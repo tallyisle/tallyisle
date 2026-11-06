@@ -22,6 +22,18 @@ RecordLabel recordLabel(
   List<Asset> assets,
 ) {
   final amount = formatMinor(r.moneyMinor);
+  if ((r.type == RecordType.expense || r.type == RecordType.income) &&
+      r.moneyMinor < BigInt.zero) {
+    // Refund child: money flows back in the opposite direction.
+    return RecordLabel(
+      '退款 · ${categoryName(categories, r.recordCatId)}',
+      [
+        if (r.assetId != noRef) assetName(assets, r.assetId),
+        r.remark,
+      ].where((s) => s.isNotEmpty).join(' · '),
+      '${r.type == RecordType.expense ? '+' : '-'}${formatMinor(-r.moneyMinor)}',
+    );
+  }
   switch (r.type) {
     case RecordType.expense:
       return RecordLabel(
@@ -56,6 +68,24 @@ RecordLabel recordLabel(
           r.remark,
         ].where((s) => s.isNotEmpty).join(' · '),
         '-$amount',
+      );
+    case RecordType.reimbursable:
+      return RecordLabel(
+        '${categoryName(categories, r.recordCatId)}（报销）',
+        [
+          if (r.fromAssetId != noRef) assetName(assets, r.fromAssetId),
+          r.remark,
+        ].where((s) => s.isNotEmpty).join(' · '),
+        '-$amount',
+      );
+    case RecordType.reimburseReceipt:
+      return RecordLabel(
+        '报销收款',
+        [
+          assetName(assets, r.assetId),
+          r.remark,
+        ].where((s) => s.isNotEmpty).join(' · '),
+        '+$amount',
       );
     default:
       return RecordLabel(RecordType.names[r.type] ?? '账单', r.remark, amount);

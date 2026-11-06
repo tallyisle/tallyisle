@@ -7,7 +7,9 @@ import 'package:tallyisle/data/db/database.dart';
 import 'package:tallyisle/data/db/seed.dart';
 import 'package:tallyisle/data/ledger/ledger_service.dart';
 import 'package:tallyisle/data/repo/ledger_queries.dart';
+import 'package:tallyisle/domain/ledger/record_relations.dart';
 import 'package:tallyisle/domain/model/codes.dart';
+import 'package:tallyisle/domain/rules/income_expense.dart';
 
 Money m(String s) => Money.parse(s);
 
@@ -307,5 +309,158 @@ void main() {
     expect(asset.usedTimes, 2);
     expect(asset.createDate, isNonZero);
     expect(const Constant(1), isNotNull);
+  });
+
+  group('refunds and reimbursements', () {
+    test('refund adds money back, links both ways, nets home stats', () async {
+      final cash = await account('现金', '500.00');
+      final food = await category('餐饮');
+      final id = await ledger.saveRecord(
+        commandId: cmd(),
+        draft: RecordDraft(
+          type: RecordType.expense,
+          money: m('200.00'),
+          bookId: 1,
+          recordTime: 1000,
+          categoryId: food,
+          assetId: cash,
+        ),
+      );
+      final refundId = await ledger.addRefund(
+        commandId: cmd(),
+        originId: id,
+        amount: m('60.00'),
+        assetId: cash,
+        recordTime: 2000,
+      );
+      expect(await balance(cash), BigInt.from(36000));
+      final child = (await queries.watchRecord(refundId).first)!;
+      expect(child.type, RecordType.expense);
+      expect(child.moneyMinor, BigInt.from(-6000));
+      expect(child.recordCatId, food);
+      final rows = await queries.watchRecords(1, 0, 10000).first;
+      final s = aggregateIncomeExpense(rows.map(statEntryOf));
+      expect(
+        s.expense,
+        BigInt.from(14000),
+      ); // 200 - 60, counted on the original
+
+      // Editing the original keeps the link.
+      await ledger.saveRecord(
+        commandId: cmd(),
+        recordId: id,
+        draft: RecordDraft(
+          type: RecordType.expense,
+          money: m('210.00'),
+          bookId: 1,
+          recordTime: 1000,
+          categoryId: food,
+          assetId: cash,
+        ),
+      );
+      final again = await queries.watchRecords(1, 0, 10000).first;
+      expect(
+        aggregateIncomeExpense(again.map(statEntryOf)).expense,
+        BigInt.from(15000),
+      );
+
+      // The child cannot be edited through the form.
+      await expectLater(
+        ledger.saveRecord(
+          commandId: cmd(),
+          recordId: refundId,
+          draft: RecordDraft(
+            type: 0,
+            money: m('1.00'),
+            bookId: 1,
+            recordTime: 1,
+            categoryId: food,
+          ),
+        ),
+        throwsA(isA<Failure>()),
+      );
+
+      // Deleting the child unlinks it and takes the money back out.
+      await ledger.deleteRecord(commandId: cmd(), recordId: refundId);
+      expect(await balance(cash), BigInt.from(29000));
+      final origin = (await queries.watchRecord(id).first)!;
+      expect(RecordRelations.parse(origin.relInfo).refunds, isNull);
+    });
+
+    test('deleting the original cascades its refunds', () async {
+      final cash = await account('现金', '100.00');
+      final food = await category('餐饮');
+      final id = await ledger.saveRecord(
+        commandId: cmd(),
+        draft: RecordDraft(
+          type: 0,
+          money: m('50.00'),
+          bookId: 1,
+          recordTime: 1,
+          categoryId: food,
+          assetId: cash,
+        ),
+      );
+      await ledger.addRefund(
+        commandId: cmd(),
+        originId: id,
+        amount: m('20.00'),
+        assetId: cash,
+        recordTime: 2,
+      );
+      expect(await balance(cash), BigInt.from(7000));
+      await ledger.deleteRecord(commandId: cmd(), recordId: id);
+      expect(await balance(cash), BigInt.from(10000));
+      expect(await db.select(db.records).get(), isEmpty);
+    });
+
+    test('reimbursable 120: receipt 50 then 70; stats 0 -> 70 -> 0', () async {
+      final card = await account('信用卡', '0.00');
+      final wallet = await account('钱包', '0.00');
+      final food = await category('餐饮');
+      final id = await ledger.saveRecord(
+        commandId: cmd(),
+        draft: RecordDraft(
+          type: RecordType.reimbursable,
+          money: m('120.00'),
+          bookId: 1,
+          recordTime: 5000,
+          categoryId: food,
+          fromAssetId: card,
+        ),
+      );
+      expect(await balance(card), BigInt.from(-12000));
+      Future<BigInt> expense() async => aggregateIncomeExpense(
+        (await queries.watchRecords(1, 0, 100000).first).map(statEntryOf),
+      ).expense;
+      expect(await expense(), BigInt.zero);
+
+      final r1 = await ledger.addReimbursement(
+        commandId: cmd(),
+        originId: id,
+        amount: m('50.00'),
+        assetId: wallet,
+        recordTime: 100,
+      );
+      expect(await expense(), BigInt.from(7000));
+      final receipt = (await queries.watchRecord(r1).first)!;
+      expect(receipt.type, RecordType.reimburseReceipt);
+      expect(receipt.recordTime, 5001); // clamped after the original
+      expect(await balance(wallet), BigInt.from(5000));
+
+      await ledger.addReimbursement(
+        commandId: cmd(),
+        originId: id,
+        amount: m('70.00'),
+        assetId: wallet,
+        recordTime: 9000,
+      );
+      expect(await expense(), BigInt.zero);
+      expect(await balance(wallet), BigInt.from(12000));
+
+      await ledger.deleteRecord(commandId: cmd(), recordId: id);
+      expect(await balance(card), BigInt.zero);
+      expect(await balance(wallet), BigInt.zero);
+    });
   });
 }

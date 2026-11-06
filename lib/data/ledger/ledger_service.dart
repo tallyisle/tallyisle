@@ -161,6 +161,9 @@ final class LedgerService {
               null) {
         throw const Failure(FailureCode.conflict, '账单标识已存在');
       }
+      if (old != null && _isLinkedChild(old)) {
+        throw const Failure(FailureCode.validation, '这是退款/报销记录，请删除后在原账单上重新添加');
+      }
       final oldFee = old == null ? null : await _feeChild(old.recordId);
 
       var parentTime = draft.recordTime;
@@ -182,6 +185,15 @@ final class LedgerService {
       }
 
       final relations = RecordRelations(draft.relations.raw);
+      if (old != null) {
+        // Child links are owned by addRefund/addReimbursement, never by the form.
+        final oldRel = RecordRelations.parse(old.relInfo);
+        relations.refunds = oldRel.refunds;
+        relations.reimbursements = oldRel.reimbursements;
+      } else {
+        relations.refunds = null;
+        relations.reimbursements = null;
+      }
       if (draft.type == RecordType.transfer) {
         relations.transferFee = hasFee
             ? TransferFeeLink(feeFromTarget: draft.feeFromTarget)
@@ -254,8 +266,17 @@ final class LedgerService {
         )..where((t) => t.recordId.equals(oldFee.recordId))).go();
       }
       await _replaceTags(id, draft.tagIds);
-      if (feeRow != null)
+      if (feeRow != null) {
         await _replaceTags(feeRow.recordId.value, draft.tagIds);
+      }
+      if (old != null && old.accountBookId != draft.bookId) {
+        // Refund/reimbursement children follow their original bill's book.
+        for (final childId in _childIds(relations)) {
+          await (db.update(db.records)
+                ..where((t) => t.recordId.equals(childId)))
+              .write(RecordsCompanion(accountBookId: Value(draft.bookId)));
+        }
+      }
       return id;
     },
     (id) => id,
@@ -268,8 +289,15 @@ final class LedgerService {
   }) => _command(commandId, ['delete-record-v1', recordId], () async {
     final old = await _liveRecord(recordId);
     final fee = await _feeChild(recordId);
-    final rows = [old, ?fee];
+    final children = <LedgerRecord>[
+      for (final id in _childIds(RecordRelations.parse(old.relInfo)))
+        ?await (db.select(
+          db.records,
+        )..where((t) => t.recordId.equals(id))).getSingleOrNull(),
+    ];
+    final rows = [old, ?fee, ...children];
     await _applyNet(netEffects(before: rows.map(factsOf)));
+    if (_isLinkedChild(old)) await _unlinkFromOrigin(old);
     for (final r in rows) {
       await (db.delete(
         db.tagRecords,
@@ -372,7 +400,179 @@ final class LedgerService {
     (id) => id.isEmpty ? null : id,
   );
 
+  /// Adds a refund to an expense/income/reimbursable bill (ledger-catalog §1/§4):
+  /// a child bill of the same direction with negative money, linked both ways.
+  Future<String> addRefund({
+    required String commandId,
+    required String originId,
+    required Money amount,
+    required int assetId,
+    required int recordTime,
+    String remark = '',
+  }) => _command(
+    commandId,
+    ['add-refund-v1', originId, amount.toJson(), assetId, recordTime, remark],
+    () async {
+      final origin = await _liveRecord(originId);
+      if (!const {
+            RecordType.expense,
+            RecordType.income,
+            RecordType.reimbursable,
+          }.contains(origin.type) ||
+          _isLinkedChild(origin)) {
+        throw const Failure(FailureCode.validation, '这笔账单不能退款');
+      }
+      if (amount.units <= BigInt.zero) {
+        throw const Failure(FailureCode.validation, '退款金额须大于 0');
+      }
+      if (assetId != noRef) await _asset(assetId);
+      final childId = _uuid.v4();
+      final row = RecordsCompanion(
+        recordId: Value(childId),
+        type: Value(
+          origin.type == RecordType.income
+              ? RecordType.income
+              : RecordType.expense,
+        ),
+        moneyMinor: Value(-amount.storageMinor),
+        remark: Value(remark),
+        recordTime: Value(recordTime),
+        recordCatId: Value(origin.recordCatId),
+        assetId: Value(assetId),
+        accountBookId: Value(origin.accountBookId),
+        excludeBudget: Value(origin.excludeBudget),
+        excludeExIn: Value(origin.excludeExIn),
+        relInfo: Value(
+          (RecordRelations()..refunds = BillLinks(originId: originId)).encode(),
+        ),
+        createDate: Value(_now()),
+      );
+      await _applyNet(netEffects(after: [_factsOfCompanion(row)]));
+      await _touchAssets([_factsOfCompanion(row)]);
+      await db.into(db.records).insert(row);
+      final rel = RecordRelations.parse(origin.relInfo);
+      final links = rel.refunds ?? const BillLinks();
+      rel.refunds = BillLinks(
+        children: [
+          ...links.children,
+          LinkedBill(billId: childId, amount: amount.storageMinor),
+        ],
+        originId: links.originId,
+      );
+      await _writeRelations(originId, rel);
+      return childId;
+    },
+    (id) => id,
+  );
+
+  /// Records money received for a reimbursable (type 3) bill: a type 15 bill
+  /// on the receiving account, linked both ways (ledger-catalog §1).
+  Future<String> addReimbursement({
+    required String commandId,
+    required String originId,
+    required Money amount,
+    required int assetId,
+    required int recordTime,
+    String remark = '',
+  }) => _command(
+    commandId,
+    [
+      'add-reimbursement-v1',
+      originId,
+      amount.toJson(),
+      assetId,
+      recordTime,
+      remark,
+    ],
+    () async {
+      final origin = await _liveRecord(originId);
+      if (origin.type != RecordType.reimbursable) {
+        throw const Failure(FailureCode.validation, '只有报销账单可以登记报销款');
+      }
+      if (amount.units <= BigInt.zero) {
+        throw const Failure(FailureCode.validation, '报销金额须大于 0');
+      }
+      if (assetId != noRef) await _asset(assetId);
+      // A receipt dated before the original bill is clamped to origin + 1 ms.
+      final time = recordTime <= origin.recordTime
+          ? origin.recordTime + 1
+          : recordTime;
+      final childId = _uuid.v4();
+      final row = RecordsCompanion(
+        recordId: Value(childId),
+        type: const Value(RecordType.reimburseReceipt),
+        subType: const Value(RecordDirection.income),
+        moneyMinor: Value(amount.storageMinor),
+        remark: Value(remark),
+        recordTime: Value(time),
+        assetId: Value(assetId),
+        accountBookId: Value(origin.accountBookId),
+        relInfo: Value(
+          (RecordRelations()..reimbursements = BillLinks(originId: originId))
+              .encode(),
+        ),
+        createDate: Value(_now()),
+      );
+      await _applyNet(netEffects(after: [_factsOfCompanion(row)]));
+      await _touchAssets([_factsOfCompanion(row)]);
+      await db.into(db.records).insert(row);
+      final rel = RecordRelations.parse(origin.relInfo);
+      final links = rel.reimbursements ?? const BillLinks();
+      rel.reimbursements = BillLinks(
+        children: [
+          ...links.children,
+          LinkedBill(billId: childId, amount: amount.storageMinor),
+        ],
+        originId: links.originId,
+      );
+      await _writeRelations(originId, rel);
+      return childId;
+    },
+    (id) => id,
+  );
+
   // ---- helpers ----
+
+  bool _isLinkedChild(LedgerRecord r) {
+    final rel = RecordRelations.parse(r.relInfo);
+    bool has(String? id) => id != null && id.trim().isNotEmpty;
+    return has(rel.refunds?.originId) || has(rel.reimbursements?.originId);
+  }
+
+  Iterable<String> _childIds(RecordRelations rel) => [
+    for (final c in rel.refunds?.children ?? const <LinkedBill>[]) c.billId,
+    for (final c in rel.reimbursements?.children ?? const <LinkedBill>[])
+      c.billId,
+  ];
+
+  Future<void> _writeRelations(String recordId, RecordRelations rel) =>
+      (db.update(db.records)..where((t) => t.recordId.equals(recordId))).write(
+        RecordsCompanion(relInfo: Value(rel.encode())),
+      );
+
+  Future<void> _unlinkFromOrigin(LedgerRecord child) async {
+    final childRel = RecordRelations.parse(child.relInfo);
+    final originId =
+        childRel.refunds?.originId ?? childRel.reimbursements?.originId;
+    if (originId == null) return;
+    final origin = await (db.select(
+      db.records,
+    )..where((t) => t.recordId.equals(originId))).getSingleOrNull();
+    if (origin == null) return;
+    final rel = RecordRelations.parse(origin.relInfo);
+    BillLinks? without(BillLinks? links) => links == null
+        ? null
+        : BillLinks(
+            children: [
+              for (final c in links.children)
+                if (c.billId != child.recordId) c,
+            ],
+            originId: links.originId,
+          );
+    rel.refunds = without(rel.refunds);
+    rel.reimbursements = without(rel.reimbursements);
+    await _writeRelations(originId, rel);
+  }
 
   EntryFacts _factsOfCompanion(RecordsCompanion c) => EntryFacts(
     type: c.type.value,
@@ -406,6 +606,19 @@ final class LedgerService {
     }
 
     switch (d.type) {
+      case RecordType.reimbursable:
+        if (d.money.units <= BigInt.zero) {
+          throw const Failure(FailureCode.validation, '报销金额须大于 0');
+        }
+        final cat = await (db.select(
+          db.recordCategories,
+        )..where((t) => t.id.equals(d.categoryId))).getSingleOrNull();
+        if (cat == null ||
+            cat.type != RecordType.expense ||
+            cat.accountBookId != d.bookId) {
+          throw const Failure(FailureCode.validation, '请选择当前账本的支出分类');
+        }
+        if (d.fromAssetId != noRef) await _asset(d.fromAssetId);
       case RecordType.expense:
       case RecordType.income:
         if (d.money.isNegative) {
