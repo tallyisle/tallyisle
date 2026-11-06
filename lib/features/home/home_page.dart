@@ -69,6 +69,15 @@ class HomePage extends ConsumerWidget {
                 trailing: b.id == current ? const Icon(Icons.check) : null,
                 onTap: () => Navigator.pop(context, b.id),
               ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.settings_outlined),
+              title: const Text('管理账本…'),
+              onTap: () {
+                Navigator.pop(context);
+                context.push('/books');
+              },
+            ),
           ],
         ),
       ),

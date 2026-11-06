@@ -164,6 +164,12 @@ final class LedgerService {
       if (old != null && _isLinkedChild(old)) {
         throw const Failure(FailureCode.validation, '这是退款/报销记录，请删除后在原账单上重新添加');
       }
+      if (old != null &&
+          (old.type == RecordType.advanceIncome ||
+              old.type == RecordType.advanceExpense) &&
+          RecordExtra.parse(old.extraInfo).advance != null) {
+        throw const Failure(FailureCode.validation, '已结算的预收/预支不能再编辑');
+      }
       final oldFee = old == null ? null : await _feeChild(old.recordId);
 
       var parentTime = draft.recordTime;
@@ -531,6 +537,105 @@ final class LedgerService {
     (id) => id,
   );
 
+  /// Settles a pending advance bill (`type=9` 预收 -> `type=1` 收入,
+  /// `type=16` 预支 -> `type=0` 支出) onto [assetId] at [recordTime].
+  Future<String> settleAdvance({
+    required String commandId,
+    required String originId,
+    required Money amount,
+    required int assetId,
+    required int recordTime,
+    bool finish = true,
+    String remark = '',
+  }) => _command(
+    commandId,
+    [
+      'settle-advance-v1',
+      originId,
+      amount.toJson(),
+      assetId,
+      recordTime,
+      finish,
+      remark,
+    ],
+    () async {
+      final origin = await _liveRecord(originId);
+      if (origin.type != RecordType.advanceIncome &&
+          origin.type != RecordType.advanceExpense) {
+        throw const Failure(FailureCode.validation, '只有预收/预支账单可以结算');
+      }
+      final originExtra = RecordExtra.parse(origin.extraInfo);
+      if (originExtra.advance != null) {
+        throw const Failure(FailureCode.validation, '该预收/预支已结算');
+      }
+      if (amount.units <= BigInt.zero) {
+        throw const Failure(FailureCode.validation, '结算金额须大于 0');
+      }
+      if (assetId != noRef) await _asset(assetId);
+
+      final settledType = origin.type == RecordType.advanceIncome
+          ? RecordType.income
+          : RecordType.expense;
+      final settledId = _uuid.v4();
+      final settledExtra = RecordExtra()
+        ..advance = AdvanceBillInfo(
+          advanceDate: origin.recordTime,
+          advanceMoney: origin.moneyMinor,
+          advanceDiffMoney: BigInt.zero,
+          partialInclude: true,
+        );
+      final settledRow = RecordsCompanion(
+        recordId: Value(settledId),
+        type: Value(settledType),
+        moneyMinor: Value(amount.storageMinor),
+        remark: Value(remark.trim().isEmpty ? origin.remark : remark.trim()),
+        recordTime: Value(recordTime),
+        recordCatId: Value(origin.recordCatId),
+        assetId: Value(assetId),
+        accountBookId: Value(origin.accountBookId),
+        excludeBudget: Value(origin.excludeBudget),
+        excludeExIn: Value(origin.excludeExIn),
+        extraInfo: Value(settledExtra.encode()),
+        createDate: Value(_now()),
+      );
+
+      await _applyNet(netEffects(after: [_factsOfCompanion(settledRow)]));
+      await _touchAssets([_factsOfCompanion(settledRow)]);
+      await db.into(db.records).insert(settledRow);
+
+      final originTags = await (db.select(
+        db.tagRecords,
+      )..where((t) => t.recordId.equals(originId))).get();
+      if (originTags.isNotEmpty) {
+        await _replaceTags(
+          settledId,
+          originTags.map((t) => t.tagId).toList(growable: false),
+        );
+      }
+
+      if (!finish && amount.storageMinor < origin.moneyMinor) {
+        await (db.update(
+          db.records,
+        )..where((t) => t.recordId.equals(originId))).write(
+          RecordsCompanion(
+            moneyMinor: Value(origin.moneyMinor - amount.storageMinor),
+          ),
+        );
+      } else {
+        originExtra.advance = AdvanceBillInfo(
+          advanceDate: recordTime,
+          advanceMoney: origin.moneyMinor,
+          advanceDiffMoney: amount.storageMinor - origin.moneyMinor,
+          partialInclude: false,
+        );
+        await (db.update(db.records)..where((t) => t.recordId.equals(originId)))
+            .write(RecordsCompanion(extraInfo: Value(originExtra.encode())));
+      }
+      return settledId;
+    },
+    (id) => id,
+  );
+
   // ---- helpers ----
 
   bool _isLinkedChild(LedgerRecord r) {
@@ -637,6 +742,23 @@ final class LedgerService {
         if (d.discount != null && d.discount!.isNegative) {
           throw const Failure(FailureCode.validation, '优惠金额无效');
         }
+      case RecordType.advanceIncome:
+      case RecordType.advanceExpense:
+        if (d.money.units <= BigInt.zero) {
+          throw const Failure(FailureCode.validation, '预收/预支金额须大于 0');
+        }
+        final wantCatType = d.type == RecordType.advanceIncome
+            ? RecordType.income
+            : RecordType.expense;
+        final cat = await (db.select(
+          db.recordCategories,
+        )..where((t) => t.id.equals(d.categoryId))).getSingleOrNull();
+        if (cat == null ||
+            cat.type != wantCatType ||
+            cat.accountBookId != d.bookId) {
+          throw const Failure(FailureCode.validation, '请选择当前账本的对应分类');
+        }
+        if (d.assetId != noRef) await _asset(d.assetId);
       case RecordType.transfer:
         if (d.money.units <= BigInt.zero) {
           throw const Failure(FailureCode.validation, '转账金额须大于 0');

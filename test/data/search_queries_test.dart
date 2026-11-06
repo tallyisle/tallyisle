@@ -1,6 +1,8 @@
+import 'package:drift/drift.dart';
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tallyisle/core/money.dart';
+import 'package:tallyisle/data/catalog/catalog_service.dart';
 import 'package:tallyisle/data/db/database.dart';
 import 'package:tallyisle/data/ledger/ledger_service.dart';
 import 'package:tallyisle/data/repo/search_queries.dart';
@@ -33,6 +35,15 @@ void main() {
   test('Search filter: book isolation', () async {
     final cash = await createAccount('现金', '1000.00');
     final food = await getCategoryId('餐饮');
+    final book2 = await CatalogService(
+      db,
+    ).createBook(commandId: cmd(), name: '第二账本');
+    final food2 =
+        (await (db.select(db.recordCategories)..where(
+                  (t) => t.accountBookId.equals(book2) & t.name.equals('餐饮'),
+                ))
+                .getSingle())
+            .id;
 
     await ledger.saveRecord(
       commandId: cmd(),
@@ -50,9 +61,9 @@ void main() {
       draft: RecordDraft(
         type: RecordType.expense,
         money: m('30.00'),
-        bookId: 2,
+        bookId: book2,
         recordTime: 1000,
-        categoryId: food,
+        categoryId: food2,
         assetId: cash,
       ),
     );
@@ -64,7 +75,7 @@ void main() {
     expect(resBook1.first.moneyMinor, BigInt.from(2000));
 
     final resBook2 = await searchQueries.getRecords(
-      const SearchFilter(bookId: 2),
+      SearchFilter(bookId: book2),
     );
     expect(resBook2, hasLength(1));
     expect(resBook2.first.moneyMinor, BigInt.from(3000));

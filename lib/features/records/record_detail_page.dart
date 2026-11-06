@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../app/providers.dart';
 import '../../data/db/database.dart';
+import '../../domain/ledger/record_extra.dart';
 import '../../domain/ledger/record_relations.dart';
 import '../../domain/model/codes.dart';
 import '../../core/money.dart';
@@ -99,10 +100,55 @@ class _RecordDetailPageState extends ConsumerState<RecordDetailPage> {
     }
   }
 
+  Future<void> _settleAdvance(LedgerRecord r) async {
+    final assets = (ref.read(assetsProvider).value ?? const <Asset>[])
+        .where((a) => a.status != AssetStatus.settled)
+        .toList();
+    final input = await showDialog<(Money, int, bool)>(
+      context: context,
+      builder: (_) => _SettleAdvanceDialog(
+        isIncome: r.type == RecordType.advanceIncome,
+        defaultAmount: formatMinor(r.moneyMinor),
+        assets: assets,
+        initialAsset: r.assetId,
+      ),
+    );
+    if (input == null || !mounted) return;
+    setState(() {
+      busy = true;
+      error = null;
+    });
+    try {
+      final service = await ref.read(ledgerServiceProvider.future);
+      final (amount, assetId, finish) = input;
+      final settledId = await service.settleAdvance(
+        commandId: ids.forPayload([
+          'settle-advance',
+          r.recordId,
+          amount.toJson(),
+          assetId,
+          finish,
+        ]),
+        originId: r.recordId,
+        amount: amount,
+        assetId: assetId,
+        recordTime: DateTime.now().millisecondsSinceEpoch,
+        finish: finish,
+      );
+      if (mounted) await context.push('/record/$settledId');
+    } catch (e) {
+      if (mounted) setState(() => error = safeMessage(e));
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final record = ref.watch(recordProvider(widget.recordId));
     final assets = ref.watch(assetsProvider).value ?? const <Asset>[];
+    final tags =
+        ref.watch(recordTagsProvider(widget.recordId)).value ?? const [];
     return Scaffold(
       appBar: AppBar(title: const Text('账单详情')),
       body: asyncBody(record, (r) {
@@ -117,13 +163,21 @@ class _RecordDetailPageState extends ConsumerState<RecordDetailPage> {
         final rel = RecordRelations.parse(r.relInfo);
         final childOf = rel.refunds?.originId ?? rel.reimbursements?.originId;
         final isChild = childOf != null && childOf.isNotEmpty;
+        final isAdvance =
+            r.type == RecordType.advanceIncome ||
+            r.type == RecordType.advanceExpense;
+        final advanceSettled =
+            isAdvance && RecordExtra.parse(r.extraInfo).advance != null;
         final editable =
             !isChild &&
+            !advanceSettled &&
             const {
               RecordType.expense,
               RecordType.income,
               RecordType.transfer,
               RecordType.reimbursable,
+              RecordType.advanceIncome,
+              RecordType.advanceExpense,
             }.contains(r.type);
         final refundable =
             !isChild &&
@@ -165,7 +219,15 @@ class _RecordDetailPageState extends ConsumerState<RecordDetailPage> {
             ] else
               ListTile(
                 title: const Text('账户'),
-                trailing: Text(assetName(assets, r.assetId)),
+                trailing: Text(
+                  assetName(
+                    assets,
+                    r.type == RecordType.reimbursable ||
+                            r.type == RecordType.balanceAdjust
+                        ? r.fromAssetId
+                        : r.assetId,
+                  ),
+                ),
               ),
             ListTile(
               title: const Text('时间'),
@@ -175,6 +237,23 @@ class _RecordDetailPageState extends ConsumerState<RecordDetailPage> {
                 ),
               ),
             ),
+            if (isAdvance)
+              ListTile(
+                title: const Text('状态'),
+                trailing: Text(advanceSettled ? '已结算' : '待结算（暂不计入收支与余额）'),
+              ),
+            if (tags.isNotEmpty)
+              ListTile(
+                title: const Text('标签'),
+                subtitle: Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: [for (final t in tags) Chip(label: Text(t.name))],
+                  ),
+                ),
+              ),
             if (r.remark.isNotEmpty)
               ListTile(title: const Text('备注'), subtitle: Text(r.remark)),
             if (r.excludeExIn) const ListTile(title: Text('不计入收支')),
@@ -215,6 +294,12 @@ class _RecordDetailPageState extends ConsumerState<RecordDetailPage> {
                 child: const Text('这是转账手续费，查看所属转账'),
               )
             else ...[
+              if (isAdvance && !advanceSettled)
+                FilledButton.tonal(
+                  key: const Key('settle-advance'),
+                  onPressed: busy ? null : () => _settleAdvance(r),
+                  child: const Text('结算转为正式账单'),
+                ),
               if (refundable)
                 OutlinedButton(
                   key: const Key('add-refund'),
@@ -324,6 +409,99 @@ class _LinkDialogState extends State<_LinkDialog> {
           }
         },
         child: const Text('保存'),
+      ),
+    ],
+  );
+}
+
+class _SettleAdvanceDialog extends StatefulWidget {
+  const _SettleAdvanceDialog({
+    required this.isIncome,
+    required this.defaultAmount,
+    required this.assets,
+    required this.initialAsset,
+  });
+  final bool isIncome;
+  final String defaultAmount;
+  final List<Asset> assets;
+  final int initialAsset;
+  @override
+  State<_SettleAdvanceDialog> createState() => _SettleAdvanceDialogState();
+}
+
+class _SettleAdvanceDialogState extends State<_SettleAdvanceDialog> {
+  late final amount = TextEditingController(text: widget.defaultAmount);
+  late int assetId = widget.assets.any((a) => a.id == widget.initialAsset)
+      ? widget.initialAsset
+      : noRef;
+  bool finish = true;
+  String? error;
+
+  @override
+  void dispose() {
+    amount.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: Text(widget.isIncome ? '结算预收款' : '结算预支款'),
+    content: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        TextField(
+          key: const Key('settle-amount'),
+          controller: amount,
+          autofocus: true,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          inputFormatters: amountInputFormatters,
+          decoration: InputDecoration(
+            labelText: '实际结算金额',
+            prefixText: '¥ ',
+            errorText: error,
+          ),
+        ),
+        DropdownButtonFormField<int>(
+          initialValue: assetId,
+          decoration: InputDecoration(
+            labelText: widget.isIncome ? '收款账户' : '扣款账户',
+          ),
+          items: [
+            const DropdownMenuItem(value: noRef, child: Text('不选账户')),
+            for (final a in widget.assets)
+              DropdownMenuItem(value: a.id, child: Text(a.name)),
+          ],
+          onChanged: (v) => setState(() => assetId = v ?? noRef),
+        ),
+        CheckboxListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('结清本笔预收/预支'),
+          subtitle: const Text('取消勾选则按部分结算保留剩余待结金额'),
+          value: finish,
+          onChanged: (v) => setState(() => finish = v ?? true),
+        ),
+      ],
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('取消'),
+      ),
+      FilledButton(
+        key: const Key('settle-save'),
+        onPressed: () {
+          try {
+            final money = parseAmount(amount.text);
+            if (money.units <= BigInt.zero) {
+              setState(() => error = '结算金额须大于 0');
+              return;
+            }
+            Navigator.pop(context, (money, assetId, finish));
+          } catch (e) {
+            setState(() => error = safeMessage(e));
+          }
+        },
+        child: const Text('确认结算'),
       ),
     ],
   );

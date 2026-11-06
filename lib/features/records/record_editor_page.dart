@@ -78,7 +78,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
         original = r;
         type = r.type;
         categoryId = r.recordCatId == noRef ? null : r.recordCatId;
-        assetId = r.assetId;
+        assetId = r.type == RecordType.reimbursable ? r.fromAssetId : r.assetId;
         fromAssetId = r.fromAssetId;
         toAssetId = r.toAssetId;
         amount.text = formatMinor(r.moneyMinor);
@@ -136,7 +136,13 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
         if (categoryId == null) {
           throw const Failure(FailureCode.validation, '请选择分类');
         }
-        if (money.isZero) {
+        if (type == RecordType.reimbursable ||
+            type == RecordType.advanceIncome ||
+            type == RecordType.advanceExpense) {
+          if (money.units <= BigInt.zero) {
+            throw const Failure(FailureCode.validation, '金额须大于 0');
+          }
+        } else if (money.isZero) {
           if (!mounted) return;
           final ok = await confirm(
             context,
@@ -155,8 +161,13 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
         bookId: bookId,
         recordTime: time.millisecondsSinceEpoch,
         categoryId: type == RecordType.transfer ? noRef : categoryId!,
-        assetId: type == RecordType.transfer ? noRef : assetId,
-        fromAssetId: type == RecordType.transfer ? fromAssetId : noRef,
+        assetId:
+            (type == RecordType.transfer || type == RecordType.reimbursable)
+            ? noRef
+            : assetId,
+        fromAssetId: type == RecordType.transfer
+            ? fromAssetId
+            : (type == RecordType.reimbursable ? assetId : noRef),
         toAssetId: type == RecordType.transfer ? toAssetId : noRef,
         remark: remark.text.trim(),
         excludeBudget: excludeBudget,
@@ -246,29 +257,31 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
                   child: ListView(
                     padding: const EdgeInsets.all(16),
                     children: [
-                      SegmentedButton<int>(
-                        segments: const [
-                          ButtonSegment(
-                            value: RecordType.expense,
-                            label: Text('支出'),
-                          ),
-                          ButtonSegment(
-                            value: RecordType.income,
-                            label: Text('收入'),
-                          ),
-                          ButtonSegment(
-                            value: RecordType.transfer,
-                            label: Text('转账'),
-                          ),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          for (final (value, label) in const [
+                            (RecordType.expense, '支出'),
+                            (RecordType.income, '收入'),
+                            (RecordType.transfer, '转账'),
+                            (RecordType.reimbursable, '报销'),
+                            (RecordType.advanceExpense, '预支'),
+                            (RecordType.advanceIncome, '预收'),
+                          ])
+                            ChoiceChip(
+                              key: Key('type-$value'),
+                              label: Text(label),
+                              selected: type == value,
+                              onSelected: busy || editing
+                                  ? null
+                                  : (_) => setState(() {
+                                      type = value;
+                                      categoryId = null;
+                                      parentCatId = null;
+                                    }),
+                            ),
                         ],
-                        selected: {type},
-                        onSelectionChanged: busy || editing
-                            ? null
-                            : (s) => setState(() {
-                                type = s.first;
-                                categoryId = null;
-                                parentCatId = null;
-                              }),
                       ),
                       const SizedBox(height: 16),
                       TextField(
@@ -382,8 +395,14 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
         }
       }
     }
+    final wantCatType =
+        (type == RecordType.income || type == RecordType.advanceIncome)
+        ? RecordType.income
+        : RecordType.expense;
     final topCats = all
-        .where((c) => c.type == type && !c.isHide && c.parentCatId == noRef)
+        .where(
+          (c) => c.type == wantCatType && !c.isHide && c.parentCatId == noRef,
+        )
         .toList();
     final subCats = parentCatId == null
         ? const <RecordCategory>[]

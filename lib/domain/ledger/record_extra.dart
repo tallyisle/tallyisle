@@ -71,6 +71,49 @@ BigInt? _minor(Object? value) {
   throw _corrupt;
 }
 
+/// Advance bill metadata stored in `record.extra_info.adbi`
+/// (original `AdvanceBillInfo`, ledger-catalog §4 / 02t §2.5).
+final class AdvanceBillInfo {
+  AdvanceBillInfo({
+    required this.advanceDate,
+    required this.advanceMoney,
+    BigInt? advanceDiffMoney,
+    this.partialInclude = false,
+  }) : advanceDiffMoney = advanceDiffMoney ?? BigInt.zero;
+
+  final int advanceDate; // advanceIncomeDate (ms; <= 0 treated as null)
+  final BigInt advanceMoney; // advanceMoney (minor units)
+  final BigInt advanceDiffMoney; // advanceDiffMoney (minor units)
+  final bool partialInclude;
+
+  Map<String, Object> toJson() => {
+    'advanceIncomeDate': advanceDate,
+    'advanceMoney': advanceMoney.toString(),
+    'advanceDiffMoney': advanceDiffMoney.toString(),
+    'partialInclude': partialInclude,
+  };
+
+  static AdvanceBillInfo? fromJson(Object? json) {
+    if (json == null) return null;
+    if (json is! Map) throw _corrupt;
+    final date = json['advanceIncomeDate'];
+    if (date == null) return null;
+    if (date is! int) throw _corrupt;
+    if (date <= 0) return null;
+    final money = _minor(json['advanceMoney']);
+    if (money == null) return null;
+    final diff = _minor(json['advanceDiffMoney']) ?? BigInt.zero;
+    final partial = json['partialInclude'];
+    if (partial != null && partial is! bool) throw _corrupt;
+    return AdvanceBillInfo(
+      advanceDate: date,
+      advanceMoney: money,
+      advanceDiffMoney: diff,
+      partialInclude: partial as bool? ?? false,
+    );
+  }
+}
+
 /// Typed view of `record.extra_info`. Unknown keys are preserved on rewrite.
 final class RecordExtra {
   RecordExtra([Map<String, Object?>? raw]) : raw = {...?raw};
@@ -83,6 +126,17 @@ final class RecordExtra {
       raw.remove('curr');
     } else {
       raw['curr'] = value.toJson();
+    }
+  }
+
+  /// Reads `adbi`, falling back to legacy flat root keys (02t §2.5).
+  AdvanceBillInfo? get advance =>
+      AdvanceBillInfo.fromJson(raw['adbi']) ?? AdvanceBillInfo.fromJson(raw);
+  set advance(AdvanceBillInfo? value) {
+    if (value == null) {
+      raw.remove('adbi');
+    } else {
+      raw['adbi'] = value.toJson();
     }
   }
 

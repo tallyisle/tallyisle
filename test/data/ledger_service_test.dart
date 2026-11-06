@@ -7,6 +7,7 @@ import 'package:tallyisle/data/db/database.dart';
 import 'package:tallyisle/data/db/seed.dart';
 import 'package:tallyisle/data/ledger/ledger_service.dart';
 import 'package:tallyisle/data/repo/ledger_queries.dart';
+import 'package:tallyisle/domain/ledger/record_extra.dart';
 import 'package:tallyisle/domain/ledger/record_relations.dart';
 import 'package:tallyisle/domain/model/codes.dart';
 import 'package:tallyisle/domain/rules/income_expense.dart';
@@ -462,5 +463,81 @@ void main() {
       expect(await balance(card), BigInt.zero);
       expect(await balance(wallet), BigInt.zero);
     });
+  });
+
+  group('advance bills (type 9 / 16)', () {
+    test(
+      'pending advance expense is zero-balance memo; partial then full settlement creates expense bills',
+      () async {
+        final cash = await account('现金', '500.00');
+        final food = await category('餐饮');
+        final id = await ledger.saveRecord(
+          commandId: cmd(),
+          draft: RecordDraft(
+            type: RecordType.advanceExpense,
+            money: m('120.00'),
+            bookId: 1,
+            recordTime: 2000,
+            categoryId: food,
+            assetId: cash,
+            remark: '团建预支',
+          ),
+        );
+        expect(await balance(cash), BigInt.from(50000));
+        Future<IncomeExpense> summary() async => aggregateIncomeExpense(
+          (await queries.watchRecords(1, 0, 100000).first).map(statEntryOf),
+        );
+        expect((await summary()).expense, BigInt.zero);
+
+        // Partial settlement of 50.00 (finish = false) leaves 70.00 pending.
+        final s1 = await ledger.settleAdvance(
+          commandId: cmd(),
+          originId: id,
+          amount: m('50.00'),
+          assetId: cash,
+          recordTime: 3000,
+          finish: false,
+        );
+        expect(await balance(cash), BigInt.from(45000));
+        expect((await summary()).expense, BigInt.from(5000));
+        final s1Row = (await queries.watchRecord(s1).first)!;
+        expect(s1Row.type, RecordType.expense);
+        expect(
+          RecordExtra.parse(s1Row.extraInfo).advance?.partialInclude,
+          isTrue,
+        );
+        final afterPartial = (await queries.watchRecord(id).first)!;
+        expect(afterPartial.moneyMinor, BigInt.from(7000));
+        expect(RecordExtra.parse(afterPartial.extraInfo).advance, isNull);
+
+        // Final settlement of 65.00 (finish = true) marks advance bill settled.
+        await ledger.settleAdvance(
+          commandId: cmd(),
+          originId: id,
+          amount: m('65.00'),
+          assetId: cash,
+          recordTime: 4000,
+          finish: true,
+        );
+        expect(await balance(cash), BigInt.from(38500));
+        expect((await summary()).expense, BigInt.from(11500));
+        final afterFinish = (await queries.watchRecord(id).first)!;
+        final adbi = RecordExtra.parse(afterFinish.extraInfo).advance!;
+        expect(adbi.partialInclude, isFalse);
+        expect(adbi.advanceDiffMoney, BigInt.from(-500));
+
+        // Settled advance bill cannot be settled or edited again.
+        await expectLater(
+          ledger.settleAdvance(
+            commandId: cmd(),
+            originId: id,
+            amount: m('10.00'),
+            assetId: cash,
+            recordTime: 5000,
+          ),
+          throwsA(isA<Failure>()),
+        );
+      },
+    );
   });
 }

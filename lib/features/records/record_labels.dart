@@ -1,4 +1,5 @@
 import '../../data/db/database.dart';
+import '../../domain/ledger/record_extra.dart';
 import '../../domain/model/codes.dart';
 import '../common/common.dart';
 
@@ -95,6 +96,35 @@ RecordLabel recordLabel(
           r.remark,
         ].where((s) => s.isNotEmpty).join(' · '),
         '+$amount',
+      );
+    case RecordType.advanceIncome:
+      final settled = RecordExtra.parse(r.extraInfo).advance != null;
+      return RecordLabel(
+        '${categoryName(categories, r.recordCatId)}（预收·${settled ? '已结算' : '待结算'}）',
+        [
+          if (r.assetId != noRef) assetName(assets, r.assetId),
+          r.remark,
+        ].where((s) => s.isNotEmpty).join(' · '),
+        '+$amount',
+      );
+    case RecordType.advanceExpense:
+      final settled = RecordExtra.parse(r.extraInfo).advance != null;
+      return RecordLabel(
+        '${categoryName(categories, r.recordCatId)}（预支·${settled ? '已结算' : '待结算'}）',
+        [
+          if (r.assetId != noRef) assetName(assets, r.assetId),
+          r.remark,
+        ].where((s) => s.isNotEmpty).join(' · '),
+        '-$amount',
+      );
+    case RecordType.balanceAdjust:
+      return RecordLabel(
+        '余额调整',
+        [
+          if (r.fromAssetId != noRef) assetName(assets, r.fromAssetId),
+          r.remark,
+        ].where((s) => s.isNotEmpty).join(' · '),
+        '${r.moneyMinor < BigInt.zero ? '' : '+'}${formatMinor(r.moneyMinor)}',
       );
     default:
       return RecordLabel(RecordType.names[r.type] ?? '账单', r.remark, amount);
