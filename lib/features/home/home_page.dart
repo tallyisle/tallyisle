@@ -27,6 +27,20 @@ class HomePage extends ConsumerWidget {
             ],
           ),
         ),
+        actions: [
+          IconButton(
+            key: const Key('home-calendar-button'),
+            tooltip: '日历',
+            icon: const Icon(Icons.calendar_month),
+            onPressed: () => context.push('/calendar'),
+          ),
+          IconButton(
+            key: const Key('home-search-button'),
+            tooltip: '搜索',
+            icon: const Icon(Icons.search),
+            onPressed: () => context.push('/search'),
+          ),
+        ],
       ),
       body: const _HomeBody(),
       floatingActionButton: FloatingActionButton.extended(
