@@ -49,6 +49,11 @@ final assetsProvider = StreamProvider<List<Asset>>((ref) async* {
   yield* q.watchAssets();
 });
 
+final assetProvider = StreamProvider.family<Asset?, int>((ref, id) async* {
+  final q = await ref.watch(queriesProvider.future);
+  yield* q.watchAsset(id);
+});
+
 final categoriesProvider = StreamProvider.family<List<RecordCategory>, int>((
   ref,
   bookId,

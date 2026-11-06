@@ -10,6 +10,7 @@ import '../../domain/ledger/effects.dart';
 import '../../domain/ledger/record_extra.dart';
 import '../../domain/ledger/record_relations.dart';
 import '../../domain/model/codes.dart';
+import '../../domain/rules/asset_overview.dart' show normalizeCurrency;
 import '../db/database.dart';
 import '../db/failures.dart';
 
@@ -316,6 +317,9 @@ final class LedgerService {
   }, (_) => true);
 
   /// Creates an account; its balance starts at [initial].
+  ///
+  /// For credit cards (type 6) [initial] is the signed balance (debt < 0) and
+  /// [limit] the fixed credit limit stored in `init_money`.
   Future<int> createAsset({
     required String commandId,
     required String name,
@@ -326,10 +330,13 @@ final class LedgerService {
     String? groupName,
     String? remark,
     bool countedInNetWorth = true,
+    Money? limit,
+    String? creditInfo,
+    String? extraInfo,
   }) => _command(
     commandId,
     [
-      'create-asset-v1',
+      'create-asset-v2',
       name,
       initial.toJson(),
       type,
@@ -338,11 +345,14 @@ final class LedgerService {
       groupName,
       remark,
       countedInNetWorth,
+      limit?.toJson(),
+      creditInfo,
+      extraInfo,
     ],
     () async {
-      final trimmed = name.trim();
-      if (trimmed.isEmpty || trimmed.length > 50) {
-        throw const Failure(FailureCode.validation, '账户名称须为 1–50 字');
+      final trimmed = _assetName(name);
+      if (limit != null && limit.isNegative) {
+        throw const Failure(FailureCode.validation, '额度不能为负数');
       }
       final minSort = await db
           .customSelect('SELECT COALESCE(MIN(sort), 0) AS s FROM asset')
@@ -353,26 +363,134 @@ final class LedgerService {
             AssetsCompanion.insert(
               name: trimmed,
               balanceMinor: initial.storageMinor,
-              initMoneyMinor: initial.storageMinor,
+              initMoneyMinor: (limit ?? initial).storageMinor,
               type: type,
               subType: Value(subType),
               createDate: _now(),
               sort: Value(minSort.read<int>('s') - 1),
-              currency: Value(currency),
+              currency: Value(normalizeCurrency(currency)),
               groupName: Value(groupName),
               remark: Value(remark),
-              // Original flag: 1 = counted, inverted for type 4 (ledger-catalog §3).
-              isEffectiveAsset: Value(
-                type == AssetType.debt
-                    ? (countedInNetWorth ? 0 : 1)
-                    : (countedInNetWorth ? 1 : 0),
-              ),
+              creditInfo: Value(creditInfo),
+              extraInfo: Value(extraInfo),
+              isEffectiveAsset: Value(_effectiveFlag(type, countedInNetWorth)),
             ),
           );
       return '$id';
     },
     int.parse,
   );
+
+  /// Edits account properties. The balance is never changed here: use
+  /// [adjustBalance] so the change is recorded as a type=4 bill.
+  Future<void> updateAsset({
+    required String commandId,
+    required int assetId,
+    required String name,
+    String? remark,
+    String? groupName,
+    String? currency,
+    required bool countedInNetWorth,
+    Money? limit,
+    String? creditInfo,
+    String? extraInfo,
+  }) => _command(
+    commandId,
+    [
+      'update-asset-v1',
+      assetId,
+      name,
+      remark,
+      groupName,
+      currency,
+      countedInNetWorth,
+      limit?.toJson(),
+      creditInfo,
+      extraInfo,
+    ],
+    () async {
+      final asset = await _asset(assetId);
+      final trimmed = _assetName(name);
+      if (limit != null && limit.isNegative) {
+        throw const Failure(FailureCode.validation, '额度不能为负数');
+      }
+      await (db.update(db.assets)..where((t) => t.id.equals(assetId))).write(
+        AssetsCompanion(
+          name: Value(trimmed),
+          remark: Value(remark),
+          groupName: Value(groupName),
+          currency: Value(normalizeCurrency(currency)),
+          isEffectiveAsset: Value(
+            _effectiveFlag(asset.type, countedInNetWorth),
+          ),
+          initMoneyMinor: limit == null
+              ? const Value.absent()
+              : Value(limit.storageMinor),
+          creditInfo: Value(creditInfo),
+          extraInfo: Value(extraInfo),
+        ),
+      );
+      return '$assetId';
+    },
+    (_) {},
+  );
+
+  /// Sets `asset.status` (0 active / 1 hidden / 2 settled).
+  Future<void> setAssetStatus({
+    required String commandId,
+    required int assetId,
+    required int status,
+  }) => _command(commandId, ['set-asset-status-v1', assetId, status], () async {
+    await _asset(assetId);
+    if (!const {
+      AssetStatus.active,
+      AssetStatus.hidden,
+      AssetStatus.settled,
+    }.contains(status)) {
+      throw const Failure(FailureCode.validation, '账户状态无效');
+    }
+    await (db.update(db.assets)..where((t) => t.id.equals(assetId))).write(
+      AssetsCompanion(status: Value(status)),
+    );
+    return '$assetId';
+  }, (_) {});
+
+  /// Deletes an account that no bill references (otherwise hide it instead,
+  /// so history keeps its account name).
+  Future<void> deleteAsset({required String commandId, required int assetId}) =>
+      _command(commandId, ['delete-asset-v1', assetId], () async {
+        await _asset(assetId);
+        final used = await db
+            .customSelect(
+              'SELECT COUNT(*) AS n FROM record '
+              'WHERE asset_id = ?1 OR from_asset_id = ?1 OR to_asset_id = ?1',
+              variables: [Variable.withInt(assetId)],
+            )
+            .getSingle();
+        if (used.read<int>('n') > 0) {
+          throw const Failure(
+            FailureCode.validation,
+            '该账户已有账单，不能删除；可以改为“隐藏”或“已结清”',
+          );
+        }
+        await (db.delete(
+          db.assetBooks,
+        )..where((t) => t.assetId.equals(assetId))).go();
+        await (db.delete(db.assets)..where((t) => t.id.equals(assetId))).go();
+        return '$assetId';
+      }, (_) {});
+
+  String _assetName(String name) {
+    final trimmed = name.trim();
+    if (trimmed.isEmpty || trimmed.length > 50) {
+      throw const Failure(FailureCode.validation, '账户名称须为 1–50 字');
+    }
+    return trimmed;
+  }
+
+  // Original flag: 1 = counted, inverted for type 4 (ledger-catalog §3).
+  int _effectiveFlag(int type, bool counted) =>
+      type == AssetType.debt ? (counted ? 0 : 1) : (counted ? 1 : 0);
 
   /// Sets an account to [target] by writing a type=4 balance-change record.
   Future<String?> adjustBalance({

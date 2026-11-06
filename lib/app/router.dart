@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../features/assets/asset_detail_page.dart';
+import '../features/assets/asset_editor_page.dart';
 import '../features/assets/assets_page.dart';
 import '../features/books/books_page.dart';
 import '../features/calendar/calendar_page.dart';
@@ -35,9 +37,17 @@ GoRouter buildRouter() => GoRouter(
     ),
     GoRoute(
       path: '/record/new',
-      builder: (_, state) => RecordEditorPage(
-        initialType: int.tryParse(state.uri.queryParameters['type'] ?? ''),
-      ),
+      builder: (_, state) {
+        final q = state.uri.queryParameters;
+        return RecordEditorPage(
+          initialType: int.tryParse(q['type'] ?? ''),
+          initialAsset: int.tryParse(q['asset'] ?? ''),
+          initialFrom: int.tryParse(q['from'] ?? ''),
+          initialTo: int.tryParse(q['to'] ?? ''),
+          initialAmount: q['amount'],
+          initialRemark: q['remark'],
+        );
+      },
     ),
     GoRoute(
       path: '/record/:id',
@@ -49,7 +59,22 @@ GoRouter buildRouter() => GoRouter(
       builder: (_, state) =>
           RecordEditorPage(recordId: state.pathParameters['id']!),
     ),
-    GoRoute(path: '/assets/new', builder: (_, _) => const AssetEditorPage()),
+    GoRoute(
+      path: '/assets/new',
+      builder: (_, state) => AssetEditorPage(
+        initialType: int.tryParse(state.uri.queryParameters['type'] ?? ''),
+      ),
+    ),
+    GoRoute(
+      path: '/assets/:id',
+      builder: (_, state) =>
+          AssetDetailPage(assetId: int.parse(state.pathParameters['id']!)),
+    ),
+    GoRoute(
+      path: '/assets/:id/edit',
+      builder: (_, state) =>
+          AssetEditorPage(assetId: int.parse(state.pathParameters['id']!)),
+    ),
     GoRoute(path: '/search', builder: (_, _) => const SearchPage()),
     GoRoute(path: '/calendar', builder: (_, _) => const CalendarPage()),
     GoRoute(path: '/books', builder: (_, _) => const BooksPage()),

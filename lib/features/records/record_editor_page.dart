@@ -34,9 +34,25 @@ Money parseAmount(String text) {
 }
 
 class RecordEditorPage extends ConsumerStatefulWidget {
-  const RecordEditorPage({super.key, this.recordId, this.initialType});
+  const RecordEditorPage({
+    super.key,
+    this.recordId,
+    this.initialType,
+    this.initialAsset,
+    this.initialFrom,
+    this.initialTo,
+    this.initialAmount,
+    this.initialRemark,
+  });
   final String? recordId;
   final int? initialType;
+
+  /// Prefill for new bills (e.g. "还款" from a credit card opens a transfer).
+  final int? initialAsset;
+  final int? initialFrom;
+  final int? initialTo;
+  final String? initialAmount;
+  final String? initialRemark;
   @override
   ConsumerState<RecordEditorPage> createState() => _RecordEditorPageState();
 }
@@ -65,6 +81,11 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
   void initState() {
     super.initState();
     type = widget.initialType ?? RecordType.expense;
+    assetId = widget.initialAsset ?? noRef;
+    fromAssetId = widget.initialFrom ?? noRef;
+    toAssetId = widget.initialTo ?? noRef;
+    if (widget.initialAmount != null) amount.text = widget.initialAmount!;
+    if (widget.initialRemark != null) remark.text = widget.initialRemark!;
     _load();
   }
 

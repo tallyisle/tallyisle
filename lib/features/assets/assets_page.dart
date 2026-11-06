@@ -3,14 +3,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../app/providers.dart';
-import '../../core/failure.dart';
 import '../../data/db/database.dart';
 import '../../domain/model/codes.dart';
 import '../common/common.dart';
-import '../records/record_editor_page.dart';
+import 'asset_detail_page.dart' show creditBalanceLabel;
 
 /// Accounts of the current book with the net-worth summary
-/// (docs/modules/asset-overview.md). Credit/debt account editors are M2.
+/// (docs/modules/asset-overview.md).
 class AssetsPage extends ConsumerStatefulWidget {
   const AssetsPage({super.key});
   @override
@@ -19,6 +18,7 @@ class AssetsPage extends ConsumerStatefulWidget {
 
 class _AssetsPageState extends ConsumerState<AssetsPage> {
   bool hidden = false;
+  bool showHiddenAccounts = false;
 
   @override
   Widget build(BuildContext context) {
@@ -40,6 +40,37 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
       ),
     );
 
+    Widget tile(Asset a) {
+      final credit = a.type == AssetType.credit;
+      final status = switch (a.status) {
+        AssetStatus.hidden => '已隐藏',
+        AssetStatus.settled => '已结清',
+        _ => null,
+      };
+      return ListTile(
+        key: Key('asset-${a.name}'),
+        leading: Icon(
+          credit ? Icons.credit_card : Icons.account_balance_wallet_outlined,
+        ),
+        title: Text(a.name),
+        subtitle: Text(
+          [
+            ?status,
+            ?a.currency,
+            if (a.remark != null && a.remark!.isNotEmpty) a.remark!,
+          ].join(' · '),
+        ),
+        trailing: Text(
+          hidden
+              ? '***'
+              : credit
+              ? creditBalanceLabel(a.balanceMinor)
+              : formatMinor(a.balanceMinor),
+        ),
+        onTap: () => context.push('/assets/${a.id}'),
+      );
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('资产'),
@@ -52,9 +83,18 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
         ],
       ),
       body: asyncBody(assets, (list) {
+        final hiddenCount = list
+            .where((a) => a.status == AssetStatus.hidden)
+            .length;
         final visible = list
-            .where((a) => a.status != AssetStatus.hidden)
+            .where((a) => showHiddenAccounts || a.status != AssetStatus.hidden)
             .toList();
+        final normal = visible.where((a) => a.type != AssetType.credit);
+        final credit = visible.where((a) => a.type == AssetType.credit);
+        Widget header(String text) => Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+          child: Text(text, style: theme.textTheme.labelLarge),
+        );
         return ListView(
           children: [
             Card(
@@ -95,16 +135,21 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
                 padding: EdgeInsets.all(32),
                 child: Center(child: Text('还没有账户，点右下角添加')),
               ),
-            for (final a in visible)
-              ListTile(
-                key: Key('asset-${a.name}'),
-                leading: const Icon(Icons.account_balance_wallet_outlined),
-                title: Text(a.name),
-                subtitle: a.remark == null || a.remark!.isEmpty
-                    ? null
-                    : Text(a.remark!),
-                trailing: Text(show(a.balanceMinor)),
-                onTap: () => _adjust(context, a),
+            if (normal.isNotEmpty) ...[
+              header('资金账户'),
+              for (final a in normal) tile(a),
+            ],
+            if (credit.isNotEmpty) ...[
+              header('信用卡'),
+              for (final a in credit) tile(a),
+            ],
+            if (hiddenCount > 0)
+              TextButton(
+                onPressed: () =>
+                    setState(() => showHiddenAccounts = !showHiddenAccounts),
+                child: Text(
+                  showHiddenAccounts ? '收起已隐藏账户' : '显示已隐藏账户（$hiddenCount）',
+                ),
               ),
             const SizedBox(height: 96),
           ],
@@ -119,168 +164,4 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
       ),
     );
   }
-
-  Future<void> _adjust(BuildContext context, Asset asset) async {
-    final controller = TextEditingController(
-      text: formatMinor(asset.balanceMinor),
-    );
-    final ids = CommandIds();
-    final value = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('调整“${asset.name}”余额'),
-        content: TextField(
-          key: const Key('adjust-amount'),
-          controller: controller,
-          autofocus: true,
-          keyboardType: const TextInputType.numberWithOptions(
-            decimal: true,
-            signed: true,
-          ),
-          decoration: const InputDecoration(
-            helperText: '会生成一条“余额变更”记录',
-            prefixText: '¥ ',
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, controller.text),
-            child: const Text('保存'),
-          ),
-        ],
-      ),
-    );
-    controller.dispose();
-    if (value == null) return;
-    try {
-      final text = value.trim();
-      final negative = text.startsWith('-');
-      var target = parseAmount(negative ? text.substring(1) : text);
-      if (negative) target = -target;
-      final service = await ref.read(ledgerServiceProvider.future);
-      final bookId = await ref.read(currentBookIdProvider.future);
-      await service.adjustBalance(
-        commandId: ids.forPayload([asset.id, target.toJson()]),
-        assetId: asset.id,
-        target: target,
-        bookId: bookId,
-      );
-    } on Failure catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(e.message)));
-      }
-    }
-  }
-}
-
-class AssetEditorPage extends ConsumerStatefulWidget {
-  const AssetEditorPage({super.key});
-  @override
-  ConsumerState<AssetEditorPage> createState() => _AssetEditorPageState();
-}
-
-class _AssetEditorPageState extends ConsumerState<AssetEditorPage> {
-  final name = TextEditingController();
-  final balance = TextEditingController();
-  final remark = TextEditingController();
-  final ids = CommandIds();
-  bool counted = true, busy = false;
-  String? error;
-
-  @override
-  void dispose() {
-    name.dispose();
-    balance.dispose();
-    remark.dispose();
-    super.dispose();
-  }
-
-  Future<void> _save() async {
-    if (busy) return;
-    setState(() {
-      busy = true;
-      error = null;
-    });
-    try {
-      final initial = parseAmount(balance.text);
-      final service = await ref.read(ledgerServiceProvider.future);
-      await service.createAsset(
-        commandId: ids.forPayload([
-          name.text,
-          initial.toJson(),
-          remark.text,
-          counted,
-        ]),
-        name: name.text,
-        initial: initial,
-        remark: remark.text.trim().isEmpty ? null : remark.text.trim(),
-        countedInNetWorth: counted,
-      );
-      if (mounted) context.pop();
-    } catch (e) {
-      if (mounted) setState(() => error = safeMessage(e));
-    } finally {
-      if (mounted) setState(() => busy = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('添加账户')),
-    body: ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        TextField(
-          key: const Key('asset-name'),
-          controller: name,
-          enabled: !busy,
-          decoration: const InputDecoration(
-            labelText: '账户名称',
-            hintText: '如：现金、银行卡',
-          ),
-        ),
-        const SizedBox(height: 12),
-        TextField(
-          key: const Key('asset-balance'),
-          controller: balance,
-          enabled: !busy,
-          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          inputFormatters: amountInputFormatters,
-          decoration: const InputDecoration(
-            labelText: '当前余额',
-            prefixText: '¥ ',
-          ),
-        ),
-        const SizedBox(height: 12),
-        TextField(
-          controller: remark,
-          enabled: !busy,
-          decoration: const InputDecoration(labelText: '备注（可选）'),
-        ),
-        SwitchListTile(
-          contentPadding: EdgeInsets.zero,
-          title: const Text('计入总资产'),
-          value: counted,
-          onChanged: busy ? null : (v) => setState(() => counted = v),
-        ),
-        if (error != null)
-          Text(
-            error!,
-            style: TextStyle(color: Theme.of(context).colorScheme.error),
-          ),
-        const SizedBox(height: 8),
-        FilledButton(
-          key: const Key('asset-save'),
-          onPressed: busy ? null : _save,
-          child: Text(busy ? '保存中…' : '保存'),
-        ),
-      ],
-    ),
-  );
 }
