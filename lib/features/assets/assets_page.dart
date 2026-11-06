@@ -9,37 +9,92 @@ import '../../domain/model/codes.dart';
 import '../common/common.dart';
 import '../records/record_editor_page.dart';
 
-/// Account list. The full asset overview (net worth rules, credit, debt) is
-/// M2 (docs/modules/asset-overview.md); this page sums ordinary accounts only.
-class AssetsPage extends ConsumerWidget {
+/// Accounts of the current book with the net-worth summary
+/// (docs/modules/asset-overview.md). Credit/debt account editors are M2.
+class AssetsPage extends ConsumerStatefulWidget {
   const AssetsPage({super.key});
+  @override
+  ConsumerState<AssetsPage> createState() => _AssetsPageState();
+}
+
+class _AssetsPageState extends ConsumerState<AssetsPage> {
+  bool hidden = false;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final assets = ref.watch(assetsProvider);
+  Widget build(BuildContext context) {
+    final assets = ref.watch(bookAssetsProvider);
+    final overview = ref.watch(assetOverviewProvider).value;
+    final theme = Theme.of(context);
+    String show(BigInt v) => hidden ? '***' : formatMinor(v);
+    Widget cell(String label, BigInt? v, Key key) => Expanded(
+      child: Column(
+        children: [
+          Text(label, style: theme.textTheme.labelMedium),
+          const SizedBox(height: 4),
+          Text(
+            v == null ? '' : show(v),
+            key: key,
+            style: theme.textTheme.titleMedium,
+          ),
+        ],
+      ),
+    );
+
     return Scaffold(
-      appBar: AppBar(title: const Text('资产')),
+      appBar: AppBar(
+        title: const Text('资产'),
+        actions: [
+          IconButton(
+            tooltip: hidden ? '显示金额' : '隐藏金额',
+            icon: Icon(hidden ? Icons.visibility_off : Icons.visibility),
+            onPressed: () => setState(() => hidden = !hidden),
+          ),
+        ],
+      ),
       body: asyncBody(assets, (list) {
         final visible = list
             .where((a) => a.status != AssetStatus.hidden)
             .toList();
-        if (visible.isEmpty) {
-          return const Center(child: Text('还没有账户，点右下角添加'));
-        }
-        final total = visible
-            .where((a) => a.type == AssetType.normal && a.isEffectiveAsset == 1)
-            .fold(BigInt.zero, (s, a) => s + a.balanceMinor);
         return ListView(
           children: [
-            ListTile(
-              title: const Text('账户合计'),
-              trailing: Text(
-                formatMinor(total),
-                key: const Key('assets-total'),
-                style: Theme.of(context).textTheme.titleLarge,
+            Card(
+              margin: const EdgeInsets.all(16),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                child: Column(
+                  children: [
+                    Row(
+                      children: [
+                        cell('净资产', overview?.netAsset, const Key('net-asset')),
+                        cell(
+                          '总资产',
+                          overview?.totalAsset,
+                          const Key('total-asset'),
+                        ),
+                        cell(
+                          '总负债',
+                          overview?.totalLiabilities,
+                          const Key('total-liabilities'),
+                        ),
+                      ],
+                    ),
+                    if (overview != null && overview.missingRates.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Text(
+                          '缺少汇率：${overview.missingRates.join('、')}（暂按 1:1 计算）',
+                          style: TextStyle(color: theme.colorScheme.error),
+                        ),
+                      ),
+                  ],
+                ),
               ),
             ),
-            const Divider(),
+            if (visible.isEmpty)
+              const Padding(
+                padding: EdgeInsets.all(32),
+                child: Center(child: Text('还没有账户，点右下角添加')),
+              ),
             for (final a in visible)
               ListTile(
                 key: Key('asset-${a.name}'),
@@ -48,8 +103,8 @@ class AssetsPage extends ConsumerWidget {
                 subtitle: a.remark == null || a.remark!.isEmpty
                     ? null
                     : Text(a.remark!),
-                trailing: Text(formatMinor(a.balanceMinor)),
-                onTap: () => _adjust(context, ref, a),
+                trailing: Text(show(a.balanceMinor)),
+                onTap: () => _adjust(context, a),
               ),
             const SizedBox(height: 96),
           ],
@@ -65,7 +120,7 @@ class AssetsPage extends ConsumerWidget {
     );
   }
 
-  Future<void> _adjust(BuildContext context, WidgetRef ref, Asset asset) async {
+  Future<void> _adjust(BuildContext context, Asset asset) async {
     final controller = TextEditingController(
       text: formatMinor(asset.balanceMinor),
     );

@@ -39,6 +39,10 @@ final class LedgerQueries {
           ]))
           .watch();
 
+  Stream<List<AssetBook>> watchAssetBooks() => db.select(db.assetBooks).watch();
+
+  Stream<List<Currency>> watchCurrencies() => db.select(db.currencies).watch();
+
   Stream<List<RecordCategory>> watchCategories(int bookId) =>
       (db.select(db.recordCategories)
             ..where((t) => t.accountBookId.equals(bookId))
