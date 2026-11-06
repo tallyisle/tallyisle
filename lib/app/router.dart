@@ -2,12 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../features/assets/assets_page.dart';
+import '../features/books/books_page.dart';
 import '../features/calendar/calendar_page.dart';
+import '../features/categories/categories_page.dart';
 import '../features/home/home_page.dart';
 import '../features/me/me_page.dart';
 import '../features/records/record_detail_page.dart';
 import '../features/records/record_editor_page.dart';
 import '../features/search/search_page.dart';
+import '../features/tags/tags_page.dart';
 
 /// Semantic routes (ADR-015). Mapping to the original app's 73 routes is kept
 /// in docs/reference/ as modules are implemented.
@@ -49,6 +52,9 @@ GoRouter buildRouter() => GoRouter(
     GoRoute(path: '/assets/new', builder: (_, _) => const AssetEditorPage()),
     GoRoute(path: '/search', builder: (_, _) => const SearchPage()),
     GoRoute(path: '/calendar', builder: (_, _) => const CalendarPage()),
+    GoRoute(path: '/books', builder: (_, _) => const BooksPage()),
+    GoRoute(path: '/categories', builder: (_, _) => const CategoriesPage()),
+    GoRoute(path: '/tags', builder: (_, _) => const TagsPage()),
   ],
 );
 

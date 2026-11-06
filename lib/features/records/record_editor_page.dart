@@ -49,6 +49,8 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
 
   int type = RecordType.expense;
   int? categoryId;
+  int? parentCatId;
+  Set<String> selectedTagIds = {};
   int assetId = noRef, fromAssetId = noRef, toAssetId = noRef;
   bool feeFromTarget = false;
   bool excludeBudget = false, excludeExIn = false;
@@ -96,6 +98,9 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
             time = DateTime.fromMillisecondsSinceEpoch(feeRow.recordTime);
           }
         }
+        final cq = await ref.read(catalogQueriesProvider.future);
+        final tagIds = await cq.getTagIdsForRecord(r.recordId);
+        selectedTagIds = tagIds.toSet();
       }
     } catch (e) {
       error = safeMessage(e);
@@ -160,6 +165,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
         relations: RecordRelations.parse(keepOldExtra?.relInfo),
         fee: type == RecordType.transfer ? parseAmount(fee.text) : null,
         feeFromTarget: feeFromTarget,
+        tagIds: selectedTagIds.toList(),
       );
       final service = await ref.read(ledgerServiceProvider.future);
       final id = await service.saveRecord(
@@ -214,6 +220,9 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
     final assets = (ref.watch(assetsProvider).value ?? const <Asset>[])
         .where((a) => a.status != AssetStatus.settled)
         .toList();
+    final tags = (ref.watch(activeTagsProvider).value ?? const <Tag>[])
+        .where((t) => t.parent != 1)
+        .toList();
 
     return PopScope(
       canPop: !busy,
@@ -258,6 +267,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
                             : (s) => setState(() {
                                 type = s.first;
                                 categoryId = null;
+                                parentCatId = null;
                               }),
                       ),
                       const SizedBox(height: 16),
@@ -313,6 +323,35 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
                               : (v) => setState(() => excludeBudget = v),
                         ),
                       ],
+                      if (tags.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          '标签',
+                          style: Theme.of(context).textTheme.labelLarge,
+                        ),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            for (final t in tags)
+                              FilterChip(
+                                key: Key('tag-${t.name}'),
+                                label: Text(t.name),
+                                selected: selectedTagIds.contains(t.tagId),
+                                onSelected: busy
+                                    ? null
+                                    : (sel) => setState(() {
+                                        if (sel) {
+                                          selectedTagIds.add(t.tagId);
+                                        } else {
+                                          selectedTagIds.remove(t.tagId);
+                                        }
+                                      }),
+                              ),
+                          ],
+                        ),
+                      ],
                       if (error != null)
                         Padding(
                           padding: const EdgeInsets.symmetric(vertical: 8),
@@ -333,9 +372,23 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
   }
 
   List<Widget> _categoryFields(List<RecordCategory> all, List<Asset> assets) {
-    final cats = all
+    if (categoryId != null && parentCatId == null) {
+      final chosen = all.where((c) => c.id == categoryId).firstOrNull;
+      if (chosen != null) {
+        if (chosen.parentCatId == noRef || chosen.parentCatId == -1) {
+          parentCatId = chosen.id;
+        } else {
+          parentCatId = chosen.parentCatId;
+        }
+      }
+    }
+    final topCats = all
         .where((c) => c.type == type && !c.isHide && c.parentCatId == noRef)
         .toList();
+    final subCats = parentCatId == null
+        ? const <RecordCategory>[]
+        : all.where((c) => c.parentCatId == parentCatId && !c.isHide).toList();
+
     return [
       Text('分类', style: Theme.of(context).textTheme.labelLarge),
       const SizedBox(height: 8),
@@ -343,17 +396,46 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
         spacing: 8,
         runSpacing: 8,
         children: [
-          for (final c in cats)
+          for (final c in topCats)
             ChoiceChip(
               key: Key('cat-${c.name}'),
               label: Text(c.name),
-              selected: categoryId == c.id,
+              selected: parentCatId == c.id,
               onSelected: busy
                   ? null
-                  : (_) => setState(() => categoryId = c.id),
+                  : (_) => setState(() {
+                      parentCatId = c.id;
+                      categoryId = c.id;
+                    }),
             ),
         ],
       ),
+      if (subCats.isNotEmpty) ...[
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            ChoiceChip(
+              key: const Key('subcat-all'),
+              label: const Text('全部'),
+              selected: categoryId == parentCatId,
+              onSelected: busy
+                  ? null
+                  : (_) => setState(() => categoryId = parentCatId),
+            ),
+            for (final s in subCats)
+              ChoiceChip(
+                key: Key('cat-${s.name}'),
+                label: Text(s.name),
+                selected: categoryId == s.id,
+                onSelected: busy
+                    ? null
+                    : (_) => setState(() => categoryId = s.id),
+              ),
+          ],
+        ),
+      ],
       const SizedBox(height: 16),
       DropdownButtonFormField<int>(
         key: const Key('asset'),

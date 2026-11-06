@@ -13,8 +13,17 @@ String assetName(List<Asset> assets, int id) => id == noRef
     ? '无账户'
     : assets.where((a) => a.id == id).firstOrNull?.name ?? '账户已删除';
 
-String categoryName(List<RecordCategory> categories, int id) =>
-    categories.where((c) => c.id == id).firstOrNull?.name ?? '未分类';
+String categoryName(List<RecordCategory> categories, int id) {
+  final cat = categories.where((c) => c.id == id).firstOrNull;
+  if (cat == null) return '未分类';
+  if (cat.parentCatId != noRef && cat.parentCatId != -1) {
+    final parent = categories.where((c) => c.id == cat.parentCatId).firstOrNull;
+    if (parent != null) {
+      return '${parent.name} · ${cat.name}';
+    }
+  }
+  return cat.name;
+}
 
 RecordLabel recordLabel(
   LedgerRecord r,
