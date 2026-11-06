@@ -15,3 +15,9 @@ export FLUTTER_SUPPRESS_ANALYTICS=true
 export DART_SUPPRESS_ANALYTICS=true
 export PATH="$FLUTTER_ROOT/bin:$JAVA_HOME/bin:$ANDROID_HOME/platform-tools:$PATH"
 export ANALYZER_STATE_LOCATION_OVERRIDE="${TALLYISLE_DART_SERVER:-$TALLYISLE_TOOLCHAIN/dartServer}"
+
+# Auto-seed pre-verified sqlite3 native libraries so flutter test / build apk work offline even after flutter clean.
+if [[ -d "$TALLYISLE_TOOLCHAIN/sqlite-lib/hooks-shared" ]]; then
+  mkdir -p "$TALLYISLE_PROJECT/.dart_tool/hooks_runner/shared/sqlite3/build"
+  cp -rn "$TALLYISLE_TOOLCHAIN/sqlite-lib/hooks-shared/"* "$TALLYISLE_PROJECT/.dart_tool/hooks_runner/shared/sqlite3/build/" 2>/dev/null || true
+fi

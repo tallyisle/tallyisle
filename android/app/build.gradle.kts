@@ -38,7 +38,10 @@ android {
     }
 
     signingConfigs.getByName("debug") {
-        storeFile = file("../../.toolchain/android-user/debug.keystore")
+        val androidUser = System.getenv("ANDROID_USER_HOME")
+        if (!androidUser.isNullOrBlank()) {
+            storeFile = file("$androidUser/debug.keystore")
+        }
     }
 }
 
