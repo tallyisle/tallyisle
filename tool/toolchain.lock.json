@@ -1,0 +1,28 @@
+{
+  "flutter": {
+    "version": "3.47.7",
+    "channel": "stable",
+    "sourceTag": "https://github.com/flutter/flutter/tree/3.47.7",
+    "frameworkRevision": "abaf9c523780a608bd46686fd5e53740a07077f8",
+    "engineRevision": "deb287481e3ce9468f3434937ced4240a70539ca"
+  },
+  "dart": "3.13.5",
+  "jdk": "17.0.20.1+1",
+  "android": {
+    "applicationId": "dev.tallyisle.rebuild",
+    "minSdk": 26,
+    "compileSdk": 36,
+    "targetSdk": 36,
+    "buildTools": "36.0.0",
+    "ndk": "28.2.13676358",
+    "ndkArchiveSha256": "dfb20d396df28ca02a8c708314b814a4d961dc9074f9a161932746f815aa552f",
+    "agp": "9.1.0",
+    "gradle": "9.3.1",
+    "kotlinDeclared": "2.4.0",
+    "developmentApkSupportedAbis": ["arm64-v8a"],
+    "incidentalJniAbis": ["armeabi-v7a", "x86_64"],
+    "apkStaticInspection": "evidence/stage4/apk-inspection.json"
+  },
+  "dependencies": "Exact direct dependencies in pubspec.yaml; all resolved dependencies and archive hashes in pubspec.lock. No dependency_overrides.",
+  "scope": "Development toolchain. Does not attest Android device runtime or other host builds."
+}

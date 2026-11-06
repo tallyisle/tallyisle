@@ -1,0 +1,8 @@
+{
+  "font": "Noto Sans SC",
+  "source": "https://github.com/google/fonts/tree/main/ofl/notosanssc",
+  "download": "https://raw.githubusercontent.com/google/fonts/main/ofl/notosanssc/NotoSansSC%5Bwght%5D.ttf",
+  "license": "OFL.txt",
+  "sha256": "a3041811a78c361b1de50f953c805e0244951c21c5bd412f7232ef0d899af0da",
+  "usage": "Chinese fallback font; original logo unchanged"
+}
