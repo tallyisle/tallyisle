@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../data/catalog/catalog_queries.dart';
+import '../data/catalog/catalog_service.dart';
 import '../data/db/connection.dart';
 import '../data/db/database.dart';
 import '../data/ledger/ledger_service.dart';
@@ -91,4 +93,44 @@ final periodRecordsProvider = StreamProvider<List<LedgerRecord>>((ref) async* {
 final periodSummaryProvider = FutureProvider<IncomeExpense>((ref) async {
   final records = await ref.watch(periodRecordsProvider.future);
   return aggregateIncomeExpense(records.map(statEntryOf));
+});
+
+final catalogServiceProvider = FutureProvider<CatalogService>(
+  (ref) async => CatalogService(await ref.watch(databaseProvider.future)),
+);
+
+final catalogQueriesProvider = FutureProvider<CatalogQueries>(
+  (ref) async => CatalogQueries(await ref.watch(databaseProvider.future)),
+);
+
+final allCategoriesProvider = StreamProvider.family<List<RecordCategory>, int>((
+  ref,
+  bookId,
+) async* {
+  final q = await ref.watch(catalogQueriesProvider.future);
+  yield* q.watchCategories(bookId);
+});
+
+final activeCategoriesProvider =
+    StreamProvider.family<List<RecordCategory>, int>((ref, bookId) async* {
+      final q = await ref.watch(catalogQueriesProvider.future);
+      yield* q.watchActiveCategories(bookId);
+    });
+
+final tagsProvider = StreamProvider<List<Tag>>((ref) async* {
+  final q = await ref.watch(catalogQueriesProvider.future);
+  yield* q.watchTags();
+});
+
+final activeTagsProvider = StreamProvider<List<Tag>>((ref) async* {
+  final q = await ref.watch(catalogQueriesProvider.future);
+  yield* q.watchActiveTags();
+});
+
+final recordTagsProvider = StreamProvider.family<List<Tag>, String>((
+  ref,
+  recordId,
+) async* {
+  final q = await ref.watch(catalogQueriesProvider.future);
+  yield* q.watchTagsForRecord(recordId);
 });
