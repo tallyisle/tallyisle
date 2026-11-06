@@ -29,3 +29,7 @@ __pycache__/
 # Evidence is archived on disk only (17 GB); not tracked since 2026-11-06
 evidence/
 archive/*/evidence/
+
+# Local binary reference APK and packaged APK releases
+reference/*.apk
+release/
