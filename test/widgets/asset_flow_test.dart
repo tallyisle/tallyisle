@@ -213,7 +213,13 @@ void main() {
       await tester.tap(find.text('招行信用卡'));
       await settle();
 
-      // Turn on reconciliation mode
+      // Turn on reconciliation mode (below the credit statements section).
+      await tester.scrollUntilVisible(
+        find.byKey(const Key('reconciliation-switch')),
+        300,
+        scrollable: find.byType(Scrollable).last,
+      );
+      await settle();
       await tester.tap(find.byKey(const Key('reconciliation-switch')));
       await settle();
 
