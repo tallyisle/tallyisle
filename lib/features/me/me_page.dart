@@ -48,6 +48,13 @@ class MePage extends StatelessWidget {
           trailing: const Icon(Icons.chevron_right),
           onTap: () => context.push('/tags'),
         ),
+        ListTile(
+          key: const Key('me-currencies'),
+          leading: const Icon(Icons.currency_exchange),
+          title: const Text('币种与汇率'),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () => context.push('/currencies'),
+        ),
         const Divider(),
         const ListTile(
           leading: Icon(Icons.info_outline),

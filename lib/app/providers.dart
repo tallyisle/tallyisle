@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/catalog/catalog_queries.dart';
 import '../data/catalog/catalog_service.dart';
+import '../data/catalog/currency_service.dart';
 import '../data/db/connection.dart';
 import '../data/db/database.dart';
 import '../data/ledger/ledger_service.dart';
@@ -111,6 +112,16 @@ final assetBooksProvider = StreamProvider<List<AssetBook>>((ref) async* {
 final currenciesProvider = StreamProvider<List<Currency>>((ref) async* {
   final q = await ref.watch(queriesProvider.future);
   yield* q.watchCurrencies();
+});
+
+final currencyServiceProvider = FutureProvider<CurrencyService>(
+  (ref) async => CurrencyService(await ref.watch(databaseProvider.future)),
+);
+
+/// Manual exchange rates relative to the base currency (CNY).
+final rateTableProvider = FutureProvider<RateTable>((ref) async {
+  final currencies = await ref.watch(currenciesProvider.future);
+  return RateTable({for (final c in currencies) c.code: c.rateToAnchor});
 });
 
 /// Accounts visible in the current book: bound to it, or bound to no book

@@ -7,6 +7,7 @@ import '../features/assets/assets_page.dart';
 import '../features/books/books_page.dart';
 import '../features/calendar/calendar_page.dart';
 import '../features/categories/categories_page.dart';
+import '../features/currencies/currencies_page.dart';
 import '../features/home/home_page.dart';
 import '../features/me/me_page.dart';
 import '../features/records/record_detail_page.dart';
@@ -80,6 +81,7 @@ GoRouter buildRouter() => GoRouter(
     GoRoute(path: '/books', builder: (_, _) => const BooksPage()),
     GoRoute(path: '/categories', builder: (_, _) => const CategoriesPage()),
     GoRoute(path: '/tags', builder: (_, _) => const TagsPage()),
+    GoRoute(path: '/currencies', builder: (_, _) => const CurrenciesPage()),
   ],
 );
 

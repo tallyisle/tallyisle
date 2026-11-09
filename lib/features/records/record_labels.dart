@@ -26,7 +26,38 @@ String categoryName(List<RecordCategory> categories, int id) {
   return cat.name;
 }
 
+/// Adds the entered foreign amount ("USD 100.00") when a bill was recorded in
+/// another currency than the one it was booked in.
 RecordLabel recordLabel(
+  LedgerRecord r,
+  List<RecordCategory> categories,
+  List<Asset> assets,
+) {
+  final label = _recordLabel(r, categories, assets);
+  final CurrencySnapshot? snap;
+  try {
+    snap = RecordExtra.parse(r.extraInfo).currency;
+  } on Object {
+    return label;
+  }
+  if (snap == null ||
+      !snap.isValid ||
+      snap.assetCode == null ||
+      snap.sourceCode.trim().toUpperCase() ==
+          snap.assetCode!.trim().toUpperCase()) {
+    return label;
+  }
+  final fx = r.type == RecordType.transfer && snap.assetNet != null
+      ? '转入 ${snap.assetCode} ${formatMinor(snap.assetNet!)}'
+      : '${snap.sourceCode} ${formatMinor(snap.sourceGross)}';
+  return RecordLabel(
+    label.title,
+    label.subtitle.isEmpty ? fx : '${label.subtitle} · $fx',
+    label.amount,
+  );
+}
+
+RecordLabel _recordLabel(
   LedgerRecord r,
   List<RecordCategory> categories,
   List<Asset> assets,

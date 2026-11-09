@@ -11,6 +11,8 @@ import '../../data/ledger/ledger_service.dart';
 import '../../domain/ledger/record_extra.dart';
 import '../../domain/ledger/record_relations.dart';
 import '../../domain/model/codes.dart';
+import '../../domain/rules/asset_overview.dart' show normalizeCurrency;
+import '../../domain/rules/currency_rates.dart';
 import '../common/common.dart';
 
 /// Original keyboard upper bound (ledger-catalog §5).
@@ -59,6 +61,7 @@ class RecordEditorPage extends ConsumerStatefulWidget {
 
 class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
   final amount = TextEditingController();
+  final converted = TextEditingController();
   final fee = TextEditingController();
   final remark = TextEditingController();
   final ids = CommandIds();
@@ -68,6 +71,12 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
   int? parentCatId;
   Set<String> selectedTagIds = {};
   int assetId = noRef, fromAssetId = noRef, toAssetId = noRef;
+
+  /// Currency the amount is entered in; null = the account currency.
+  String? sourceCurrency;
+
+  /// The user typed the converted amount themselves (stop auto-filling).
+  bool convertedEdited = false;
   bool feeFromTarget = false;
   bool excludeBudget = false, excludeExIn = false;
   DateTime time = DateTime.now();
@@ -76,6 +85,44 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
   String? error;
 
   bool get editing => widget.recordId != null;
+
+  String _currencyOf(int id) {
+    if (id == noRef) return baseCurrency;
+    final assets = ref.read(assetsProvider).value ?? const <Asset>[];
+    final a = assets.where((x) => x.id == id).firstOrNull;
+    return normalizeCurrency(a?.currency) ?? baseCurrency;
+  }
+
+  /// (entered currency, booked currency) for the current form.
+  (String, String) _currencies() {
+    if (type == RecordType.transfer) {
+      return (_currencyOf(fromAssetId), _currencyOf(toAssetId));
+    }
+    final ac = _currencyOf(assetId);
+    return (sourceCurrency ?? ac, ac);
+  }
+
+  /// Fills [converted] from the manual rates unless the user edited it.
+  void _autoConvert() {
+    if (convertedEdited) return;
+    final (sc, ac) = _currencies();
+    if (sc == ac) {
+      converted.text = '';
+      return;
+    }
+    final rates = ref.read(rateTableProvider).value;
+    final text = amount.text.trim();
+    if (rates == null || text.isEmpty) {
+      converted.text = '';
+      return;
+    }
+    try {
+      final minor = parseAmount(text).storageMinor;
+      converted.text = formatMinor(rates.convert(minor, sc, ac));
+    } on Failure {
+      converted.text = '';
+    }
+  }
 
   @override
   void initState() {
@@ -107,6 +154,22 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
         excludeBudget = r.excludeBudget;
         excludeExIn = r.excludeExIn;
         time = DateTime.fromMillisecondsSinceEpoch(r.recordTime);
+        final snap = RecordExtra.parse(r.extraInfo).currency;
+        if (snap != null && snap.isValid && snap.assetNet != null) {
+          final sc = normalizeCurrency(snap.sourceCode) ?? baseCurrency;
+          final ac = normalizeCurrency(snap.assetCode) ?? baseCurrency;
+          if (r.type == RecordType.transfer) {
+            if (sc != ac) {
+              converted.text = formatMinor(snap.assetNet!);
+              convertedEdited = true;
+            }
+          } else if (sc != ac) {
+            sourceCurrency = sc;
+            amount.text = formatMinor(snap.sourceGross);
+            converted.text = formatMinor(snap.assetNet!);
+            convertedEdited = true;
+          }
+        }
         if (feeRow != null) {
           fee.text = formatMinor(feeRow.moneyMinor);
           feeFromTarget =
@@ -132,6 +195,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
   @override
   void dispose() {
     amount.dispose();
+    converted.dispose();
     fee.dispose();
     remark.dispose();
     super.dispose();
@@ -176,9 +240,43 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
       final keepOldExtra = original != null && original!.type == type
           ? original
           : null;
+      final extra = RecordExtra.parse(keepOldExtra?.extraInfo);
+      // Multi-currency (ledger-catalog §4 `curr`): `money` is the booked amount
+      // (account currency) for bills and the source amount for transfers.
+      final (sc, ac) = _currencies();
+      var booked = money;
+      if (sc != ac) {
+        final rates = await ref.read(rateTableProvider.future);
+        final text = converted.text.trim();
+        final target = text.isEmpty
+            ? Money.minor(rates.convert(money.storageMinor, sc, ac))
+            : parseAmount(text);
+        if (!money.isZero && target.units <= BigInt.zero) {
+          throw const Failure(FailureCode.validation, '折算金额须大于 0');
+        }
+        if (type != RecordType.transfer) booked = target;
+        extra.currency = billSnapshot(
+          source: sc,
+          sourceMinor: money.storageMinor,
+          account: ac,
+          assetMinor: target.storageMinor,
+          rates: rates,
+        );
+      } else if (sc != baseCurrency) {
+        final rates = await ref.read(rateTableProvider.future);
+        extra.currency = billSnapshot(
+          source: sc,
+          sourceMinor: money.storageMinor,
+          account: ac,
+          assetMinor: money.storageMinor,
+          rates: rates,
+        );
+      } else {
+        extra.currency = null;
+      }
       final draft = RecordDraft(
         type: type,
-        money: money,
+        money: booked,
         bookId: bookId,
         recordTime: time.millisecondsSinceEpoch,
         categoryId: type == RecordType.transfer ? noRef : categoryId!,
@@ -193,7 +291,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
         remark: remark.text.trim(),
         excludeBudget: excludeBudget,
         excludeExIn: excludeExIn,
-        extra: RecordExtra.parse(keepOldExtra?.extraInfo),
+        extra: extra,
         relations: RecordRelations.parse(keepOldExtra?.relInfo),
         fee: type == RecordType.transfer ? parseAmount(fee.text) : null,
         feeFromTarget: feeFromTarget,
@@ -255,6 +353,17 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
     final tags = (ref.watch(activeTagsProvider).value ?? const <Tag>[])
         .where((t) => t.parent != 1)
         .toList();
+    final currencies =
+        [...(ref.watch(currenciesProvider).value ?? const <Currency>[])]..sort(
+          (a, b) => a.code == b.code
+              ? 0
+              : a.code == baseCurrency
+              ? -1
+              : b.code == baseCurrency
+              ? 1
+              : a.code.compareTo(b.code),
+        );
+    ref.watch(rateTableProvider);
 
     return PopScope(
       canPop: !busy,
@@ -305,22 +414,82 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
                         ],
                       ),
                       const SizedBox(height: 16),
-                      TextField(
-                        key: const Key('amount'),
-                        controller: amount,
-                        enabled: !busy,
-                        autofocus: !editing,
-                        keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true,
-                        ),
-                        inputFormatters: amountInputFormatters,
-                        style: Theme.of(context).textTheme.headlineSmall,
-                        decoration: const InputDecoration(
-                          labelText: '金额',
-                          prefixText: '¥ ',
-                          border: OutlineInputBorder(),
-                        ),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              key: const Key('amount'),
+                              controller: amount,
+                              enabled: !busy,
+                              autofocus: !editing,
+                              keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                    decimal: true,
+                                  ),
+                              inputFormatters: amountInputFormatters,
+                              style: Theme.of(context).textTheme.headlineSmall,
+                              onChanged: (_) => setState(_autoConvert),
+                              decoration: InputDecoration(
+                                labelText: '金额',
+                                prefixText: '${_currencies().$1} ',
+                                border: const OutlineInputBorder(),
+                              ),
+                            ),
+                          ),
+                          if (type != RecordType.transfer &&
+                              currencies.length > 1) ...[
+                            const SizedBox(width: 8),
+                            SizedBox(
+                              width: 112,
+                              child: DropdownButtonFormField<String>(
+                                key: ValueKey(
+                                  'source-currency-${_currencies().$2}',
+                                ),
+                                initialValue: _currencies().$1,
+                                decoration: const InputDecoration(
+                                  labelText: '币种',
+                                  border: OutlineInputBorder(),
+                                ),
+                                items: [
+                                  for (final c in currencies)
+                                    DropdownMenuItem(
+                                      value: c.code,
+                                      child: Text(c.code),
+                                    ),
+                                ],
+                                onChanged: busy
+                                    ? null
+                                    : (v) => setState(() {
+                                        sourceCurrency = v;
+                                        convertedEdited = false;
+                                        _autoConvert();
+                                      }),
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
+                      if (_currencies().$1 != _currencies().$2) ...[
+                        const SizedBox(height: 12),
+                        TextField(
+                          key: const Key('converted'),
+                          controller: converted,
+                          enabled: !busy,
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                          ),
+                          inputFormatters: amountInputFormatters,
+                          onChanged: (_) => convertedEdited = true,
+                          decoration: InputDecoration(
+                            labelText: type == RecordType.transfer
+                                ? '转入金额（${_currencies().$2}）'
+                                : '折合账户金额（${_currencies().$2}）',
+                            prefixText: '${_currencies().$2} ',
+                            helperText: '按“币种与汇率”中的汇率自动折算，可改成实际金额',
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 16),
                       if (type == RecordType.transfer)
                         ..._transferFields(assets)
@@ -486,7 +655,12 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
           for (final a in assets)
             DropdownMenuItem(value: a.id, child: Text(a.name)),
         ],
-        onChanged: busy ? null : (v) => setState(() => assetId = v ?? noRef),
+        onChanged: busy
+            ? null
+            : (v) => setState(() {
+                assetId = v ?? noRef;
+                _autoConvert();
+              }),
       ),
     ];
   }
@@ -505,7 +679,13 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
         for (final a in assets)
           DropdownMenuItem(value: a.id, child: Text(a.name)),
       ],
-      onChanged: busy ? null : (v) => setState(() => set(v ?? noRef)),
+      onChanged: busy
+          ? null
+          : (v) => setState(() {
+              set(v ?? noRef);
+              convertedEdited = false;
+              _autoConvert();
+            }),
     );
     return [
       if (assets.length < 2)
