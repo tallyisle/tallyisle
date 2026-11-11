@@ -30,8 +30,3 @@ flutter:
   uses-material-design: true
   assets:
     - assets/branding/tallyisle-logo-original.png
-    - assets/fonts/OFL.txt
-  fonts:
-    - family: NotoSansSC
-      fonts:
-        - asset: assets/fonts/NotoSansSC.ttf

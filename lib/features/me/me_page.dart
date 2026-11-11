@@ -122,7 +122,7 @@ class MePage extends ConsumerWidget {
             ListTile(
               key: const Key('me-backup'),
               leading: const Icon(Icons.cloud_sync_outlined),
-              title: const Text('备份与恢复'),
+              title: const Text('云同步与备份'),
               trailing: const Icon(Icons.chevron_right),
               onTap: () => context.push('/backup'),
             ),
@@ -148,16 +148,10 @@ class MePage extends ConsumerWidget {
               onTap: () => context.push('/export/csv'),
             ),
             ListTile(
-              key: const Key('me-import-penny'),
-              leading: const Icon(Icons.archive_outlined),
-              title: const Text('导入原版备份 (.penny)'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => context.push('/import/penny'),
-            ),
-            ListTile(
               key: const Key('me-migration'),
               leading: const Icon(Icons.phonelink_setup_outlined),
-              title: const Text('跨端迁移与局域网恢复'),
+              title: const Text('从旧软件导入'),
+              subtitle: const Text('兼容一羽记账 .penny / .yi2a / 局域网备份'),
               trailing: const Icon(Icons.chevron_right),
               onTap: () => context.push('/migration'),
             ),
@@ -302,7 +296,7 @@ class MePage extends ConsumerWidget {
               leading: Icon(Icons.info_outline),
               title: Text('开发版本'),
               subtitle: Text(
-                '数据保存在本机，可选配置私有 WebDAV 云备份；已支持核心记账、资产与多币种、统计预算、计划提醒、数据迁移备份，以及常用工具、安全锁与桌面/自动记账联动。',
+                '数据保存在本机，可选配置私有 WebDAV / S3 云同步与备份；已支持核心记账、资产与多币种（含可选在线汇率）、统计预算、计划提醒、数据迁移备份，以及常用工具、安全锁与桌面/自动记账联动。',
               ),
             ),
             ListTile(

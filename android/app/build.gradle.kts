@@ -27,13 +27,26 @@ android {
         // flag during build.
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        ndk {
+            abiFilters += listOf("arm64-v8a")
+        }
+    }
+
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
     }
 
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
         }
     }
 
@@ -56,4 +69,26 @@ kotlin {
 
 flutter {
     source = "../.."
+}
+
+// Ensure `--release --no-pub` offline builds strip dev-only `integration_test` registration
+// left in GeneratedPluginRegistrant.java by `flutter pub get --offline`.
+tasks.configureEach {
+    if (name == "compileReleaseJavaWithJavac" || name == "compileReleaseKotlin") {
+        doFirst {
+            val registrant = file("src/main/java/io/flutter/plugins/GeneratedPluginRegistrant.java")
+            if (registrant.exists()) {
+                val original = registrant.readText()
+                val cleaned = original.replace(
+                    Regex(
+                        """\s*try\s*\{\s*flutterEngine\.getPlugins\(\)\.add\(new dev\.flutter\.plugins\.integration_test\.IntegrationTestPlugin\(\)\);\s*\}\s*catch\s*\(Exception e\)\s*\{[^}]*\}""",
+                    ),
+                    "",
+                )
+                if (cleaned != original) {
+                    registrant.writeText(cleaned)
+                }
+            }
+        }
+    }
 }

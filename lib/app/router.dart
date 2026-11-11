@@ -10,6 +10,7 @@ import '../features/automation/desktop_widgets_page.dart';
 import '../features/automation/ocr_bill_page.dart';
 import '../features/automation/url_scheme_page.dart';
 import '../features/backup/backup_page.dart';
+import '../features/backup/s3_config_page.dart';
 import '../features/backup/webdav_config_page.dart';
 import '../features/bank_cards/bank_card_editor_page.dart';
 import '../features/bank_cards/bank_cards_page.dart';
@@ -37,7 +38,6 @@ import '../features/migration/migration_page.dart';
 import '../features/notes/note_editor_page.dart';
 import '../features/notes/note_trash_page.dart';
 import '../features/notes/notes_page.dart';
-import '../features/penny_import/penny_import_page.dart';
 import '../features/periodic/periodic_editor_page.dart';
 import '../features/periodic/periodic_page.dart';
 import '../features/receipt/diy_toolbar_settings_page.dart';
@@ -272,6 +272,7 @@ GoRouter buildRouter() => GoRouter(
       path: '/backup/webdav',
       builder: (_, _) => const WebDavConfigPage(),
     ),
+    GoRoute(path: '/backup/s3', builder: (_, _) => const S3ConfigPage()),
     GoRoute(path: '/import/csv', builder: (_, _) => const CsvImportPage()),
     GoRoute(
       path: '/import/batches',
@@ -284,7 +285,7 @@ GoRouter buildRouter() => GoRouter(
       ),
     ),
     GoRoute(path: '/export/csv', builder: (_, _) => const CsvExportPage()),
-    GoRoute(path: '/import/penny', builder: (_, _) => const PennyImportPage()),
+    GoRoute(path: '/import/penny', builder: (_, _) => const MigrationPage()),
     GoRoute(path: '/migration', builder: (_, _) => const MigrationPage()),
     GoRoute(path: '/wishes', builder: (_, _) => const WishesPage()),
     GoRoute(path: '/wishes/new', builder: (_, _) => const WishEditorPage()),

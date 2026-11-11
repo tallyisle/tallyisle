@@ -116,7 +116,7 @@ void main() {
   driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
 
   testWidgets(
-    'MePage Data & Backup section navigates to all 6 M5 pages and direct /backup/webdav route loads stored config',
+    'MePage Data & Backup section navigates to all 5 consolidated pages, legacy /import/penny deep link lands on MigrationPage, and direct /backup/webdav route loads stored config',
     (tester) async {
       final rig = await _openTestRig(tester);
       var httpClientCalls = 0;
@@ -143,7 +143,7 @@ void main() {
       );
       await _settle(tester);
 
-      // Lifecycle startup and foreground resume with unconfigured WebDAV must perform zero network I/O.
+      // Lifecycle startup and foreground resume with unconfigured WebDAV/S3 must perform zero network I/O.
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
       await _settle(tester);
@@ -159,12 +159,7 @@ void main() {
       );
       await _settle(tester);
       expect(find.text('数据与备份'), findsOneWidget);
-      expect(
-        find.text(
-          '数据保存在本机，可选配置私有 WebDAV 云备份；已支持核心记账、资产与多币种、统计预算、计划提醒、数据迁移备份，以及常用工具、安全锁与桌面/自动记账联动。',
-        ),
-        findsOneWidget,
-      );
+      expect(find.byKey(const Key('me-import-penny')), findsNothing);
 
       // 1. /backup + nested WebDavConfigPage
       await tester.scrollUntilVisible(
@@ -173,6 +168,7 @@ void main() {
         scrollable: find.byType(Scrollable).first,
       );
       await _settle(tester);
+      expect(find.text('云同步与备份'), findsOneWidget);
       await tester.tap(find.byKey(const Key('me-backup')));
       await _settle(tester);
       expect(find.byKey(const Key('backup_page')), findsOneWidget);
@@ -184,12 +180,11 @@ void main() {
       expect(find.byKey(const Key('backup_page')), findsOneWidget);
       await _goBack(tester);
 
-      // 2..6. Remaining 5 M5 destinations on MePage
+      // 2..5. Remaining 4 consolidated Data & Backup destinations on MePage
       const routesToVerify = <(Key, Key)>[
         (Key('me-import-csv'), Key('csv_import_page')),
         (Key('me-import-batches'), Key('import_batches_page')),
         (Key('me-export-csv'), Key('csv_export_page')),
-        (Key('me-import-penny'), Key('penny_import_page')),
         (Key('me-migration'), Key('migration_page')),
       ];
 
@@ -208,6 +203,36 @@ void main() {
         await _goBack(tester);
         expect(find.text('我的'), findsWidgets);
       }
+
+      await tester.scrollUntilVisible(
+        find.text('开发版本'),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await _settle(tester);
+      expect(
+        find.text(
+          '数据保存在本机，可选配置私有 WebDAV / S3 云同步与备份；已支持核心记账、资产与多币种（含可选在线汇率）、统计预算、计划提醒、数据迁移备份，以及常用工具、安全锁与桌面/自动记账联动。',
+        ),
+        findsOneWidget,
+      );
+
+      // Legacy deep link `/import/penny` lands cleanly on unified MigrationPage.
+      await tester.scrollUntilVisible(
+        find.byKey(const Key('me-migration')),
+        -200,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await _settle(tester);
+      final legacyCtx = tester.element(find.byKey(const Key('me-migration')));
+      unawaited(GoRouter.of(legacyCtx).push('/import/penny'));
+      await _settle(tester);
+      expect(find.byKey(const Key('migration_page')), findsOneWidget);
+      expect(
+        find.byKey(const Key('legacy_import_penny_button')),
+        findsOneWidget,
+      );
+      await _goBack(tester);
 
       // Direct semantic route `/backup/webdav` (initialConfig == null) loads stored WebDAV config.
       final container = ProviderScope.containerOf(

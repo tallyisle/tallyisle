@@ -190,31 +190,39 @@ final class HttpExchangeRateProvider implements ExchangeRateProvider {
     );
   }
 
-  Future<String> _getJsonText(Uri uri) async {
-    final client = _httpClientFactory()..connectionTimeout = timeout;
-    try {
-      final request = await client.getUrl(uri).timeout(timeout);
-      request.headers.set(HttpHeaders.acceptHeader, 'application/json');
-      final response = await request.close().timeout(timeout);
+  Future<String> _getJsonText(Uri uri) {
+    final completer = Completer<String>();
+    Zone.root.run(() async {
+      final client = _httpClientFactory()..connectionTimeout = timeout;
+      try {
+        final request = await client.getUrl(uri).timeout(timeout);
+        request.headers.set(HttpHeaders.acceptHeader, 'application/json');
+        final response = await request.close().timeout(timeout);
 
-      if (response.statusCode < 200 || response.statusCode >= 300) {
-        await response.drain<void>().timeout(timeout);
-        throw Failure(
-          FailureCode.remoteUnavailable,
-          '汇率源返回 HTTP ${response.statusCode}',
-        );
-      }
-
-      final chunks = BytesBuilder(copy: false);
-      await for (final chunk in response.timeout(timeout)) {
-        if (chunks.length + chunk.length > _maxResponseBytes) {
-          throw const Failure(FailureCode.validation, '汇率源响应体积超出限制');
+        if (response.statusCode < 200 || response.statusCode >= 300) {
+          await response.drain<void>().timeout(timeout);
+          throw Failure(
+            FailureCode.remoteUnavailable,
+            '汇率源返回 HTTP ${response.statusCode}',
+          );
         }
-        chunks.add(chunk);
+
+        final chunks = BytesBuilder(copy: false);
+        await for (final chunk in response.timeout(timeout)) {
+          if (chunks.length + chunk.length > _maxResponseBytes) {
+            throw const Failure(FailureCode.validation, '汇率源响应体积超出限制');
+          }
+          chunks.add(chunk);
+        }
+        completer.complete(
+          utf8.decode(chunks.takeBytes(), allowMalformed: true),
+        );
+      } catch (e, st) {
+        completer.completeError(e, st);
+      } finally {
+        client.close(force: true);
       }
-      return utf8.decode(chunks.takeBytes(), allowMalformed: true);
-    } finally {
-      client.close(force: true);
-    }
+    });
+    return completer.future;
   }
 }

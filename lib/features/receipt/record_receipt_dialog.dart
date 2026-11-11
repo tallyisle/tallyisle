@@ -309,11 +309,7 @@ class RecordReceiptPaperCard extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.fromLTRB(22, 24, 22, 24),
         child: DefaultTextStyle(
-          style: const TextStyle(
-            color: _inkPrimary,
-            fontSize: 13,
-            fontFamilyFallback: ['NotoSansSC'],
-          ),
+          style: const TextStyle(color: _inkPrimary, fontSize: 13),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,

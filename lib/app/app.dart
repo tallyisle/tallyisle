@@ -5,10 +5,13 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../domain/rules/app_settings_rules.dart';
+import '../domain/rules/cloud_sync_rules.dart';
 import '../features/automation/automation_providers.dart';
 import '../features/backup/backup_providers.dart';
+import '../features/currencies/currency_rate_providers.dart';
 import '../features/deposit/fixed_deposit_providers.dart';
 import '../features/installment/installment_providers.dart';
+import '../features/migration/migration_providers.dart';
 import '../features/periodic/periodic_providers.dart';
 import '../features/reminder/reminder_providers.dart';
 import '../features/savings/savings_providers.dart';
@@ -50,8 +53,57 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed && !_disposed && mounted) {
+    if (_disposed || !mounted) return;
+    if (state == AppLifecycleState.resumed) {
       unawaited(_runLifecycleSync(isInitial: false));
+    } else if (state == AppLifecycleState.paused) {
+      unawaited(_runSilentCloudSyncOnPause());
+    }
+  }
+
+  void _applyCloudSyncOutcome(CloudSyncOutcome outcome) {
+    if (_disposed || !mounted) return;
+    ref
+      ..invalidate(localBackupsProvider)
+      ..invalidate(webDavBackupsProvider)
+      ..invalidate(s3BackupsProvider)
+      ..invalidate(activeCloudBackupsProvider)
+      ..invalidate(cloudSyncCursorProvider)
+      ..invalidate(lastBackupAtMsProvider);
+    if (outcome.status == CloudSyncStatus.pulled) {
+      ref.read(periodOffsetProvider.notifier).reset();
+      ref.read(calendarMonthOffsetProvider.notifier).reset();
+      ref
+        ..invalidate(currentBookIdProvider)
+        ..invalidate(booksProvider)
+        ..invalidate(assetsProvider)
+        ..invalidate(assetBooksProvider)
+        ..invalidate(currenciesProvider)
+        ..invalidate(tagsProvider)
+        ..invalidate(remindersProvider)
+        ..invalidate(reminderCountProvider)
+        ..invalidate(migrationLocalSummaryProvider);
+    }
+  }
+
+  Future<void> _runSilentCloudSyncOnPause() async {
+    if (_syncRunning || _disposed || !mounted) return;
+    try {
+      final service = await ref.read(tallyBackupServiceProvider.future);
+      if (_disposed || !mounted) return;
+      final outcome = await service.runSilentCloudSyncIfNeeded();
+      if (_disposed || !mounted || outcome == null) return;
+      _applyCloudSyncOutcome(outcome);
+      if (outcome.status == CloudSyncStatus.pulled) {
+        final widgetService = await ref.read(
+          widgetSnapshotServiceProvider.future,
+        );
+        if (!_disposed && mounted) {
+          await widgetService.syncToPlatform();
+        }
+      }
+    } catch (_) {
+      // Non-blocking background sync on pause.
     }
   }
 
@@ -192,6 +244,33 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
         await service.resyncAll();
       });
       await safeStep(() async {
+        final service = await ref.read(currencyServiceProvider.future);
+        if (_disposed || !mounted) return;
+        final settings = await service.getOnlineRateSettings();
+        if (_disposed ||
+            !mounted ||
+            !settings.shouldAutoSync(nowMs: service.db.nowMs())) {
+          return;
+        }
+        final provider = await ref.read(
+          exchangeRateProviderInstanceProvider.future,
+        );
+        if (_disposed || !mounted) return;
+        final synced = await service.runAutoSyncIfNeeded(provider: provider);
+        if (_disposed || !mounted || synced == null) return;
+        ref.invalidate(onlineRateSettingsProvider);
+        if (synced.updatedCount > 0) {
+          ref.invalidate(currenciesProvider);
+        }
+      });
+      await safeStep(() async {
+        final service = await ref.read(tallyBackupServiceProvider.future);
+        if (_disposed || !mounted) return;
+        final outcome = await service.runSilentCloudSyncIfNeeded();
+        if (_disposed || !mounted || outcome == null) return;
+        _applyCloudSyncOutcome(outcome);
+      });
+      await safeStep(() async {
         final service = await ref.read(tallyBackupServiceProvider.future);
         if (_disposed || !mounted) return;
         await service.runSilentAutoBackupIfNeeded();
@@ -238,7 +317,6 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
       locale: const Locale('zh'),
       themeMode: themeMode,
       theme: ThemeData(
-        fontFamilyFallback: const ['NotoSansSC'],
         colorScheme: ColorScheme.fromSeed(
           seedColor: seedColor,
           brightness: Brightness.light,
@@ -246,7 +324,6 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
         useMaterial3: true,
       ),
       darkTheme: ThemeData(
-        fontFamilyFallback: const ['NotoSansSC'],
         colorScheme: ColorScheme.fromSeed(
           seedColor: seedColor,
           brightness: Brightness.dark,
