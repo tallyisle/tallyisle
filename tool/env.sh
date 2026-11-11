@@ -8,6 +8,8 @@ if [[ -d "${TALLYISLE_JAVA_SDK:-$TALLYISLE_TOOLCHAIN/jdk-17}" ]]; then
   export JAVA_HOME="${TALLYISLE_JAVA_SDK:-$TALLYISLE_TOOLCHAIN/jdk-17}"
 elif [[ -d "/usr/lib/jvm/java-17-openjdk-amd64" ]]; then
   export JAVA_HOME="/usr/lib/jvm/java-17-openjdk-amd64"
+elif [[ -d "/usr/lib/jvm/java-17-openjdk-arm64" ]]; then
+  export JAVA_HOME="/usr/lib/jvm/java-17-openjdk-arm64"
 else
   export JAVA_HOME="${TALLYISLE_JAVA_SDK:-$TALLYISLE_TOOLCHAIN/jdk-17}"
 fi

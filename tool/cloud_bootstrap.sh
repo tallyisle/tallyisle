@@ -13,13 +13,20 @@ if [[ -d "$PROJECT_DIR/tool/seeds/gradle-init" ]]; then
   cp -f "$PROJECT_DIR/tool/seeds/gradle-init/"* "$GRADLE_USER_HOME/init.d/" 2>/dev/null || true
 fi
 
-# 2. Ensure JDK 17 is available
-if [[ ! -x "$JAVA_HOME/bin/java" ]]; then
-  echo "==> Downloading OpenJDK 17 into $TALLYISLE_TOOLCHAIN/jdk-17 ..."
+# 2. Ensure JDK 17 is available (matching host CPU architecture)
+HOST_ARCH="$(uname -m)"
+if [[ "$HOST_ARCH" == "aarch64" || "$HOST_ARCH" == "arm64" ]]; then
+  JDK_ARCH="aarch64"
+else
+  JDK_ARCH="x64"
+fi
+if [[ ! -x "$JAVA_HOME/bin/java" ]] || ! "$JAVA_HOME/bin/java" -version >/dev/null 2>&1; then
+  echo "==> Downloading OpenJDK 17 ($JDK_ARCH) into $TALLYISLE_TOOLCHAIN/jdk-17 ..."
+  rm -rf "$TALLYISLE_TOOLCHAIN/jdk-17"
   mkdir -p "$TALLYISLE_TOOLCHAIN/jdk-17"
   JDK_TAR="/tmp/openjdk17.tar.gz"
   curl -fL --retry 3 -o "$JDK_TAR" \
-    "https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.13%2B11/OpenJDK17U-jdk_x64_linux_hotspot_17.0.13_11.tar.gz"
+    "https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.13%2B11/OpenJDK17U-jdk_${JDK_ARCH}_linux_hotspot_17.0.13_11.tar.gz"
   tar -xzf "$JDK_TAR" -C "$TALLYISLE_TOOLCHAIN/jdk-17" --strip-components=1
   rm -f "$JDK_TAR"
   export JAVA_HOME="$TALLYISLE_TOOLCHAIN/jdk-17"
@@ -49,8 +56,6 @@ if [[ "${1:-}" == "--with-android" ]]; then
     rm -f "$CMDLINE_ZIP"
   fi
   bash "$SCRIPT_DIR/bootstrap_android.sh"
-  env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY \
-    "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_HOME" 'cmake;3.22.1' 'platform-tools'
 fi
 
 echo "==> Verifying analyzer and test suite ..."
