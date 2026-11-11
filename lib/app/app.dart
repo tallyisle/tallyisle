@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../features/backup/backup_providers.dart';
 import '../features/deposit/fixed_deposit_providers.dart';
 import '../features/installment/installment_providers.dart';
 import '../features/periodic/periodic_providers.dart';
@@ -103,6 +104,11 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
         final service = await ref.read(reminderServiceProvider.future);
         if (_disposed || !mounted) return;
         await service.resyncAll();
+      });
+      await safeStep(() async {
+        final service = await ref.read(tallyBackupServiceProvider.future);
+        if (_disposed || !mounted) return;
+        await service.runSilentAutoBackupIfNeeded();
       });
     } finally {
       _syncRunning = false;

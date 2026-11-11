@@ -4,10 +4,15 @@ import 'package:go_router/go_router.dart';
 import '../features/assets/asset_detail_page.dart';
 import '../features/assets/asset_editor_page.dart';
 import '../features/assets/assets_page.dart';
+import '../features/backup/backup_page.dart';
+import '../features/backup/webdav_config_page.dart';
 import '../features/books/books_page.dart';
 import '../features/budget/budget_page.dart';
 import '../features/calendar/calendar_page.dart';
 import '../features/categories/categories_page.dart';
+import '../features/csv_transfer/csv_export_page.dart';
+import '../features/csv_transfer/csv_import_page.dart';
+import '../features/csv_transfer/import_batches_page.dart';
 import '../features/currencies/currencies_page.dart';
 import '../features/debt/debt_detail_page.dart';
 import '../features/debt/debt_editor_page.dart';
@@ -19,6 +24,8 @@ import '../features/installment/installment_detail_page.dart';
 import '../features/installment/installment_editor_page.dart';
 import '../features/installment/installment_page.dart';
 import '../features/me/me_page.dart';
+import '../features/migration/migration_page.dart';
+import '../features/penny_import/penny_import_page.dart';
 import '../features/periodic/periodic_editor_page.dart';
 import '../features/periodic/periodic_page.dart';
 import '../features/records/record_detail_page.dart';
@@ -235,6 +242,25 @@ GoRouter buildRouter() => GoRouter(
       ),
     ),
     GoRoute(path: '/reminders', builder: (_, _) => const ReminderPage()),
+    GoRoute(path: '/backup', builder: (_, _) => const BackupPage()),
+    GoRoute(
+      path: '/backup/webdav',
+      builder: (_, _) => const WebDavConfigPage(),
+    ),
+    GoRoute(path: '/import/csv', builder: (_, _) => const CsvImportPage()),
+    GoRoute(
+      path: '/import/batches',
+      builder: (_, _) => const ImportBatchesPage(),
+    ),
+    GoRoute(
+      path: '/import/batches/:id',
+      builder: (_, state) => ImportBatchDetailPage(
+        batchId: int.parse(state.pathParameters['id']!),
+      ),
+    ),
+    GoRoute(path: '/export/csv', builder: (_, _) => const CsvExportPage()),
+    GoRoute(path: '/import/penny', builder: (_, _) => const PennyImportPage()),
+    GoRoute(path: '/migration', builder: (_, _) => const MigrationPage()),
   ],
 );
 

@@ -9,6 +9,8 @@ import '../../data/backup/webdav_client.dart';
 import '../../domain/rules/tally_backup.dart';
 import '../../platform/files.dart';
 import '../common/common.dart';
+import '../migration/migration_providers.dart';
+import '../reminder/reminder_providers.dart';
 import 'backup_providers.dart';
 import 'webdav_config_page.dart';
 
@@ -66,11 +68,18 @@ class _BackupPageState extends ConsumerState<BackupPage>
 
   void _refreshAfterRestore() {
     _refreshAfterBackupChange();
-    ref.invalidate(currentBookIdProvider);
-    ref.invalidate(booksProvider);
-    ref.invalidate(assetsProvider);
-    ref.invalidate(currenciesProvider);
-    ref.invalidate(tagsProvider);
+    ref.read(periodOffsetProvider.notifier).reset();
+    ref.read(calendarMonthOffsetProvider.notifier).reset();
+    ref
+      ..invalidate(currentBookIdProvider)
+      ..invalidate(booksProvider)
+      ..invalidate(assetsProvider)
+      ..invalidate(assetBooksProvider)
+      ..invalidate(currenciesProvider)
+      ..invalidate(tagsProvider)
+      ..invalidate(remindersProvider)
+      ..invalidate(reminderCountProvider)
+      ..invalidate(migrationLocalSummaryProvider);
   }
 
   void _showMessage(String text) {

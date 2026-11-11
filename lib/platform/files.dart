@@ -110,7 +110,15 @@ class FileAccess {
       return _onPickBytes(allowedExtensions);
     }
     try {
-      final groups = allowedExtensions == null || allowedExtensions.isEmpty
+      // On Android SAF, file_selector maps extensions via MimeTypeMap, which
+      // drops unknown extensions (.penny/.tally/.yi2a/.db) or narrows MIME
+      // filters so .db (paired with .zip) and vendor-typed WeChat/Alipay .csv
+      // files become unselectable. Passing empty groups uses `*/*` on Android
+      // while preserving extension filters on desktop.
+      final groups =
+          _isAndroidNative ||
+              allowedExtensions == null ||
+              allowedExtensions.isEmpty
           ? const <XTypeGroup>[]
           : <XTypeGroup>[XTypeGroup(extensions: allowedExtensions)];
       final file = await openFile(acceptedTypeGroups: groups);

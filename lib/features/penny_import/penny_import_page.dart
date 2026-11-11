@@ -6,6 +6,8 @@ import '../../app/providers.dart';
 import '../../data/penny/penny_import_service.dart';
 import '../../domain/rules/penny_backup.dart';
 import '../common/common.dart';
+import '../migration/migration_providers.dart';
+import '../reminder/reminder_providers.dart';
 import 'penny_import_providers.dart';
 
 /// Page for importing original encrypted `.penny` / `.yy` backups (`F-035`).
@@ -91,9 +93,20 @@ class _PennyImportPageState extends ConsumerState<PennyImportPage> {
         bytes: picked.bytes,
       );
 
-      // Reset home & calendar period offsets so the restored default book shows current period (R7).
+      // Reset home & calendar period offsets and invalidate cached providers
+      // so the restored default book and accounts reflect immediately (R7).
       ref.read(periodOffsetProvider.notifier).reset();
       ref.read(calendarMonthOffsetProvider.notifier).reset();
+      ref
+        ..invalidate(currentBookIdProvider)
+        ..invalidate(booksProvider)
+        ..invalidate(assetsProvider)
+        ..invalidate(assetBooksProvider)
+        ..invalidate(currenciesProvider)
+        ..invalidate(tagsProvider)
+        ..invalidate(remindersProvider)
+        ..invalidate(reminderCountProvider)
+        ..invalidate(migrationLocalSummaryProvider);
 
       if (!mounted) return;
       setState(() {
@@ -198,6 +211,7 @@ class _PennyImportPageState extends ConsumerState<PennyImportPage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Scaffold(
+      key: const Key('penny_import_page'),
       appBar: AppBar(title: const Text('导入原版备份')),
       body: ListView(
         padding: const EdgeInsets.all(16),

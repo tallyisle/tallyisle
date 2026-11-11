@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -7,9 +9,9 @@ import '../common/common.dart';
 import 'backup_providers.dart';
 
 class WebDavConfigPage extends ConsumerStatefulWidget {
-  const WebDavConfigPage({super.key, required this.initialConfig});
+  const WebDavConfigPage({super.key, this.initialConfig});
 
-  final WebDavConfig initialConfig;
+  final WebDavConfig? initialConfig;
 
   @override
   ConsumerState<WebDavConfigPage> createState() => _WebDavConfigPageState();
@@ -18,6 +20,7 @@ class WebDavConfigPage extends ConsumerStatefulWidget {
 class _WebDavConfigPageState extends ConsumerState<WebDavConfigPage> {
   static const List<int> _presetKeepCounts = <int>[5, 10, 20, 30, 50];
 
+  late WebDavConfig _baseConfig;
   late final TextEditingController _urlController;
   late final TextEditingController _usernameController;
   late final TextEditingController _passwordController;
@@ -25,6 +28,8 @@ class _WebDavConfigPageState extends ConsumerState<WebDavConfigPage> {
 
   late int _keepCount;
   late bool _autoBackupEnabled;
+  ProviderSubscription<AsyncValue<WebDavConfig>>? _configSub;
+  bool _userTouched = false;
   bool _obscurePassword = true;
   bool _busy = false;
   String? _testStatusMessage;
@@ -33,7 +38,8 @@ class _WebDavConfigPageState extends ConsumerState<WebDavConfigPage> {
   @override
   void initState() {
     super.initState();
-    final cfg = widget.initialConfig;
+    final cfg = widget.initialConfig ?? const WebDavConfig.unconfigured();
+    _baseConfig = cfg;
     _urlController = TextEditingController(text: cfg.serverUrl);
     _usernameController = TextEditingController(text: cfg.username);
     _passwordController = TextEditingController(text: cfg.password);
@@ -42,10 +48,59 @@ class _WebDavConfigPageState extends ConsumerState<WebDavConfigPage> {
     );
     _keepCount = cfg.keepCount > 0 ? cfg.keepCount : defaultWebDavKeepCount;
     _autoBackupEnabled = cfg.autoBackupEnabled;
+    if (widget.initialConfig == null) {
+      _configSub = ref.listenManual<AsyncValue<WebDavConfig>>(
+        webDavConfigProvider,
+        (_, next) {
+          final loaded = next.value;
+          if (loaded != null) {
+            _applyLoadedConfigIfUntouched(loaded);
+          }
+        },
+      );
+      unawaited(_loadStoredConfig());
+    }
+  }
+
+  void _applyLoadedConfigIfUntouched(WebDavConfig loaded) {
+    if (!mounted || _userTouched || _busy) return;
+    setState(() {
+      _baseConfig = loaded;
+      _urlController.text = loaded.serverUrl;
+      _usernameController.text = loaded.username;
+      _passwordController.text = loaded.password;
+      _remoteDirController.text = loaded.remoteDirectory.isEmpty
+          ? '/TallyIsle'
+          : loaded.remoteDirectory;
+      _keepCount = loaded.keepCount > 0
+          ? loaded.keepCount
+          : defaultWebDavKeepCount;
+      _autoBackupEnabled = loaded.autoBackupEnabled;
+    });
+  }
+
+  Future<void> _loadStoredConfig() async {
+    try {
+      final service = await ref.read(tallyBackupServiceProvider.future);
+      final fresh = await service.getWebDavConfig();
+      _applyLoadedConfigIfUntouched(fresh);
+      final streamed = await ref.read(webDavConfigProvider.future);
+      _applyLoadedConfigIfUntouched(
+        fresh.isConfigured || !streamed.isConfigured ? fresh : streamed,
+      );
+    } catch (_) {
+      try {
+        final streamed = await ref.read(webDavConfigProvider.future);
+        _applyLoadedConfigIfUntouched(streamed);
+      } catch (_) {
+        // Keep unconfigured defaults if provider fails before user interaction.
+      }
+    }
   }
 
   @override
   void dispose() {
+    _configSub?.close();
     _urlController.dispose();
     _usernameController.dispose();
     _passwordController.dispose();
@@ -57,7 +112,7 @@ class _WebDavConfigPageState extends ConsumerState<WebDavConfigPage> {
     final remoteDir = _remoteDirController.text.trim().isEmpty
         ? '/TallyIsle'
         : _remoteDirController.text.trim();
-    return widget.initialConfig.copyWith(
+    return _baseConfig.copyWith(
       serverUrl: _urlController.text.trim(),
       username: _usernameController.text.trim(),
       password: _passwordController.text,
@@ -105,9 +160,18 @@ class _WebDavConfigPageState extends ConsumerState<WebDavConfigPage> {
     try {
       final service = await ref.read(tallyBackupServiceProvider.future);
       await service.saveWebDavConfig(draft);
-      ref.invalidate(webDavBackupsProvider);
+      ref
+        ..invalidate(webDavConfigProvider)
+        ..invalidate(webDavBackupsProvider);
       if (!mounted) return;
-      Navigator.of(context).pop(true);
+      if (Navigator.of(context).canPop()) {
+        Navigator.of(context).pop(true);
+      } else {
+        setState(() => _baseConfig = draft);
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('WebDAV 配置已更新')));
+      }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(
@@ -132,9 +196,28 @@ class _WebDavConfigPageState extends ConsumerState<WebDavConfigPage> {
     try {
       final service = await ref.read(tallyBackupServiceProvider.future);
       await service.clearWebDavConfig();
-      ref.invalidate(webDavBackupsProvider);
+      ref
+        ..invalidate(webDavConfigProvider)
+        ..invalidate(webDavBackupsProvider);
       if (!mounted) return;
-      Navigator.of(context).pop(true);
+      if (Navigator.of(context).canPop()) {
+        Navigator.of(context).pop(true);
+      } else {
+        setState(() {
+          _baseConfig = WebDavConfig(
+            includeAttachments: _baseConfig.includeAttachments,
+            keepCount: _keepCount,
+          );
+          _urlController.clear();
+          _usernameController.clear();
+          _passwordController.clear();
+          _remoteDirController.text = '/TallyIsle';
+          _autoBackupEnabled = false;
+        });
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('WebDAV 配置已清除')));
+      }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(
@@ -157,7 +240,7 @@ class _WebDavConfigPageState extends ConsumerState<WebDavConfigPage> {
       appBar: AppBar(
         title: const Text('WebDAV 配置'),
         actions: [
-          if (widget.initialConfig.isConfigured)
+          if (_baseConfig.isConfigured)
             TextButton(
               key: const Key('webdav_clear_config_button'),
               onPressed: _busy ? null : _handleClear,
@@ -180,6 +263,7 @@ class _WebDavConfigPageState extends ConsumerState<WebDavConfigPage> {
                     controller: _urlController,
                     enabled: !_busy,
                     keyboardType: TextInputType.url,
+                    onChanged: (_) => _userTouched = true,
                     decoration: const InputDecoration(
                       labelText: '服务器地址',
                       hintText: 'https://dav.jianguoyun.com/dav/',
@@ -191,6 +275,7 @@ class _WebDavConfigPageState extends ConsumerState<WebDavConfigPage> {
                     key: const Key('webdav_username_input'),
                     controller: _usernameController,
                     enabled: !_busy,
+                    onChanged: (_) => _userTouched = true,
                     decoration: const InputDecoration(
                       labelText: '用户名 / 账号',
                       border: OutlineInputBorder(),
@@ -202,6 +287,7 @@ class _WebDavConfigPageState extends ConsumerState<WebDavConfigPage> {
                     controller: _passwordController,
                     enabled: !_busy,
                     obscureText: _obscurePassword,
+                    onChanged: (_) => _userTouched = true,
                     decoration: InputDecoration(
                       labelText: '密码 / 应用专用密码',
                       border: const OutlineInputBorder(),
@@ -222,6 +308,7 @@ class _WebDavConfigPageState extends ConsumerState<WebDavConfigPage> {
                     key: const Key('webdav_remote_dir_input'),
                     controller: _remoteDirController,
                     enabled: !_busy,
+                    onChanged: (_) => _userTouched = true,
                     decoration: const InputDecoration(
                       labelText: '远端存储目录',
                       hintText: '/TallyIsle',
@@ -251,6 +338,7 @@ class _WebDavConfigPageState extends ConsumerState<WebDavConfigPage> {
                             ? null
                             : (val) {
                                 if (val != null) {
+                                  _userTouched = true;
                                   setState(() => _keepCount = val);
                                 }
                               },
@@ -266,7 +354,10 @@ class _WebDavConfigPageState extends ConsumerState<WebDavConfigPage> {
                     value: _autoBackupEnabled,
                     onChanged: _busy
                         ? null
-                        : (val) => setState(() => _autoBackupEnabled = val),
+                        : (val) {
+                            _userTouched = true;
+                            setState(() => _autoBackupEnabled = val);
+                          },
                   ),
                   if (_testStatusMessage != null) ...[
                     const SizedBox(height: 12),

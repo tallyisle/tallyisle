@@ -1,10 +1,11 @@
 import 'dart:typed_data';
 
-import 'package:file_selector/file_selector.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
+import '../../core/failure.dart';
 import '../../data/penny/penny_import_service.dart';
+import '../../platform/files.dart';
 import '../reminder/reminder_providers.dart';
 
 /// Picked `.penny` / `.yy` backup file name and raw bytes.
@@ -20,16 +21,15 @@ typedef PennyFilePicker = Future<PennyPickedFile?> Function();
 
 /// Opens the system file selector filtered for `.penny` and `.yy` backups.
 Future<PennyPickedFile?> pickPennyBackupFile() async {
-  const typeGroup = XTypeGroup(
-    label: '一羽记账备份 (.penny, .yy)',
-    extensions: <String>['penny', 'yy'],
-  );
-  final file = await openFile(
-    acceptedTypeGroups: const <XTypeGroup>[typeGroup],
-  );
-  if (file == null) return null;
-  final bytes = await file.readAsBytes();
-  return PennyPickedFile(name: file.name, bytes: bytes);
+  try {
+    final selected = await const FileAccess().pickBytes(
+      allowedExtensions: const <String>['penny', 'yy'],
+    );
+    return PennyPickedFile(name: selected.name, bytes: selected.bytes);
+  } on Failure catch (f) {
+    if (f.code == FailureCode.cancelled) return null;
+    rethrow;
+  }
 }
 
 final pennyFilePickerProvider = Provider<PennyFilePicker>(

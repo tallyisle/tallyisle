@@ -53,6 +53,8 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
   }
 
   void _refreshProviders() {
+    ref.read(periodOffsetProvider.notifier).reset();
+    ref.read(calendarMonthOffsetProvider.notifier).reset();
     ref
       ..invalidate(migrationLocalSummaryProvider)
       ..invalidate(booksProvider)
@@ -60,6 +62,7 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
       ..invalidate(assetsProvider)
       ..invalidate(assetBooksProvider)
       ..invalidate(currenciesProvider)
+      ..invalidate(tagsProvider)
       ..invalidate(remindersProvider)
       ..invalidate(reminderCountProvider);
   }
