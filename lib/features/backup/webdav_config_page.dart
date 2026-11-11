@@ -162,7 +162,9 @@ class _WebDavConfigPageState extends ConsumerState<WebDavConfigPage> {
       await service.saveWebDavConfig(draft);
       ref
         ..invalidate(webDavConfigProvider)
-        ..invalidate(webDavBackupsProvider);
+        ..invalidate(cloudSyncSettingsProvider)
+        ..invalidate(webDavBackupsProvider)
+        ..invalidate(activeCloudBackupsProvider);
       if (!mounted) return;
       if (Navigator.of(context).canPop()) {
         Navigator.of(context).pop(true);
@@ -198,7 +200,9 @@ class _WebDavConfigPageState extends ConsumerState<WebDavConfigPage> {
       await service.clearWebDavConfig();
       ref
         ..invalidate(webDavConfigProvider)
-        ..invalidate(webDavBackupsProvider);
+        ..invalidate(cloudSyncSettingsProvider)
+        ..invalidate(webDavBackupsProvider)
+        ..invalidate(activeCloudBackupsProvider);
       if (!mounted) return;
       if (Navigator.of(context).canPop()) {
         Navigator.of(context).pop(true);

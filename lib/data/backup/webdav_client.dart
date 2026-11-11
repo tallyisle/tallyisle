@@ -4,13 +4,15 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import '../../core/failure.dart';
+import '../../domain/rules/cloud_sync_rules.dart';
+import '../../domain/rules/s3_sigv4_rules.dart';
 import '../../domain/rules/tally_backup.dart';
 import '../../platform/files.dart';
 
 typedef BackupProgressCallback =
     void Function(int transferredBytes, int totalBytes);
 
-/// Summary metadata for a single `.tally` backup entry (local or WebDAV, §1.6).
+/// Summary metadata for a single `.tally` backup entry (local, WebDAV, or S3, §1.6).
 final class BackupFileMetadata {
   const BackupFileMetadata({
     required this.fileName,
@@ -28,7 +30,7 @@ final class BackupFileMetadata {
       BackupRetentionItem(fileName: fileName, modifiedAtMs: modifiedAtMs);
 }
 
-/// Pluggable backup storage target boundary (ADR-017: Local File / WebDAV).
+/// Pluggable backup storage target boundary (ADR-017: Local File / WebDAV / S3).
 abstract interface class BackupTarget {
   String get id;
   String get label;
@@ -48,6 +50,33 @@ abstract interface class BackupTarget {
   });
 
   Future<void> deleteBackup(String fileName);
+}
+
+/// Unified relative-path object operations used by multi-device snapshot sync
+/// across both WebDAV and S3 backends.
+abstract interface class CloudSyncObjectStore {
+  String get targetFingerprint;
+
+  Future<Uint8List?> getObjectOrNull(
+    String relativePath, {
+    BackupProgressCallback? onProgress,
+  });
+
+  Future<Uint8List> getObject(
+    String relativePath, {
+    BackupProgressCallback? onProgress,
+  });
+
+  Future<void> putObject(
+    String relativePath,
+    Uint8List bytes, {
+    String contentType = 'application/octet-stream',
+    BackupProgressCallback? onProgress,
+  });
+
+  Future<void> deleteObject(String relativePath);
+
+  Future<Set<String>> listRelativeFileNames(String relativeDir);
 }
 
 /// User-configured WebDAV endpoint and backup policy settings (§1.1, §1.5, §6.2, §6.3).
@@ -97,6 +126,12 @@ final class WebDavConfig {
       60 *
       60 *
       1000;
+
+  String get targetFingerprint => sha256Hex(
+    utf8.encode(
+      'webdav|${serverUrl.trim().toLowerCase()}|${remoteDirectory.trim()}',
+    ),
+  );
 
   WebDavConfig copyWith({
     String? serverUrl,
@@ -220,6 +255,16 @@ final class WebDavClient {
     return base.replace(pathSegments: allSegments);
   }
 
+  Uri _relativePathUri(List<String> relSegments) {
+    final base = _validatedBaseUri();
+    final allSegments = <String>[
+      ...base.pathSegments,
+      ..._remoteDirSegments(),
+      ...relSegments,
+    ];
+    return base.replace(pathSegments: allSegments);
+  }
+
   static String _validateSafeFileName(String fileName) {
     final trimmed = fileName.trim();
     if (trimmed.isEmpty ||
@@ -306,10 +351,15 @@ final class WebDavClient {
   }
 
   /// Ensures the configured remote WebDAV folder hierarchy exists (`PROPFIND` + `MKCOL`).
-  Future<void> ensureRemoteDirectory() => _withClient(_ensureRemoteDirectoryOn);
+  Future<void> ensureRemoteDirectory() =>
+      _withClient((client) => _ensureCollectionHierarchyOn(client, const []));
 
-  Future<void> _ensureRemoteDirectoryOn(HttpClient client) async {
-    final dirUri = _directoryUri();
+  Future<void> _ensureCollectionHierarchyOn(
+    HttpClient client,
+    List<String> extraSegments,
+  ) async {
+    final fullSegments = <String>[..._remoteDirSegments(), ...extraSegments];
+    final dirUri = _directoryUri(fullSegments);
     final checkReq = await client.openUrl('PROPFIND', dirUri);
     checkReq.headers.set(HttpHeaders.authorizationHeader, _basicAuthHeader);
     checkReq.headers.set('Depth', '0');
@@ -327,9 +377,8 @@ final class WebDavClient {
       return;
     }
 
-    final segments = _remoteDirSegments();
     final current = <String>[];
-    for (final seg in segments) {
+    for (final seg in fullSegments) {
       current.add(seg);
       final colUri = _directoryUri(current);
       final mkReq = await client.openUrl('MKCOL', colUri);
@@ -338,7 +387,6 @@ final class WebDavClient {
       final mkRes = await mkReq.close();
       await mkRes.drain<void>();
       _checkAuthAndStorageStatus(mkRes.statusCode, action: '创建远端目录');
-      // 201 Created, or 200/204/301/405 when intermediate collection already exists.
       if (mkRes.statusCode != 201 &&
           mkRes.statusCode != 200 &&
           mkRes.statusCode != 204 &&
@@ -355,7 +403,7 @@ final class WebDavClient {
   /// Verifies WebDAV reachability, credentials, directory creation, and write
   /// permission (§1.2).
   Future<void> testConnection() => _withClient((client) async {
-    await _ensureRemoteDirectoryOn(client);
+    await _ensureCollectionHierarchyOn(client, const []);
     final probeUri = _fileUri(_probeFileName);
     final probeBytes = utf8.encode('tallyisle-webdav-probe');
     await _putBytesOn(client, probeUri, Uint8List.fromList(probeBytes));
@@ -402,12 +450,182 @@ final class WebDavClient {
     BackupProgressCallback? onProgress,
   }) => _withClient((client) async {
     final cleanName = _validateSafeFileName(fileName);
-    await _ensureRemoteDirectoryOn(client);
+    await _ensureCollectionHierarchyOn(client, const []);
 
     final tmpUri = _fileUri('$cleanName.tmp');
     final finalUri = _fileUri(cleanName);
 
-    await _putBytesOn(client, tmpUri, bytes, onProgress: onProgress);
+    await _atomicPutWithMoveFallbackOn(
+      client,
+      tmpUri: tmpUri,
+      finalUri: finalUri,
+      bytes: bytes,
+      onProgress: onProgress,
+    );
+
+    final ts =
+        parseTimestampFromFileName(cleanName) ??
+        (nowMs?.call() ?? DateTime.now().millisecondsSinceEpoch);
+    return BackupFileMetadata(
+      fileName: cleanName,
+      sizeBytes: bytes.length,
+      modifiedAtMs: ts,
+    );
+  });
+
+  /// Downloads a `.tally` backup from WebDAV and verifies `Content-Length` if
+  /// returned by the server.
+  Future<Uint8List> downloadBackup(
+    String fileName, {
+    BackupProgressCallback? onProgress,
+  }) => _withClient((client) async {
+    final data = await _getUriBytesOrNullOn(
+      client,
+      _fileUri(fileName),
+      onProgress: onProgress,
+    );
+    if (data == null) {
+      throw const Failure(FailureCode.storageUnavailable, '远端备份文件不存在');
+    }
+    return data;
+  });
+
+  /// Deletes a remote backup file from WebDAV (§1.8).
+  Future<void> deleteBackup(String fileName) => _withClient((client) async {
+    await _deleteUriOn(client, _fileUri(fileName), ignoreNotFound: true);
+  });
+
+  /// Prunes older remote routine backups exceeding [keepCount] (defaults to
+  /// `config.keepCount`, §6.2), while protecting `conflict_*` files (R6).
+  Future<List<String>> pruneOldBackups({int? keepCount}) async {
+    final effectiveKeep = keepCount ?? config.keepCount;
+    if (effectiveKeep <= 0) return const <String>[];
+    final current = await listBackups();
+    final toDelete = selectNonConflictBackupsToPrune(
+      current.map((e) => e.toRetentionItem()),
+      keepCount: effectiveKeep,
+    );
+    for (final name in toDelete) {
+      await deleteBackup(name);
+    }
+    return toDelete;
+  }
+
+  /// Reads an arbitrary relative object under `remoteDirectory` (e.g. `sync/head.json`),
+  /// returning `null` on `404`.
+  Future<Uint8List?> getRelativeFileOrNull(
+    String relativePath, {
+    BackupProgressCallback? onProgress,
+  }) => _withClient((client) async {
+    final segments = validateCloudRelativeSegments(relativePath);
+    return _getUriBytesOrNullOn(
+      client,
+      _relativePathUri(segments),
+      onProgress: onProgress,
+    );
+  });
+
+  /// Reads an arbitrary relative object under `remoteDirectory`, throwing on `404`.
+  Future<Uint8List> getRelativeFile(
+    String relativePath, {
+    BackupProgressCallback? onProgress,
+  }) async {
+    final bytes = await getRelativeFileOrNull(
+      relativePath,
+      onProgress: onProgress,
+    );
+    if (bytes == null) {
+      throw Failure(FailureCode.storageUnavailable, '远端同步对象不存在：$relativePath');
+    }
+    return bytes;
+  }
+
+  /// Writes an arbitrary relative object under `remoteDirectory` using two-phase
+  /// `.tmp -> MOVE` atomic commit (with `405`/`501` fallback).
+  Future<void> putRelativeFile(
+    String relativePath,
+    Uint8List bytes, {
+    String contentType = 'application/octet-stream',
+    BackupProgressCallback? onProgress,
+  }) => _withClient((client) async {
+    final segments = validateCloudRelativeSegments(relativePath);
+    final parentSegments = segments.sublist(0, segments.length - 1);
+    await _ensureCollectionHierarchyOn(client, parentSegments);
+
+    final tmpSegments = <String>[...parentSegments, '${segments.last}.tmp'];
+    await _atomicPutWithMoveFallbackOn(
+      client,
+      tmpUri: _relativePathUri(tmpSegments),
+      finalUri: _relativePathUri(segments),
+      bytes: bytes,
+      contentType: contentType,
+      onProgress: onProgress,
+    );
+  });
+
+  /// Deletes an arbitrary relative object under `remoteDirectory`.
+  Future<void> deleteRelativeFile(String relativePath) =>
+      _withClient((client) async {
+        final segments = validateCloudRelativeSegments(relativePath);
+        await _deleteUriOn(
+          client,
+          _relativePathUri(segments),
+          ignoreNotFound: true,
+        );
+      });
+
+  /// Lists immediate non-collection, non-`.tmp` file names in [relativeDir].
+  Future<Set<String>> listRelativeFileNames(String relativeDir) =>
+      _withClient((client) async {
+        final subSegments = validateCloudRelativeSegments(
+          relativeDir,
+          allowEmpty: true,
+        );
+        final dirUri = _directoryUri(<String>[
+          ..._remoteDirSegments(),
+          ...subSegments,
+        ]);
+        final req = await client.openUrl('PROPFIND', dirUri);
+        req.headers.set(HttpHeaders.authorizationHeader, _basicAuthHeader);
+        req.headers.set('Depth', '1');
+        req.headers.set(
+          HttpHeaders.contentTypeHeader,
+          'application/xml; charset=utf-8',
+        );
+        final reqBytes = utf8.encode(_propfindBody);
+        req.contentLength = reqBytes.length;
+        req.add(reqBytes);
+
+        final res = await req.close();
+        final xmlBody = await utf8.decoder.bind(res).join();
+        if (res.statusCode == 404) {
+          return const <String>{};
+        }
+        _checkAuthAndStorageStatus(res.statusCode, action: '列举远端同步目录');
+        if (res.statusCode != 207 && res.statusCode != 200) {
+          throw Failure(
+            FailureCode.remoteUnavailable,
+            '列举 WebDAV 目录失败（状态码 ${res.statusCode}）',
+          );
+        }
+        return parsePropfindFileNames(xmlBody, collectionPath: dirUri.path);
+      });
+
+  Future<void> _atomicPutWithMoveFallbackOn(
+    HttpClient client, {
+    required Uri tmpUri,
+    required Uri finalUri,
+    required Uint8List bytes,
+    String contentType = 'application/octet-stream',
+    BackupProgressCallback? onProgress,
+  }) async {
+    await _putBytesOn(
+      client,
+      tmpUri,
+      bytes,
+      contentType: contentType,
+      onProgress: onProgress,
+    );
 
     final moveReq = await client.openUrl('MOVE', tmpUri);
     moveReq.headers.set(HttpHeaders.authorizationHeader, _basicAuthHeader);
@@ -420,58 +638,48 @@ final class WebDavClient {
     if (moveRes.statusCode == 200 ||
         moveRes.statusCode == 201 ||
         moveRes.statusCode == 204) {
-      final ts =
-          _parseTimestampFromFileName(cleanName) ??
-          (nowMs?.call() ?? DateTime.now().millisecondsSinceEpoch);
-      return BackupFileMetadata(
-        fileName: cleanName,
-        sizeBytes: bytes.length,
-        modifiedAtMs: ts,
-      );
+      return;
     }
 
     if (moveRes.statusCode == 405 || moveRes.statusCode == 501) {
       await _deleteUriOn(client, tmpUri, ignoreNotFound: true);
-      await _putBytesOn(client, finalUri, bytes, onProgress: onProgress);
-      await _verifyHeadContentLengthOn(client, finalUri, bytes.length);
-      final ts =
-          _parseTimestampFromFileName(cleanName) ??
-          (nowMs?.call() ?? DateTime.now().millisecondsSinceEpoch);
-      return BackupFileMetadata(
-        fileName: cleanName,
-        sizeBytes: bytes.length,
-        modifiedAtMs: ts,
+      await _putBytesOn(
+        client,
+        finalUri,
+        bytes,
+        contentType: contentType,
+        onProgress: onProgress,
       );
+      await _verifyHeadContentLengthOn(client, finalUri, bytes.length);
+      return;
     }
 
     await _deleteUriOn(client, tmpUri, ignoreNotFound: true);
-    _checkAuthAndStorageStatus(moveRes.statusCode, action: '原子重命名远端备份');
+    _checkAuthAndStorageStatus(moveRes.statusCode, action: '原子重命名远端文件');
     throw Failure(
       FailureCode.remoteUnavailable,
       'WebDAV 两阶段提交 MOVE 失败（状态码 ${moveRes.statusCode}）',
     );
-  });
+  }
 
-  /// Downloads a `.tally` backup from WebDAV and verifies `Content-Length` if
-  /// returned by the server.
-  Future<Uint8List> downloadBackup(
-    String fileName, {
+  Future<Uint8List?> _getUriBytesOrNullOn(
+    HttpClient client,
+    Uri uri, {
     BackupProgressCallback? onProgress,
-  }) => _withClient((client) async {
-    final uri = _fileUri(fileName);
+  }) async {
     final req = await client.getUrl(uri);
     req.headers.set(HttpHeaders.authorizationHeader, _basicAuthHeader);
     final res = await req.close();
     if (res.statusCode == 404) {
       await res.drain<void>();
-      throw const Failure(FailureCode.storageUnavailable, '远端备份文件不存在');
+      return null;
     }
-    _checkAuthAndStorageStatus(res.statusCode, action: '下载远端备份');
+    _checkAuthAndStorageStatus(res.statusCode, action: '下载远端文件');
     if (res.statusCode != 200) {
       await res.drain<void>();
       throw Failure(
         FailureCode.remoteUnavailable,
-        '下载 WebDAV 备份失败（状态码 ${res.statusCode}）',
+        '下载 WebDAV 文件失败（状态码 ${res.statusCode}）',
       );
     }
 
@@ -486,44 +694,21 @@ final class WebDavClient {
       }
     }
     if (expectedLength >= 0 && received != expectedLength) {
-      throw const Failure(
-        FailureCode.remoteUnavailable,
-        '下载中断：远端备份字节长度与响应头不一致',
-      );
+      throw const Failure(FailureCode.remoteUnavailable, '下载中断：远端字节长度与响应头不一致');
     }
     return builder.takeBytes();
-  });
-
-  /// Deletes a remote backup file from WebDAV (§1.8).
-  Future<void> deleteBackup(String fileName) => _withClient((client) async {
-    await _deleteUriOn(client, _fileUri(fileName), ignoreNotFound: true);
-  });
-
-  /// Prunes older remote backups exceeding [keepCount] (defaults to
-  /// `config.keepCount`, §6.2). Returns the list of deleted filenames.
-  Future<List<String>> pruneOldBackups({int? keepCount}) async {
-    final effectiveKeep = keepCount ?? config.keepCount;
-    if (effectiveKeep <= 0) return const <String>[];
-    final current = await listBackups();
-    final toDelete = selectBackupsToPrune(
-      current.map((e) => e.toRetentionItem()),
-      keepCount: effectiveKeep,
-    );
-    for (final name in toDelete) {
-      await deleteBackup(name);
-    }
-    return toDelete;
   }
 
   Future<void> _putBytesOn(
     HttpClient client,
     Uri uri,
     Uint8List bytes, {
+    String contentType = 'application/octet-stream',
     BackupProgressCallback? onProgress,
   }) async {
     final req = await client.putUrl(uri);
     req.headers.set(HttpHeaders.authorizationHeader, _basicAuthHeader);
-    req.headers.set(HttpHeaders.contentTypeHeader, 'application/octet-stream');
+    req.headers.set(HttpHeaders.contentTypeHeader, contentType);
     req.contentLength = bytes.length;
 
     if (bytes.isEmpty) {
@@ -641,7 +826,7 @@ final class WebDavClient {
       final fileName = slashIdx >= 0
           ? decodedPath.substring(slashIdx + 1)
           : decodedPath;
-      if (!_isSupportedBackupFileName(fileName)) continue;
+      if (!isSupportedBackupFileName(fileName)) continue;
       if (!seenNames.add(fileName)) continue;
 
       final sizeText = _extractTagText(block, 'getcontentlength');
@@ -650,7 +835,7 @@ final class WebDavClient {
       final lastModText = _extractTagText(block, 'getlastmodified');
       final modifiedAtMs =
           _parseHttpOrIsoTimestamp(lastModText) ??
-          _parseTimestampFromFileName(fileName) ??
+          parseTimestampFromFileName(fileName) ??
           0;
 
       items.add(
@@ -670,7 +855,47 @@ final class WebDavClient {
     return items;
   }
 
-  static bool _isSupportedBackupFileName(String fileName) {
+  /// Parses all non-collection, non-`.tmp` immediate filenames from a PROPFIND response.
+  static Set<String> parsePropfindFileNames(
+    String xml, {
+    required String collectionPath,
+  }) {
+    final responseBlocks = RegExp(
+      r'<(?:[A-Za-z0-9_-]+:)?response\b[^>]*>([\s\S]*?)</(?:[A-Za-z0-9_-]+:)?response>',
+      caseSensitive: false,
+    ).allMatches(xml);
+
+    final normalizedCollection = _stripTrailingSlash(
+      Uri.decodeFull(collectionPath),
+    );
+    final names = <String>{};
+
+    for (final match in responseBlocks) {
+      final block = match.group(1) ?? '';
+      if (RegExp(
+        r'<(?:[A-Za-z0-9_-]+:)?collection\b',
+        caseSensitive: false,
+      ).hasMatch(block)) {
+        continue;
+      }
+      final rawHref = _extractTagText(block, 'href');
+      if (rawHref == null || rawHref.isEmpty) continue;
+      final hrefPath = Uri.tryParse(rawHref)?.path ?? rawHref;
+      final decodedPath = _stripTrailingSlash(Uri.decodeFull(hrefPath));
+      if (decodedPath.isEmpty || decodedPath == normalizedCollection) {
+        continue;
+      }
+      final slashIdx = decodedPath.lastIndexOf('/');
+      final fileName = slashIdx >= 0
+          ? decodedPath.substring(slashIdx + 1)
+          : decodedPath;
+      if (fileName.isEmpty || fileName.toLowerCase().endsWith('.tmp')) continue;
+      names.add(fileName);
+    }
+    return names;
+  }
+
+  static bool isSupportedBackupFileName(String fileName) {
     final lower = fileName.toLowerCase();
     if (lower.endsWith('.tmp')) return false;
     return lower.endsWith('.tally') || lower.endsWith('.tallyzip');
@@ -706,7 +931,7 @@ final class WebDavClient {
     }
   }
 
-  static int? _parseTimestampFromFileName(String fileName) {
+  static int? parseTimestampFromFileName(String fileName) {
     final m = RegExp(
       r'(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})',
     ).firstMatch(fileName);
@@ -728,8 +953,8 @@ final class WebDavClient {
   }
 }
 
-/// [BackupTarget] backed by [WebDavClient] (ADR-017).
-final class WebDavBackupTarget implements BackupTarget {
+/// [BackupTarget] and [CloudSyncObjectStore] backed by [WebDavClient] (ADR-017).
+final class WebDavBackupTarget implements BackupTarget, CloudSyncObjectStore {
   WebDavBackupTarget(
     this.config, {
     HttpClient Function()? httpClientFactory,
@@ -751,6 +976,9 @@ final class WebDavBackupTarget implements BackupTarget {
 
   @override
   Capability get capability => config.capability;
+
+  @override
+  String get targetFingerprint => config.targetFingerprint;
 
   void _requireConfigured() {
     if (!config.isConfigured) {
@@ -776,7 +1004,9 @@ final class WebDavBackupTarget implements BackupTarget {
       bytes,
       onProgress: onProgress,
     );
-    await _client.pruneOldBackups();
+    if (!isConflictBackupFileName(fileName)) {
+      await _client.pruneOldBackups();
+    }
     return uploaded;
   }
 
@@ -793,5 +1023,51 @@ final class WebDavBackupTarget implements BackupTarget {
   Future<void> deleteBackup(String fileName) async {
     _requireConfigured();
     await _client.deleteBackup(fileName);
+  }
+
+  @override
+  Future<Uint8List?> getObjectOrNull(
+    String relativePath, {
+    BackupProgressCallback? onProgress,
+  }) async {
+    _requireConfigured();
+    return _client.getRelativeFileOrNull(relativePath, onProgress: onProgress);
+  }
+
+  @override
+  Future<Uint8List> getObject(
+    String relativePath, {
+    BackupProgressCallback? onProgress,
+  }) async {
+    _requireConfigured();
+    return _client.getRelativeFile(relativePath, onProgress: onProgress);
+  }
+
+  @override
+  Future<void> putObject(
+    String relativePath,
+    Uint8List bytes, {
+    String contentType = 'application/octet-stream',
+    BackupProgressCallback? onProgress,
+  }) async {
+    _requireConfigured();
+    await _client.putRelativeFile(
+      relativePath,
+      bytes,
+      contentType: contentType,
+      onProgress: onProgress,
+    );
+  }
+
+  @override
+  Future<void> deleteObject(String relativePath) async {
+    _requireConfigured();
+    await _client.deleteRelativeFile(relativePath);
+  }
+
+  @override
+  Future<Set<String>> listRelativeFileNames(String relativeDir) async {
+    _requireConfigured();
+    return _client.listRelativeFileNames(relativeDir);
   }
 }

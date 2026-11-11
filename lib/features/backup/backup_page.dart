@@ -5,13 +5,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
 import '../../core/failure.dart';
+import '../../data/backup/s3_client.dart';
 import '../../data/backup/webdav_client.dart';
+import '../../domain/rules/cloud_sync_rules.dart';
 import '../../domain/rules/tally_backup.dart';
 import '../../platform/files.dart';
 import '../common/common.dart';
 import '../migration/migration_providers.dart';
 import '../reminder/reminder_providers.dart';
 import 'backup_providers.dart';
+import 's3_config_page.dart';
 import 'webdav_config_page.dart';
 
 class BackupPage extends ConsumerStatefulWidget {
@@ -27,6 +30,7 @@ class _BackupPageState extends ConsumerState<BackupPage>
   String? _progressLabel;
   int _transferredBytes = 0;
   int _totalBytes = 0;
+  CloudSyncOutcome? _pendingConflict;
 
   @override
   void initState() {
@@ -43,17 +47,27 @@ class _BackupPageState extends ConsumerState<BackupPage>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed && mounted && !_busy) {
-      unawaited(_checkSilentAutoBackup());
+      unawaited(_checkSilentTasksOnResume());
     }
   }
 
-  Future<void> _checkSilentAutoBackup() async {
+  Future<void> _checkSilentTasksOnResume() async {
     try {
       final service = await ref.read(tallyBackupServiceProvider.future);
+      final syncOutcome = await service.runSilentCloudSyncIfNeeded();
+      if (syncOutcome != null && mounted) {
+        if (syncOutcome.status == CloudSyncStatus.pulled) {
+          _refreshAfterRestore();
+        } else if (syncOutcome.isConflict) {
+          setState(() => _pendingConflict = syncOutcome);
+          _refreshAfterBackupChange();
+        } else {
+          _refreshAfterBackupChange();
+        }
+      }
       final uploaded = await service.runSilentAutoBackupIfNeeded();
       if (uploaded != null && mounted) {
-        ref.invalidate(webDavBackupsProvider);
-        ref.invalidate(lastBackupAtMsProvider);
+        _refreshAfterBackupChange();
       }
     } catch (_) {
       // Silent background check never interrupts foreground workflow.
@@ -61,9 +75,13 @@ class _BackupPageState extends ConsumerState<BackupPage>
   }
 
   void _refreshAfterBackupChange() {
-    ref.invalidate(localBackupsProvider);
-    ref.invalidate(webDavBackupsProvider);
-    ref.invalidate(lastBackupAtMsProvider);
+    ref
+      ..invalidate(localBackupsProvider)
+      ..invalidate(webDavBackupsProvider)
+      ..invalidate(s3BackupsProvider)
+      ..invalidate(activeCloudBackupsProvider)
+      ..invalidate(cloudSyncCursorProvider)
+      ..invalidate(lastBackupAtMsProvider);
   }
 
   void _refreshAfterRestore() {
@@ -93,6 +111,33 @@ class _BackupPageState extends ConsumerState<BackupPage>
     try {
       final service = await ref.read(tallyBackupServiceProvider.future);
       await service.setIncludeAttachments(value);
+      ref
+        ..invalidate(webDavConfigProvider)
+        ..invalidate(s3ConfigProvider);
+    } catch (e) {
+      _showMessage(safeMessage(e));
+    }
+  }
+
+  Future<void> _selectCloudBackend(CloudBackendType backend) async {
+    try {
+      final service = await ref.read(tallyBackupServiceProvider.future);
+      await service.setCloudBackend(backend);
+      setState(() => _pendingConflict = null);
+      ref
+        ..invalidate(cloudSyncSettingsProvider)
+        ..invalidate(activeCloudBackupsProvider)
+        ..invalidate(cloudSyncCursorProvider);
+    } catch (e) {
+      _showMessage(safeMessage(e));
+    }
+  }
+
+  Future<void> _toggleAutoSync(bool value) async {
+    try {
+      final service = await ref.read(tallyBackupServiceProvider.future);
+      await service.setAutoSyncEnabled(value);
+      ref.invalidate(cloudSyncSettingsProvider);
     } catch (e) {
       _showMessage(safeMessage(e));
     }
@@ -102,6 +147,9 @@ class _BackupPageState extends ConsumerState<BackupPage>
     try {
       final service = await ref.read(tallyBackupServiceProvider.future);
       await service.setAutoBackupEnabled(value);
+      ref
+        ..invalidate(webDavConfigProvider)
+        ..invalidate(s3ConfigProvider);
     } catch (e) {
       _showMessage(safeMessage(e));
     }
@@ -115,7 +163,125 @@ class _BackupPageState extends ConsumerState<BackupPage>
     );
     if (changed == true && mounted) {
       _refreshAfterBackupChange();
+      ref.invalidate(cloudSyncSettingsProvider);
       _showMessage('WebDAV 配置已更新');
+    }
+  }
+
+  Future<void> _openS3Config(S3Config current) async {
+    final changed = await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(
+        builder: (_) => S3ConfigPage(initialConfig: current),
+      ),
+    );
+    if (changed == true && mounted) {
+      _refreshAfterBackupChange();
+      ref.invalidate(cloudSyncSettingsProvider);
+      _showMessage('S3 对象存储配置已更新');
+    }
+  }
+
+  Future<void> _handleSyncNow({SyncConflictResolution? resolution}) async {
+    setState(() {
+      _busy = true;
+      _progressLabel = switch (resolution) {
+        SyncConflictResolution.useRemote => '正在拉取云端版本解决冲突…',
+        SyncConflictResolution.useLocal => '正在以本机版本覆盖推送…',
+        null => '正在执行多端云同步…',
+      };
+      _transferredBytes = 0;
+      _totalBytes = 0;
+    });
+    CloudSyncOutcome? conflictToPrompt;
+    try {
+      final service = await ref.read(tallyBackupServiceProvider.future);
+      final outcome = await service.syncNow(
+        resolution: resolution,
+        onProgress: (transferred, total) {
+          if (!mounted) return;
+          setState(() {
+            _transferredBytes = transferred;
+            _totalBytes = total;
+          });
+        },
+      );
+      if (!mounted) return;
+      switch (outcome.status) {
+        case CloudSyncStatus.alreadyUpToDate:
+          setState(() => _pendingConflict = null);
+          _refreshAfterBackupChange();
+          _showMessage('多端数据已是最新（版本 r${outcome.revision}）');
+        case CloudSyncStatus.pushed:
+          setState(() => _pendingConflict = null);
+          _refreshAfterBackupChange();
+          _showMessage('已推送最新快照至云端（版本 r${outcome.revision}）');
+        case CloudSyncStatus.pulled:
+          setState(() => _pendingConflict = null);
+          _refreshAfterRestore();
+          _showMessage('已从云端同步最新数据（版本 r${outcome.revision}）');
+        case CloudSyncStatus.conflict:
+          setState(() => _pendingConflict = outcome);
+          _refreshAfterBackupChange();
+          conflictToPrompt = outcome;
+      }
+    } catch (e) {
+      _showMessage(safeMessage(e));
+    } finally {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _progressLabel = null;
+        });
+      }
+    }
+
+    if (conflictToPrompt != null && mounted) {
+      await _showConflictResolutionDialog(conflictToPrompt);
+    }
+  }
+
+  Future<void> _showConflictResolutionDialog(CloudSyncOutcome conflict) async {
+    final head = conflict.remoteHead;
+    final remoteDesc = head == null
+        ? '云端新版本'
+        : '设备「${head.deviceName}」于 ${formatDateTime(DateTime.fromMillisecondsSinceEpoch(head.updatedAtMs))} 推送的版本 r${head.revision}（账单 ${head.recordCount} 条）';
+    final backupName = conflict.conflictBackupFileName ?? 'conflict_*.tally';
+
+    final choice = await showDialog<SyncConflictResolution?>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        key: const Key('cloud_sync_conflict_dialog'),
+        title: const Text('检测到多端同步冲突'),
+        content: Text(
+          '本机与云端自上次同步后均产生了新的账务改动。\n\n'
+          '• 云端状态：$remoteDesc\n'
+          '• 零丢数保护：已自动将本机当前完整数据（含附件）归档保存为「$backupName」，同时留存于本机与云端备份列表。\n\n'
+          '请选择如何处理当前同步冲突：',
+        ),
+        actions: [
+          TextButton(
+            key: const Key('conflict_resolve_later_button'),
+            onPressed: () => Navigator.of(ctx).pop(null),
+            child: const Text('稍后处理'),
+          ),
+          OutlinedButton(
+            key: const Key('conflict_use_remote_button'),
+            onPressed: () =>
+                Navigator.of(ctx).pop(SyncConflictResolution.useRemote),
+            child: const Text('采用云端版本'),
+          ),
+          FilledButton(
+            key: const Key('conflict_use_local_button'),
+            onPressed: () =>
+                Navigator.of(ctx).pop(SyncConflictResolution.useLocal),
+            child: const Text('以本机覆盖云端'),
+          ),
+        ],
+      ),
+    );
+
+    if (choice != null && mounted) {
+      await _handleSyncNow(resolution: choice);
     }
   }
 
@@ -301,16 +467,18 @@ class _BackupPageState extends ConsumerState<BackupPage>
     }
   }
 
-  Future<void> _handleWebDavUpload() async {
+  Future<void> _handleCloudBackupUpload(CloudBackendType activeBackend) async {
     setState(() {
       _busy = true;
-      _progressLabel = '正在上传至 WebDAV…';
+      _progressLabel = activeBackend == CloudBackendType.s3
+          ? '正在上传至 S3 对象存储…'
+          : '正在上传至 WebDAV…';
       _transferredBytes = 0;
       _totalBytes = 0;
     });
     try {
       final service = await ref.read(tallyBackupServiceProvider.future);
-      final uploaded = await service.uploadBackupToWebDav(
+      final uploaded = await service.uploadToActiveCloudBackup(
         onProgress: (sent, total) {
           if (!mounted) return;
           setState(() {
@@ -333,10 +501,14 @@ class _BackupPageState extends ConsumerState<BackupPage>
     }
   }
 
-  Future<void> _handleRestoreWebDavItem(BackupFileMetadata item) async {
+  Future<void> _handleRestoreCloudItem(
+    BackupFileMetadata item,
+    CloudBackendType activeBackend,
+  ) async {
+    final backendTitle = activeBackend == CloudBackendType.s3 ? 'S3' : 'WebDAV';
     final ok = await confirm(
       context,
-      title: '确认从 WebDAV 恢复？',
+      title: '确认从 $backendTitle 恢复？',
       message: '将下载「${item.fileName}」至隔离暂存区完成哈希校验，再原子替换当前数据。',
       ok: '确认恢复',
     );
@@ -350,7 +522,7 @@ class _BackupPageState extends ConsumerState<BackupPage>
     });
     try {
       final service = await ref.read(tallyBackupServiceProvider.future);
-      final manifest = await service.restoreWebDavBackup(
+      final manifest = await service.restoreActiveCloudBackup(
         item.fileName,
         onProgress: (received, total) {
           if (!mounted) return;
@@ -374,11 +546,17 @@ class _BackupPageState extends ConsumerState<BackupPage>
     }
   }
 
-  Future<void> _handleDeleteWebDavItem(BackupFileMetadata item) async {
+  Future<void> _handleDeleteCloudItem(
+    BackupFileMetadata item,
+    CloudBackendType activeBackend,
+  ) async {
+    final backendLabel = activeBackend == CloudBackendType.s3
+        ? 'S3 对象存储'
+        : 'WebDAV 服务器';
     final ok = await confirm(
       context,
       title: '删除远端备份？',
-      message: '确认从 WebDAV 服务器删除「${item.fileName}」？',
+      message: '确认从$backendLabel删除「${item.fileName}」？',
       ok: '删除',
     );
     if (!ok || !mounted) return;
@@ -391,8 +569,8 @@ class _BackupPageState extends ConsumerState<BackupPage>
     });
     try {
       final service = await ref.read(tallyBackupServiceProvider.future);
-      await service.deleteWebDavBackup(item.fileName);
-      ref.invalidate(webDavBackupsProvider);
+      await service.deleteActiveCloudBackup(item.fileName);
+      _refreshAfterBackupChange();
       _showMessage('已删除远端备份：${item.fileName}');
     } catch (e) {
       _showMessage(safeMessage(e));
@@ -422,18 +600,88 @@ class _BackupPageState extends ConsumerState<BackupPage>
     return '共 ${m.totalRows} 条 · 账单 ${m.recordCount} · 便签 ${m.noteCount} · 币种 ${m.currencyCount}$attSuffix';
   }
 
+  static String _buildSyncStatusSummary({
+    required CloudSyncSettings settings,
+    required LocalSyncCursor cursor,
+    required bool isActiveReady,
+  }) {
+    if (settings.backend == CloudBackendType.none) {
+      return '当前多端同步未启用；可选择 WebDAV 或 S3 对象存储实现跨设备快照同步。';
+    }
+    if (!isActiveReady) {
+      return '已选择 ${settings.backend.displayLabel} 通道，请先完成连接参数配置。';
+    }
+    if (cursor.isNeverSynced || cursor.lastSyncedAtMs == null) {
+      return '当前通道：${settings.backend.displayLabel}（就绪）· 尚未执行过多端同步';
+    }
+    final syncTime = formatDateTime(
+      DateTime.fromMillisecondsSinceEpoch(cursor.lastSyncedAtMs!),
+    );
+    return '当前通道：${settings.backend.displayLabel} · 已同步版本 r${cursor.lastSyncedRevision} · $syncTime';
+  }
+
   @override
   Widget build(BuildContext context) {
-    final configAsync = ref.watch(webDavConfigProvider);
+    final davConfigAsync = ref.watch(webDavConfigProvider);
+    final s3ConfigAsync = ref.watch(s3ConfigProvider);
+    final syncSettingsAsync = ref.watch(cloudSyncSettingsProvider);
+    final syncCursorAsync = ref.watch(cloudSyncCursorProvider);
     final localListAsync = ref.watch(localBackupsProvider);
-    final remoteListAsync = ref.watch(webDavBackupsProvider);
     final lastBackupAsync = ref.watch(lastBackupAtMsProvider);
     final fileAccess = ref.watch(backupFileAccessProvider);
 
-    final config = configAsync.maybeWhen(
+    final davConfig = davConfigAsync.maybeWhen(
       data: (c) => c,
       orElse: WebDavConfig.unconfigured,
     );
+    final s3Config = s3ConfigAsync.maybeWhen(
+      data: (c) => c,
+      orElse: S3Config.unconfigured,
+    );
+    final syncSettings = syncSettingsAsync.maybeWhen(
+      data: (s) => s,
+      orElse: () => CloudSyncSettings(
+        backend: davConfig.isConfigured
+            ? CloudBackendType.webdav
+            : CloudBackendType.none,
+        deviceId: 'pending',
+      ),
+    );
+    final syncCursor = syncCursorAsync.maybeWhen(
+      data: (c) => c,
+      orElse: LocalSyncCursor.initial,
+    );
+
+    final activeBackend = syncSettings.backend;
+    final isActiveCloudReady = switch (activeBackend) {
+      CloudBackendType.webdav => davConfig.isConfigured,
+      CloudBackendType.s3 => s3Config.isConfigured,
+      CloudBackendType.none => false,
+    };
+    final AsyncValue<List<BackupFileMetadata>> remoteListAsync =
+        isActiveCloudReady
+        ? ref.watch(activeCloudBackupsProvider)
+        : const AsyncValue.data(<BackupFileMetadata>[]);
+    final activeBadgeText = switch (activeBackend) {
+      CloudBackendType.webdav => davConfig.capability.reason,
+      CloudBackendType.s3 => s3Config.capability.reason,
+      CloudBackendType.none =>
+        (davConfig.isConfigured || s3Config.isConfigured) ? '已停用' : '未配置',
+    };
+    final activeAutoBackupEnabled = switch (activeBackend) {
+      CloudBackendType.s3 => s3Config.autoBackupEnabled,
+      CloudBackendType.webdav => davConfig.autoBackupEnabled,
+      CloudBackendType.none => false,
+    };
+    final activeCloudSubtitle = switch (activeBackend) {
+      CloudBackendType.webdav when davConfig.isConfigured =>
+        '${davConfig.serverUrl} · 目录 ${davConfig.remoteDirectory} · 保留最近 ${davConfig.keepCount} 份',
+      CloudBackendType.s3 when s3Config.isConfigured =>
+        '${s3Config.endpoint} · Bucket ${s3Config.bucket}/${s3Config.normalizedPrefix} · 保留最近 ${s3Config.keepCount} 份',
+      _ =>
+        '支持 WebDAV（坚果云 / Nextcloud）或 S3 对象存储（R2 / OSS / COS / MinIO）保留多版本历史备份。',
+    };
+
     final lastBackupText = lastBackupAsync.maybeWhen(
       data: (ms) => ms == null
           ? '尚未执行过备份'
@@ -448,7 +696,7 @@ class _BackupPageState extends ConsumerState<BackupPage>
 
     return Scaffold(
       key: const Key('backup_page'),
-      appBar: AppBar(title: const Text('备份与恢复')),
+      appBar: AppBar(title: const Text('云同步与备份')),
       body: Column(
         children: [
           if (_busy)
@@ -493,25 +741,163 @@ class _BackupPageState extends ConsumerState<BackupPage>
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         ListTile(
+                          dense: true,
                           leading: const Icon(Icons.shield_outlined),
                           title: const Text('备份导出模式'),
                           subtitle: Text(lastBackupText),
                         ),
                         SwitchListTile(
                           key: const Key('include_attachments_switch'),
+                          dense: true,
                           title: const Text('完整备份（包含账单图片附件）'),
                           subtitle: Text(
-                            config.includeAttachments
+                            davConfig.includeAttachments
                                 ? '打包全部 22 张业务表及原图附件并写入 SHA-256 校验清单'
                                 : '纯数据轻量备份（仅打包 22 张业务表，不含图片附件）',
                           ),
-                          value: config.includeAttachments,
+                          value: davConfig.includeAttachments,
                           onChanged: _busy ? null : _toggleIncludeAttachments,
                         ),
                       ],
                     ),
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 12),
+                  Card(
+                    key: const Key('cloud_sync_card'),
+                    child: Padding(
+                      padding: const EdgeInsets.all(14),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '多端云同步（WebDAV / S3）',
+                            style: Theme.of(context).textTheme.titleMedium,
+                          ),
+                          const SizedBox(height: 8),
+                          SegmentedButton<CloudBackendType>(
+                            key: const Key('cloud_backend_selector'),
+                            showSelectedIcon: false,
+                            segments: const <ButtonSegment<CloudBackendType>>[
+                              ButtonSegment<CloudBackendType>(
+                                value: CloudBackendType.none,
+                                label: Text('未启用'),
+                              ),
+                              ButtonSegment<CloudBackendType>(
+                                value: CloudBackendType.webdav,
+                                label: Text('WebDAV'),
+                              ),
+                              ButtonSegment<CloudBackendType>(
+                                value: CloudBackendType.s3,
+                                label: Text('S3 对象存储'),
+                              ),
+                            ],
+                            selected: <CloudBackendType>{activeBackend},
+                            onSelectionChanged: _busy
+                                ? null
+                                : (selected) =>
+                                      _selectCloudBackend(selected.first),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            _buildSyncStatusSummary(
+                              settings: syncSettings,
+                              cursor: syncCursor,
+                              isActiveReady: isActiveCloudReady,
+                            ),
+                            key: const Key('cloud_sync_status_summary'),
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                          const SizedBox(height: 10),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              OutlinedButton.icon(
+                                key: const Key('open_webdav_config_button'),
+                                onPressed: _busy
+                                    ? null
+                                    : () => _openWebDavConfig(davConfig),
+                                icon: const Icon(Icons.settings_outlined),
+                                label: Text(
+                                  davConfig.isConfigured
+                                      ? 'WebDAV 配置'
+                                      : '配置 WebDAV',
+                                ),
+                              ),
+                              OutlinedButton.icon(
+                                key: const Key('open_s3_config_button'),
+                                onPressed: _busy
+                                    ? null
+                                    : () => _openS3Config(s3Config),
+                                icon: const Icon(Icons.cloud_outlined),
+                                label: Text(
+                                  s3Config.isConfigured ? 'S3 配置' : '配置 S3',
+                                ),
+                              ),
+                              FilledButton.icon(
+                                key: const Key('cloud_sync_now_button'),
+                                onPressed: !_busy && isActiveCloudReady
+                                    ? _handleSyncNow
+                                    : null,
+                                icon: const Icon(Icons.sync),
+                                label: const Text('立即多端同步'),
+                              ),
+                            ],
+                          ),
+                          SwitchListTile(
+                            key: const Key('auto_cloud_sync_switch'),
+                            contentPadding: EdgeInsets.zero,
+                            dense: true,
+                            title: const Text('自动多端同步'),
+                            subtitle: const Text('应用回到前台时静默拉取或推送最新账务快照'),
+                            value: syncSettings.autoSyncEnabled,
+                            onChanged: !_busy && isActiveCloudReady
+                                ? _toggleAutoSync
+                                : null,
+                          ),
+                          if (_pendingConflict != null) ...[
+                            const SizedBox(height: 8),
+                            Container(
+                              key: const Key('cloud_sync_conflict_banner'),
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.errorContainer,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      '检测到同步冲突，本机快照已保护存为 ${_pendingConflict!.conflictBackupFileName ?? ''}',
+                                      style: TextStyle(
+                                        color: Theme.of(
+                                          context,
+                                        ).colorScheme.onErrorContainer,
+                                      ),
+                                    ),
+                                  ),
+                                  TextButton(
+                                    key: const Key(
+                                      'reopen_conflict_dialog_button',
+                                    ),
+                                    onPressed: _busy
+                                        ? null
+                                        : () => _showConflictResolutionDialog(
+                                            _pendingConflict!,
+                                          ),
+                                    child: const Text('处理冲突'),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
                   Card(
                     child: Padding(
                       padding: const EdgeInsets.all(16),
@@ -639,7 +1025,7 @@ class _BackupPageState extends ConsumerState<BackupPage>
                       ),
                     ),
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 12),
                   Card(
                     child: Padding(
                       padding: const EdgeInsets.all(16),
@@ -650,7 +1036,7 @@ class _BackupPageState extends ConsumerState<BackupPage>
                             children: [
                               Expanded(
                                 child: Text(
-                                  'WebDAV 私有云备份',
+                                  '云端历史版本备份',
                                   style: Theme.of(
                                     context,
                                   ).textTheme.titleMedium,
@@ -658,16 +1044,14 @@ class _BackupPageState extends ConsumerState<BackupPage>
                               ),
                               Chip(
                                 key: const Key('webdav_status_badge'),
-                                label: Text(config.capability.reason),
+                                label: Text(activeBadgeText),
                                 visualDensity: VisualDensity.compact,
                               ),
                             ],
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            config.isConfigured
-                                ? '${config.serverUrl} · 目录 ${config.remoteDirectory} · 保留最近 ${config.keepCount} 份'
-                                : '支持坚果云、Nextcloud 或自建 WebDAV，两阶段安全上传，无任何账号或会员限制。',
+                            activeCloudSubtitle,
                             style: Theme.of(context).textTheme.bodySmall,
                           ),
                           const SizedBox(height: 12),
@@ -675,38 +1059,28 @@ class _BackupPageState extends ConsumerState<BackupPage>
                             spacing: 8,
                             runSpacing: 8,
                             children: [
-                              OutlinedButton.icon(
-                                key: const Key('open_webdav_config_button'),
-                                onPressed: _busy
-                                    ? null
-                                    : () => _openWebDavConfig(config),
-                                icon: const Icon(Icons.settings_outlined),
-                                label: Text(
-                                  config.isConfigured ? '修改配置' : '配置 WebDAV',
-                                ),
-                              ),
                               FilledButton.icon(
                                 key: const Key('webdav_backup_now_button'),
-                                onPressed: !_busy && config.isConfigured
-                                    ? _handleWebDavUpload
+                                onPressed: !_busy && isActiveCloudReady
+                                    ? () => _handleCloudBackupUpload(
+                                        activeBackend,
+                                      )
                                     : null,
                                 icon: const Icon(Icons.cloud_upload_outlined),
                                 label: const Text('立即云端备份'),
                               ),
-                              if (config.isConfigured)
+                              if (isActiveCloudReady)
                                 OutlinedButton.icon(
                                   key: const Key('webdav_refresh_button'),
                                   onPressed: _busy
                                       ? null
-                                      : () => ref.invalidate(
-                                          webDavBackupsProvider,
-                                        ),
+                                      : _refreshAfterBackupChange,
                                   icon: const Icon(Icons.refresh),
                                   label: const Text('刷新列表'),
                                 ),
                             ],
                           ),
-                          if (config.isConfigured) ...[
+                          if (isActiveCloudReady) ...[
                             const SizedBox(height: 8),
                             SwitchListTile(
                               key: const Key('auto_backup_switch'),
@@ -715,16 +1089,20 @@ class _BackupPageState extends ConsumerState<BackupPage>
                               subtitle: const Text(
                                 '距上次备份满 24 小时且本地有新账单变动时自动上传',
                               ),
-                              value: config.autoBackupEnabled,
+                              value: activeAutoBackupEnabled,
                               onChanged: _busy ? null : _toggleAutoBackup,
                             ),
                           ],
                           const Divider(height: 24),
-                          if (!config.isConfigured)
-                            const Padding(
-                              key: Key('webdav_unconfigured_hint'),
-                              padding: EdgeInsets.symmetric(vertical: 8),
-                              child: Text('WebDAV 未配置，请点击「配置 WebDAV」接入私有云目录。'),
+                          if (!isActiveCloudReady)
+                            Padding(
+                              key: const Key('webdav_unconfigured_hint'),
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              child: Text(
+                                activeBackend == CloudBackendType.s3
+                                    ? 'S3 对象存储尚未完成配置，请点击上方「配置 S3」。'
+                                    : '云备份尚未启用或配置，请在上方配置 WebDAV 或 S3 对象存储。',
+                              ),
                             )
                           else
                             remoteListAsync.when(
@@ -753,7 +1131,11 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                         contentPadding: EdgeInsets.zero,
                                         title: Text(item.fileName),
                                         subtitle: Text(
-                                          '${formatDateTime(DateTime.fromMillisecondsSinceEpoch(item.modifiedAtMs))} · ${_formatSize(item.sizeBytes)}',
+                                          isConflictBackupFileName(
+                                                item.fileName,
+                                              )
+                                              ? '${formatDateTime(DateTime.fromMillisecondsSinceEpoch(item.modifiedAtMs))} · ${_formatSize(item.sizeBytes)} · 冲突保护快照'
+                                              : '${formatDateTime(DateTime.fromMillisecondsSinceEpoch(item.modifiedAtMs))} · ${_formatSize(item.sizeBytes)}',
                                         ),
                                         trailing: Row(
                                           mainAxisSize: MainAxisSize.min,
@@ -765,8 +1147,9 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                               onPressed: _busy
                                                   ? null
                                                   : () =>
-                                                        _handleRestoreWebDavItem(
+                                                        _handleRestoreCloudItem(
                                                           item,
+                                                          activeBackend,
                                                         ),
                                               child: const Text('恢复'),
                                             ),
@@ -778,8 +1161,9 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                               onPressed: _busy
                                                   ? null
                                                   : () =>
-                                                        _handleDeleteWebDavItem(
+                                                        _handleDeleteCloudItem(
                                                           item,
+                                                          activeBackend,
                                                         ),
                                               icon: const Icon(
                                                 Icons.delete_outline,

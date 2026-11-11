@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -8,11 +9,14 @@ import 'package:path_provider/path_provider.dart';
 
 import '../../core/failure.dart';
 import '../../core/zip_archive.dart';
+import '../../domain/rules/cloud_sync_rules.dart';
+import '../../domain/rules/s3_sigv4_rules.dart';
 import '../../domain/rules/tally_backup.dart';
 import '../../platform/files.dart';
 import '../db/database.dart';
 import '../db/failures.dart';
 import '../reminder/reminder_service.dart';
+import 's3_client.dart';
 import 'webdav_client.dart';
 
 const String prefKeyWebDavConfig = 'backup_webdav_config';
@@ -189,6 +193,9 @@ final class TallyBackupService {
   late final LocalDirectoryBackupTarget localTarget =
       LocalDirectoryBackupTarget(_localBackupsDirProvider);
 
+  String? _cachedFallbackDeviceId;
+  Future<void>? _syncSerialChain;
+
   static Directory? _headlessSupportRoot;
 
   static Future<Directory> _resolveSupportRoot() async {
@@ -212,6 +219,9 @@ final class TallyBackupService {
   }
 
   int _nowMs() => db.nowMs();
+
+  String _ensureFallbackDeviceId() =>
+      _cachedFallbackDeviceId ??= generateSyncDeviceId();
 
   /// Reactive stream of [WebDavConfig] from `ti_preference`.
   Stream<WebDavConfig> watchWebDavConfig() =>
@@ -241,6 +251,204 @@ final class TallyBackupService {
     return const WebDavConfig.unconfigured();
   }
 
+  /// Reactive stream of [S3Config] from `ti_preference`.
+  Stream<S3Config> watchS3Config() =>
+      (db.select(db.preferences)..where((t) => t.key.equals(prefKeyS3Config)))
+          .watchSingleOrNull()
+          .map((row) => _decodeS3Config(row?.value));
+
+  /// Current [S3Config] snapshot (returns [S3Config.unconfigured] if unset).
+  Future<S3Config> getS3Config() async {
+    final row = await guardDatabase(
+      () => (db.select(
+        db.preferences,
+      )..where((t) => t.key.equals(prefKeyS3Config))).getSingleOrNull(),
+    );
+    return _decodeS3Config(row?.value);
+  }
+
+  static S3Config _decodeS3Config(String? raw) {
+    if (raw == null || raw.isEmpty) return const S3Config.unconfigured();
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is Map<String, Object?>) {
+        return S3Config.fromJson(decoded);
+      }
+    } catch (_) {}
+    return const S3Config.unconfigured();
+  }
+
+  /// Reactive stream of effective [CloudSyncSettings], seamlessly recognizing
+  /// previously configured [WebDavConfig] when `cloud_sync_settings` is unset.
+  Stream<CloudSyncSettings> watchCloudSyncSettings() {
+    final keys = <String>[prefKeyCloudSyncSettings, prefKeyWebDavConfig];
+    return (db.select(
+      db.preferences,
+    )..where((t) => t.key.isIn(keys))).watch().map((rows) {
+      String? rawSync;
+      String? rawDav;
+      for (final r in rows) {
+        if (r.key == prefKeyCloudSyncSettings) rawSync = r.value;
+        if (r.key == prefKeyWebDavConfig) rawDav = r.value;
+      }
+      final davCfg = _decodeWebDavConfig(rawDav);
+      return resolveEffectiveCloudSyncSettings(
+        rawJson: rawSync,
+        isWebDavConfigured: davCfg.isConfigured,
+        fallbackDeviceId: _ensureFallbackDeviceId(),
+      );
+    });
+  }
+
+  /// Reads effective [CloudSyncSettings] without mutating the database.
+  Future<CloudSyncSettings> getCloudSyncSettings() async {
+    final rows = await guardDatabase(
+      () =>
+          (db.select(db.preferences)..where(
+                (t) => t.key.isIn(<String>[
+                  prefKeyCloudSyncSettings,
+                  prefKeyWebDavConfig,
+                ]),
+              ))
+              .get(),
+    );
+    String? rawSync;
+    String? rawDav;
+    for (final r in rows) {
+      if (r.key == prefKeyCloudSyncSettings) rawSync = r.value;
+      if (r.key == prefKeyWebDavConfig) rawDav = r.value;
+    }
+    final davCfg = _decodeWebDavConfig(rawDav);
+    return resolveEffectiveCloudSyncSettings(
+      rawJson: rawSync,
+      isWebDavConfigured: davCfg.isConfigured,
+      fallbackDeviceId: _ensureFallbackDeviceId(),
+    );
+  }
+
+  /// Persists [settings] to `ti_preference` (`cloud_sync_settings`).
+  Future<void> saveCloudSyncSettings(CloudSyncSettings settings) async {
+    final normalized = settings.copyWith(
+      deviceId: settings.deviceId.trim().isEmpty
+          ? _ensureFallbackDeviceId()
+          : settings.deviceId.trim(),
+      deviceName: settings.deviceName.trim().isEmpty
+          ? '帐屿本机'
+          : settings.deviceName.trim(),
+    );
+    await guardDatabase(
+      () => db
+          .into(db.preferences)
+          .insertOnConflictUpdate(
+            PreferencesCompanion.insert(
+              key: prefKeyCloudSyncSettings,
+              value: jsonEncode(normalized.toJson()),
+            ),
+          ),
+    );
+  }
+
+  /// Switches the active cloud backend (`none` / `webdav` / `s3`).
+  Future<void> setCloudBackend(CloudBackendType backend) async {
+    final current = await getCloudSyncSettings();
+    final updated = current.copyWith(
+      backend: backend,
+      explicitBackend: true,
+      autoSyncEnabled: backend == CloudBackendType.none
+          ? false
+          : current.autoSyncEnabled,
+    );
+    await saveCloudSyncSettings(updated);
+  }
+
+  /// Enables or disables automatic multi-device cloud sync on app resume.
+  Future<void> setAutoSyncEnabled(bool enabled) async {
+    final settings = await getCloudSyncSettings();
+    if (enabled) {
+      if (settings.backend == CloudBackendType.none) {
+        throw const Failure(
+          FailureCode.validation,
+          '请先选择并配置 WebDAV 或 S3 云存储通道',
+        );
+      }
+      if (settings.backend == CloudBackendType.webdav) {
+        final dav = await getWebDavConfig();
+        if (!dav.isConfigured) {
+          throw const Failure(FailureCode.validation, '请先完成 WebDAV 配置再开启自动同步');
+        }
+      } else if (settings.backend == CloudBackendType.s3) {
+        final s3 = await getS3Config();
+        if (!s3.isConfigured) {
+          throw const Failure(FailureCode.validation, '请先完成 S3 配置再开启自动同步');
+        }
+      }
+    }
+    await saveCloudSyncSettings(settings.copyWith(autoSyncEnabled: enabled));
+  }
+
+  /// Enables or disables 24h full `.tally` archive generation during sync pushes.
+  Future<void> setAutoArchiveBackupEnabled(bool enabled) async {
+    final settings = await getCloudSyncSettings();
+    await saveCloudSyncSettings(
+      settings.copyWith(autoArchiveBackupEnabled: enabled),
+    );
+  }
+
+  /// Reactive stream of [LocalSyncCursor] from `ti_preference`.
+  Stream<LocalSyncCursor> watchSyncCursor() =>
+      (db.select(db.preferences)
+            ..where((t) => t.key.equals(prefKeyCloudSyncCursor)))
+          .watchSingleOrNull()
+          .map((row) => _decodeSyncCursor(row?.value));
+
+  /// Current [LocalSyncCursor] snapshot.
+  Future<LocalSyncCursor> getSyncCursor() async {
+    final row = await guardDatabase(
+      () => (db.select(
+        db.preferences,
+      )..where((t) => t.key.equals(prefKeyCloudSyncCursor))).getSingleOrNull(),
+    );
+    return _decodeSyncCursor(row?.value);
+  }
+
+  static LocalSyncCursor _decodeSyncCursor(String? raw) {
+    if (raw == null || raw.isEmpty) return const LocalSyncCursor.initial();
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is Map<String, Object?>) {
+        return LocalSyncCursor.fromJson(decoded);
+      }
+    } catch (_) {}
+    return const LocalSyncCursor.initial();
+  }
+
+  Future<void> _saveSyncCursor(
+    LocalSyncCursor cursor, {
+    CloudSyncSettings? ensureSettings,
+  }) => guardDatabase(
+    () => db.transaction(() async {
+      await db
+          .into(db.preferences)
+          .insertOnConflictUpdate(
+            PreferencesCompanion.insert(
+              key: prefKeyCloudSyncCursor,
+              value: jsonEncode(cursor.toJson()),
+            ),
+          );
+      if (ensureSettings != null) {
+        await db
+            .into(db.preferences)
+            .insert(
+              PreferencesCompanion.insert(
+                key: prefKeyCloudSyncSettings,
+                value: jsonEncode(ensureSettings.toJson()),
+              ),
+              mode: InsertMode.insertOrIgnore,
+            );
+      }
+    }),
+  );
+
   /// Validates and saves [config] to `ti_preference`.
   Future<void> saveWebDavConfig(WebDavConfig config) async {
     final trimmedUrl = config.serverUrl.trim();
@@ -258,54 +466,290 @@ final class TallyBackupService {
       throw const Failure(FailureCode.validation, '备份保留份数须在 1–200 之间');
     }
     await guardDatabase(
-      () => db
-          .into(db.preferences)
-          .insertOnConflictUpdate(
-            PreferencesCompanion.insert(
-              key: prefKeyWebDavConfig,
-              value: jsonEncode(config.toJson()),
-            ),
-          ),
+      () => db.transaction(() async {
+        final rawSyncRow =
+            await (db.select(db.preferences)
+                  ..where((t) => t.key.equals(prefKeyCloudSyncSettings)))
+                .getSingleOrNull();
+        final settings = resolveEffectiveCloudSyncSettings(
+          rawJson: rawSyncRow?.value,
+          isWebDavConfigured: config.isConfigured,
+          fallbackDeviceId: _ensureFallbackDeviceId(),
+        );
+        await db
+            .into(db.preferences)
+            .insertOnConflictUpdate(
+              PreferencesCompanion.insert(
+                key: prefKeyWebDavConfig,
+                value: jsonEncode(config.toJson()),
+              ),
+            );
+        if (config.isConfigured &&
+            rawSyncRow != null &&
+            settings.backend == CloudBackendType.none &&
+            !settings.explicitBackend) {
+          await db
+              .into(db.preferences)
+              .insertOnConflictUpdate(
+                PreferencesCompanion.insert(
+                  key: prefKeyCloudSyncSettings,
+                  value: jsonEncode(
+                    settings
+                        .copyWith(backend: CloudBackendType.webdav)
+                        .toJson(),
+                  ),
+                ),
+              );
+        }
+      }),
     );
   }
 
   /// Clears WebDAV server credentials while keeping local export preferences.
   Future<void> clearWebDavConfig() async {
-    final current = await getWebDavConfig();
-    final cleared = WebDavConfig(
-      includeAttachments: current.includeAttachments,
-      keepCount: current.keepCount,
-    );
     await guardDatabase(
-      () => db
-          .into(db.preferences)
-          .insertOnConflictUpdate(
-            PreferencesCompanion.insert(
-              key: prefKeyWebDavConfig,
-              value: jsonEncode(cleared.toJson()),
-            ),
-          ),
+      () => db.transaction(() async {
+        final rows =
+            await (db.select(db.preferences)..where(
+                  (t) => t.key.isIn(<String>[
+                    prefKeyWebDavConfig,
+                    prefKeyCloudSyncSettings,
+                  ]),
+                ))
+                .get();
+        String? rawDav;
+        String? rawSync;
+        for (final r in rows) {
+          if (r.key == prefKeyWebDavConfig) rawDav = r.value;
+          if (r.key == prefKeyCloudSyncSettings) rawSync = r.value;
+        }
+        final current = _decodeWebDavConfig(rawDav);
+        final cleared = WebDavConfig(
+          includeAttachments: current.includeAttachments,
+          keepCount: current.keepCount,
+        );
+        await db
+            .into(db.preferences)
+            .insertOnConflictUpdate(
+              PreferencesCompanion.insert(
+                key: prefKeyWebDavConfig,
+                value: jsonEncode(cleared.toJson()),
+              ),
+            );
+        if (rawSync != null && rawSync.isNotEmpty) {
+          final settings = resolveEffectiveCloudSyncSettings(
+            rawJson: rawSync,
+            isWebDavConfigured: false,
+            fallbackDeviceId: _ensureFallbackDeviceId(),
+          );
+          if (settings.backend == CloudBackendType.webdav) {
+            await db
+                .into(db.preferences)
+                .insertOnConflictUpdate(
+                  PreferencesCompanion.insert(
+                    key: prefKeyCloudSyncSettings,
+                    value: jsonEncode(
+                      settings
+                          .copyWith(
+                            backend: settings.explicitBackend
+                                ? CloudBackendType.webdav
+                                : CloudBackendType.none,
+                            autoSyncEnabled: false,
+                          )
+                          .toJson(),
+                    ),
+                  ),
+                );
+          }
+        }
+      }),
+    );
+  }
+
+  /// Validates and saves [config] (`S3Config`) to `ti_preference`.
+  Future<void> saveS3Config(S3Config config) async {
+    final hasAnyInput =
+        config.endpoint.trim().isNotEmpty ||
+        config.bucket.trim().isNotEmpty ||
+        config.accessKeyId.trim().isNotEmpty ||
+        config.secretAccessKey.isNotEmpty;
+    if (hasAnyInput && !config.isConfigured) {
+      throw const Failure(
+        FailureCode.validation,
+        '请完整填写有效的 S3 Endpoint、Bucket、Access Key ID 与 Secret Access Key',
+      );
+    }
+    normalizeS3Prefix(config.remotePrefix);
+    if (config.keepCount < 1 || config.keepCount > 200) {
+      throw const Failure(FailureCode.validation, '备份保留份数须在 1–200 之间');
+    }
+    await guardDatabase(
+      () => db.transaction(() async {
+        final rows =
+            await (db.select(db.preferences)..where(
+                  (t) => t.key.isIn(<String>[
+                    prefKeyCloudSyncSettings,
+                    prefKeyWebDavConfig,
+                  ]),
+                ))
+                .get();
+        String? rawSync;
+        String? rawDav;
+        for (final r in rows) {
+          if (r.key == prefKeyCloudSyncSettings) rawSync = r.value;
+          if (r.key == prefKeyWebDavConfig) rawDav = r.value;
+        }
+        final settings = resolveEffectiveCloudSyncSettings(
+          rawJson: rawSync,
+          isWebDavConfigured: _decodeWebDavConfig(rawDav).isConfigured,
+          fallbackDeviceId: _ensureFallbackDeviceId(),
+        );
+        await db
+            .into(db.preferences)
+            .insertOnConflictUpdate(
+              PreferencesCompanion.insert(
+                key: prefKeyS3Config,
+                value: jsonEncode(config.toJson()),
+              ),
+            );
+        if (config.isConfigured && settings.backend == CloudBackendType.none) {
+          await db
+              .into(db.preferences)
+              .insertOnConflictUpdate(
+                PreferencesCompanion.insert(
+                  key: prefKeyCloudSyncSettings,
+                  value: jsonEncode(
+                    settings
+                        .copyWith(
+                          backend: CloudBackendType.s3,
+                          explicitBackend: true,
+                        )
+                        .toJson(),
+                  ),
+                ),
+              );
+        }
+      }),
+    );
+  }
+
+  /// Clears S3 credentials while preserving export & retention preferences.
+  Future<void> clearS3Config() async {
+    await guardDatabase(
+      () => db.transaction(() async {
+        final rows =
+            await (db.select(db.preferences)..where(
+                  (t) => t.key.isIn(<String>[
+                    prefKeyS3Config,
+                    prefKeyCloudSyncSettings,
+                    prefKeyWebDavConfig,
+                  ]),
+                ))
+                .get();
+        String? rawS3;
+        String? rawSync;
+        String? rawDav;
+        for (final r in rows) {
+          if (r.key == prefKeyS3Config) rawS3 = r.value;
+          if (r.key == prefKeyCloudSyncSettings) rawSync = r.value;
+          if (r.key == prefKeyWebDavConfig) rawDav = r.value;
+        }
+        final current = _decodeS3Config(rawS3);
+        final cleared = S3Config(
+          includeAttachments: current.includeAttachments,
+          keepCount: current.keepCount,
+          forcePathStyle: current.forcePathStyle,
+        );
+        await db
+            .into(db.preferences)
+            .insertOnConflictUpdate(
+              PreferencesCompanion.insert(
+                key: prefKeyS3Config,
+                value: jsonEncode(cleared.toJson()),
+              ),
+            );
+        if (rawSync != null && rawSync.isNotEmpty) {
+          final settings = resolveEffectiveCloudSyncSettings(
+            rawJson: rawSync,
+            isWebDavConfigured: _decodeWebDavConfig(rawDav).isConfigured,
+            fallbackDeviceId: _ensureFallbackDeviceId(),
+          );
+          if (settings.backend == CloudBackendType.s3) {
+            await db
+                .into(db.preferences)
+                .insertOnConflictUpdate(
+                  PreferencesCompanion.insert(
+                    key: prefKeyCloudSyncSettings,
+                    value: jsonEncode(
+                      settings.copyWith(autoSyncEnabled: false).toJson(),
+                    ),
+                  ),
+                );
+          }
+        }
+      }),
     );
   }
 
   /// Updates the full vs lightweight no-attachment export toggle (§6.3).
   Future<void> setIncludeAttachments(bool includeAttachments) async {
-    final current = await getWebDavConfig();
-    final updated = current.copyWith(includeAttachments: includeAttachments);
+    final currentDav = await getWebDavConfig();
+    final currentS3 = await getS3Config();
     await guardDatabase(
-      () => db
-          .into(db.preferences)
-          .insertOnConflictUpdate(
-            PreferencesCompanion.insert(
-              key: prefKeyWebDavConfig,
-              value: jsonEncode(updated.toJson()),
-            ),
-          ),
+      () => db.transaction(() async {
+        await db
+            .into(db.preferences)
+            .insertOnConflictUpdate(
+              PreferencesCompanion.insert(
+                key: prefKeyWebDavConfig,
+                value: jsonEncode(
+                  currentDav
+                      .copyWith(includeAttachments: includeAttachments)
+                      .toJson(),
+                ),
+              ),
+            );
+        if (currentS3.isConfigured) {
+          await db
+              .into(db.preferences)
+              .insertOnConflictUpdate(
+                PreferencesCompanion.insert(
+                  key: prefKeyS3Config,
+                  value: jsonEncode(
+                    currentS3
+                        .copyWith(includeAttachments: includeAttachments)
+                        .toJson(),
+                  ),
+                ),
+              );
+        }
+      }),
     );
   }
 
-  /// Updates the silent 24h auto-backup switch (§1.5, R7).
+  /// Updates the silent 24h auto-backup switch (§1.5, R7) for the active cloud target.
   Future<void> setAutoBackupEnabled(bool enabled) async {
+    final settings = await getCloudSyncSettings();
+    if (settings.backend == CloudBackendType.s3) {
+      final s3 = await getS3Config();
+      if (enabled && !s3.isConfigured) {
+        throw const Failure(FailureCode.validation, '请先配置 S3 对象存储再开启自动云备份');
+      }
+      await guardDatabase(
+        () => db
+            .into(db.preferences)
+            .insertOnConflictUpdate(
+              PreferencesCompanion.insert(
+                key: prefKeyS3Config,
+                value: jsonEncode(
+                  s3.copyWith(autoBackupEnabled: enabled).toJson(),
+                ),
+              ),
+            ),
+      );
+      return;
+    }
+
     final current = await getWebDavConfig();
     if (enabled && !current.isConfigured) {
       throw const Failure(FailureCode.validation, '请先配置 WebDAV 服务器再开启自动云备份');
@@ -333,6 +777,27 @@ final class TallyBackupService {
     );
   }
 
+  /// Builds an [S3BackupTarget] for the current [S3Config] (ADR-017).
+  Future<S3BackupTarget> getS3Target() async {
+    final config = await getS3Config();
+    return S3BackupTarget(
+      config,
+      httpClientFactory: httpClientFactory,
+      nowMs: _nowMs,
+    );
+  }
+
+  /// Returns the currently selected cloud [BackupTarget] (`WebDavBackupTarget`
+  /// or `S3BackupTarget`), or `null` when cloud sync/backup is disabled (`none`).
+  Future<BackupTarget?> getActiveCloudBackupTarget() async {
+    final settings = await getCloudSyncSettings();
+    return switch (settings.backend) {
+      CloudBackendType.webdav => await getWebDavTarget(),
+      CloudBackendType.s3 => await getS3Target(),
+      CloudBackendType.none => null,
+    };
+  }
+
   /// Tests WebDAV connectivity, credentials, and directory write permission (§1.2).
   Future<void> testWebDavConnection([WebDavConfig? draftConfig]) async {
     final effective = draftConfig ?? await getWebDavConfig();
@@ -345,6 +810,24 @@ final class TallyBackupService {
       nowMs: _nowMs,
     );
     await client.testConnection();
+  }
+
+  /// Tests S3 connectivity, SigV4 credentials, and write/read/delete permission.
+  Future<void> testS3Connection([S3Config? draftConfig]) async {
+    final effective = draftConfig ?? await getS3Config();
+    if (!effective.isConfigured) {
+      throw const Failure(
+        FailureCode.validation,
+        '请完整填写有效的 S3 Endpoint、Bucket、Access Key ID 与 Secret Access Key',
+      );
+    }
+    normalizeS3Prefix(effective.remotePrefix);
+    final target = S3BackupTarget(
+      effective,
+      httpClientFactory: httpClientFactory,
+      nowMs: _nowMs,
+    );
+    await target.testConnection();
   }
 
   /// Exports all 22 business tables (and optional attachments) into `.tally`
@@ -459,6 +942,22 @@ final class TallyBackupService {
     return target.listBackups();
   }
 
+  /// Lists remote `.tally` backups on S3 (`GET ?list-type=2`).
+  Future<List<BackupFileMetadata>> listS3Backups() async {
+    final target = await getS3Target();
+    return target.listBackups();
+  }
+
+  /// Lists historical `.tally` backups on the currently active cloud backend.
+  Future<List<BackupFileMetadata>> listActiveCloudBackups() async {
+    final target = await getActiveCloudBackupTarget();
+    if (target == null ||
+        target.capability.state != CapabilityState.available) {
+      return const <BackupFileMetadata>[];
+    }
+    return target.listBackups();
+  }
+
   /// Packs a `.tally` backup and uploads it to WebDAV via two-phase atomic
   /// `.tmp -> MOVE` (or `PUT + HEAD` fallback), then prunes older remote
   /// backups beyond `config.keepCount` (§1.4, R4, §6.2).
@@ -498,6 +997,69 @@ final class TallyBackupService {
     );
   }
 
+  /// Packs a `.tally` backup and uploads it to S3 via SigV4 `PUT`, then prunes
+  /// older routine backups beyond `config.keepCount`.
+  Future<BackupFileMetadata> uploadBackupToS3({
+    bool? includeAttachments,
+    String? customFileName,
+    BackupProgressCallback? onProgress,
+  }) async {
+    final config = await getS3Config();
+    if (!config.isConfigured) {
+      throw const Failure(FailureCode.validation, 'S3 对象存储未配置');
+    }
+    final packed = await createBackupBytes(
+      includeAttachments: includeAttachments ?? config.includeAttachments,
+    );
+    final fileName =
+        customFileName ??
+        formatTallyBackupFileName(
+          DateTime.fromMillisecondsSinceEpoch(packed.manifest.createdAtMs),
+        );
+    final target = S3BackupTarget(
+      config,
+      httpClientFactory: httpClientFactory,
+      nowMs: _nowMs,
+    );
+    final uploaded = await target.writeBackup(
+      fileName,
+      packed.bytes,
+      onProgress: onProgress,
+    );
+    await _recordCompletedBackupState(packed.manifest.createdAtMs);
+    return BackupFileMetadata(
+      fileName: uploaded.fileName,
+      sizeBytes: uploaded.sizeBytes,
+      modifiedAtMs: uploaded.modifiedAtMs,
+      manifest: packed.manifest,
+    );
+  }
+
+  /// Uploads a historical `.tally` backup to whichever cloud backend is active.
+  Future<BackupFileMetadata> uploadToActiveCloudBackup({
+    bool? includeAttachments,
+    String? customFileName,
+    BackupProgressCallback? onProgress,
+  }) async {
+    final settings = await getCloudSyncSettings();
+    return switch (settings.backend) {
+      CloudBackendType.s3 => uploadBackupToS3(
+        includeAttachments: includeAttachments,
+        customFileName: customFileName,
+        onProgress: onProgress,
+      ),
+      CloudBackendType.webdav => uploadBackupToWebDav(
+        includeAttachments: includeAttachments,
+        customFileName: customFileName,
+        onProgress: onProgress,
+      ),
+      CloudBackendType.none => throw const Failure(
+        FailureCode.validation,
+        '请先选择并配置云存储通道（WebDAV 或 S3）',
+      ),
+    };
+  }
+
   /// Downloads a remote `.tally` backup from WebDAV and executes the 3-stage
   /// atomic restore (R5).
   Future<TallyManifest> restoreWebDavBackup(
@@ -509,10 +1071,59 @@ final class TallyBackupService {
     return restoreFromBytes(bytes);
   }
 
+  /// Downloads a remote `.tally` backup from S3 and executes the 3-stage
+  /// atomic restore (R5).
+  Future<TallyManifest> restoreS3Backup(
+    String fileName, {
+    BackupProgressCallback? onProgress,
+  }) async {
+    final target = await getS3Target();
+    final bytes = await target.readBackup(fileName, onProgress: onProgress);
+    return restoreFromBytes(bytes);
+  }
+
+  /// Downloads and restores a historical `.tally` backup from the active cloud target.
+  Future<TallyManifest> restoreActiveCloudBackup(
+    String fileName, {
+    BackupProgressCallback? onProgress,
+  }) async {
+    final settings = await getCloudSyncSettings();
+    return switch (settings.backend) {
+      CloudBackendType.s3 => restoreS3Backup(fileName, onProgress: onProgress),
+      CloudBackendType.webdav => restoreWebDavBackup(
+        fileName,
+        onProgress: onProgress,
+      ),
+      CloudBackendType.none => throw const Failure(
+        FailureCode.validation,
+        '云存储通道未启用',
+      ),
+    };
+  }
+
   /// Deletes a remote `.tally` backup from WebDAV (§1.8).
   Future<void> deleteWebDavBackup(String fileName) async {
     final target = await getWebDavTarget();
     await target.deleteBackup(fileName);
+  }
+
+  /// Deletes a remote `.tally` backup from S3.
+  Future<void> deleteS3Backup(String fileName) async {
+    final target = await getS3Target();
+    await target.deleteBackup(fileName);
+  }
+
+  /// Deletes a historical `.tally` backup from whichever cloud target is active.
+  Future<void> deleteActiveCloudBackup(String fileName) async {
+    final settings = await getCloudSyncSettings();
+    return switch (settings.backend) {
+      CloudBackendType.s3 => deleteS3Backup(fileName),
+      CloudBackendType.webdav => deleteWebDavBackup(fileName),
+      CloudBackendType.none => throw const Failure(
+        FailureCode.validation,
+        '云存储通道未启用',
+      ),
+    };
   }
 
   /// Returns epoch milliseconds of the last successful backup, if any.
@@ -524,6 +1135,9 @@ final class TallyBackupService {
     );
     return row == null ? null : int.tryParse(row.value);
   }
+
+  /// Computes deterministic SHA-256 over all 22 tables + sorted local attachments (`R2`).
+  Future<String> computeLocalDataSha256() => _computeCanonicalStateDigest();
 
   /// Returns `true` if any of the 22 business tables or attachments changed
   /// since the last completed backup (`localDataChanged` in R7).
@@ -538,12 +1152,39 @@ final class TallyBackupService {
     return prevRow?.value != currentDigest;
   }
 
-  /// Checks R7 silent auto-backup eligibility (`enabled && webDavConfigured &&
+  /// Checks R7 silent auto-backup eligibility (`enabled && configured &&
   /// elapsed >= cooldown && localDataChanged`) and, if eligible, packs and
-  /// uploads a backup to WebDAV. Returns `null` when throttled or unchanged.
+  /// uploads a backup to the configured cloud target. Returns `null` when
+  /// throttled, disabled, or unchanged.
   Future<BackupFileMetadata?> runSilentAutoBackupIfNeeded({
     BackupProgressCallback? onProgress,
   }) async {
+    final settings = await getCloudSyncSettings();
+    if (settings.backend == CloudBackendType.s3) {
+      final s3Config = await getS3Config();
+      if (!s3Config.autoBackupEnabled || !s3Config.isConfigured) {
+        return null;
+      }
+      final lastBackupAtMs = await getLastBackupAtMs();
+      final now = _nowMs();
+      if (lastBackupAtMs != null &&
+          (now - lastBackupAtMs) < s3Config.autoBackupCooldownMs) {
+        return null;
+      }
+      final changed = await hasLocalDataChanged();
+      if (!shouldTriggerAutoBackup(
+        enabled: s3Config.autoBackupEnabled,
+        webDavConfigured: s3Config.isConfigured,
+        localDataChanged: changed,
+        lastBackupAtMs: lastBackupAtMs,
+        nowMs: now,
+        cooldownMs: s3Config.autoBackupCooldownMs,
+      )) {
+        return null;
+      }
+      return uploadBackupToS3(onProgress: onProgress);
+    }
+
     final config = await getWebDavConfig();
     if (!config.autoBackupEnabled || !config.isConfigured) {
       return null;
@@ -566,6 +1207,590 @@ final class TallyBackupService {
       return null;
     }
     return uploadBackupToWebDav(onProgress: onProgress);
+  }
+
+  /// Runs silent multi-device snapshot sync when `autoSyncEnabled` is `true`
+  /// and the active cloud backend (`WebDAV` or `S3`) is configured.
+  /// Performs zero network I/O when disabled or unconfigured.
+  Future<CloudSyncOutcome?> runSilentCloudSyncIfNeeded({
+    BackupProgressCallback? onProgress,
+  }) async {
+    final settings = await getCloudSyncSettings();
+    if (!settings.autoSyncEnabled ||
+        settings.backend == CloudBackendType.none) {
+      return null;
+    }
+    if (settings.backend == CloudBackendType.webdav) {
+      final dav = await getWebDavConfig();
+      if (!dav.isConfigured) return null;
+    } else if (settings.backend == CloudBackendType.s3) {
+      final s3 = await getS3Config();
+      if (!s3.isConfigured) return null;
+    }
+    return syncNow(onProgress: onProgress);
+  }
+
+  /// Executes multi-device snapshot synchronization (`sync/head.json` +
+  /// `sync/latest_db.tally` + deduplicated `sync/attachments/*`) with atomic
+  /// pull replacement, race-guarded push commits, and zero-data-loss conflict
+  /// backup preservation (`R4`, `R5`, `R6`).
+  Future<CloudSyncOutcome> syncNow({
+    SyncConflictResolution? resolution,
+    BackupProgressCallback? onProgress,
+    FutureOr<void> Function()? beforePushCommitForTest,
+  }) {
+    final prev = _syncSerialChain ?? Future<void>.value();
+    final completer = Completer<CloudSyncOutcome>();
+    _syncSerialChain = prev.catchError((_) {}).then((_) async {
+      try {
+        final outcome = await _syncNowUnlocked(
+          resolution: resolution,
+          onProgress: onProgress,
+          beforePushCommitForTest: beforePushCommitForTest,
+        );
+        completer.complete(outcome);
+      } catch (e, st) {
+        completer.completeError(e, st);
+      }
+    });
+    return completer.future;
+  }
+
+  Future<CloudSyncOutcome> _syncNowUnlocked({
+    SyncConflictResolution? resolution,
+    BackupProgressCallback? onProgress,
+    FutureOr<void> Function()? beforePushCommitForTest,
+  }) async {
+    final settings = await getCloudSyncSettings();
+    final CloudSyncObjectStore store;
+    final BackupTarget cloudBackupTarget;
+    final int archiveCooldownMs;
+
+    switch (settings.backend) {
+      case CloudBackendType.none:
+        throw const Failure(
+          FailureCode.validation,
+          '尚未启用云同步通道，请先选择 WebDAV 或 S3 对象存储',
+        );
+      case CloudBackendType.webdav:
+        final davCfg = await getWebDavConfig();
+        if (!davCfg.isConfigured) {
+          throw const Failure(FailureCode.validation, 'WebDAV 未配置，无法执行多端同步');
+        }
+        final target = WebDavBackupTarget(
+          davCfg,
+          httpClientFactory: httpClientFactory,
+          nowMs: _nowMs,
+        );
+        store = target;
+        cloudBackupTarget = target;
+        archiveCooldownMs = davCfg.autoBackupCooldownMs;
+      case CloudBackendType.s3:
+        final s3Cfg = await getS3Config();
+        if (!s3Cfg.isConfigured) {
+          throw const Failure(FailureCode.validation, 'S3 对象存储未配置，无法执行多端同步');
+        }
+        final target = S3BackupTarget(
+          s3Cfg,
+          httpClientFactory: httpClientFactory,
+          nowMs: _nowMs,
+        );
+        store = target;
+        cloudBackupTarget = target;
+        archiveCooldownMs = s3Cfg.autoBackupCooldownMs;
+    }
+
+    final localTables = await guardDatabase(
+      () => db.transaction(_exportAll22Tables),
+    );
+    final localAttachments = await _collectLocalAttachments();
+    final localAttChecksums = <String, String>{
+      for (final entry in localAttachments.entries)
+        entry.key: sha256Hex(entry.value),
+    };
+    final localDataSha256 = computeCanonicalSyncDataSha256(
+      tables: localTables,
+      attachmentChecksums: localAttChecksums,
+    );
+    final isLocalFreshEmpty = isFreshSeedSnapshot(
+      localTables,
+      attachmentCount: localAttachments.length,
+    );
+
+    final rawCursor = await getSyncCursor();
+    final cursor = rawCursor.scopedToTarget(store.targetFingerprint);
+    final remoteHead = await _readRemoteHeadOrNull(store);
+
+    final decision = decideSyncAction(
+      cursor: cursor,
+      localDataSha256: localDataSha256,
+      isLocalFreshEmpty: isLocalFreshEmpty,
+      remoteHead: remoteHead,
+      resolution: resolution,
+    );
+
+    switch (decision.action) {
+      case SyncActionType.noOp:
+        return CloudSyncOutcome(
+          status: CloudSyncStatus.alreadyUpToDate,
+          revision: remoteHead!.revision,
+          localDataSha256: localDataSha256,
+          remoteHead: remoteHead,
+        );
+
+      case SyncActionType.fastForwardCursor:
+        final updatedCursor = cursor.copyWith(
+          lastSyncedRevision: remoteHead!.revision,
+          lastSyncedDataSha256: localDataSha256,
+          lastSyncedAtMs: _nowMs(),
+          targetFingerprint: store.targetFingerprint,
+          clearConflictRecord: true,
+        );
+        await _saveSyncCursor(updatedCursor, ensureSettings: settings);
+        return CloudSyncOutcome(
+          status: CloudSyncStatus.alreadyUpToDate,
+          revision: remoteHead.revision,
+          localDataSha256: localDataSha256,
+          remoteHead: remoteHead,
+        );
+
+      case SyncActionType.pullRemote:
+        return _executeSyncPull(
+          settings: settings,
+          store: store,
+          remoteHead: remoteHead!,
+          localAttachments: localAttachments,
+          localAttChecksums: localAttChecksums,
+          onProgress: onProgress,
+        );
+
+      case SyncActionType.pushLocal:
+        return _executeSyncPush(
+          settings: settings,
+          store: store,
+          cloudBackupTarget: cloudBackupTarget,
+          cursor: cursor,
+          initialRemoteHead: remoteHead,
+          localTables: localTables,
+          localAttachments: localAttachments,
+          localAttChecksums: localAttChecksums,
+          localDataSha256: localDataSha256,
+          archiveCooldownMs: archiveCooldownMs,
+          forceOverwriteRemote: resolution == SyncConflictResolution.useLocal,
+          onProgress: onProgress,
+          beforePushCommitForTest: beforePushCommitForTest,
+        );
+
+      case SyncActionType.conflict:
+        return _preserveConflictAndReport(
+          settings: settings,
+          store: store,
+          cloudBackupTarget: cloudBackupTarget,
+          cursor: cursor,
+          remoteHead: remoteHead!,
+          localTables: localTables,
+          localAttachments: localAttachments,
+          localDataSha256: localDataSha256,
+        );
+    }
+  }
+
+  Future<CloudSyncHead?> _readRemoteHeadOrNull(
+    CloudSyncObjectStore store,
+  ) async {
+    final bytes = await store.getObjectOrNull(cloudSyncHeadPath);
+    if (bytes == null) return null;
+    final Object? decoded;
+    try {
+      decoded = jsonDecode(utf8.decode(bytes));
+    } catch (_) {
+      throw const Failure(FailureCode.corruptData, '远端 sync/head.json 解析失败');
+    }
+    if (decoded is! Map<String, Object?>) {
+      throw const Failure(FailureCode.corruptData, '远端 sync/head.json 格式损坏');
+    }
+    return CloudSyncHead.fromJson(decoded);
+  }
+
+  Future<CloudSyncOutcome> _executeSyncPull({
+    required CloudSyncSettings settings,
+    required CloudSyncObjectStore store,
+    required CloudSyncHead remoteHead,
+    required Map<String, Uint8List> localAttachments,
+    required Map<String, String> localAttChecksums,
+    BackupProgressCallback? onProgress,
+  }) async {
+    final latestDbBytes = await store.getObject(
+      cloudSyncLatestDbPath,
+      onProgress: onProgress,
+    );
+    final verifiedDb = unpackAndVerifyTallyArchive(latestDbBytes);
+    final Object? rawDbJson;
+    try {
+      final zip = ZipArchive.decode(latestDbBytes);
+      rawDbJson = jsonDecode(
+        utf8.decode(zip[verifiedDb.manifest.databaseFile]!.bytes),
+      );
+    } catch (_) {
+      throw const Failure(FailureCode.corruptData, '远端同步数据库 JSON 损坏');
+    }
+    if (rawDbJson is! Map<String, Object?>) {
+      throw const Failure(FailureCode.corruptData, '远端同步数据库顶层结构损坏');
+    }
+    final parsedRows = _parseAndValidateAll22Tables(
+      rawDbJson,
+      verifiedDb.manifest,
+    );
+
+    // Build local content-addressed index for deduplicated pull (`R4`).
+    final localBytesBySha = <String, Uint8List>{
+      for (final entry in localAttChecksums.entries)
+        entry.value: localAttachments[entry.key]!,
+    };
+
+    final requiredAtts = remoteHead.resolvedAttachments();
+    final verifiedPulledAttachments = <String, Uint8List>{};
+    final pulledAttChecksums = <String, String>{};
+    var downloadedCount = 0;
+
+    for (final desc in requiredAtts) {
+      Uint8List bytes;
+      final cachedLocal = localBytesBySha[desc.sha256];
+      if (cachedLocal != null) {
+        bytes = cachedLocal;
+      } else {
+        bytes = await store.getObject(
+          '$cloudSyncAttachmentsDir/${desc.objectName}',
+        );
+        final actualSha = sha256Hex(bytes);
+        if (actualSha != desc.sha256) {
+          throw Failure(
+            FailureCode.corruptData,
+            '远端同步附件哈希校验失败（${desc.objectName}），已拒绝拉取覆盖',
+          );
+        }
+        localBytesBySha[desc.sha256] = bytes;
+        downloadedCount++;
+      }
+      verifiedPulledAttachments[desc.archivePath] = bytes;
+      pulledAttChecksums[desc.archivePath] = desc.sha256;
+    }
+
+    final pulledCanonicalSha = computeCanonicalSyncDataSha256(
+      tables: verifiedDb.tables,
+      attachmentChecksums: pulledAttChecksums,
+    );
+    if (pulledCanonicalSha != remoteHead.dataSha256) {
+      throw const Failure(
+        FailureCode.remoteUnavailable,
+        '远端同步快照正在更新或校验不一致，请稍后重试',
+      );
+    }
+
+    final stagingDir = await Directory.systemTemp.createTemp(
+      'tally_sync_pull_',
+    );
+    try {
+      final stagedAttRoot = Directory(p.join(stagingDir.path, 'attachments'));
+      for (final entry in verifiedPulledAttachments.entries) {
+        final relUnderAtt = entry.key.substring(tallyAttachmentsPrefix.length);
+        final stagedFile = File(
+          p.joinAll(<String>[stagedAttRoot.path, ...relUnderAtt.split('/')]),
+        );
+        await stagedFile.parent.create(recursive: true);
+        await stagedFile.writeAsBytes(entry.value, flush: true);
+      }
+
+      final now = _nowMs();
+      final newCursor = LocalSyncCursor(
+        lastSyncedRevision: remoteHead.revision,
+        lastSyncedDataSha256: remoteHead.dataSha256,
+        lastSyncedAtMs: now,
+        targetFingerprint: store.targetFingerprint,
+      );
+
+      await guardDatabase(
+        () => db.transaction(() async {
+          await _clearAll22TablesInTransaction();
+          await db.delete(db.writeCommands).go();
+          await _insertAll22TablesInTransaction(parsedRows);
+
+          final activeBookId = resolveRestoredActiveBookId(
+            parsedRows.accountBooks.map((b) => (id: b.id, sort: b.sort)),
+          );
+          await db
+              .into(db.preferences)
+              .insertOnConflictUpdate(
+                PreferencesCompanion.insert(
+                  key: _prefKeyCurrentBookId,
+                  value: '$activeBookId',
+                ),
+              );
+          await db
+              .into(db.preferences)
+              .insertOnConflictUpdate(
+                PreferencesCompanion.insert(
+                  key: prefKeyCloudSyncCursor,
+                  value: jsonEncode(newCursor.toJson()),
+                ),
+              );
+          await db
+              .into(db.preferences)
+              .insert(
+                PreferencesCompanion.insert(
+                  key: prefKeyCloudSyncSettings,
+                  value: jsonEncode(settings.toJson()),
+                ),
+                mode: InsertMode.insertOrIgnore,
+              );
+        }),
+      );
+
+      final targetAttDir = await _attachmentsDirProvider();
+      if (await targetAttDir.exists()) {
+        await for (final child in targetAttDir.list(followLinks: false)) {
+          await child.delete(recursive: true);
+        }
+      }
+      if (verifiedPulledAttachments.isNotEmpty) {
+        await targetAttDir.create(recursive: true);
+        for (final archivePath in verifiedPulledAttachments.keys) {
+          final relUnderAtt = archivePath.substring(
+            tallyAttachmentsPrefix.length,
+          );
+          final srcFile = File(
+            p.joinAll(<String>[stagedAttRoot.path, ...relUnderAtt.split('/')]),
+          );
+          final dstFile = File(
+            p.joinAll(<String>[targetAttDir.path, ...relUnderAtt.split('/')]),
+          );
+          await dstFile.parent.create(recursive: true);
+          await srcFile.copy(dstFile.path);
+        }
+      }
+
+      await reminderService.resyncAll();
+
+      return CloudSyncOutcome(
+        status: CloudSyncStatus.pulled,
+        revision: remoteHead.revision,
+        localDataSha256: remoteHead.dataSha256,
+        remoteHead: remoteHead,
+        downloadedAttachments: downloadedCount,
+      );
+    } finally {
+      try {
+        if (await stagingDir.exists()) {
+          await stagingDir.delete(recursive: true);
+        }
+      } catch (_) {}
+    }
+  }
+
+  Future<CloudSyncOutcome> _executeSyncPush({
+    required CloudSyncSettings settings,
+    required CloudSyncObjectStore store,
+    required BackupTarget cloudBackupTarget,
+    required LocalSyncCursor cursor,
+    required CloudSyncHead? initialRemoteHead,
+    required Map<String, List<Map<String, Object?>>> localTables,
+    required Map<String, Uint8List> localAttachments,
+    required Map<String, String> localAttChecksums,
+    required String localDataSha256,
+    required int archiveCooldownMs,
+    required bool forceOverwriteRemote,
+    BackupProgressCallback? onProgress,
+    FutureOr<void> Function()? beforePushCommitForTest,
+  }) async {
+    // 1. Deduplicated attachment upload (`sync/attachments/<sha256>__<basename>`).
+    final objectBytesMap = <String, Uint8List>{};
+    final sortedArchivePaths = localAttachments.keys.toList()..sort();
+    for (final archivePath in sortedArchivePaths) {
+      final sha = localAttChecksums[archivePath]!;
+      final objName = buildAttachmentObjectName(
+        sha256: sha,
+        archivePath: archivePath,
+      );
+      objectBytesMap.putIfAbsent(objName, () => localAttachments[archivePath]!);
+    }
+
+    var uploadedCount = 0;
+    if (objectBytesMap.isNotEmpty) {
+      final existingRemote = await store.listRelativeFileNames(
+        cloudSyncAttachmentsDir,
+      );
+      for (final entry in objectBytesMap.entries) {
+        if (existingRemote.contains(entry.key)) continue;
+        await store.putObject(
+          '$cloudSyncAttachmentsDir/${entry.key}',
+          entry.value,
+        );
+        uploadedCount++;
+      }
+    }
+
+    // 2. Re-read `sync/head.json` right before commit to guard concurrent races!
+    if (beforePushCommitForTest != null) {
+      await beforePushCommitForTest();
+    }
+    final freshHead = await _readRemoteHeadOrNull(store);
+    if (!forceOverwriteRemote) {
+      final raced =
+          (initialRemoteHead == null && freshHead != null) ||
+          (initialRemoteHead != null &&
+              (freshHead == null ||
+                  freshHead.revision != initialRemoteHead.revision ||
+                  freshHead.dataSha256 != initialRemoteHead.dataSha256));
+      if (raced) {
+        if (freshHead != null && freshHead.dataSha256 == localDataSha256) {
+          final aligned = cursor.copyWith(
+            lastSyncedRevision: freshHead.revision,
+            lastSyncedDataSha256: localDataSha256,
+            lastSyncedAtMs: _nowMs(),
+            targetFingerprint: store.targetFingerprint,
+            clearConflictRecord: true,
+          );
+          await _saveSyncCursor(aligned);
+          return CloudSyncOutcome(
+            status: CloudSyncStatus.alreadyUpToDate,
+            revision: freshHead.revision,
+            localDataSha256: localDataSha256,
+            remoteHead: freshHead,
+          );
+        }
+        if (freshHead != null) {
+          return _preserveConflictAndReport(
+            settings: settings,
+            store: store,
+            cloudBackupTarget: cloudBackupTarget,
+            cursor: cursor,
+            remoteHead: freshHead,
+            localTables: localTables,
+            localAttachments: localAttachments,
+            localDataSha256: localDataSha256,
+          );
+        }
+      }
+    }
+
+    // 3. Upload lightweight `sync/latest_db.tally` + updated `sync/head.json`.
+    final now = _nowMs();
+    final lightweightDb = packTallyArchive(
+      tables: localTables,
+      createdAtMs: now,
+      appVersion: appVersion,
+      includeAttachments: false,
+    );
+    await store.putObject(
+      cloudSyncLatestDbPath,
+      lightweightDb.bytes,
+      onProgress: onProgress,
+    );
+
+    final nextRevision = (freshHead?.revision ?? 0) + 1;
+    final newHead = CloudSyncHead(
+      revision: nextRevision,
+      dataSha256: localDataSha256,
+      updatedAtMs: now,
+      deviceId: settings.deviceId,
+      deviceName: settings.deviceName,
+      recordCount: (localTables['record'] ?? const <Object?>[]).length,
+      attachmentFiles: objectBytesMap.keys.toList()..sort(),
+      attachmentManifest: localAttChecksums,
+    );
+    final headBytes = Uint8List.fromList(
+      utf8.encode(const JsonEncoder.withIndent('  ').convert(newHead.toJson())),
+    );
+    await store.putObject(
+      cloudSyncHeadPath,
+      headBytes,
+      contentType: 'application/json; charset=utf-8',
+    );
+
+    final updatedCursor = LocalSyncCursor(
+      lastSyncedRevision: nextRevision,
+      lastSyncedDataSha256: localDataSha256,
+      lastSyncedAtMs: now,
+      targetFingerprint: store.targetFingerprint,
+    );
+    await _saveSyncCursor(updatedCursor, ensureSettings: settings);
+
+    // 4. Optional 24h full versioned `.tally` archive backup & pruning.
+    String? archivedName;
+    if (settings.autoArchiveBackupEnabled) {
+      final lastBackupAt = await getLastBackupAtMs();
+      if (lastBackupAt == null || (now - lastBackupAt) >= archiveCooldownMs) {
+        final archived = await uploadToActiveCloudBackup();
+        archivedName = archived.fileName;
+      }
+    }
+
+    return CloudSyncOutcome(
+      status: CloudSyncStatus.pushed,
+      revision: nextRevision,
+      localDataSha256: localDataSha256,
+      remoteHead: newHead,
+      uploadedAttachments: uploadedCount,
+      archivedBackupFileName: archivedName,
+    );
+  }
+
+  Future<CloudSyncOutcome> _preserveConflictAndReport({
+    required CloudSyncSettings settings,
+    required CloudSyncObjectStore store,
+    required BackupTarget cloudBackupTarget,
+    required LocalSyncCursor cursor,
+    required CloudSyncHead remoteHead,
+    required Map<String, List<Map<String, Object?>>> localTables,
+    required Map<String, Uint8List> localAttachments,
+    required String localDataSha256,
+  }) async {
+    String? conflictFileName;
+    if (cursor.lastConflictSha256 == localDataSha256 &&
+        cursor.lastConflictFileName != null &&
+        cursor.lastConflictFileName!.isNotEmpty) {
+      final localDir = await _localBackupsDirProvider();
+      final existing = File(
+        p.join(localDir.path, cursor.lastConflictFileName!),
+      );
+      if (await existing.exists()) {
+        conflictFileName = cursor.lastConflictFileName;
+      }
+    }
+
+    if (conflictFileName == null) {
+      final now = _nowMs();
+      conflictFileName = formatConflictBackupFileName(
+        deviceId: settings.deviceId,
+        when: DateTime.fromMillisecondsSinceEpoch(now),
+      );
+      final fullConflictPack = packTallyArchive(
+        tables: localTables,
+        attachments: localAttachments,
+        createdAtMs: now,
+        appVersion: appVersion,
+        includeAttachments: true,
+      );
+      await localTarget.writeBackup(conflictFileName, fullConflictPack.bytes);
+      await cloudBackupTarget.writeBackup(
+        conflictFileName,
+        fullConflictPack.bytes,
+      );
+      await _saveSyncCursor(
+        cursor.copyWith(
+          targetFingerprint: store.targetFingerprint,
+          lastConflictSha256: localDataSha256,
+          lastConflictFileName: conflictFileName,
+        ),
+      );
+    }
+
+    return CloudSyncOutcome.conflict(
+      revision: remoteHead.revision,
+      localDataSha256: localDataSha256,
+      remoteHead: remoteHead,
+      conflictBackupFileName: conflictFileName,
+    );
   }
 
   /// Executes the 3-stage safe restore workflow (R5):
@@ -762,14 +1987,13 @@ final class TallyBackupService {
     );
     final attachments = await _collectLocalAttachments();
     final attChecksums = <String, String>{
-      for (final key in attachments.keys.toList()..sort())
-        key: sha256Hex(attachments[key]!),
+      for (final entry in attachments.entries)
+        entry.key: sha256Hex(entry.value),
     };
-    final canonicalPayload = jsonEncode(<String, Object>{
-      'tables': tables,
-      'attachments': attChecksums,
-    });
-    return sha256Hex(utf8.encode(canonicalPayload));
+    return computeCanonicalSyncDataSha256(
+      tables: tables,
+      attachmentChecksums: attChecksums,
+    );
   }
 
   Future<Map<String, Uint8List>> _collectLocalAttachments() async {
