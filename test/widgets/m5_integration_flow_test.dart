@@ -161,7 +161,7 @@ void main() {
       expect(find.text('数据与备份'), findsOneWidget);
       expect(
         find.text(
-          '数据保存在本机，可选配置私有 WebDAV 云备份；已支持核心记账、资产与多币种、统计预算、计划提醒及数据导入导出与跨端迁移。',
+          '数据保存在本机，可选配置私有 WebDAV 云备份；已支持核心记账、资产与多币种、统计预算、计划提醒、数据迁移备份，以及常用工具、安全锁与桌面/自动记账联动。',
         ),
         findsOneWidget,
       );

@@ -7,8 +7,11 @@ import '../../data/db/database.dart';
 import '../../domain/ledger/record_extra.dart';
 import '../../domain/ledger/record_relations.dart';
 import '../../domain/model/codes.dart';
+import '../../core/failure.dart';
 import '../../core/money.dart';
+import '../attachments/attachment_providers.dart';
 import '../common/common.dart';
+import '../receipt/record_receipt_dialog.dart' show showRecordReceiptDialog;
 import 'record_editor_page.dart' show parseAmount, amountInputFormatters;
 import 'record_labels.dart';
 
@@ -160,7 +163,24 @@ class _RecordDetailPageState extends ConsumerState<RecordDetailPage> {
     final tags =
         ref.watch(recordTagsProvider(widget.recordId)).value ?? const [];
     return Scaffold(
-      appBar: AppBar(title: const Text('账单详情')),
+      appBar: AppBar(
+        title: const Text('账单详情'),
+        actions: [
+          if (record.value != null)
+            IconButton(
+              key: const Key('open-receipt-button'),
+              tooltip: '生成小票',
+              icon: const Icon(Icons.receipt_long_outlined),
+              onPressed: busy
+                  ? null
+                  : () => showRecordReceiptDialog(
+                      context,
+                      recordId: record.value!.recordId,
+                      initialRecord: record.value,
+                    ),
+            ),
+        ],
+      ),
       body: asyncBody(record, (r) {
         if (r == null) return const Center(child: Text('账单不存在或已删除'));
         final categories =
@@ -298,8 +318,52 @@ class _RecordDetailPageState extends ConsumerState<RecordDetailPage> {
                   ),
                 ),
               ),
+            if (r.discountMinor != null && r.discountMinor! > BigInt.zero)
+              ListTile(
+                key: const Key('detail-discount-tile'),
+                title: const Text('优惠'),
+                trailing: Text(formatMinor(r.discountMinor!)),
+              ),
             if (r.remark.isNotEmpty)
               ListTile(title: const Text('备注'), subtitle: Text(r.remark)),
+            ...() {
+              BillLocationInfo? loc;
+              try {
+                loc = RecordExtra.parse(r.extraInfo).location;
+              } on Failure {
+                loc = null;
+              }
+              List<String> attached = const <String>[];
+              try {
+                attached = parseRecordImages(r.images);
+              } on Failure {
+                attached = const <String>[];
+              }
+              return <Widget>[
+                if (loc != null && !loc.isEmpty)
+                  ListTile(
+                    key: const Key('detail-location-tile'),
+                    title: const Text('地点'),
+                    subtitle: Text(
+                      loc.detailAddress == null
+                          ? loc.displayLabel
+                          : '${loc.displayLabel}（${loc.detailAddress}）',
+                    ),
+                  ),
+                if (attached.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 8,
+                    ),
+                    child: BillAttachmentStrip(
+                      key: const Key('detail-attachment-strip'),
+                      recordId: r.recordId,
+                      readOnly: true,
+                    ),
+                  ),
+              ];
+            }(),
             if (r.excludeExIn) const ListTile(title: Text('不计入收支')),
             if (r.excludeBudget) const ListTile(title: Text('不计入预算')),
             if (refunded > BigInt.zero)

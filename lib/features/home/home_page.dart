@@ -5,6 +5,8 @@ import 'package:go_router/go_router.dart';
 import '../../app/providers.dart';
 import '../../data/db/database.dart';
 import '../../domain/model/codes.dart';
+import '../../domain/rules/app_settings_rules.dart';
+import '../../domain/rules/asset_overview.dart';
 import '../../domain/rules/income_expense.dart';
 import '../budget/budget_widgets.dart';
 import '../common/common.dart';
@@ -16,6 +18,8 @@ class HomePage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final book = ref.watch(currentBookProvider);
+    final settings =
+        ref.watch(appSettingsProvider).value ?? AppSettings.defaults;
     return Scaffold(
       appBar: AppBar(
         title: InkWell(
@@ -47,7 +51,14 @@ class HomePage extends ConsumerWidget {
       floatingActionButton: FloatingActionButton.extended(
         key: const Key('add-record'),
         heroTag: 'fab-home',
-        onPressed: () => context.push('/record/new'),
+        onPressed: () {
+          final defaultType = settings.defaultRecordType;
+          context.push(
+            defaultType == RecordType.expense
+                ? '/record/new'
+                : '/record/new?type=$defaultType',
+          );
+        },
         icon: const Icon(Icons.edit),
         label: const Text('记一笔'),
       ),
@@ -102,6 +113,9 @@ class _HomeBody extends ConsumerWidget {
         ? const <RecordCategory>[]
         : ref.watch(categoriesProvider(bookId)).value ?? const [];
     final assets = ref.watch(assetsProvider).value ?? const <Asset>[];
+    final settings =
+        ref.watch(appSettingsProvider).value ?? AppSettings.defaults;
+    final assetOverview = ref.watch(assetOverviewProvider).value;
     final offset = ref.read(periodOffsetProvider.notifier);
 
     return CustomScrollView(
@@ -135,10 +149,17 @@ class _HomeBody extends ConsumerWidget {
             ),
           ),
         ),
+        if (settings.showHomeAssetSummaryBanner)
+          SliverToBoxAdapter(
+            child: _HomeAssetSummaryBanner(
+              overview: assetOverview,
+              onTap: () => context.go('/assets'),
+            ),
+          ),
         SliverToBoxAdapter(
           child: _SummaryCard(summary.value ?? IncomeExpense.zero),
         ),
-        if (ref.watch(periodOffsetProvider) == 0)
+        if (settings.showHomeBudgetCard && ref.watch(periodOffsetProvider) == 0)
           SliverToBoxAdapter(
             child: BudgetSummaryCard(
               hideWhenEmpty: true,
@@ -235,6 +256,55 @@ class _SummaryCard extends StatelessWidget {
             cell('支出', s.expense, const Key('sum-expense')),
             cell('收入', s.income, const Key('sum-income')),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _HomeAssetSummaryBanner extends StatelessWidget {
+  const _HomeAssetSummaryBanner({required this.overview, required this.onTap});
+
+  final AssetOverview? overview;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final net = overview?.netAsset ?? BigInt.zero;
+    final totalAsset = overview?.totalAsset ?? BigInt.zero;
+    final totalLiability = overview?.totalLiabilities ?? BigInt.zero;
+
+    return Card(
+      key: const Key('home-asset-summary-banner'),
+      margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          child: Row(
+            children: [
+              Icon(
+                Icons.account_balance_wallet_outlined,
+                size: 18,
+                color: theme.colorScheme.primary,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  '净资产 ¥${formatMinor(net)}',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              Text(
+                '资产 ¥${formatMinor(totalAsset)} · 负债 ¥${formatMinor(totalLiability)}',
+                style: theme.textTheme.bodySmall,
+              ),
+            ],
+          ),
         ),
       ),
     );

@@ -52,6 +52,12 @@ class StatsPage extends ConsumerWidget {
             icon: const Icon(Icons.insights),
             onPressed: () => context.push('/stats/annual'),
           ),
+          IconButton(
+            key: const Key('stats-stories-action'),
+            tooltip: '统计故事',
+            icon: const Icon(Icons.auto_stories_outlined),
+            onPressed: () => context.push('/stat-stories'),
+          ),
         ],
       ),
       body: ListView(

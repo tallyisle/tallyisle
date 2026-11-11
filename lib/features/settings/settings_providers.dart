@@ -2,25 +2,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
 import '../../data/db/database.dart';
-import '../../data/settings/app_settings_service.dart';
 import '../../data/settings/data_health_service.dart';
 import '../../data/settings/stat_story_service.dart';
-import '../../domain/rules/app_settings_rules.dart';
 import '../../domain/rules/data_health_rules.dart';
 
-/// Persistence service provider for System & Home Settings (`F-038`).
-final appSettingsServiceProvider = FutureProvider<AppSettingsService>((
-  ref,
-) async {
-  final db = await ref.watch(databaseProvider.future);
-  return AppSettingsService(db);
-});
-
-/// Reactive [AppSettings] stream from `ti_preference` (`'app_settings'`).
-final appSettingsProvider = StreamProvider<AppSettings>((ref) async* {
-  final svc = await ref.watch(appSettingsServiceProvider.future);
-  yield* svc.watchSettings();
-});
+export '../../app/providers.dart'
+    show appSettingsProvider, appSettingsServiceProvider;
 
 /// Service provider for ADR-012 Data Health Check & atomic repair.
 final dataHealthServiceProvider = FutureProvider<DataHealthService>((

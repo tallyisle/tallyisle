@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -13,8 +14,17 @@ import '../../domain/ledger/record_relations.dart';
 import '../../domain/model/codes.dart';
 import '../../domain/rules/asset_overview.dart' show normalizeCurrency;
 import '../../domain/rules/currency_rates.dart';
+import '../attachments/attachment_providers.dart';
+import '../automation/automation_providers.dart'
+    show widgetSnapshotServiceProvider;
 import '../budget/budget_widgets.dart';
 import '../common/common.dart';
+import '../receipt/diy_toolbar_settings_page.dart';
+import '../receipt/receipt_diy_providers.dart';
+import '../receipt/record_receipt_dialog.dart' show BillLocationEditorDialog;
+import '../templates/template_providers.dart';
+import '../templates/templates_page.dart'
+    show FrequentRemarkChips, TemplatePrefill, TemplateQuickBar;
 
 /// Original keyboard upper bound (ledger-catalog §5).
 final maxAmount = Money.parse('88888888888.00');
@@ -41,6 +51,8 @@ class RecordEditorPage extends ConsumerStatefulWidget {
     super.key,
     this.recordId,
     this.initialType,
+    this.initialCategory,
+    this.initialTemplateId,
     this.initialAsset,
     this.initialFrom,
     this.initialTo,
@@ -49,6 +61,8 @@ class RecordEditorPage extends ConsumerStatefulWidget {
   });
   final String? recordId;
   final int? initialType;
+  final int? initialCategory;
+  final int? initialTemplateId;
 
   /// Prefill for new bills (e.g. "还款" from a credit card opens a transfer).
   final int? initialAsset;
@@ -63,14 +77,19 @@ class RecordEditorPage extends ConsumerStatefulWidget {
 class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
   final amount = TextEditingController();
   final converted = TextEditingController();
+  final discount = TextEditingController();
   final fee = TextEditingController();
   final remark = TextEditingController();
   final ids = CommandIds();
+  final imageIds = CommandIds();
+  final remarkIds = CommandIds();
 
   int type = RecordType.expense;
   int? categoryId;
   int? parentCatId;
   Set<String> selectedTagIds = {};
+  List<String> imageNames = const <String>[];
+  BillLocationInfo? location;
   int assetId = noRef, fromAssetId = noRef, toAssetId = noRef;
 
   /// Currency the amount is entered in; null = the account currency.
@@ -125,10 +144,41 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
     }
   }
 
+  void _applyTemplatePrefill(TemplatePrefill prefill) {
+    setState(() {
+      type = prefill.type;
+      categoryId = prefill.categoryId;
+      parentCatId = prefill.parentCategoryId;
+      assetId = prefill.assetId;
+      fromAssetId = prefill.fromAssetId;
+      toAssetId = prefill.toAssetId;
+      amount.text = prefill.amountText;
+      fee.text = prefill.feeText;
+      feeFromTarget = prefill.feeFromTarget;
+      remark.text = prefill.remark;
+      excludeBudget = prefill.excludeBudget;
+      excludeExIn = prefill.excludeExIn;
+      selectedTagIds = prefill.tagIds.toSet();
+      sourceCurrency = prefill.sourceCurrency;
+      convertedEdited = false;
+      _autoConvert();
+    });
+  }
+
+  Future<void> _pickLocation() async {
+    final res = await showDialog<BillLocationInfo>(
+      context: context,
+      builder: (_) => BillLocationEditorDialog(initial: location),
+    );
+    if (res == null || !mounted) return;
+    setState(() => location = res.isEmpty ? null : res);
+  }
+
   @override
   void initState() {
     super.initState();
     type = widget.initialType ?? RecordType.expense;
+    categoryId = widget.initialCategory;
     assetId = widget.initialAsset ?? noRef;
     fromAssetId = widget.initialFrom ?? noRef;
     toAssetId = widget.initialTo ?? noRef;
@@ -164,11 +214,25 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
         fromAssetId = r.fromAssetId;
         toAssetId = r.toAssetId;
         amount.text = formatMinor(r.moneyMinor);
+        if (r.discountMinor != null && r.discountMinor! > BigInt.zero) {
+          discount.text = formatMinor(r.discountMinor!);
+        }
         remark.text = r.remark;
         excludeBudget = r.excludeBudget;
         excludeExIn = r.excludeExIn;
         time = DateTime.fromMillisecondsSinceEpoch(r.recordTime);
-        final snap = RecordExtra.parse(r.extraInfo).currency;
+        try {
+          imageNames = parseRecordImages(r.images);
+        } on Failure {
+          imageNames = const <String>[];
+        }
+        final parsedExtra = RecordExtra.parse(r.extraInfo);
+        try {
+          location = parsedExtra.location;
+        } on Failure {
+          location = null;
+        }
+        final snap = parsedExtra.currency;
         if (snap != null && snap.isValid && snap.assetNet != null) {
           final sc = normalizeCurrency(snap.sourceCode) ?? baseCurrency;
           final ac = normalizeCurrency(snap.assetCode) ?? baseCurrency;
@@ -199,6 +263,12 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
         final cq = await ref.read(catalogQueriesProvider.future);
         final tagIds = await cq.getTagIdsForRecord(r.recordId);
         selectedTagIds = tagIds.toSet();
+      } else if (widget.initialTemplateId != null) {
+        final tplSvc = await ref.read(templateRemarkServiceProvider.future);
+        final prefill = await tplSvc.buildTemplatePrefill(
+          widget.initialTemplateId!,
+        );
+        if (mounted) _applyTemplatePrefill(prefill);
       }
     } catch (e) {
       error = safeMessage(e);
@@ -210,6 +280,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
   void dispose() {
     amount.dispose();
     converted.dispose();
+    discount.dispose();
     fee.dispose();
     remark.dispose();
     super.dispose();
@@ -255,6 +326,15 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
           ? original
           : null;
       final extra = RecordExtra.parse(keepOldExtra?.extraInfo);
+      extra.location = location;
+      final parsedDiscount =
+          (type == RecordType.expense || type == RecordType.income) &&
+              discount.text.trim().isNotEmpty
+          ? parseAmount(discount.text)
+          : null;
+      final effectiveDiscount = parsedDiscount != null && !parsedDiscount.isZero
+          ? parsedDiscount
+          : null;
       // Multi-currency (ledger-catalog §4 `curr`): `money` is the booked amount
       // (account currency) for bills and the source amount for transfers.
       final (sc, ac) = _currencies();
@@ -305,6 +385,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
         remark: remark.text.trim(),
         excludeBudget: excludeBudget,
         excludeExIn: excludeExIn,
+        discount: effectiveDiscount,
         extra: extra,
         relations: RecordRelations.parse(keepOldExtra?.relInfo),
         fee: type == RecordType.transfer ? parseAmount(fee.text) : null,
@@ -317,6 +398,51 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
         recordId: widget.recordId,
         draft: draft,
       );
+      List<String> oldImages = const <String>[];
+      if (old != null) {
+        try {
+          oldImages = parseRecordImages(old.images);
+        } on Failure {
+          oldImages = const <String>[];
+        }
+      }
+      if (imageNames.isNotEmpty || oldImages.isNotEmpty) {
+        final attSvc = await ref.read(billAttachmentServiceProvider.future);
+        await attSvc.setRecordImages(
+          commandId: imageIds.forPayload(['editor-images', id, imageNames]),
+          recordId: id,
+          imageNames: imageNames,
+        );
+      }
+      if (type != RecordType.transfer && draft.remark.isNotEmpty) {
+        try {
+          final remarkSvc = await ref.read(
+            templateRemarkServiceProvider.future,
+          );
+          await remarkSvc.recordRemarkUsage(
+            commandId: remarkIds.forPayload([
+              'editor-remark-usage',
+              id,
+              draft.categoryId,
+              draft.remark,
+            ]),
+            recordCatId: draft.categoryId,
+            content: draft.remark,
+          );
+          if (mounted) {
+            ref.invalidate(remarksForCategoryProvider(draft.categoryId));
+            ref.invalidate(allRemarksProvider);
+          }
+        } catch (_) {
+          // Non-blocking frequent-remark counter update.
+        }
+      }
+      try {
+        final widgetSvc = await ref.read(widgetSnapshotServiceProvider.future);
+        await widgetSvc.syncToPlatform();
+      } catch (_) {
+        // Non-blocking desktop widget refresh.
+      }
       if (!mounted) return;
       if (context.canPop()) {
         context.pop(id);
@@ -380,11 +506,49 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
               : a.code.compareTo(b.code),
         );
     ref.watch(rateTableProvider);
+    final diyConfig =
+        ref.watch(diyToolbarConfigProvider).value ??
+        DiyToolbarConfig.defaults();
 
     return PopScope(
       canPop: !busy,
       child: Scaffold(
-        appBar: AppBar(title: Text(editing ? '编辑账单' : '记一笔')),
+        appBar: AppBar(
+          title: Text(editing ? '编辑账单' : '记一笔'),
+          actions: [
+            if (!editing && diyConfig.isEnabled(DiyToolbarAction.templates))
+              IconButton(
+                key: const Key('editor-templates-btn'),
+                tooltip: '账单模板',
+                icon: const Icon(Icons.bookmarks_outlined),
+                onPressed: busy
+                    ? null
+                    : () {
+                        if (GoRouter.maybeOf(context) != null) {
+                          context.push('/templates');
+                        }
+                      },
+              ),
+            IconButton(
+              key: const Key('editor-diy-toolbar-btn'),
+              tooltip: '记账工具栏自定义',
+              icon: const Icon(Icons.tune),
+              onPressed: busy
+                  ? null
+                  : () {
+                      if (GoRouter.maybeOf(context) != null) {
+                        context.push('/settings/diy-toolbar');
+                      } else {
+                        Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => const DiyToolbarSettingsPage(),
+                          ),
+                        );
+                      }
+                    },
+            ),
+          ],
+        ),
         bottomNavigationBar: SafeArea(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -420,6 +584,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 640),
                   child: ListView(
+                    scrollCacheExtent: const ScrollCacheExtent.pixels(800),
                     padding: const EdgeInsets.all(16),
                     children: [
                       Wrap(
@@ -448,6 +613,27 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
                             ),
                         ],
                       ),
+                      if (!editing &&
+                          bookId != null &&
+                          diyConfig.isEnabled(DiyToolbarAction.templates)) ...[
+                        const SizedBox(height: 8),
+                        TemplateQuickBar(
+                          bookId: bookId,
+                          recordType: type,
+                          enabled: !busy,
+                          recordTimeMs: time.millisecondsSinceEpoch,
+                          onPrefill: _applyTemplatePrefill,
+                          onInstantSaved: (savedId) {
+                            if (!mounted) return;
+                            if (GoRouter.maybeOf(context) != null &&
+                                context.canPop()) {
+                              context.pop(savedId);
+                            } else if (GoRouter.maybeOf(context) != null) {
+                              context.go('/');
+                            }
+                          },
+                        ),
+                      ],
                       const SizedBox(height: 16),
                       Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -473,7 +659,9 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
                             ),
                           ),
                           if (type != RecordType.transfer &&
-                              currencies.length > 1) ...[
+                              currencies.length > 1 &&
+                              (diyConfig.isEnabled(DiyToolbarAction.currency) ||
+                                  sourceCurrency != null)) ...[
                             const SizedBox(width: 8),
                             SizedBox(
                               width: 112,
@@ -541,27 +729,65 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
                         controller: remark,
                         enabled: !busy,
                         maxLength: 200,
-                        decoration: const InputDecoration(labelText: '备注'),
+                        onChanged: (_) => setState(() {}),
+                        decoration: InputDecoration(
+                          labelText: '备注',
+                          suffixIcon:
+                              type != RecordType.transfer &&
+                                  GoRouter.maybeOf(context) != null
+                              ? IconButton(
+                                  key: const Key('editor-remarks-btn'),
+                                  tooltip: '常用备注管理',
+                                  icon: const Icon(
+                                    Icons.comment_outlined,
+                                    size: 20,
+                                  ),
+                                  onPressed: busy
+                                      ? null
+                                      : () => context.push(
+                                          categoryId == null
+                                              ? '/remarks'
+                                              : '/remarks?categoryId=$categoryId',
+                                        ),
+                                )
+                              : null,
+                        ),
                       ),
+                      if (type != RecordType.transfer && categoryId != null)
+                        FrequentRemarkChips(
+                          categoryId: categoryId!,
+                          selectedRemark: remark.text,
+                          enabled: !busy,
+                          onSelectRemark: (value) =>
+                              setState(() => remark.text = value),
+                        ),
                       if (type != RecordType.transfer) ...[
-                        SwitchListTile(
-                          contentPadding: EdgeInsets.zero,
-                          title: const Text('不计入收支'),
-                          value: excludeExIn,
-                          onChanged: busy
-                              ? null
-                              : (v) => setState(() => excludeExIn = v),
-                        ),
-                        SwitchListTile(
-                          contentPadding: EdgeInsets.zero,
-                          title: const Text('不计入预算'),
-                          value: excludeBudget,
-                          onChanged: busy
-                              ? null
-                              : (v) => setState(() => excludeBudget = v),
-                        ),
+                        if (diyConfig.isEnabled(DiyToolbarAction.excludeExIn) ||
+                            excludeExIn)
+                          SwitchListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: const Text('不计入收支'),
+                            value: excludeExIn,
+                            onChanged: busy
+                                ? null
+                                : (v) => setState(() => excludeExIn = v),
+                          ),
+                        if (diyConfig.isEnabled(
+                              DiyToolbarAction.excludeBudget,
+                            ) ||
+                            excludeBudget)
+                          SwitchListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: const Text('不计入预算'),
+                            value: excludeBudget,
+                            onChanged: busy
+                                ? null
+                                : (v) => setState(() => excludeBudget = v),
+                          ),
                       ],
-                      if (tags.isNotEmpty) ...[
+                      if (tags.isNotEmpty &&
+                          (diyConfig.isEnabled(DiyToolbarAction.tags) ||
+                              selectedTagIds.isNotEmpty)) ...[
                         const SizedBox(height: 8),
                         Text(
                           '标签',
@@ -588,6 +814,53 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
                                       }),
                               ),
                           ],
+                        ),
+                      ],
+                      if ((type == RecordType.expense ||
+                              type == RecordType.income) &&
+                          (diyConfig.isEnabled(DiyToolbarAction.discount) ||
+                              discount.text.trim().isNotEmpty)) ...[
+                        const SizedBox(height: 12),
+                        TextField(
+                          key: const Key('discount'),
+                          controller: discount,
+                          enabled: !busy,
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                          ),
+                          inputFormatters: amountInputFormatters,
+                          decoration: InputDecoration(
+                            labelText: '优惠金额（可选）',
+                            prefixText: '${_currencies().$2} ',
+                          ),
+                        ),
+                      ],
+                      if (diyConfig.isEnabled(DiyToolbarAction.location) ||
+                          (location != null && !location!.isEmpty))
+                        ListTile(
+                          key: const Key('record-location-tile'),
+                          contentPadding: EdgeInsets.zero,
+                          leading: const Icon(Icons.place_outlined),
+                          title: Text(
+                            location == null || location!.isEmpty
+                                ? '添加消费地点（可选）'
+                                : location!.displayLabel,
+                          ),
+                          subtitle: location?.detailAddress != null
+                              ? Text(location!.detailAddress!)
+                              : null,
+                          trailing: const Icon(Icons.chevron_right),
+                          onTap: busy ? null : _pickLocation,
+                        ),
+                      if (diyConfig.isEnabled(DiyToolbarAction.images) ||
+                          imageNames.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        BillAttachmentStrip(
+                          key: const Key('record-attachment-strip'),
+                          imageNames: imageNames,
+                          readOnly: busy,
+                          onChanged: (next) =>
+                              setState(() => imageNames = next),
                         ),
                       ],
                       if (error != null)

@@ -4,12 +4,21 @@ import 'package:go_router/go_router.dart';
 import '../features/assets/asset_detail_page.dart';
 import '../features/assets/asset_editor_page.dart';
 import '../features/assets/assets_page.dart';
+import '../features/attachments/bill_images_page.dart';
+import '../features/automation/auto_bill_page.dart';
+import '../features/automation/desktop_widgets_page.dart';
+import '../features/automation/ocr_bill_page.dart';
+import '../features/automation/url_scheme_page.dart';
 import '../features/backup/backup_page.dart';
 import '../features/backup/webdav_config_page.dart';
+import '../features/bank_cards/bank_card_editor_page.dart';
+import '../features/bank_cards/bank_cards_page.dart';
+import '../features/batch_edit/batch_edit_page.dart';
 import '../features/books/books_page.dart';
 import '../features/budget/budget_page.dart';
 import '../features/calendar/calendar_page.dart';
 import '../features/categories/categories_page.dart';
+import '../features/category_transfer/category_transfer_page.dart';
 import '../features/csv_transfer/csv_export_page.dart';
 import '../features/csv_transfer/csv_import_page.dart';
 import '../features/csv_transfer/import_batches_page.dart';
@@ -25,9 +34,13 @@ import '../features/installment/installment_editor_page.dart';
 import '../features/installment/installment_page.dart';
 import '../features/me/me_page.dart';
 import '../features/migration/migration_page.dart';
+import '../features/notes/note_editor_page.dart';
+import '../features/notes/note_trash_page.dart';
+import '../features/notes/notes_page.dart';
 import '../features/penny_import/penny_import_page.dart';
 import '../features/periodic/periodic_editor_page.dart';
 import '../features/periodic/periodic_page.dart';
+import '../features/receipt/diy_toolbar_settings_page.dart';
 import '../features/records/record_detail_page.dart';
 import '../features/records/record_editor_page.dart';
 import '../features/reminder/reminder_page.dart';
@@ -35,11 +48,21 @@ import '../features/savings/savings_detail_page.dart';
 import '../features/savings/savings_editor_page.dart';
 import '../features/savings/savings_page.dart';
 import '../features/search/search_page.dart';
+import '../features/security/app_lock_settings_page.dart';
+import '../features/settings/about_help_page.dart';
+import '../features/settings/data_health_page.dart';
+import '../features/settings/settings_page.dart';
+import '../features/settings/stat_stories_page.dart';
 import '../features/stats/annual_report_page.dart';
 import '../features/stats/asset_trend_page.dart';
 import '../features/stats/category_stats_page.dart';
 import '../features/stats/stats_page.dart';
 import '../features/tags/tags_page.dart';
+import '../features/templates/remarks_page.dart';
+import '../features/templates/template_editor_page.dart';
+import '../features/templates/templates_page.dart';
+import '../features/wishes/wish_editor_page.dart';
+import '../features/wishes/wishes_page.dart';
 
 /// Semantic routes (ADR-015). Mapping to the original app's 73 routes is kept
 /// in docs/reference/ as modules are implemented.
@@ -103,11 +126,13 @@ GoRouter buildRouter() => GoRouter(
         final q = state.uri.queryParameters;
         return RecordEditorPage(
           initialType: int.tryParse(q['type'] ?? ''),
+          initialCategory: int.tryParse(q['cat'] ?? q['category'] ?? ''),
+          initialTemplateId: int.tryParse(q['templateId'] ?? ''),
           initialAsset: int.tryParse(q['asset'] ?? ''),
           initialFrom: int.tryParse(q['from'] ?? ''),
           initialTo: int.tryParse(q['to'] ?? ''),
-          initialAmount: q['amount'],
-          initialRemark: q['remark'],
+          initialAmount: q['amount'] ?? q['money'],
+          initialRemark: q['remark'] ?? q['note'],
         );
       },
     ),
@@ -261,6 +286,100 @@ GoRouter buildRouter() => GoRouter(
     GoRoute(path: '/export/csv', builder: (_, _) => const CsvExportPage()),
     GoRoute(path: '/import/penny', builder: (_, _) => const PennyImportPage()),
     GoRoute(path: '/migration', builder: (_, _) => const MigrationPage()),
+    GoRoute(path: '/wishes', builder: (_, _) => const WishesPage()),
+    GoRoute(path: '/wishes/new', builder: (_, _) => const WishEditorPage()),
+    GoRoute(
+      path: '/wishes/:id/edit',
+      builder: (_, state) => WishEditorPage(wishId: state.pathParameters['id']),
+    ),
+    GoRoute(path: '/notes', builder: (_, _) => const NotesPage()),
+    GoRoute(path: '/notes/new', builder: (_, _) => const NoteEditorPage()),
+    GoRoute(path: '/notes/trash', builder: (_, _) => const NoteTrashPage()),
+    GoRoute(
+      path: '/notes/:id/edit',
+      builder: (_, state) =>
+          NoteEditorPage(noteId: int.parse(state.pathParameters['id']!)),
+    ),
+    GoRoute(path: '/templates', builder: (_, _) => const TemplatesPage()),
+    GoRoute(
+      path: '/templates/new',
+      builder: (_, state) {
+        final q = state.uri.queryParameters;
+        return TemplateEditorPage(
+          initialBookId: int.tryParse(q['bookId'] ?? ''),
+          initialType: int.tryParse(q['type'] ?? ''),
+        );
+      },
+    ),
+    GoRoute(
+      path: '/templates/:id/edit',
+      builder: (_, state) => TemplateEditorPage(
+        templateId: int.parse(state.pathParameters['id']!),
+      ),
+    ),
+    GoRoute(
+      path: '/remarks',
+      builder: (_, state) => RemarksPage(
+        initialCategoryId: int.tryParse(
+          state.uri.queryParameters['categoryId'] ?? '',
+        ),
+      ),
+    ),
+    GoRoute(path: '/bank-cards', builder: (_, _) => const BankCardsPage()),
+    GoRoute(
+      path: '/bank-cards/new',
+      builder: (_, _) => const BankCardEditorPage(),
+    ),
+    GoRoute(
+      path: '/bank-cards/:id/edit',
+      builder: (_, state) =>
+          BankCardEditorPage(cardId: int.parse(state.pathParameters['id']!)),
+    ),
+    GoRoute(
+      path: '/categories/transfer',
+      builder: (_, state) {
+        final q = state.uri.queryParameters;
+        return CategoryTransferPage(
+          initialBookId: int.tryParse(q['bookId'] ?? ''),
+          initialTab: int.tryParse(q['tab'] ?? '') ?? 0,
+        );
+      },
+    ),
+    GoRoute(
+      path: '/records/batch',
+      builder: (_, state) => BatchEditPage(
+        initialBookId: int.tryParse(state.uri.queryParameters['bookId'] ?? ''),
+      ),
+    ),
+    GoRoute(path: '/attachments', builder: (_, _) => const BillImagesPage()),
+    GoRoute(
+      path: '/settings/diy-toolbar',
+      builder: (_, _) => const DiyToolbarSettingsPage(),
+    ),
+    GoRoute(
+      path: '/security/app-lock',
+      builder: (_, _) => const AppLockSettingsPage(),
+    ),
+    GoRoute(path: '/settings', builder: (_, _) => const SettingsPage()),
+    GoRoute(
+      path: '/settings/data-health',
+      builder: (_, _) => const DataHealthPage(),
+    ),
+    GoRoute(path: '/stat-stories', builder: (_, _) => const StatStoriesPage()),
+    GoRoute(path: '/about', builder: (_, _) => const AboutHelpPage()),
+    GoRoute(
+      path: '/automation/url-scheme',
+      builder: (_, _) => const UrlSchemePage(),
+    ),
+    GoRoute(
+      path: '/automation/widgets',
+      builder: (_, _) => const DesktopWidgetsPage(),
+    ),
+    GoRoute(
+      path: '/automation/auto-bill',
+      builder: (_, _) => const AutoBillPage(),
+    ),
+    GoRoute(path: '/automation/ocr', builder: (_, _) => const OcrBillPage()),
   ],
 );
 

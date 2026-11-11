@@ -134,6 +134,12 @@ class _SearchPageState extends ConsumerState<SearchPage> {
         ),
         actions: [
           IconButton(
+            key: const Key('search-batch-action'),
+            tooltip: '批量操作',
+            icon: const Icon(Icons.checklist_rtl_outlined),
+            onPressed: () => context.push('/records/batch?bookId=$bookId'),
+          ),
+          IconButton(
             key: const Key('search-filter-toggle'),
             icon: Badge(
               isLabelVisible: _hasActiveFilters,

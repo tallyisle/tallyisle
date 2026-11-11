@@ -10,7 +10,9 @@ import '../data/db/database.dart';
 import '../data/ledger/ledger_service.dart';
 import '../data/repo/ledger_queries.dart';
 import '../data/repo/search_queries.dart';
+import '../data/settings/app_settings_service.dart';
 import '../domain/model/codes.dart';
+import '../domain/rules/app_settings_rules.dart';
 import '../domain/rules/asset_overview.dart';
 import '../domain/rules/billing_period.dart';
 import '../domain/rules/calendar.dart';
@@ -94,11 +96,33 @@ final currentPeriodProvider = FutureProvider<BillingPeriod>((ref) async {
   return BillingPeriod.starting(now.year, now.month + offset, startDay);
 });
 
+/// Persistence service provider for System & Home Settings (`F-038`).
+final appSettingsServiceProvider = FutureProvider<AppSettingsService>((
+  ref,
+) async {
+  final db = await ref.watch(databaseProvider.future);
+  return AppSettingsService(db);
+});
+
+/// Reactive [AppSettings] stream from `ti_preference` (`'app_settings'`).
+final appSettingsProvider = StreamProvider<AppSettings>((ref) async* {
+  final svc = await ref.watch(appSettingsServiceProvider.future);
+  yield* svc.watchSettings();
+});
+
 final periodRecordsProvider = StreamProvider<List<LedgerRecord>>((ref) async* {
+  final includeBalanceAdjust =
+      ref.watch(appSettingsProvider).value?.showBalanceChangeRecordOnHome ??
+      false;
   final q = await ref.watch(queriesProvider.future);
   final bookId = await ref.watch(currentBookIdProvider.future);
   final period = await ref.watch(currentPeriodProvider.future);
-  yield* q.watchRecords(bookId, period.startMs, period.endMs);
+  yield* q.watchRecords(
+    bookId,
+    period.startMs,
+    period.endMs,
+    includeBalanceAdjust: includeBalanceAdjust,
+  );
 });
 
 final periodSummaryProvider = FutureProvider<IncomeExpense>((ref) async {

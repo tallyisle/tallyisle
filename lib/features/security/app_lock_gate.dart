@@ -188,20 +188,31 @@ class _AppLockGateState extends ConsumerState<AppLockGate>
           )
         else if (config.isConfigured && session.isLocked)
           Positioned.fill(
-            child: _LockOverlayScreen(
-              config: config,
-              enteredLength: _enteredPin.length,
-              verifying: _verifying,
-              message: _localMessage ?? session.feedbackMessage,
-              nowMs: ref.read(appLockClockProvider)(),
-              canUseBiometric:
-                  config.biometricEnabled &&
-                  (bioAvailAsync.value?.canAuthenticate ?? false),
-              onDigit: (d) => unawaited(_onDigitPressed(d, config)),
-              onBackspace: _onBackspace,
-              onClear: _onClear,
-              onBiometric: () => unawaited(_triggerBiometricUnlock()),
-              onForgotHelp: () => unawaited(_showForgotPinHelpDialog(context)),
+            child: Navigator(
+              pages: [
+                MaterialPage<void>(
+                  key: const ValueKey<String>('app_lock_shield_page'),
+                  child: Builder(
+                    builder: (navContext) => _LockOverlayScreen(
+                      config: config,
+                      enteredLength: _enteredPin.length,
+                      verifying: _verifying,
+                      message: _localMessage ?? session.feedbackMessage,
+                      nowMs: ref.read(appLockClockProvider)(),
+                      canUseBiometric:
+                          config.biometricEnabled &&
+                          (bioAvailAsync.value?.canAuthenticate ?? false),
+                      onDigit: (d) => unawaited(_onDigitPressed(d, config)),
+                      onBackspace: _onBackspace,
+                      onClear: _onClear,
+                      onBiometric: () => unawaited(_triggerBiometricUnlock()),
+                      onForgotHelp: () =>
+                          unawaited(_showForgotPinHelpDialog(navContext)),
+                    ),
+                  ),
+                ),
+              ],
+              onDidRemovePage: (_) {},
             ),
           ),
       ],

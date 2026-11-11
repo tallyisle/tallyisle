@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../app/providers.dart';
 import '../../data/db/database.dart';
@@ -273,6 +274,15 @@ class _CategoriesPageState extends ConsumerState<CategoriesPage>
     return Scaffold(
       appBar: AppBar(
         title: const Text('分类管理'),
+        actions: [
+          IconButton(
+            key: const Key('categories-transfer-action'),
+            tooltip: '分类导入导出与迁移',
+            icon: const Icon(Icons.import_export_outlined),
+            onPressed: () =>
+                context.push('/categories/transfer?bookId=$bookId'),
+          ),
+        ],
         bottom: TabBar(
           controller: _tabController,
           tabs: const [

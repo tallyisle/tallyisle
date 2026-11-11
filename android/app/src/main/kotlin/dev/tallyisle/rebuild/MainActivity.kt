@@ -13,19 +13,40 @@ import io.flutter.plugin.common.MethodChannel
 class MainActivity : FlutterActivity() {
     private var reminderChannel: MethodChannel? = null
     private var fileBridge: FileBridge? = null
+    private var biometricBridge: BiometricBridge? = null
+    private var automationBridge: AutomationBridge? = null
     private var pendingLaunchRoute: String? = null
     private var pendingPermissionResult: MethodChannel.Result? = null
+
+    private fun ensureAutomationBridge(): AutomationBridge =
+        automationBridge ?: AutomationBridge(this).also { automationBridge = it }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         ReminderNativeScheduler.ensureNotificationChannel(this)
-        captureLaunchRoute(intent, notifyFlutter = false)
+        val handledDeepLink = ensureAutomationBridge().captureIntent(
+            intent,
+            notifyFlutter = false,
+        )
+        if (handledDeepLink) {
+            intent?.removeExtra(ReminderNativeScheduler.EXTRA_LAUNCH_ROUTE)
+        } else {
+            captureLaunchRoute(intent, notifyFlutter = false)
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        captureLaunchRoute(intent, notifyFlutter = true)
+        val handledDeepLink = ensureAutomationBridge().captureIntent(
+            intent,
+            notifyFlutter = true,
+        )
+        if (handledDeepLink) {
+            intent.removeExtra(ReminderNativeScheduler.EXTRA_LAUNCH_ROUTE)
+        } else {
+            captureLaunchRoute(intent, notifyFlutter = true)
+        }
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -40,18 +61,29 @@ class MainActivity : FlutterActivity() {
 
         val bridge = fileBridge ?: FileBridge(this).also { fileBridge = it }
         bridge.attach(messenger)
+
+        val bio = biometricBridge ?: BiometricBridge(this).also { biometricBridge = it }
+        bio.attach(messenger)
+
+        ensureAutomationBridge().attach(messenger)
     }
 
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
         reminderChannel?.setMethodCallHandler(null)
         reminderChannel = null
         fileBridge?.detach()
+        biometricBridge?.detach()
+        automationBridge?.detach()
         super.cleanUpFlutterEngine(flutterEngine)
     }
 
     override fun onDestroy() {
         fileBridge?.shutdown()
         fileBridge = null
+        biometricBridge?.shutdown()
+        biometricBridge = null
+        automationBridge?.detach()
+        automationBridge = null
         super.onDestroy()
     }
 
