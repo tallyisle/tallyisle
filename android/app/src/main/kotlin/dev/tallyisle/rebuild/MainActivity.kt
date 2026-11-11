@@ -12,6 +12,7 @@ import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
     private var reminderChannel: MethodChannel? = null
+    private var fileBridge: FileBridge? = null
     private var pendingLaunchRoute: String? = null
     private var pendingPermissionResult: MethodChannel.Result? = null
 
@@ -29,18 +30,36 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        val messenger = flutterEngine.dartExecutor.binaryMessenger
         val channel = MethodChannel(
-            flutterEngine.dartExecutor.binaryMessenger,
+            messenger,
             ReminderNativeScheduler.CHANNEL_NAME,
         )
         channel.setMethodCallHandler(::handleMethodCall)
         reminderChannel = channel
+
+        val bridge = fileBridge ?: FileBridge(this).also { fileBridge = it }
+        bridge.attach(messenger)
     }
 
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
         reminderChannel?.setMethodCallHandler(null)
         reminderChannel = null
+        fileBridge?.detach()
         super.cleanUpFlutterEngine(flutterEngine)
+    }
+
+    override fun onDestroy() {
+        fileBridge?.shutdown()
+        fileBridge = null
+        super.onDestroy()
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (fileBridge?.onActivityResult(requestCode, resultCode, data) == true) {
+            return
+        }
+        super.onActivityResult(requestCode, resultCode, data)
     }
 
     private fun handleMethodCall(call: MethodCall, result: MethodChannel.Result) {
