@@ -1,12 +1,17 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
 import '../../data/db/database.dart';
 import '../../domain/rules/currency_rates.dart';
+import '../../domain/rules/online_rate_rules.dart';
 import '../common/common.dart';
+import 'currency_rate_providers.dart';
 
-/// Currencies and manual exchange rates (`/currencies`).
+/// Currencies, manual exchange rates, and optional privacy-first online rate
+/// sync (`/currencies`, `F-029`, `ADR-017`).
 class CurrenciesPage extends ConsumerStatefulWidget {
   const CurrenciesPage({super.key});
   @override
@@ -15,10 +20,103 @@ class CurrenciesPage extends ConsumerStatefulWidget {
 
 class _CurrenciesPageState extends ConsumerState<CurrenciesPage> {
   final ids = CommandIds();
+  int _completedGeneration = 0;
+  bool _syncing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_checkAutoSyncOnOpen());
+    });
+  }
+
+  Future<void> _checkAutoSyncOnOpen() async {
+    if (!mounted) return;
+    try {
+      final service = await ref.read(currencyServiceProvider.future);
+      if (!mounted) return;
+      final settings = await service.getOnlineRateSettings();
+      if (!mounted || !settings.shouldAutoSync(nowMs: service.db.nowMs())) {
+        return;
+      }
+      final provider = await ref.read(
+        exchangeRateProviderInstanceProvider.future,
+      );
+      if (!mounted) return;
+      await service.runAutoSyncIfNeeded(provider: provider);
+    } catch (_) {
+      // Silent background auto-sync never interrupts the user on transient errors.
+    }
+  }
 
   void _toast(String text) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+  }
+
+  Future<void> _saveOnlineSettings(OnlineRateSettings next) async {
+    try {
+      final service = await ref.read(currencyServiceProvider.future);
+      await service.saveOnlineRateSettings(
+        commandId: ids.forPayload([
+          'online-settings',
+          _completedGeneration,
+          next.toJson(),
+        ]),
+        settings: next,
+      );
+      _completedGeneration++;
+      ref.invalidate(onlineRateSettingsProvider);
+      ref.invalidate(exchangeRateProviderInstanceProvider);
+    } catch (e) {
+      _toast(safeMessage(e));
+    }
+  }
+
+  Future<void> _syncNow() async {
+    if (_syncing) return;
+    setState(() => _syncing = true);
+    try {
+      final service = await ref.read(currencyServiceProvider.future);
+      final provider = await ref.read(
+        exchangeRateProviderInstanceProvider.future,
+      );
+      final result = await service.syncOnlineRates(
+        commandId: ids.forPayload(['online-sync-now', _completedGeneration]),
+        provider: provider,
+      );
+      _completedGeneration++;
+      ref.invalidate(onlineRateSettingsProvider);
+      if (result.updatedCount == 0 && result.skippedCodes.isEmpty) {
+        _toast('当前暂无已添加的外币币种，请先添加外币后再同步。');
+      } else if (result.skippedCodes.isEmpty) {
+        _toast('已更新 ${result.updatedCount} 个外币汇率（来源：${result.sourceLabel}）');
+      } else {
+        _toast(
+          '已更新 ${result.updatedCount} 个币种，'
+          '${result.skippedCodes.length} 个自定义币种保留手动汇率',
+        );
+      }
+    } catch (e) {
+      _toast(safeMessage(e));
+    } finally {
+      if (mounted) {
+        setState(() => _syncing = false);
+      }
+    }
+  }
+
+  Future<void> _configureCustomSource(OnlineRateSettings current) async {
+    final nextUrl = await showDialog<String>(
+      context: context,
+      builder: (_) =>
+          _CustomRateSourceDialog(initialUrl: current.customEndpointUrl),
+    );
+    if (nextUrl == null) return;
+    await _saveOnlineSettings(current.copyWith(customEndpointUrl: nextUrl));
+    if (!mounted) return;
+    _toast(nextUrl.isEmpty ? '已恢复使用内置公共免密钥多源容灾' : '已保存自定义汇率源');
   }
 
   Future<void> _edit({Currency? existing, required Set<String> used}) async {
@@ -31,12 +129,20 @@ class _CurrenciesPageState extends ConsumerState<CurrenciesPage> {
     try {
       final service = await ref.read(currencyServiceProvider.future);
       await service.saveCurrency(
-        commandId: ids.forPayload(['save', code, name, symbol, price]),
+        commandId: ids.forPayload([
+          'save',
+          _completedGeneration,
+          code,
+          name,
+          symbol,
+          price,
+        ]),
         code: code,
         name: name,
         symbol: symbol,
         price: price,
       );
+      _completedGeneration++;
     } catch (e) {
       _toast(safeMessage(e));
     }
@@ -53,9 +159,10 @@ class _CurrenciesPageState extends ConsumerState<CurrenciesPage> {
     try {
       final service = await ref.read(currencyServiceProvider.future);
       await service.deleteCurrency(
-        commandId: ids.forPayload(['delete', c.code]),
+        commandId: ids.forPayload(['delete', _completedGeneration, c.code]),
         code: c.code,
       );
+      _completedGeneration++;
     } catch (e) {
       _toast(safeMessage(e));
     }
@@ -64,6 +171,10 @@ class _CurrenciesPageState extends ConsumerState<CurrenciesPage> {
   @override
   Widget build(BuildContext context) {
     final currencies = ref.watch(currenciesProvider);
+    final settings =
+        ref.watch(onlineRateSettingsProvider).value ??
+        OnlineRateSettings.defaults;
+
     return Scaffold(
       appBar: AppBar(title: const Text('币种与汇率')),
       floatingActionButton: FloatingActionButton.extended(
@@ -87,10 +198,7 @@ class _CurrenciesPageState extends ConsumerState<CurrenciesPage> {
         final used = {for (final c in list) c.code};
         return ListView(
           children: [
-            const Padding(
-              padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
-              child: Text('汇率由你手动维护（帐屿不联网获取汇率）。外币账户与外币账单都按这里的汇率折算成人民币统计。'),
-            ),
+            _buildOnlineRateCard(context, settings),
             for (final c in sorted)
               ListTile(
                 key: Key('currency-${c.code}'),
@@ -117,6 +225,188 @@ class _CurrenciesPageState extends ConsumerState<CurrenciesPage> {
           ],
         );
       }),
+    );
+  }
+
+  Widget _buildOnlineRateCard(
+    BuildContext context,
+    OnlineRateSettings settings,
+  ) {
+    final theme = Theme.of(context);
+    final lastSyncText = settings.lastSyncedAtMs > 0
+        ? '上次同步：${formatDateTime(DateTime.fromMillisecondsSinceEpoch(settings.lastSyncedAtMs))}'
+              '${settings.lastSyncSource.isNotEmpty ? ' · 来源：${settings.lastSyncSource}' : ''}'
+        : '上次同步：尚未执行在线同步';
+    final sourceSummary = settings.hasCustomEndpoint
+        ? '当前汇率源：自定义（${settings.customEndpointUrl}）'
+        : '当前汇率源：内置公共免密钥多源容灾';
+
+    return Card(
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SwitchListTile(
+            key: const Key('online-rate-enable-switch'),
+            title: const Text('联网获取汇率'),
+            subtitle: const Text(
+              '默认关闭，不联网获取任何数据；开启后支持一键刷新与每 24 小时自动同步。历史已记账单的折算快照不受影响。',
+            ),
+            value: settings.enabled,
+            onChanged: _syncing
+                ? null
+                : (enabled) =>
+                      _saveOnlineSettings(settings.copyWith(enabled: enabled)),
+          ),
+          if (!settings.enabled)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+              child: Text(
+                '$offlineExchangeRateCapabilityReason · 外币账户与新账单按下方手动汇率折算成人民币统计。',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+          if (settings.enabled) ...[
+            const Divider(height: 1),
+            SwitchListTile(
+              key: const Key('online-rate-auto-switch'),
+              title: const Text('自动同步（每 24 小时）'),
+              subtitle: const Text('距上次成功同步满 24 小时后自动静默刷新已添加的外币汇率'),
+              value: settings.autoSyncOnLaunch,
+              onChanged: _syncing
+                  ? null
+                  : (autoSync) => _saveOnlineSettings(
+                      settings.copyWith(autoSyncOnLaunch: autoSync),
+                    ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(sourceSummary, style: theme.textTheme.bodySmall),
+                  const SizedBox(height: 2),
+                  Text(
+                    lastSyncText,
+                    key: const Key('online-rate-last-sync-status'),
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  FilledButton.icon(
+                    key: const Key('online-rate-sync-now'),
+                    onPressed: _syncing ? null : _syncNow,
+                    icon: _syncing
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.sync, size: 18),
+                    label: Text(_syncing ? '同步中…' : '立即同步汇率'),
+                  ),
+                  OutlinedButton.icon(
+                    key: const Key('online-rate-source-btn'),
+                    onPressed: _syncing
+                        ? null
+                        : () => _configureCustomSource(settings),
+                    icon: const Icon(Icons.tune, size: 18),
+                    label: const Text('自定义汇率源'),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _CustomRateSourceDialog extends StatefulWidget {
+  const _CustomRateSourceDialog({required this.initialUrl});
+  final String initialUrl;
+
+  @override
+  State<_CustomRateSourceDialog> createState() =>
+      _CustomRateSourceDialogState();
+}
+
+class _CustomRateSourceDialogState extends State<_CustomRateSourceDialog> {
+  late final TextEditingController _urlController = TextEditingController(
+    text: widget.initialUrl,
+  );
+  String? _error;
+
+  @override
+  void dispose() {
+    _urlController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('自定义汇率源'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              '留空则使用内置公共免密钥多源容灾；填写 https:// 或 http:// 地址则优先请求该 CNY 基准 JSON 接口。',
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              key: const Key('online-rate-custom-url-input'),
+              controller: _urlController,
+              keyboardType: TextInputType.url,
+              decoration: InputDecoration(
+                labelText: 'JSON 接口地址（留空使用默认公共源）',
+                hintText: 'https://open.er-api.com/v6/latest/CNY',
+                errorText: _error,
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        if (_urlController.text.trim().isNotEmpty)
+          TextButton(
+            key: const Key('online-rate-reset-source'),
+            onPressed: () => Navigator.pop(context, ''),
+            child: const Text('恢复默认'),
+          ),
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          key: const Key('online-rate-save-source'),
+          onPressed: () {
+            try {
+              final validated = validateCustomRateEndpointUrl(
+                _urlController.text,
+              );
+              Navigator.pop(context, validated);
+            } catch (e) {
+              setState(() => _error = safeMessage(e));
+            }
+          },
+          child: const Text('保存'),
+        ),
+      ],
     );
   }
 }

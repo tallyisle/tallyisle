@@ -31,7 +31,8 @@ const presetCurrencies = <(String, String, String)>[
   ('AED', '阿联酋迪拉姆', 'AED'),
 ];
 
-const _rateScale = 12;
+/// Canonical fractional scale stored in `currency.rate_to_anchor` (12 decimals).
+const rateToAnchorScale = 12;
 
 String _trim(String s) {
   if (!s.contains('.')) return s;
@@ -40,9 +41,11 @@ String _trim(String s) {
   return t;
 }
 
-String _decimalString(BigInt coefficient, int scale) {
+/// Formats `coefficient / 10^scale` as a canonical decimal string with
+/// trailing fractional zeros stripped.
+String formatRateDecimal(BigInt coefficient, int scale) {
   final negative = coefficient.isNegative;
-  var digits = coefficient.abs().toString().padLeft(scale + 1, '0');
+  final digits = coefficient.abs().toString().padLeft(scale + 1, '0');
   final text = scale == 0
       ? digits
       : '${digits.substring(0, digits.length - scale)}.'
@@ -62,16 +65,16 @@ String rateToAnchorFromPrice(String price) {
   if (p.coefficient <= BigInt.zero) {
     throw const Failure(FailureCode.validation, '汇率须为正数');
   }
-  // 1 / (c / 10^s) = 10^s / c, expressed with _rateScale decimals.
+  // 1 / (c / 10^s) = 10^s / c, expressed with rateToAnchorScale decimals.
   final coefficient = divideRounded(
-    powerOfTen(p.scale + _rateScale),
+    powerOfTen(p.scale + rateToAnchorScale),
     p.coefficient,
     RoundingMode.halfUp,
   );
   if (coefficient == BigInt.zero) {
     throw const Failure(FailureCode.validation, '汇率过大');
   }
-  return _decimalString(coefficient, _rateScale);
+  return formatRateDecimal(coefficient, rateToAnchorScale);
 }
 
 /// Stored `rate_to_anchor` -> price of 1 unit in CNY, HALF_UP to 4 decimals.
@@ -83,7 +86,7 @@ String priceFromRateToAnchor(String rateToAnchor) {
     r.coefficient,
     RoundingMode.halfUp,
   );
-  return _decimalString(coefficient, 4);
+  return formatRateDecimal(coefficient, 4);
 }
 
 /// Builds the `extra_info.curr` snapshot for an income/expense bill entered as
