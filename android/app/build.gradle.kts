@@ -40,7 +40,10 @@ android {
     signingConfigs.getByName("debug") {
         val androidUser = System.getenv("ANDROID_USER_HOME")
         if (!androidUser.isNullOrBlank()) {
-            storeFile = file("$androidUser/debug.keystore")
+            val keystoreFile = file("$androidUser/debug.keystore")
+            if (keystoreFile.exists()) {
+                storeFile = keystoreFile
+            }
         }
     }
 }

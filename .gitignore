@@ -33,3 +33,12 @@ archive/*/evidence/
 # Local binary reference APK and packaged APK releases
 reference/*.apk
 release/
+
+# Local governance docs, AI instructions, read-only archives, reference & private seeds
+# (Backed up via cloud env-kit archive; excluded from public source repository)
+/AGENTS.md
+/docs/
+/archive/
+/reference/
+/tool/seeds/
+/.env-kit/
