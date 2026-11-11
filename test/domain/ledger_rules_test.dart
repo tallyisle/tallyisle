@@ -264,6 +264,21 @@ void main() {
       expect((p.year, p.month), (2025, 12));
     });
 
+    test('annual period, section keys, and elapsedDays (M3 shared rules)', () {
+      final mar = BillingPeriod.starting(2026, 3, 15);
+      expect(mar.monthlySection, '2026-3');
+      expect(mar.totalDays, 31);
+      expect(mar.elapsedDays(DateTime(2026, 3, 24, 12)), 10);
+      expect(mar.elapsedDays(DateTime(2026, 3, 14, 23)), 0);
+      expect(mar.elapsedDays(DateTime(2026, 5, 1)), 31);
+
+      final y = BillingPeriod.containingYear(DateTime(2026, 1, 5), 10);
+      expect(y.year, 2025);
+      expect(y.yearlySection, '2025');
+      expect(y.start, DateTime(2025, 1, 10));
+      expect(y.end, DateTime(2026, 1, 9, 23, 59, 59, 999));
+    });
+
     test('record type codes stay identical to the original', () {
       expect(RecordType.depositInterest, 17);
       expect(AssetType.credit, 6);
