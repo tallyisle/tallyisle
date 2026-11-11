@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Self-contained toolchain paths under /home/debian/Coding/toolchain.
+# Self-contained toolchain paths under <workspace>/toolchain.
 TALLYISLE_PROJECT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TALLYISLE_TOOLCHAIN="${TALLYISLE_TOOLCHAIN_ROOT:-/home/debian/Coding/toolchain}"
+TALLYISLE_WORKSPACE="$(cd "$TALLYISLE_PROJECT/.." && pwd)"
+TALLYISLE_TOOLCHAIN="${TALLYISLE_TOOLCHAIN_ROOT:-$TALLYISLE_WORKSPACE/toolchain}"
 export FLUTTER_ROOT="${TALLYISLE_FLUTTER_SDK:-$TALLYISLE_TOOLCHAIN/flutter-3.47.7}"
 if [[ -d "${TALLYISLE_JAVA_SDK:-$TALLYISLE_TOOLCHAIN/jdk-17}" ]]; then
   export JAVA_HOME="${TALLYISLE_JAVA_SDK:-$TALLYISLE_TOOLCHAIN/jdk-17}"
