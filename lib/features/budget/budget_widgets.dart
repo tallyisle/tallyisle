@@ -8,9 +8,10 @@ import 'budget_providers.dart';
 
 /// Overview card displayed on Home or Statistics page.
 class BudgetSummaryCard extends ConsumerStatefulWidget {
-  const BudgetSummaryCard({super.key, this.onTap});
+  const BudgetSummaryCard({super.key, this.onTap, this.hideWhenEmpty = false});
 
   final VoidCallback? onTap;
+  final bool hideWhenEmpty;
 
   @override
   ConsumerState<BudgetSummaryCard> createState() => _BudgetSummaryCardState();
@@ -37,7 +38,7 @@ class _BudgetSummaryCardState extends ConsumerState<BudgetSummaryCard> {
       if (service != null) {
         service.ensureAutoCarryoverIfNeeded(
           commandId:
-              'auto-carryover-${book.id}-${mode.value}-${period.monthlySection}',
+              'auto-carryover-${book.id}-${mode.value}-${mode.sectionFor(period)}',
           bookId: book.id,
           mode: mode,
           currentPeriod: period,
@@ -58,33 +59,38 @@ class _BudgetSummaryCardState extends ConsumerState<BudgetSummaryCard> {
     final overviewAsync = ref.watch(budgetOverviewProvider);
 
     return overviewAsync.when(
-      loading: () => const Card(
-        key: Key('budget_summary_card'),
-        margin: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        child: Padding(
-          padding: EdgeInsets.all(16),
-          child: Center(
-            child: SizedBox(
-              height: 24,
-              width: 24,
-              child: CircularProgressIndicator(strokeWidth: 2),
+      loading: () => widget.hideWhenEmpty
+          ? const SizedBox.shrink()
+          : const Card(
+              key: Key('budget_summary_card'),
+              margin: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Padding(
+                padding: EdgeInsets.all(16),
+                child: Center(
+                  child: SizedBox(
+                    height: 24,
+                    width: 24,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                ),
+              ),
             ),
-          ),
-        ),
-      ),
-      error: (e, _) => Card(
-        key: const Key('budget_summary_card'),
-        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Text('加载预算失败: ${safeMessage(e)}'),
-        ),
-      ),
+      error: (e, _) => widget.hideWhenEmpty
+          ? const SizedBox.shrink()
+          : Card(
+              key: const Key('budget_summary_card'),
+              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Text('加载预算失败: ${safeMessage(e)}'),
+              ),
+            ),
       data: (overview) {
         final totalBudget = overview.totalBudget;
         final totalUsage = overview.totalUsage;
 
         if (totalBudget == null || totalUsage == null) {
+          if (widget.hideWhenEmpty) return const SizedBox.shrink();
           // No budget set for current period
           return Card(
             key: const Key('budget_summary_card'),

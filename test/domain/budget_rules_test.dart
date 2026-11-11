@@ -423,6 +423,15 @@ void main() {
         totalBudget: null,
       );
       expect(hintNone, isNull);
+
+      // Income category (400, type=1) without saving budget does NOT fall back to expense total budget
+      final hintIncomeNoSaving = resolveRecordBudgetHint(
+        selectedCatId: 400,
+        categoryMap: categoryMap,
+        categoryBudgets: {101: usage101, 100: usage100},
+        totalBudget: usageTotal,
+      );
+      expect(hintIncomeNoSaving, isNull);
     });
 
     test('BudgetExtra JSON parsing and serialization', () {

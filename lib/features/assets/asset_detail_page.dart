@@ -166,7 +166,7 @@ String repayRoute(Asset card, BigInt amount) {
   ).toString();
 }
 
-enum _Action { edit, adjust, hide, unhide, settle, unsettle, delete }
+enum _Action { trend, edit, adjust, hide, unhide, settle, unsettle, delete }
 
 class _AssetMenu extends ConsumerStatefulWidget {
   const _AssetMenu({super.key, required this.asset});
@@ -188,6 +188,8 @@ class _AssetMenuState extends ConsumerState<_AssetMenu> {
     try {
       final service = await ref.read(ledgerServiceProvider.future);
       switch (action) {
+        case _Action.trend:
+          if (mounted) await context.push('/stats/trend?assetId=${a.id}');
         case _Action.edit:
           if (mounted) await context.push('/assets/${a.id}/edit');
         case _Action.adjust:
@@ -285,6 +287,11 @@ class _AssetMenuState extends ConsumerState<_AssetMenu> {
     return PopupMenuButton<_Action>(
       onSelected: (v) => _run(v),
       itemBuilder: (_) => [
+        const PopupMenuItem(
+          key: Key('menu-trend'),
+          value: _Action.trend,
+          child: Text('资产趋势'),
+        ),
         const PopupMenuItem(value: _Action.edit, child: Text('编辑账户')),
         const PopupMenuItem(
           key: Key('menu-adjust'),

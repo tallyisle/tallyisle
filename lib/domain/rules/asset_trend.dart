@@ -518,6 +518,7 @@ AssetTrendResult computeAssetTrend({
 }) {
   final targetAccounts = accounts.where(filter.matches).toList();
   final targetIds = targetAccounts.map((a) => a.id).toSet();
+  final accountById = {for (final a in accounts) a.id: a};
 
   final singleAccount =
       filter is AssetTrendFilterSingleAsset && targetAccounts.isNotEmpty
@@ -549,6 +550,7 @@ AssetTrendResult computeAssetTrend({
   final monthInflow = <String, BigInt>{};
   final monthOutflow = <String, BigInt>{};
   final monthHasRecords = <String, bool>{};
+  final accountMonthDelta = <String, Map<int, BigInt>>{};
   final recordYears = <int>{};
 
   for (final r in records) {
@@ -567,6 +569,12 @@ AssetTrendResult computeAssetTrend({
     var inflow = BigInt.zero;
     var outflow = BigInt.zero;
 
+    void addAcctDelta(int id, BigInt delta) {
+      if (delta == BigInt.zero || !targetIds.contains(id)) return;
+      final map = accountMonthDelta.putIfAbsent(key, () => <int, BigInt>{});
+      map[id] = (map[id] ?? BigInt.zero) + delta;
+    }
+
     switch (r.type) {
       case RecordType.expense:
       case RecordType.installmentPrincipal:
@@ -583,6 +591,7 @@ AssetTrendResult computeAssetTrend({
           } else {
             inflow += -amt;
           }
+          addAcctDelta(r.assetId, -amt);
         }
 
       case RecordType.income:
@@ -600,6 +609,7 @@ AssetTrendResult computeAssetTrend({
           } else {
             outflow += -amt;
           }
+          addAcctDelta(r.assetId, amt);
         }
 
       case RecordType.transfer:
@@ -612,6 +622,7 @@ AssetTrendResult computeAssetTrend({
               isFromSide: true,
             );
             outflow += amt;
+            addAcctDelta(r.fromAssetId, -amt);
           }
           if (targetIds.contains(r.toAssetId)) {
             final amt = _selectTrendAmount(
@@ -621,6 +632,7 @@ AssetTrendResult computeAssetTrend({
               isFromSide: false,
             );
             inflow += amt;
+            addAcctDelta(r.toAssetId, amt);
           }
         }
 
@@ -638,6 +650,7 @@ AssetTrendResult computeAssetTrend({
           } else {
             inflow += -amt;
           }
+          addAcctDelta(payingId, -amt);
         }
 
       case RecordType.balanceAdjust:
@@ -645,7 +658,7 @@ AssetTrendResult computeAssetTrend({
         if (targetIds.contains(targetId)) {
           final amt = rates.convert(
             r.moneyMinor,
-            singleAccount?.currency,
+            accountById[targetId]?.currency,
             targetCurrency,
           );
           if (amt >= BigInt.zero) {
@@ -653,6 +666,7 @@ AssetTrendResult computeAssetTrend({
           } else {
             outflow += -amt;
           }
+          addAcctDelta(targetId, amt);
         }
 
       case RecordType.borrowIn:
@@ -665,6 +679,7 @@ AssetTrendResult computeAssetTrend({
             preferAssetSide: true,
           );
           inflow += amt;
+          addAcctDelta(r.toAssetId, amt);
         }
         if (targetIds.contains(r.fromAssetId)) {
           final amt = _selectTrendAmount(
@@ -674,6 +689,7 @@ AssetTrendResult computeAssetTrend({
             preferAssetSide: false,
           );
           outflow += amt;
+          addAcctDelta(r.fromAssetId, -amt);
         }
 
       case RecordType.lendOut:
@@ -686,6 +702,7 @@ AssetTrendResult computeAssetTrend({
             preferAssetSide: false,
           );
           outflow += amt;
+          addAcctDelta(r.fromAssetId, -amt);
         }
         if (targetIds.contains(r.toAssetId)) {
           final amt = _selectTrendAmount(
@@ -695,6 +712,7 @@ AssetTrendResult computeAssetTrend({
             preferAssetSide: true,
           );
           inflow += amt;
+          addAcctDelta(r.toAssetId, amt);
         }
 
       case RecordType.debtInterest:
@@ -707,6 +725,7 @@ AssetTrendResult computeAssetTrend({
             preferAssetSide: false,
           );
           outflow += amt;
+          addAcctDelta(r.fromAssetId, -amt);
         } else if (r.subType == RecordDirection.income &&
             targetIds.contains(r.toAssetId)) {
           final amt = _selectTrendAmount(
@@ -716,6 +735,7 @@ AssetTrendResult computeAssetTrend({
             preferAssetSide: true,
           );
           inflow += amt;
+          addAcctDelta(r.toAssetId, amt);
         }
 
       case RecordType.reimburseDiff:
@@ -727,13 +747,18 @@ AssetTrendResult computeAssetTrend({
           );
           if (r.subType == RecordDirection.expense) {
             outflow += amt;
+            addAcctDelta(r.assetId, -amt);
           } else if (r.subType == RecordDirection.income) {
             inflow += amt;
+            addAcctDelta(r.assetId, amt);
           }
         }
 
       case RecordType.billInstallment:
-        if (targetIds.contains(r.toAssetId) || targetIds.contains(r.assetId)) {
+        final instId = targetIds.contains(r.toAssetId)
+            ? r.toAssetId
+            : r.assetId;
+        if (targetIds.contains(instId)) {
           final amt = _selectTrendAmount(
             record: r,
             targetCurrency: targetCurrency,
@@ -745,6 +770,7 @@ AssetTrendResult computeAssetTrend({
           } else {
             outflow += -amt;
           }
+          addAcctDelta(instId, amt);
         }
 
       case RecordType.advanceIncome:
@@ -830,17 +856,61 @@ AssetTrendResult computeAssetTrend({
     }
   }
 
-  var cur = anchorMinor;
   final monthBalance = <String, BigInt>{};
 
-  for (var i = allKeys.length - 1; i >= 0; i--) {
-    final key = allKeys[i];
-    if (monthHasRecords[key] == true) {
-      monthBalance[key] = cur;
-      final netFlow =
-          (monthInflow[key] ?? BigInt.zero) -
-          (monthOutflow[key] ?? BigInt.zero);
-      cur = cur - netFlow;
+  if (explicitAnchorMinor != null || filter is AssetTrendFilterSingleAsset) {
+    var cur = anchorMinor;
+    final flipLiabilitySign =
+        perspective == AssetTrendPerspective.totalLiability &&
+        filter is! AssetTrendFilterSingleAsset;
+
+    for (var i = allKeys.length - 1; i >= 0; i--) {
+      final key = allKeys[i];
+      if (monthHasRecords[key] == true) {
+        monthBalance[key] = cur;
+        final netFlow =
+            (monthInflow[key] ?? BigInt.zero) -
+            (monthOutflow[key] ?? BigInt.zero);
+        cur = flipLiabilitySign ? cur + netFlow : cur - netFlow;
+      }
+    }
+  } else {
+    final acctSigned = <int, BigInt>{
+      for (final a in targetAccounts)
+        a.id: (a.type == AssetType.debt && a.subType == AssetType.debtBorrow)
+            ? -rates.convert(a.balanceMinor, a.currency, targetCurrency)
+            : rates.convert(a.balanceMinor, a.currency, targetCurrency),
+    };
+
+    BigInt snapshotForPerspective() {
+      var pos = BigInt.zero;
+      var liab = BigInt.zero;
+      for (final v in acctSigned.values) {
+        if (v > BigInt.zero) {
+          pos += v;
+        } else if (v < BigInt.zero) {
+          liab += -v;
+        }
+      }
+      return switch (perspective) {
+        AssetTrendPerspective.netWorth => pos - liab,
+        AssetTrendPerspective.totalAsset => pos,
+        AssetTrendPerspective.totalLiability => liab,
+      };
+    }
+
+    for (var i = allKeys.length - 1; i >= 0; i--) {
+      final key = allKeys[i];
+      if (monthHasRecords[key] == true) {
+        monthBalance[key] = snapshotForPerspective();
+        final deltas = accountMonthDelta[key];
+        if (deltas != null) {
+          for (final entry in deltas.entries) {
+            acctSigned[entry.key] =
+                (acctSigned[entry.key] ?? BigInt.zero) - entry.value;
+          }
+        }
+      }
     }
   }
 

@@ -352,5 +352,9 @@ BudgetUsage? resolveRecordBudgetHint({
     if (parentBudget != null) return parentBudget;
   }
 
+  if (node != null && node.type != RecordDirection.expense) {
+    return null;
+  }
+
   return totalBudget;
 }

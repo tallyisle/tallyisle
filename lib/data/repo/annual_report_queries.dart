@@ -57,12 +57,16 @@ final class AnnualReportQueries {
         'SELECT '
         '  r.record_id, r.type, r.sub_type, r.money_minor, r.discount_minor, '
         '  r.extra_info, r.rel_info, r.exclude_ex_in, r.exclude_budget, '
-        '  r.record_time, r.account_book_id, r.record_cat_id, '
+        '  r.record_time, r.account_book_id, '
+        '  CASE WHEN c.parent_cat_id IS NOT NULL AND c.parent_cat_id != -1 AND pc.id IS NOT NULL '
+        '       THEN pc.id ELSE r.record_cat_id END AS effective_cat_id, '
         '  r.asset_id, r.from_asset_id, r.to_asset_id, '
-        '  c.name AS category_name, c.icon AS category_icon, '
+        '  COALESCE(pc.name, c.name) AS category_name, '
+        '  COALESCE(pc.icon, c.icon) AS category_icon, '
         '  COALESCE(a.name, fa.name, ta.name) AS asset_name '
         'FROM record r '
         'LEFT JOIN record_category c ON r.record_cat_id = c.id '
+        'LEFT JOIN record_category pc ON c.parent_cat_id = pc.id AND c.parent_cat_id != -1 '
         'LEFT JOIN asset a ON r.asset_id = a.id '
         'LEFT JOIN asset fa ON r.from_asset_id = fa.id '
         'LEFT JOIN asset ta ON r.to_asset_id = ta.id '
@@ -138,7 +142,7 @@ final class AnnualReportQueries {
       excludeBudget: row.read<bool>('exclude_budget'),
       recordTime: row.read<int>('record_time'),
       bookId: row.read<int>('account_book_id'),
-      categoryId: row.read<int>('record_cat_id'),
+      categoryId: row.read<int>('effective_cat_id'),
       categoryName: row.readNullable<String>('category_name'),
       categoryIcon: row.readNullable<String>('category_icon'),
       assetId: effectiveAssetId,

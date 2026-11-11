@@ -6,6 +6,7 @@ import '../../app/providers.dart';
 import '../../data/db/database.dart';
 import '../../domain/model/codes.dart';
 import '../../domain/rules/income_expense.dart';
+import '../budget/budget_widgets.dart';
 import '../common/common.dart';
 import '../records/record_labels.dart';
 
@@ -137,6 +138,13 @@ class _HomeBody extends ConsumerWidget {
         SliverToBoxAdapter(
           child: _SummaryCard(summary.value ?? IncomeExpense.zero),
         ),
+        if (ref.watch(periodOffsetProvider) == 0)
+          SliverToBoxAdapter(
+            child: BudgetSummaryCard(
+              hideWhenEmpty: true,
+              onTap: () => context.push('/budget'),
+            ),
+          ),
         ...switch (records) {
           AsyncData(:final value) when value.isEmpty => [
             const SliverFillRemaining(

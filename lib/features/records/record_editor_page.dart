@@ -13,6 +13,7 @@ import '../../domain/ledger/record_relations.dart';
 import '../../domain/model/codes.dart';
 import '../../domain/rules/asset_overview.dart' show normalizeCurrency;
 import '../../domain/rules/currency_rates.dart';
+import '../budget/budget_widgets.dart';
 import '../common/common.dart';
 
 /// Original keyboard upper bound (ledger-catalog §5).
@@ -370,13 +371,30 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
       child: Scaffold(
         appBar: AppBar(title: Text(editing ? '编辑账单' : '记一笔')),
         bottomNavigationBar: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-            child: FilledButton(
-              key: const Key('save'),
-              onPressed: busy || loading ? null : _submit,
-              child: Text(busy ? '保存中…' : '保存'),
-            ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (bookId != null &&
+                  categoryId != null &&
+                  (type == RecordType.expense ||
+                      type == RecordType.income ||
+                      type == RecordType.reimbursable))
+                RecordBudgetHintBar(
+                  bookId: bookId,
+                  recordTime: time.millisecondsSinceEpoch,
+                  categoryId: categoryId!,
+                  excludeBudget: excludeBudget,
+                ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                child: FilledButton(
+                  key: const Key('save'),
+                  onPressed: busy || loading ? null : _submit,
+                  child: Text(busy ? '保存中…' : '保存'),
+                ),
+              ),
+            ],
           ),
         ),
         body: loading

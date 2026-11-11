@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tallyisle/app/providers.dart';
 import 'package:tallyisle/data/db/database.dart';
+import 'package:tallyisle/data/repo/annual_report_queries.dart';
+import 'package:tallyisle/domain/model/codes.dart';
 import 'package:tallyisle/features/stats/annual_report_page.dart';
 
 void main() {
@@ -264,6 +266,64 @@ void main() {
       await tester.pumpWidget(const SizedBox());
       await settle(tester);
       await tester.pump(const Duration(seconds: 1));
+    },
+  );
+
+  test(
+    'AnnualReportQueries rolls secondary category expenses up to primary category (R6)',
+    () async {
+      final db = AppDatabase(NativeDatabase.memory());
+      addTearDown(db.close);
+
+      // Insert primary category 500 ('餐饮美食') and child subcategory 501 ('火锅', parentCatId=500)
+      await db
+          .into(db.recordCategories)
+          .insert(
+            RecordCategoriesCompanion.insert(
+              id: const Value(500),
+              name: '餐饮美食',
+              icon: const Value('food'),
+              type: RecordDirection.expense,
+              accountBookId: 1,
+              parentCatId: const Value(-1),
+              sort: const Value(1),
+            ),
+          );
+      await db
+          .into(db.recordCategories)
+          .insert(
+            RecordCategoriesCompanion.insert(
+              id: const Value(501),
+              name: '火锅',
+              icon: const Value('hotpot'),
+              type: RecordDirection.expense,
+              accountBookId: 1,
+              parentCatId: const Value(500),
+              sort: const Value(2),
+            ),
+          );
+
+      await db
+          .into(db.records)
+          .insert(
+            RecordsCompanion.insert(
+              recordId: 'rec-subcat-1',
+              type: RecordType.expense,
+              moneyMinor: BigInt.from(18800),
+              recordTime: DateTime(2026, 4, 12, 19, 0).millisecondsSinceEpoch,
+              accountBookId: 1,
+              recordCatId: const Value(501),
+            ),
+          );
+
+      final report = await AnnualReportQueries(
+        db,
+      ).watchAnnualReport(year: 2026, startDay: 1, bookId: 1).first;
+
+      expect(report.topExpenseCategories, hasLength(1));
+      expect(report.topExpenseCategories.first.categoryId, 500);
+      expect(report.topExpenseCategories.first.categoryName, '餐饮美食');
+      expect(report.topExpenseCategories.first.amount, BigInt.from(18800));
     },
   );
 }

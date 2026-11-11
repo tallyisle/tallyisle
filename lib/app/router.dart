@@ -5,6 +5,7 @@ import '../features/assets/asset_detail_page.dart';
 import '../features/assets/asset_editor_page.dart';
 import '../features/assets/assets_page.dart';
 import '../features/books/books_page.dart';
+import '../features/budget/budget_page.dart';
 import '../features/calendar/calendar_page.dart';
 import '../features/categories/categories_page.dart';
 import '../features/currencies/currencies_page.dart';
@@ -13,6 +14,10 @@ import '../features/me/me_page.dart';
 import '../features/records/record_detail_page.dart';
 import '../features/records/record_editor_page.dart';
 import '../features/search/search_page.dart';
+import '../features/stats/annual_report_page.dart';
+import '../features/stats/asset_trend_page.dart';
+import '../features/stats/category_stats_page.dart';
+import '../features/stats/stats_page.dart';
 import '../features/tags/tags_page.dart';
 
 /// Semantic routes (ADR-015). Mapping to the original app's 73 routes is kept
@@ -28,6 +33,11 @@ GoRouter buildRouter() => GoRouter(
         ),
         StatefulShellBranch(
           routes: [
+            GoRoute(path: '/stats', builder: (_, _) => const StatsPage()),
+          ],
+        ),
+        StatefulShellBranch(
+          routes: [
             GoRoute(path: '/assets', builder: (_, _) => const AssetsPage()),
           ],
         ),
@@ -35,6 +45,36 @@ GoRouter buildRouter() => GoRouter(
           routes: [GoRoute(path: '/me', builder: (_, _) => const MePage())],
         ),
       ],
+    ),
+    GoRoute(path: '/budget', builder: (_, _) => const BudgetPage()),
+    GoRoute(
+      path: '/stats/category',
+      builder: (_, _) => const CategoryStatsPage(),
+    ),
+    GoRoute(
+      path: '/stats/category/:id',
+      builder: (_, state) => CategoryRouteDrilldownPage(
+        categoryId: int.parse(state.pathParameters['id']!),
+      ),
+    ),
+    GoRoute(
+      path: '/stats/trend',
+      builder: (_, state) => AssetTrendPage(
+        initialAssetId: int.tryParse(
+          state.uri.queryParameters['assetId'] ?? '',
+        ),
+      ),
+    ),
+    GoRoute(
+      path: '/stats/annual',
+      builder: (context, state) {
+        final q = state.uri.queryParameters;
+        return AnnualReportPage(
+          initialYear: int.tryParse(q['year'] ?? ''),
+          initialBookId: int.tryParse(q['bookId'] ?? ''),
+          onRecordTap: (id) => context.push('/record/$id'),
+        );
+      },
     ),
     GoRoute(
       path: '/record/new',
@@ -98,6 +138,7 @@ class _Shell extends StatelessWidget {
           shell.goBranch(i, initialLocation: i == shell.currentIndex),
       destinations: const [
         NavigationDestination(icon: Icon(Icons.receipt_long), label: '明细'),
+        NavigationDestination(icon: Icon(Icons.pie_chart_outline), label: '统计'),
         NavigationDestination(
           icon: Icon(Icons.account_balance_wallet),
           label: '资产',

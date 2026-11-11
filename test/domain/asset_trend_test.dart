@@ -530,5 +530,84 @@ void main() {
       );
       expect(k3, '2026-01');
     });
+
+    test(
+      'Perspective consistency: netWorth == totalAsset - totalLiability across historical backward walk & multi-currency balanceAdjust',
+      () {
+        // Bank 101: 1000 CNY; USD Savings 103: 100 USD (714.29 CNY); Credit 104: -200 CNY
+        final accounts = [
+          acc(101, '储蓄卡', 1000),
+          acc(103, '美元储蓄', 100, currency: 'USD'),
+          acc(104, '信用卡', -200, type: AssetType.credit),
+        ];
+
+        // In 2026-03:
+        // - Swiped credit card 104 for 50 CNY expense (liability grew from 150 -> 200)
+        // - Paid credit card 104 100 CNY from bank 101 (before that, 101 was 1100 and 104 was -250!)
+        // - Balance adjust +10 USD (+71.43 CNY) on USD account 103
+        final records = [
+          TrendRecord(
+            id: 'R_INIT',
+            type: RecordType.income,
+            moneyMinor: y(500),
+            recordTime: DateTime(2026, 1, 10).millisecondsSinceEpoch,
+            assetId: 101,
+          ),
+          TrendRecord(
+            id: 'R_CC_EXP',
+            type: RecordType.expense,
+            moneyMinor: y(50),
+            recordTime: DateTime(2026, 3, 5).millisecondsSinceEpoch,
+            assetId: 104,
+          ),
+          TrendRecord(
+            id: 'R_CC_REPAY',
+            type: RecordType.transfer,
+            moneyMinor: y(100),
+            recordTime: DateTime(2026, 3, 10).millisecondsSinceEpoch,
+            fromAssetId: 101,
+            toAssetId: 104,
+          ),
+          TrendRecord(
+            id: 'R_USD_ADJ',
+            type: RecordType.balanceAdjust,
+            moneyMinor: y(10), // +10 USD
+            recordTime: DateTime(2026, 3, 15).millisecondsSinceEpoch,
+            fromAssetId: 103,
+          ),
+        ];
+
+        AssetTrendResult run(AssetTrendPerspective p) => computeAssetTrend(
+          accounts: accounts,
+          records: records,
+          rates: rates,
+          filter: const AssetTrendFilter.allEffective(),
+          perspective: p,
+          selectedYear: 2026,
+          referenceDate: DateTime(2026, 3, 31),
+        );
+
+        final netRes = run(AssetTrendPerspective.netWorth);
+        final assetRes = run(AssetTrendPerspective.totalAsset);
+        final liabRes = run(AssetTrendPerspective.totalLiability);
+
+        // End of 2026-03: posAsset = 1000 + 714.29 = 1714.29, liab = 200, net = 1514.29
+        expect(assetRes.chartPoints[2].balanceMinor, y(1714.29));
+        expect(liabRes.chartPoints[2].balanceMinor, y(200));
+        expect(netRes.chartPoints[2].balanceMinor, y(1514.29));
+
+        // End of 2026-02 (before March records):
+        // Bank 101 was 1000 + 100 = 1100
+        // USD 103 was 714.29 - 71.43 (10 USD converted) = 642.86
+        // Credit 104 was -200 + 50 (undo expense) - 100 (undo repayment) = -250 -> liab = 250!
+        expect(liabRes.chartPoints[1].balanceMinor, y(250));
+        expect(assetRes.chartPoints[1].balanceMinor, y(1742.86));
+        expect(
+          netRes.chartPoints[1].balanceMinor,
+          assetRes.chartPoints[1].balanceMinor -
+              liabRes.chartPoints[1].balanceMinor,
+        );
+      },
+    );
   });
 }

@@ -944,8 +944,8 @@ class BudgetDrilldownPage extends ConsumerWidget {
                                 overflow: TextOverflow.ellipsis,
                               ),
                             ),
-                          ],
-                          const Spacer(),
+                          ] else
+                            const Spacer(),
                           Text(
                             r.moneyMinor.isNegative
                                 ? '-¥${formatMinor(-r.moneyMinor)}'
