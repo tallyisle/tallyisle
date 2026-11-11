@@ -1,24 +1,29 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
 import '../../core/failure.dart';
 import '../../data/migration/cross_migration_service.dart';
-import '../../domain/rules/ios_migration_rules.dart';
+import '../../domain/rules/penny_backup.dart';
 import '../../platform/files.dart';
 import '../common/common.dart';
+import '../penny_import/penny_import_providers.dart';
 import '../reminder/reminder_providers.dart';
 import 'migration_providers.dart';
 
-/// Cross-platform iOS migration (`.ya2i` export / `.yi2a` import) and LAN
-/// `ServerBackup.zip` / `.db` restore page (`F-035`, `docs/modules/ios-migration.md`).
+/// Unified one-way legacy original-app import page (`F-035`,
+/// `docs/modules/ios-migration.md` & `docs/modules/import-original-backup.md`):
+/// - Original Android encrypted backup (`.penny` / `.yy`)
+/// - Original iOS migration package (`.yi2a`, including external share intent)
+/// - Original LAN transfer archive (`ServerBackup.zip` / bare SQLite `.db`)
 class MigrationPage extends ConsumerStatefulWidget {
   const MigrationPage({super.key, this.initialSharedYi2a});
 
-  /// Optional `.yi2a` payload received from an external app share intent (§1.2).
+  /// Optional `.yi2a` payload received from an external app share intent (§1.3).
   final SelectedBytes? initialSharedYi2a;
 
   @override
@@ -27,6 +32,8 @@ class MigrationPage extends ConsumerStatefulWidget {
 
 class _MigrationPageState extends ConsumerState<MigrationPage> {
   final CommandIds _commandIds = CommandIds();
+  int _pickSession = 0;
+  bool _inFlow = false;
   bool _busy = false;
   bool _handledInitialShare = false;
   String? _statusMessage;
@@ -42,6 +49,11 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
         unawaited(_handleSharedYi2a(widget.initialSharedYi2a!));
       });
     }
+  }
+
+  void _setBusy(bool value) {
+    if (!mounted || _busy == value) return;
+    setState(() => _busy = value);
   }
 
   void _setStatus(String message, {required bool isError}) {
@@ -67,34 +79,68 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
       ..invalidate(reminderCountProvider);
   }
 
-  Future<void> _exportYa2i({required bool share}) async {
-    if (_busy) return;
-    setState(() => _busy = true);
+  Future<PennyPickedFile?> _pickPennyFile() async {
+    final picker = ref.read(pennyFilePickerProvider);
+    if (!identical(picker, pickPennyBackupFile)) {
+      return picker();
+    }
+    final fileAccess = ref.read(migrationFileAccessProvider);
     try {
-      final service = await ref.read(crossMigrationServiceProvider.future);
-      final fileAccess = ref.read(migrationFileAccessProvider);
-      final bytes = await service.exportYa2iBytes();
-
-      if (share) {
-        if (fileAccess.shareCapability.state == CapabilityState.available) {
-          await fileAccess.shareBytes(
-            defaultYa2iExportFileName,
-            bytes,
-            mimeType: 'application/json',
-            subject: '帐屿跨端迁移文件 (.ya2i)',
-          );
-          _setStatus('已生成 $defaultYa2iExportFileName 并调起系统分享', isError: false);
-          return;
-        }
-      }
-
-      await fileAccess.saveBytes(
-        defaultYa2iExportFileName,
-        bytes,
-        mimeType: 'application/json',
+      final selected = await fileAccess.pickBytes(
+        allowedExtensions: const <String>['penny', 'yy'],
       );
+      return PennyPickedFile(name: selected.name, bytes: selected.bytes);
+    } on Failure catch (f) {
+      if (f.code == FailureCode.cancelled) return null;
+      rethrow;
+    }
+  }
+
+  Future<void> _pickAndImportPenny() async {
+    if (_inFlow) return;
+    _inFlow = true;
+    final sessionId = ++_pickSession;
+    _setBusy(true);
+    try {
+      final picked = await _pickPennyFile();
+      if (picked == null || !mounted) return;
+
+      final service = await ref.read(pennyImportServiceProvider.future);
+      final preview = await service.previewPenny(
+        fileName: picked.name,
+        bytes: picked.bytes,
+      );
+      if (!mounted) return;
+
+      _setBusy(false);
+      final confirmed = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => _PennyConfirmDialog(
+          key: const Key('penny_preview_dialog'),
+          preview: preview,
+        ),
+      );
+      if (confirmed != true || !mounted) return;
+
+      _setBusy(true);
+      final digest = sha256.convert(picked.bytes).toString();
+      final commandId = _commandIds.forPayload([
+        'penny-import-ui-v1',
+        sessionId,
+        picked.name,
+        digest,
+      ]);
+      final result = await service.importPenny(
+        commandId: commandId,
+        fileName: picked.name,
+        bytes: picked.bytes,
+      );
+      _refreshProviders();
       _setStatus(
-        '已导出跨端迁移文件 $defaultYa2iExportFileName（${bytes.length} 字节）',
+        '原版 Android 备份导入完成：已切换至「${result.preview.targetBookName}」，共恢复 '
+        '${result.preview.bookCount} 个账本、${result.preview.assetCount} 个账户、'
+        '${result.preview.recordCount} 条账单',
         isError: false,
       );
     } on Failure catch (f) {
@@ -103,13 +149,16 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
     } catch (e) {
       _setStatus(safeMessage(e), isError: true);
     } finally {
-      if (mounted) setState(() => _busy = false);
+      _inFlow = false;
+      _setBusy(false);
     }
   }
 
   Future<void> _handleSharedYi2a(SelectedBytes selected) async {
-    if (_busy) return;
-    setState(() => _busy = true);
+    if (_inFlow) return;
+    _inFlow = true;
+    final sessionId = ++_pickSession;
+    _setBusy(true);
     try {
       final service = await ref.read(crossMigrationServiceProvider.future);
       final preview = service.preflightYi2a(
@@ -120,6 +169,7 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
       await _confirmAndApplyPreview(
         service: service,
         preview: preview,
+        sessionId: sessionId,
         dialogKey: const Key('yi2a_confirm_dialog'),
       );
     } on Failure catch (f) {
@@ -128,13 +178,16 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
     } catch (e) {
       _setStatus(safeMessage(e), isError: true);
     } finally {
-      if (mounted) setState(() => _busy = false);
+      _inFlow = false;
+      _setBusy(false);
     }
   }
 
   Future<void> _pickAndImportYi2a() async {
-    if (_busy) return;
-    setState(() => _busy = true);
+    if (_inFlow) return;
+    _inFlow = true;
+    final sessionId = ++_pickSession;
+    _setBusy(true);
     try {
       final fileAccess = ref.read(migrationFileAccessProvider);
       final selected = await fileAccess.pickBytes();
@@ -147,6 +200,7 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
       await _confirmAndApplyPreview(
         service: service,
         preview: preview,
+        sessionId: sessionId,
         dialogKey: const Key('yi2a_confirm_dialog'),
       );
     } on Failure catch (f) {
@@ -155,13 +209,16 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
     } catch (e) {
       _setStatus(safeMessage(e), isError: true);
     } finally {
-      if (mounted) setState(() => _busy = false);
+      _inFlow = false;
+      _setBusy(false);
     }
   }
 
   Future<void> _pickAndRestoreLanBackup() async {
-    if (_busy) return;
-    setState(() => _busy = true);
+    if (_inFlow) return;
+    _inFlow = true;
+    final sessionId = ++_pickSession;
+    _setBusy(true);
     try {
       final fileAccess = ref.read(migrationFileAccessProvider);
       final selected = await fileAccess.pickBytes(
@@ -180,11 +237,13 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
           await _confirmAndApplyPreview(
             service: service,
             preview: preview,
+            sessionId: sessionId,
             dialogKey: const Key('lan_confirm_dialog'),
           );
           return;
         case LanInspectPasswordRequired():
         case LanInspectWrongPassword():
+          _setBusy(false);
           preview = await showDialog<MigrationPreview>(
             context: context,
             barrierDismissible: false,
@@ -200,6 +259,7 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
       await _confirmAndApplyPreview(
         service: service,
         preview: preview,
+        sessionId: sessionId,
         dialogKey: const Key('lan_confirm_dialog'),
       );
     } on Failure catch (f) {
@@ -208,15 +268,18 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
     } catch (e) {
       _setStatus(safeMessage(e), isError: true);
     } finally {
-      if (mounted) setState(() => _busy = false);
+      _inFlow = false;
+      _setBusy(false);
     }
   }
 
   Future<void> _confirmAndApplyPreview({
     required CrossMigrationService service,
     required MigrationPreview preview,
+    required int sessionId,
     required Key dialogKey,
   }) async {
+    _setBusy(false);
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) =>
@@ -224,8 +287,10 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
     );
     if (confirmed != true || !mounted) return;
 
+    _setBusy(true);
     final commandId = _commandIds.forPayload([
       preview.sourceKind.name,
+      sessionId,
       preview.fileName,
       preview.totalEntityCount,
       preview.recordCount,
@@ -237,8 +302,8 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
     );
     _refreshProviders();
     final kindLabel = preview.sourceKind == MigrationSourceKind.yi2a
-        ? 'iOS 跨端迁移导入完成'
-        : '局域网备份恢复完成';
+        ? '原版 iOS 迁移包导入完成'
+        : '原版局域网备份恢复完成';
     _setStatus(
       '$kindLabel：共恢复 ${applied.bookCount} 个账本、${applied.assetCount} 个账户、${applied.recordCount} 条账单',
       isError: false,
@@ -252,22 +317,17 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
 
     return Scaffold(
       key: const Key('migration_page'),
-      appBar: AppBar(title: const Text('跨端迁移与局域网恢复')),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
+      appBar: AppBar(title: const Text('从旧软件导入')),
+      body: Column(
         children: [
           if (_busy)
-            const Padding(
-              padding: EdgeInsets.only(bottom: 12),
-              child: LinearProgressIndicator(
-                key: Key('migration_progress_bar'),
-              ),
-            ),
+            const LinearProgressIndicator(key: Key('migration_progress_bar')),
           if (_statusMessage != null)
             Padding(
-              padding: const EdgeInsets.only(bottom: 12),
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
               child: Card(
                 key: const Key('migration_status_banner'),
+                margin: EdgeInsets.zero,
                 color: _statusIsError
                     ? theme.colorScheme.errorContainer
                     : theme.colorScheme.secondaryContainer,
@@ -300,128 +360,268 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
                 ),
               ),
             ),
-          summaryAsync.when(
-            data: (summary) => Card(
-              key: const Key('migration_local_summary_card'),
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('当前本地数据概况', style: theme.textTheme.titleMedium),
-                    const SizedBox(height: 8),
-                    Text(
-                      '账本 ${summary.bookCount} · 账户 ${summary.assetCount} · 账单 ${summary.recordCount} · 便签 ${summary.noteCount}',
-                      key: const Key('migration_local_summary_text'),
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                // Cross-platform schema unity & legacy-only guidance banner
+                Card(
+                  key: const Key('migration_unity_banner_card'),
+                  color: theme.colorScheme.primaryContainer.withValues(
+                    alpha: 0.45,
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.devices_outlined,
+                              color: theme.colorScheme.primary,
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                '全平台数据格式统一说明',
+                                style: theme.textTheme.titleMedium?.copyWith(
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          '• 帐屿各平台（Android / iOS / 桌面 / Web）数据格式 100% 统一，'
+                          '日常跨设备请使用「云同步与备份（.tally / WebDAV / S3）」。\n'
+                          '• 本页专用于将原版“一羽记账”历史备份一次性迁入帐屿'
+                          '（导入时均采用单事务安全替换，并自动保留本机已有便签与自定义汇率）。',
+                          style: theme.textTheme.bodyMedium,
+                        ),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
-              ),
-            ),
-            loading: () => const SizedBox.shrink(),
-            error: (_, _) => const SizedBox.shrink(),
-          ),
-          const SizedBox(height: 12),
+                const SizedBox(height: 12),
 
-          // 1. Export `.ya2i` to iOS
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('导出数据到 iOS (.ya2i)', style: theme.textTheme.titleMedium),
-                  const SizedBox(height: 6),
-                  const Text(
-                    '生成标准无加密 UTF-8 跨端迁移文件（完整包含 19 类账本、账户、账单、专属资产关联与统计故事数据），无需登录且完全免费开放。',
-                  ),
-                  const SizedBox(height: 12),
-                  Wrap(
-                    spacing: 12,
-                    runSpacing: 8,
-                    children: [
-                      FilledButton.icon(
-                        key: const Key('export_ya2i_save_button'),
-                        onPressed: _busy
-                            ? null
-                            : () => _exportYa2i(share: false),
-                        icon: const Icon(Icons.download_outlined),
-                        label: const Text('导出 .ya2i 文件'),
+                // Local data overview card
+                summaryAsync.when(
+                  data: (summary) => Card(
+                    key: const Key('migration_local_summary_card'),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('当前本地数据概况', style: theme.textTheme.titleMedium),
+                          const SizedBox(height: 8),
+                          Text(
+                            '账本 ${summary.bookCount} · 账户 ${summary.assetCount} · 账单 ${summary.recordCount} · 便签 ${summary.noteCount}',
+                            key: const Key('migration_local_summary_text'),
+                          ),
+                        ],
                       ),
-                      OutlinedButton.icon(
-                        key: const Key('export_ya2i_share_button'),
-                        onPressed: _busy
-                            ? null
-                            : () => _exportYa2i(share: true),
-                        icon: const Icon(Icons.ios_share_outlined),
-                        label: const Text('导出并分享到 iOS'),
-                      ),
-                    ],
+                    ),
                   ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
+                  loading: () => const SizedBox.shrink(),
+                  error: (_, _) => const SizedBox.shrink(),
+                ),
+                const SizedBox(height: 12),
 
-          // 2. Import `.yi2a` from iOS
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '从 iOS 导入数据 (.yi2a)',
-                    style: theme.textTheme.titleMedium,
+                // 1. Original Android encrypted backup (`.penny` / `.yy`)
+                Card(
+                  key: const Key('legacy_import_penny_card'),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '原版 Android 备份导入 (.penny / .yy)',
+                          style: theme.textTheme.titleMedium,
+                        ),
+                        const SizedBox(height: 6),
+                        const Text(
+                          '支持导入原版导出的加密 .penny 备份文件（兼容历史 .yy 备份）。'
+                          '独立内存暂存校验并自动过滤软删除墓碑，在单事务内原子替换 20 张账务业务表，完整保留本机便签与自定义汇率。',
+                        ),
+                        const SizedBox(height: 12),
+                        FilledButton.icon(
+                          key: const Key('legacy_import_penny_button'),
+                          onPressed: _busy ? null : _pickAndImportPenny,
+                          icon: const Icon(Icons.archive_outlined),
+                          label: const Text('选择 .penny / .yy 备份文件'),
+                        ),
+                      ],
+                    ),
                   ),
-                  const SizedBox(height: 6),
-                  const Text(
-                    '导入前自动执行非空与短键结构预检，并在单事务内原子替换 19 张跨端业务表；本地便签、汇率与自动映射规则将完整保留。',
-                  ),
-                  const SizedBox(height: 12),
-                  FilledButton.tonalIcon(
-                    key: const Key('import_yi2a_button'),
-                    onPressed: _busy ? null : _pickAndImportYi2a,
-                    icon: const Icon(Icons.file_open_outlined),
-                    label: const Text('选择 .yi2a 迁移文件'),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
+                ),
+                const SizedBox(height: 12),
 
-          // 3. Restore LAN `ServerBackup.zip` / `.db`
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '从局域网备份恢复 (ServerBackup.zip / .db)',
-                    style: theme.textTheme.titleMedium,
+                // 2. Original iOS migration package (`.yi2a`)
+                Card(
+                  key: const Key('legacy_import_yi2a_card'),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '原版 iOS 迁移包导入 (.yi2a)',
+                          style: theme.textTheme.titleMedium,
+                        ),
+                        const SizedBox(height: 6),
+                        const Text(
+                          '导入前自动执行非空与短键结构预检，并在单事务内原子替换 19 张跨端业务表；'
+                          '本机已有的便签、自定义汇率与自动记账规则将完整保留。',
+                        ),
+                        const SizedBox(height: 12),
+                        KeyedSubtree(
+                          key: const Key('migration_import_yi2a_button'),
+                          child: FilledButton.tonalIcon(
+                            key: const Key('import_yi2a_button'),
+                            onPressed: _busy ? null : _pickAndImportYi2a,
+                            icon: const Icon(Icons.file_open_outlined),
+                            label: const Text('选择 .yi2a 迁移文件'),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                  const SizedBox(height: 6),
-                  const Text(
-                    '支持局域网传输生成的 ServerBackup.zip（含 AES-256 历史兼容口令与自定义密码解密）及裸 SQLite .db 数据库恢复。',
+                ),
+                const SizedBox(height: 12),
+
+                // 3. Original LAN `ServerBackup.zip` / `.db` restore
+                Card(
+                  key: const Key('legacy_restore_lan_card'),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '原版局域网备份恢复 (ServerBackup.zip / .db)',
+                          style: theme.textTheme.titleMedium,
+                        ),
+                        const SizedBox(height: 6),
+                        const Text(
+                          '支持原版局域网传输生成的 ServerBackup.zip（含 AES-256 历史兼容口令与自定义密码解密）'
+                          '及裸 SQLite .db 数据库恢复。',
+                        ),
+                        const SizedBox(height: 12),
+                        KeyedSubtree(
+                          key: const Key('migration_restore_lan_button'),
+                          child: FilledButton.tonalIcon(
+                            key: const Key('restore_lan_backup_button'),
+                            onPressed: _busy ? null : _pickAndRestoreLanBackup,
+                            icon: const Icon(Icons.folder_zip_outlined),
+                            label: const Text('选择局域网备份 (.zip / .db)'),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                  const SizedBox(height: 12),
-                  FilledButton.tonalIcon(
-                    key: const Key('restore_lan_backup_button'),
-                    onPressed: _busy ? null : _pickAndRestoreLanBackup,
-                    icon: const Icon(Icons.folder_zip_outlined),
-                    label: const Text('选择局域网备份 (.zip / .db)'),
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
         ],
       ),
     );
   }
+}
+
+class _PennyConfirmDialog extends StatelessWidget {
+  const _PennyConfirmDialog({super.key, required this.preview});
+
+  final PennyBackupPreview preview;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final tombstoneText = preview.filteredTombstoneCount > 0
+        ? '已过滤 ${preview.filteredTombstoneCount} 条（sstatus=4 软删记录不落库）'
+        : '0 条（自动过滤 sstatus=4 软删墓碑）';
+
+    return AlertDialog(
+      title: const Text('原版 Android 备份导入预览'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _PreviewRow(label: '备份文件', value: preview.fileName),
+            _PreviewRow(label: '原版版本', value: preview.appVersion),
+            _PreviewRow(
+              label: '账本数量',
+              value: '${preview.bookCount} 个（恢复后选中：${preview.targetBookName}）',
+            ),
+            _PreviewRow(label: '账户资产', value: '${preview.assetCount} 个'),
+            _PreviewRow(label: '收支分类', value: '${preview.categoryCount} 个'),
+            _PreviewRow(label: '账单流水', value: '${preview.recordCount} 条'),
+            _PreviewRow(label: '计划与预算', value: '${preview.totalPlanCount} 项'),
+            _PreviewRow(label: '历史备注', value: '${preview.remarkCount} 条'),
+            _PreviewRow(label: '软删墓碑过滤', value: tombstoneText),
+            const SizedBox(height: 12),
+            Container(
+              key: const Key('penny_overwrite_warning'),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.errorContainer,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                '覆盖警告：确认恢复将以备份内容在单一数据库事务内替换本地 20 张账务业务表'
+                '（账本、账户、分类、账单、预算、分期、周期、存钱计划等）；'
+                '本机已有的便签（note）与自定义汇率（currency）将完整保留，不会被清空。',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onErrorContainer,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          key: const Key('cancel_penny_import_button'),
+          onPressed: () => Navigator.of(context).pop(false),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          key: const Key('confirm_penny_import_button'),
+          onPressed: () => Navigator.of(context).pop(true),
+          child: const Text('确认恢复'),
+        ),
+      ],
+    );
+  }
+}
+
+class _PreviewRow extends StatelessWidget {
+  const _PreviewRow({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 3),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 96,
+          child: Text(label, style: Theme.of(context).textTheme.bodySmall),
+        ),
+        Expanded(
+          child: Text(value, style: Theme.of(context).textTheme.bodyMedium),
+        ),
+      ],
+    ),
+  );
 }
 
 class _MigrationConfirmDialog extends StatelessWidget {
@@ -432,7 +632,7 @@ class _MigrationConfirmDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isYi2a = preview.sourceKind == MigrationSourceKind.yi2a;
-    final title = isYi2a ? '确认导入 iOS 迁移数据' : '确认恢复局域网备份';
+    final title = isYi2a ? '确认导入原版 iOS 迁移数据' : '确认恢复原版局域网备份';
 
     return AlertDialog(
       title: Text(title),
@@ -458,7 +658,7 @@ class _MigrationConfirmDialog extends StatelessWidget {
           Text(
             isYi2a
                 ? '确认后将在单一数据库事务内替换 19 张跨端业务表（若异常立即完整回滚），本地已有的便签、汇率与自动映射规则不会被清空。'
-                : '确认后将在单一数据库事务内恢复账本数据；若执行异常将完整回滚保护现有数据。',
+                : '确认后将在单一数据库事务内恢复账本数据；若执行异常将完整回滚，且本地已有的便签与自定义汇率不会被清空。',
             style: Theme.of(context).textTheme.bodySmall,
           ),
         ],
@@ -566,23 +766,26 @@ class _LanPasswordDialogState extends State<_LanPasswordDialog> {
       children: [
         Text('备份包 ${widget.fileName} 使用了自定义加密口令，请输入密码解密：'),
         const SizedBox(height: 12),
-        TextField(
-          key: const Key('lan_password_input'),
-          controller: _passwordController,
-          obscureText: _obscure,
-          autofocus: true,
-          enabled: !_submitting,
-          onSubmitted: (_) => _submit(),
-          decoration: InputDecoration(
-            labelText: '解密密码',
-            errorText: _errorText,
-            suffixIcon: IconButton(
-              key: const Key('lan_password_toggle_visibility'),
-              onPressed: () => setState(() => _obscure = !_obscure),
-              icon: Icon(
-                _obscure
-                    ? Icons.visibility_outlined
-                    : Icons.visibility_off_outlined,
+        KeyedSubtree(
+          key: const Key('migration_lan_password_input'),
+          child: TextField(
+            key: const Key('lan_password_input'),
+            controller: _passwordController,
+            obscureText: _obscure,
+            autofocus: true,
+            enabled: !_submitting,
+            onSubmitted: (_) => _submit(),
+            decoration: InputDecoration(
+              labelText: '解密密码',
+              errorText: _errorText,
+              suffixIcon: IconButton(
+                key: const Key('lan_password_toggle_visibility'),
+                onPressed: () => setState(() => _obscure = !_obscure),
+                icon: Icon(
+                  _obscure
+                      ? Icons.visibility_outlined
+                      : Icons.visibility_off_outlined,
+                ),
               ),
             ),
           ),
