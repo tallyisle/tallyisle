@@ -10,9 +10,11 @@ import '../data/db/database.dart';
 import '../data/ledger/ledger_service.dart';
 import '../data/repo/ledger_queries.dart';
 import '../data/repo/search_queries.dart';
+import '../domain/model/codes.dart';
 import '../domain/rules/asset_overview.dart';
 import '../domain/rules/billing_period.dart';
 import '../domain/rules/calendar.dart';
+import '../domain/rules/debt_rules.dart' show isDebtVisibleInBook;
 import '../domain/rules/income_expense.dart';
 
 final databaseProvider = FutureProvider<AppDatabase>((ref) async {
@@ -125,7 +127,8 @@ final rateTableProvider = FutureProvider<RateTable>((ref) async {
 });
 
 /// Accounts visible in the current book: bound to it, or bound to no book
-/// (docs/modules/asset-overview.md R1).
+/// for ordinary/credit accounts (`docs/modules/asset-overview.md` R1), and
+/// respecting `CE-DM-06` for debt accounts (`type == 4`).
 final bookAssetsProvider = FutureProvider<List<Asset>>((ref) async {
   final assets = await ref.watch(assetsProvider.future);
   final links = await ref.watch(assetBooksProvider.future);
@@ -136,7 +139,13 @@ final bookAssetsProvider = FutureProvider<List<Asset>>((ref) async {
   }
   return [
     for (final a in assets)
-      if (bound[a.id] == null || bound[a.id]!.contains(bookId)) a,
+      if (a.type == AssetType.debt
+          ? isDebtVisibleInBook(
+              boundBookIds: bound[a.id] ?? const {},
+              queryBookId: bookId,
+            )
+          : (bound[a.id] == null || bound[a.id]!.contains(bookId)))
+        a,
   ];
 });
 

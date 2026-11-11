@@ -143,6 +143,19 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
         final q = await ref.read(queriesProvider.future);
         final r = await ref.read(recordProvider(widget.recordId!).future);
         if (r == null) throw const Failure(FailureCode.conflict, '账单不存在或已删除');
+        if (!const {
+          RecordType.expense,
+          RecordType.income,
+          RecordType.transfer,
+          RecordType.reimbursable,
+          RecordType.advanceIncome,
+          RecordType.advanceExpense,
+        }.contains(r.type)) {
+          throw const Failure(
+            FailureCode.validation,
+            '该类型账单不支持在此编辑，请前往对应功能模块管理',
+          );
+        }
         final feeRow = await q.feeChildOf(r.recordId);
         original = r;
         type = r.type;
@@ -349,7 +362,9 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
         ? const <RecordCategory>[]
         : ref.watch(categoriesProvider(bookId)).value ?? const [];
     final assets = (ref.watch(assetsProvider).value ?? const <Asset>[])
-        .where((a) => a.status != AssetStatus.settled)
+        .where(
+          (a) => a.status != AssetStatus.settled && a.type != AssetType.debt,
+        )
         .toList();
     final tags = (ref.watch(activeTagsProvider).value ?? const <Tag>[])
         .where((t) => t.parent != 1)
@@ -390,7 +405,9 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
                 child: FilledButton(
                   key: const Key('save'),
-                  onPressed: busy || loading ? null : _submit,
+                  onPressed: busy || loading || (editing && original == null)
+                      ? null
+                      : _submit,
                   child: Text(busy ? '保存中…' : '保存'),
                 ),
               ),
@@ -666,7 +683,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
       const SizedBox(height: 16),
       DropdownButtonFormField<int>(
         key: const Key('asset'),
-        initialValue: assetId,
+        initialValue: assets.any((a) => a.id == assetId) ? assetId : noRef,
         decoration: const InputDecoration(labelText: '账户'),
         items: [
           const DropdownMenuItem(value: noRef, child: Text('不选账户')),
@@ -691,7 +708,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
       Key key,
     ) => DropdownButtonFormField<int>(
       key: key,
-      initialValue: value == noRef ? null : value,
+      initialValue: assets.any((a) => a.id == value) ? value : null,
       decoration: InputDecoration(labelText: label),
       items: [
         for (final a in assets)

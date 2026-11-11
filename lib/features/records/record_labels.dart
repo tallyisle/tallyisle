@@ -57,6 +57,15 @@ RecordLabel recordLabel(
   );
 }
 
+String _pairAssets(List<Asset> assets, int fromId, int toId) {
+  if (fromId != noRef && toId != noRef) {
+    return '${assetName(assets, fromId)} → ${assetName(assets, toId)}';
+  }
+  if (fromId != noRef) return assetName(assets, fromId);
+  if (toId != noRef) return assetName(assets, toId);
+  return '';
+}
+
 RecordLabel _recordLabel(
   LedgerRecord r,
   List<RecordCategory> categories,
@@ -156,6 +165,54 @@ RecordLabel _recordLabel(
           r.remark,
         ].where((s) => s.isNotEmpty).join(' · '),
         '${r.moneyMinor < BigInt.zero ? '' : '+'}${formatMinor(r.moneyMinor)}',
+      );
+    case RecordType.borrowIn:
+    case RecordType.collect:
+      return RecordLabel(
+        RecordType.names[r.type] ?? '借贷',
+        [
+          _pairAssets(assets, r.fromAssetId, r.toAssetId),
+          r.remark,
+        ].where((s) => s.isNotEmpty).join(' · '),
+        '+$amount',
+      );
+    case RecordType.lendOut:
+    case RecordType.repay:
+      return RecordLabel(
+        RecordType.names[r.type] ?? '借贷',
+        [
+          _pairAssets(assets, r.fromAssetId, r.toAssetId),
+          r.remark,
+        ].where((s) => s.isNotEmpty).join(' · '),
+        '-$amount',
+      );
+    case RecordType.debtInterest:
+      final isIncome = r.subType == RecordDirection.income;
+      return RecordLabel(
+        RecordType.names[r.type] ?? '借贷利息',
+        [
+          _pairAssets(assets, r.fromAssetId, r.toAssetId),
+          r.remark,
+        ].where((s) => s.isNotEmpty).join(' · '),
+        '${isIncome ? '+' : '-'}$amount',
+      );
+    case RecordType.installmentPrincipal:
+      return RecordLabel(
+        RecordType.names[r.type] ?? '分期本金',
+        [
+          if (r.assetId != noRef) assetName(assets, r.assetId),
+          r.remark,
+        ].where((s) => s.isNotEmpty).join(' · '),
+        '-$amount',
+      );
+    case RecordType.depositInterest:
+      return RecordLabel(
+        RecordType.names[r.type] ?? '定存收益',
+        [
+          if (r.assetId != noRef) assetName(assets, r.assetId),
+          r.remark,
+        ].where((s) => s.isNotEmpty).join(' · '),
+        '+$amount',
       );
     default:
       return RecordLabel(RecordType.names[r.type] ?? '账单', r.remark, amount);

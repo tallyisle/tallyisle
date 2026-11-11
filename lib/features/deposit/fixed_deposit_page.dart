@@ -14,10 +14,13 @@ import 'fixed_deposit_providers.dart';
 
 /// Fixed Deposit Management screen (`FixedDepositManageActivity` / `/bkp/FDMAct`, F-027).
 class FixedDepositPage extends ConsumerStatefulWidget {
-  const FixedDepositPage({super.key, this.initialAssetId});
+  const FixedDepositPage({super.key, this.initialAssetId, this.onRecordTap});
 
   /// Optional host account filter (`null` = global view across all eligible active accounts).
   final int? initialAssetId;
+
+  /// Optional callback invoked when tapping a settled deposit's income bill chip.
+  final void Function(String recordId)? onRecordTap;
 
   @override
   ConsumerState<FixedDepositPage> createState() => _FixedDepositPageState();
@@ -130,9 +133,13 @@ class _FixedDepositPageState extends ConsumerState<FixedDepositPage> {
         ).showSnackBar(const SnackBar(content: Text('账单已不存在')));
         return;
       }
-      await Navigator.of(context).push<void>(
-        MaterialPageRoute(builder: (_) => RecordDetailPage(recordId: recId)),
-      );
+      if (widget.onRecordTap != null) {
+        widget.onRecordTap!(recId);
+      } else {
+        await Navigator.of(context).push<void>(
+          MaterialPageRoute(builder: (_) => RecordDetailPage(recordId: recId)),
+        );
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(

@@ -16,7 +16,9 @@ const _uuid = Uuid();
 
 /// Management page for periodic bookkeeping rules across 3 state tabs (F-009, R-042).
 class PeriodicPage extends ConsumerStatefulWidget {
-  const PeriodicPage({super.key});
+  const PeriodicPage({super.key, this.onRecordTap});
+
+  final void Function(String recordId)? onRecordTap;
 
   @override
   ConsumerState<PeriodicPage> createState() => _PeriodicPageState();
@@ -93,7 +95,10 @@ class _PeriodicPageState extends ConsumerState<PeriodicPage>
   void _openHistory(int periodId) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => PeriodicHistoryPage(periodId: periodId),
+        builder: (_) => PeriodicHistoryPage(
+          periodId: periodId,
+          onRecordTap: widget.onRecordTap,
+        ),
       ),
     );
   }
@@ -475,9 +480,14 @@ class _PeriodicPageState extends ConsumerState<PeriodicPage>
 
 /// Generated bill history drilldown page for a periodic rule (`record.period_id`).
 class PeriodicHistoryPage extends ConsumerWidget {
-  const PeriodicHistoryPage({super.key, required this.periodId});
+  const PeriodicHistoryPage({
+    super.key,
+    required this.periodId,
+    this.onRecordTap,
+  });
 
   final int periodId;
+  final void Function(String recordId)? onRecordTap;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -544,6 +554,9 @@ class PeriodicHistoryPage extends ConsumerWidget {
                                 fontWeight: FontWeight.bold,
                               ),
                             ),
+                            onTap: onRecordTap == null
+                                ? null
+                                : () => onRecordTap!(r.recordId),
                           );
                         },
                       ),

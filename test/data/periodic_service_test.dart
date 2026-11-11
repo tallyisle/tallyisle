@@ -339,7 +339,11 @@ void main() {
         assetId: settledAssetId,
         status: AssetStatus.settled,
       );
-      await ledger.deleteAsset(commandId: 'del-a', assetId: deletedAssetId);
+      // Simulate legacy/imported missing account row directly in DB
+      // (LedgerService.deleteAsset guards accounts referenced by record_period).
+      await (db.delete(
+        db.assets,
+      )..where((t) => t.id.equals(deletedAssetId))).go();
       await (db.update(db.currencies)..where((t) => t.code.equals('USD')))
           .write(const CurrenciesCompanion(rateToAnchor: Value('0')));
 

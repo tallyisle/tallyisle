@@ -44,7 +44,13 @@ class _RecordDetailPageState extends ConsumerState<RecordDetailPage> {
         commandId: ids.forPayload(['delete', r.recordId]),
         recordId: r.recordId,
       );
-      if (mounted) context.pop();
+      if (mounted) {
+        if (GoRouter.maybeOf(context) != null && context.canPop()) {
+          context.pop();
+        } else {
+          await Navigator.of(context).maybePop();
+        }
+      }
     } catch (e) {
       if (mounted) setState(() => error = safeMessage(e));
     } finally {
@@ -54,7 +60,9 @@ class _RecordDetailPageState extends ConsumerState<RecordDetailPage> {
 
   Future<void> _addLink(LedgerRecord r, {required bool refund}) async {
     final assets = (ref.read(assetsProvider).value ?? const <Asset>[])
-        .where((a) => a.status != AssetStatus.settled)
+        .where(
+          (a) => a.status != AssetStatus.settled && a.type != AssetType.debt,
+        )
         .toList();
     final input = await showDialog<(Money, int)>(
       context: context,
@@ -102,7 +110,9 @@ class _RecordDetailPageState extends ConsumerState<RecordDetailPage> {
 
   Future<void> _settleAdvance(LedgerRecord r) async {
     final assets = (ref.read(assetsProvider).value ?? const <Asset>[])
-        .where((a) => a.status != AssetStatus.settled)
+        .where(
+          (a) => a.status != AssetStatus.settled && a.type != AssetType.debt,
+        )
         .toList();
     final input = await showDialog<(Money, int, bool)>(
       context: context,
@@ -168,9 +178,19 @@ class _RecordDetailPageState extends ConsumerState<RecordDetailPage> {
             r.type == RecordType.advanceExpense;
         final advanceSettled =
             isAdvance && RecordExtra.parse(r.extraInfo).advance != null;
+        const specializedM4Types = {
+          RecordType.borrowIn,
+          RecordType.lendOut,
+          RecordType.repay,
+          RecordType.collect,
+          RecordType.debtInterest,
+          RecordType.installmentPrincipal,
+          RecordType.depositInterest,
+        };
         final editable =
             !isChild &&
             !advanceSettled &&
+            !specializedM4Types.contains(r.type) &&
             const {
               RecordType.expense,
               RecordType.income,
@@ -214,6 +234,30 @@ class _RecordDetailPageState extends ConsumerState<RecordDetailPage> {
               ),
               ListTile(
                 title: const Text('转入'),
+                trailing: Text(assetName(assets, r.toAssetId)),
+              ),
+            ] else if (r.type == RecordType.borrowIn ||
+                r.type == RecordType.collect ||
+                (r.type == RecordType.debtInterest &&
+                    r.subType == RecordDirection.income)) ...[
+              ListTile(
+                title: const Text('借贷项目'),
+                trailing: Text(assetName(assets, r.fromAssetId)),
+              ),
+              ListTile(
+                title: const Text('资金账户'),
+                trailing: Text(assetName(assets, r.toAssetId)),
+              ),
+            ] else if (r.type == RecordType.lendOut ||
+                r.type == RecordType.repay ||
+                (r.type == RecordType.debtInterest &&
+                    r.subType == RecordDirection.expense)) ...[
+              ListTile(
+                title: const Text('资金账户'),
+                trailing: Text(assetName(assets, r.fromAssetId)),
+              ),
+              ListTile(
+                title: const Text('借贷项目'),
                 trailing: Text(assetName(assets, r.toAssetId)),
               ),
             ] else

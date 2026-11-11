@@ -121,6 +121,7 @@ class _Header extends StatelessWidget {
             const SizedBox(height: 12),
             Wrap(
               spacing: 8,
+              runSpacing: 8,
               children: [
                 if (credit)
                   FilledButton.icon(
@@ -136,12 +137,36 @@ class _Header extends StatelessWidget {
                       ),
                     ),
                   ),
-                OutlinedButton.icon(
-                  icon: const Icon(Icons.edit_note),
-                  label: const Text('记一笔'),
-                  onPressed: () =>
-                      context.push('/record/new?asset=${asset.id}'),
-                ),
+                if (asset.type != AssetType.debt)
+                  OutlinedButton.icon(
+                    icon: const Icon(Icons.edit_note),
+                    label: const Text('记一笔'),
+                    onPressed: () =>
+                        context.push('/record/new?asset=${asset.id}'),
+                  ),
+                if (!credit && asset.type != AssetType.debt)
+                  OutlinedButton.icon(
+                    key: const Key('asset-detail-deposits'),
+                    icon: const Icon(Icons.lock_clock_outlined),
+                    label: const Text('定期存款'),
+                    onPressed: () =>
+                        context.push('/deposits?assetId=${asset.id}'),
+                  ),
+                if (credit)
+                  OutlinedButton.icon(
+                    key: const Key('asset-detail-installments'),
+                    icon: const Icon(Icons.calendar_view_month_outlined),
+                    label: const Text('分期管理'),
+                    onPressed: () => context.push('/installments'),
+                  ),
+                if (asset.type == AssetType.debt)
+                  OutlinedButton.icon(
+                    key: const Key('asset-detail-debt'),
+                    icon: const Icon(Icons.swap_horiz_outlined),
+                    label: const Text('借贷详情'),
+                    onPressed: () =>
+                        context.pushReplacement('/debts/${asset.id}'),
+                  ),
               ],
             ),
           ],

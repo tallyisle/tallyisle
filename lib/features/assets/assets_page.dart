@@ -71,6 +71,37 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
       );
     }
 
+    Widget debtTile(Asset a) {
+      final isLend = a.subType == AssetType.debtLend;
+      final dirLabel = isLend ? '借出' : '借入';
+      final status = switch (a.status) {
+        AssetStatus.hidden => '已隐藏',
+        AssetStatus.settled => '已结清',
+        _ => null,
+      };
+      final displayMinor =
+          a.status == AssetStatus.settled || a.balanceMinor < BigInt.zero
+          ? BigInt.zero
+          : a.balanceMinor;
+      return ListTile(
+        key: Key('asset-${a.name}'),
+        leading: Icon(
+          isLend ? Icons.call_made_outlined : Icons.call_received_outlined,
+        ),
+        title: Text(a.name),
+        subtitle: Text(
+          [
+            dirLabel,
+            ?status,
+            ?a.currency,
+            if (a.remark != null && a.remark!.isNotEmpty) a.remark!,
+          ].join(' · '),
+        ),
+        trailing: Text(hidden ? '***' : formatMinor(displayMinor)),
+        onTap: () => context.push('/debts/${a.id}'),
+      );
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('资产'),
@@ -83,14 +114,37 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
         ],
       ),
       body: asyncBody(assets, (list) {
-        final hiddenCount = list
-            .where((a) => a.status == AssetStatus.hidden)
+        final archivedCount = list
+            .where(
+              (a) => a.type == AssetType.debt
+                  ? a.status != AssetStatus.active
+                  : a.status == AssetStatus.hidden,
+            )
             .length;
-        final visible = list
-            .where((a) => showHiddenAccounts || a.status != AssetStatus.hidden)
+        final normal = list
+            .where(
+              (a) =>
+                  a.type != AssetType.credit &&
+                  a.type != AssetType.debt &&
+                  (showHiddenAccounts || a.status != AssetStatus.hidden),
+            )
             .toList();
-        final normal = visible.where((a) => a.type != AssetType.credit);
-        final credit = visible.where((a) => a.type == AssetType.credit);
+        final credit = list
+            .where(
+              (a) =>
+                  a.type == AssetType.credit &&
+                  (showHiddenAccounts || a.status != AssetStatus.hidden),
+            )
+            .toList();
+        final debts = list
+            .where(
+              (a) =>
+                  a.type == AssetType.debt &&
+                  (showHiddenAccounts || a.status == AssetStatus.active),
+            )
+            .toList();
+        final allVisibleEmpty =
+            normal.isEmpty && credit.isEmpty && debts.isEmpty;
         Widget header(String text) => Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
           child: Text(text, style: theme.textTheme.labelLarge),
@@ -98,7 +152,7 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
         return ListView(
           children: [
             Card(
-              margin: const EdgeInsets.all(16),
+              margin: const EdgeInsets.fromLTRB(16, 16, 16, 8),
               child: Padding(
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 child: Column(
@@ -130,7 +184,37 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
                 ),
               ),
             ),
-            if (visible.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  ActionChip(
+                    key: const Key('assets-quick-debts'),
+                    avatar: const Icon(Icons.swap_horiz_outlined, size: 18),
+                    label: const Text('借贷管理'),
+                    onPressed: () => context.push('/debts'),
+                  ),
+                  ActionChip(
+                    key: const Key('assets-quick-installments'),
+                    avatar: const Icon(
+                      Icons.calendar_view_month_outlined,
+                      size: 18,
+                    ),
+                    label: const Text('分期管理'),
+                    onPressed: () => context.push('/installments'),
+                  ),
+                  ActionChip(
+                    key: const Key('assets-quick-deposits'),
+                    avatar: const Icon(Icons.lock_clock_outlined, size: 18),
+                    label: const Text('定期存款'),
+                    onPressed: () => context.push('/deposits'),
+                  ),
+                ],
+              ),
+            ),
+            if (allVisibleEmpty)
               const Padding(
                 padding: EdgeInsets.all(32),
                 child: Center(child: Text('还没有账户，点右下角添加')),
@@ -143,12 +227,17 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
               header('信用卡'),
               for (final a in credit) tile(a),
             ],
-            if (hiddenCount > 0)
+            if (debts.isNotEmpty) ...[
+              header('借入 / 借出'),
+              for (final a in debts) debtTile(a),
+            ],
+            if (archivedCount > 0)
               TextButton(
+                key: const Key('toggle-hidden-assets'),
                 onPressed: () =>
                     setState(() => showHiddenAccounts = !showHiddenAccounts),
                 child: Text(
-                  showHiddenAccounts ? '收起已隐藏账户' : '显示已隐藏账户（$hiddenCount）',
+                  showHiddenAccounts ? '收起已隐藏账户' : '显示已隐藏账户（$archivedCount）',
                 ),
               ),
             const SizedBox(height: 96),

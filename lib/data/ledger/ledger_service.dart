@@ -10,7 +10,11 @@ import '../../domain/ledger/effects.dart';
 import '../../domain/ledger/record_extra.dart';
 import '../../domain/ledger/record_relations.dart';
 import '../../domain/model/codes.dart';
-import '../../domain/rules/asset_overview.dart' show normalizeCurrency;
+import '../../domain/rules/asset_overview.dart'
+    show RateTable, normalizeCurrency;
+import '../../domain/rules/debt_rules.dart'
+    show DebtRecordEntry, LoanInfo, recomputeDebtPrincipal;
+import '../../domain/rules/fixed_deposit.dart' show decodeFixedDepositList;
 import '../db/database.dart';
 import '../db/failures.dart';
 
@@ -313,6 +317,7 @@ final class LedgerService {
         db.records,
       )..where((t) => t.recordId.equals(r.recordId))).go();
     }
+    await _recomputeAffectedDebtsAfterDelete(rows);
     return recordId;
   }, (_) => true);
 
@@ -455,11 +460,11 @@ final class LedgerService {
     return '$assetId';
   }, (_) {});
 
-  /// Deletes an account that no bill references (otherwise hide it instead,
-  /// so history keeps its account name).
+  /// Deletes an account that no bill or plan references (otherwise hide it
+  /// instead, so history keeps its account name).
   Future<void> deleteAsset({required String commandId, required int assetId}) =>
       _command(commandId, ['delete-asset-v1', assetId], () async {
-        await _asset(assetId);
+        final asset = await _asset(assetId);
         final used = await db
             .customSelect(
               'SELECT COUNT(*) AS n FROM record '
@@ -473,6 +478,82 @@ final class LedgerService {
             '该账户已有账单，不能删除；可以改为“隐藏”或“已结清”',
           );
         }
+
+        final periodRef = await db
+            .customSelect(
+              'SELECT COUNT(*) AS n FROM record_period '
+              'WHERE asset_id = ?1 OR asset_id2 = ?1',
+              variables: [Variable.withInt(assetId)],
+            )
+            .getSingle();
+        if (periodRef.read<int>('n') > 0) {
+          throw const Failure(
+            FailureCode.validation,
+            '该账户已关联周期记账规则，不能删除；请先修改或删除对应周期规则，或改为“隐藏”',
+          );
+        }
+
+        final instRef = await db
+            .customSelect(
+              'SELECT COUNT(*) AS n FROM installment WHERE asset_id = ?1',
+              variables: [Variable.withInt(assetId)],
+            )
+            .getSingle();
+        if (instRef.read<int>('n') > 0) {
+          throw const Failure(
+            FailureCode.validation,
+            '该账户已关联分期计划，不能删除；请先删除对应分期计划，或改为“隐藏”',
+          );
+        }
+
+        final savePlanRef = await db
+            .customSelect(
+              'SELECT ('
+              '(SELECT COUNT(*) FROM money_save_plan '
+              'WHERE from_asset_id = ?1 OR to_asset_id = ?1) + '
+              '(SELECT COUNT(*) FROM money_save_plan_record '
+              'WHERE from_asset_id = ?1 OR to_asset_id = ?1)'
+              ') AS n',
+              variables: [Variable.withInt(assetId)],
+            )
+            .getSingle();
+        if (savePlanRef.read<int>('n') > 0) {
+          throw const Failure(
+            FailureCode.validation,
+            '该账户已关联存钱计划，不能删除；请先修改或删除对应存钱计划，或改为“隐藏”',
+          );
+        }
+
+        if (_hasNonEmptyFixedDeposit(asset.fixedDepositInfo)) {
+          throw const Failure(
+            FailureCode.validation,
+            '该账户下存在定期存款记录，不能删除；请先删除对应定期存款，或改为“隐藏”',
+          );
+        }
+
+        final otherDepositHosts = await db
+            .customSelect(
+              'SELECT fixed_deposit_info FROM asset '
+              'WHERE id != ?1 AND fixed_deposit_info IS NOT NULL '
+              "AND TRIM(fixed_deposit_info) != ''",
+              variables: [Variable.withInt(assetId)],
+            )
+            .get();
+        for (final row in otherDepositHosts) {
+          final raw = row.read<String?>('fixed_deposit_info');
+          try {
+            final items = decodeFixedDepositList(raw);
+            if (items.any((item) => item.fromAssetId == assetId)) {
+              throw const Failure(
+                FailureCode.validation,
+                '该账户已被定期存款关联为转出账户，不能删除；请先删除对应定期存款，或改为“隐藏”',
+              );
+            }
+          } on Failure catch (e) {
+            if (e.code == FailureCode.validation) rethrow;
+          }
+        }
+
         await (db.delete(
           db.assetBooks,
         )..where((t) => t.assetId.equals(assetId))).go();
@@ -549,7 +630,7 @@ final class LedgerService {
       if (amount.units <= BigInt.zero) {
         throw const Failure(FailureCode.validation, '退款金额须大于 0');
       }
-      if (assetId != noRef) await _asset(assetId);
+      if (assetId != noRef) await _fundingAsset(assetId);
       final childId = _uuid.v4();
       final row = RecordsCompanion(
         recordId: Value(childId),
@@ -616,7 +697,7 @@ final class LedgerService {
       if (amount.units <= BigInt.zero) {
         throw const Failure(FailureCode.validation, '报销金额须大于 0');
       }
-      if (assetId != noRef) await _asset(assetId);
+      if (assetId != noRef) await _fundingAsset(assetId);
       // A receipt dated before the original bill is clamped to origin + 1 ms.
       final time = recordTime <= origin.recordTime
           ? origin.recordTime + 1
@@ -689,7 +770,7 @@ final class LedgerService {
       if (amount.units <= BigInt.zero) {
         throw const Failure(FailureCode.validation, '结算金额须大于 0');
       }
-      if (assetId != noRef) await _asset(assetId);
+      if (assetId != noRef) await _fundingAsset(assetId);
 
       final settledType = origin.type == RecordType.advanceIncome
           ? RecordType.income
@@ -825,7 +906,7 @@ final class LedgerService {
       if (id == noRef) {
         throw Failure(FailureCode.validation, '请选择$label');
       }
-      await _asset(id);
+      await _fundingAsset(id);
     }
 
     switch (d.type) {
@@ -841,7 +922,7 @@ final class LedgerService {
             cat.accountBookId != d.bookId) {
           throw const Failure(FailureCode.validation, '请选择当前账本的支出分类');
         }
-        if (d.fromAssetId != noRef) await _asset(d.fromAssetId);
+        if (d.fromAssetId != noRef) await _fundingAsset(d.fromAssetId);
       case RecordType.expense:
       case RecordType.income:
         if (d.money.isNegative) {
@@ -856,7 +937,7 @@ final class LedgerService {
           throw const Failure(FailureCode.validation, '请选择当前账本的分类');
         }
         // Original allows bills without an account (asset_id = -1).
-        if (d.assetId != noRef) await _asset(d.assetId);
+        if (d.assetId != noRef) await _fundingAsset(d.assetId);
         if (d.discount != null && d.discount!.isNegative) {
           throw const Failure(FailureCode.validation, '优惠金额无效');
         }
@@ -876,7 +957,7 @@ final class LedgerService {
             cat.accountBookId != d.bookId) {
           throw const Failure(FailureCode.validation, '请选择当前账本的对应分类');
         }
-        if (d.assetId != noRef) await _asset(d.assetId);
+        if (d.assetId != noRef) await _fundingAsset(d.assetId);
       case RecordType.transfer:
         if (d.money.units <= BigInt.zero) {
           throw const Failure(FailureCode.validation, '转账金额须大于 0');
@@ -905,6 +986,104 @@ final class LedgerService {
     return asset;
   }
 
+  Future<Asset> _fundingAsset(int id) async {
+    final asset = await _asset(id);
+    if (asset.type == AssetType.debt) {
+      throw const Failure(FailureCode.validation, '不能选择借贷账户作为普通资金账户');
+    }
+    return asset;
+  }
+
+  bool _hasNonEmptyFixedDeposit(String? fixedDepositInfo) {
+    if (fixedDepositInfo == null || fixedDepositInfo.trim().isEmpty) {
+      return false;
+    }
+    try {
+      return decodeFixedDepositList(fixedDepositInfo).isNotEmpty;
+    } on Failure {
+      return true;
+    }
+  }
+
+  Future<void> _recomputeAffectedDebtsAfterDelete(
+    Iterable<LedgerRecord> deletedRows,
+  ) async {
+    const debtPrincipalTypes = {
+      RecordType.borrowIn,
+      RecordType.lendOut,
+      RecordType.repay,
+      RecordType.collect,
+    };
+    final candidateIds = <int>{
+      for (final r in deletedRows)
+        if (debtPrincipalTypes.contains(r.type)) ...[
+          if (r.fromAssetId != noRef) r.fromAssetId,
+          if (r.toAssetId != noRef) r.toAssetId,
+        ],
+    };
+    if (candidateIds.isEmpty) return;
+
+    final debtAssets = <Asset>[];
+    for (final id in candidateIds) {
+      final asset = await (db.select(
+        db.assets,
+      )..where((t) => t.id.equals(id))).getSingleOrNull();
+      if (asset != null && asset.type == AssetType.debt) {
+        debtAssets.add(asset);
+      }
+    }
+    if (debtAssets.isEmpty) return;
+
+    final currencies = await db.select(db.currencies).get();
+    final rates = RateTable({
+      for (final c in currencies) c.code: c.rateToAnchor,
+    });
+    final now = _now();
+
+    for (final debt in debtAssets) {
+      final liveRows = await db
+          .customSelect(
+            'SELECT * FROM record '
+            'WHERE (from_asset_id = ?1 OR to_asset_id = ?1) '
+            'AND type IN (5, 6, 7, 8) '
+            'ORDER BY record_time ASC, create_date ASC, record_id ASC',
+            variables: [Variable.withInt(debt.id)],
+          )
+          .get();
+      final entries = [
+        for (final row in liveRows)
+          _toDebtRecordEntry(db.records.map(row.data)),
+      ];
+      final currentInfo = LoanInfo.parse(debt.loanInfo);
+      final result = recomputeDebtPrincipal(
+        debtSubType: debt.subType,
+        currentStatus: debt.status,
+        currentLoanInfo: currentInfo,
+        records: entries,
+        debtCurrency: debt.currency,
+        rates: rates,
+        allowReopen: false,
+        nowMs: now,
+      );
+      await (db.update(db.assets)..where((t) => t.id.equals(debt.id))).write(
+        AssetsCompanion(
+          balanceMinor: Value(result.balanceMinor),
+          status: Value(result.status),
+          loanInfo: Value(result.loanInfo.encode()),
+        ),
+      );
+    }
+  }
+
+  DebtRecordEntry _toDebtRecordEntry(LedgerRecord r) => DebtRecordEntry(
+    recordId: r.recordId,
+    type: r.type,
+    subType: r.subType,
+    moneyMinor: r.moneyMinor,
+    recordTime: r.recordTime,
+    currency: RecordExtra.parse(r.extraInfo).currency,
+  );
+
   Future<LedgerRecord> _liveRecord(String id) async {
     final r = await (db.select(
       db.records,
@@ -931,6 +1110,7 @@ final class LedgerService {
   Future<void> _applyNet(Map<int, BigInt> net) async {
     for (final entry in net.entries) {
       final asset = await _asset(entry.key);
+      if (asset.type == AssetType.debt) continue;
       final balance = Money.minor(asset.balanceMinor + entry.value);
       await (db.update(db.assets)..where((t) => t.id.equals(entry.key))).write(
         AssetsCompanion(balanceMinor: Value(balance.storageMinor)),
