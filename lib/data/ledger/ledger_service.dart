@@ -330,7 +330,9 @@ final class LedgerService {
     required String name,
     required Money initial,
     int type = AssetType.normal,
-    int subType = RecordDirection.none,
+    int? subType,
+    String? icon,
+    String? color,
     String? currency,
     String? groupName,
     String? remark,
@@ -338,53 +340,66 @@ final class LedgerService {
     Money? limit,
     String? creditInfo,
     String? extraInfo,
-  }) => _command(
-    commandId,
-    [
-      'create-asset-v2',
-      name,
-      initial.toJson(),
-      type,
-      subType,
-      currency,
-      groupName,
-      remark,
-      countedInNetWorth,
-      limit?.toJson(),
-      creditInfo,
-      extraInfo,
-    ],
-    () async {
-      final trimmed = _assetName(name);
-      if (limit != null && limit.isNegative) {
-        throw const Failure(FailureCode.validation, '额度不能为负数');
-      }
-      final minSort = await db
-          .customSelect('SELECT COALESCE(MIN(sort), 0) AS s FROM asset')
-          .getSingle();
-      final id = await db
-          .into(db.assets)
-          .insert(
-            AssetsCompanion.insert(
-              name: trimmed,
-              balanceMinor: initial.storageMinor,
-              initMoneyMinor: (limit ?? initial).storageMinor,
-              type: type,
-              subType: Value(subType),
-              createDate: _now(),
-              sort: Value(minSort.read<int>('s') - 1),
-              currency: Value(normalizeCurrency(currency)),
-              groupName: Value(groupName),
-              remark: Value(remark),
-              creditInfo: Value(creditInfo),
-              extraInfo: Value(extraInfo),
-              isEffectiveAsset: Value(_effectiveFlag(type, countedInNetWorth)),
-            ),
-          );
-      return '$id';
-    },
-    int.parse,
-  );
+  }) {
+    final effectiveSubType = subType ?? RecordDirection.none;
+    final effectiveIcon = icon ?? '';
+    final normalizedColor = (color == null || color.trim().isEmpty)
+        ? null
+        : color.trim();
+    return _command(
+      commandId,
+      [
+        'create-asset-v2',
+        name,
+        initial.toJson(),
+        type,
+        effectiveSubType,
+        effectiveIcon,
+        normalizedColor,
+        currency,
+        groupName,
+        remark,
+        countedInNetWorth,
+        limit?.toJson(),
+        creditInfo,
+        extraInfo,
+      ],
+      () async {
+        final trimmed = _assetName(name);
+        if (limit != null && limit.isNegative) {
+          throw const Failure(FailureCode.validation, '额度不能为负数');
+        }
+        final minSort = await db
+            .customSelect('SELECT COALESCE(MIN(sort), 0) AS s FROM asset')
+            .getSingle();
+        final id = await db
+            .into(db.assets)
+            .insert(
+              AssetsCompanion.insert(
+                name: trimmed,
+                balanceMinor: initial.storageMinor,
+                initMoneyMinor: (limit ?? initial).storageMinor,
+                type: type,
+                subType: Value(effectiveSubType),
+                icon: Value(effectiveIcon),
+                color: Value(normalizedColor),
+                createDate: _now(),
+                sort: Value(minSort.read<int>('s') - 1),
+                currency: Value(normalizeCurrency(currency)),
+                groupName: Value(groupName),
+                remark: Value(remark),
+                creditInfo: Value(creditInfo),
+                extraInfo: Value(extraInfo),
+                isEffectiveAsset: Value(
+                  _effectiveFlag(type, countedInNetWorth),
+                ),
+              ),
+            );
+        return '$id';
+      },
+      int.parse,
+    );
+  }
 
   /// Edits account properties. The balance is never changed here: use
   /// [adjustBalance] so the change is recorded as a type=4 bill.
@@ -392,6 +407,9 @@ final class LedgerService {
     required String commandId,
     required int assetId,
     required String name,
+    String? icon,
+    String? color,
+    int? subType,
     String? remark,
     String? groupName,
     String? currency,
@@ -405,6 +423,9 @@ final class LedgerService {
       'update-asset-v1',
       assetId,
       name,
+      icon,
+      color,
+      subType,
       remark,
       groupName,
       currency,
@@ -419,9 +440,17 @@ final class LedgerService {
       if (limit != null && limit.isNegative) {
         throw const Failure(FailureCode.validation, '额度不能为负数');
       }
+      final nextIcon = icon ?? asset.icon;
+      final nextColor = color == null
+          ? asset.color
+          : (color.trim().isEmpty ? null : color.trim());
+      final nextSubType = subType ?? asset.subType;
       await (db.update(db.assets)..where((t) => t.id.equals(assetId))).write(
         AssetsCompanion(
           name: Value(trimmed),
+          icon: Value(nextIcon),
+          color: Value(nextColor),
+          subType: Value(nextSubType),
           remark: Value(remark),
           groupName: Value(groupName),
           currency: Value(normalizeCurrency(currency)),

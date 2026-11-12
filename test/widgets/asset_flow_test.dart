@@ -175,7 +175,7 @@ void main() {
       await settle();
       await tester.tap(find.byKey(const Key('add-asset')));
       await settle();
-      await tester.tap(find.text('信用卡'));
+      await tester.tap(find.text('信用账户'));
       await settle();
       await tester.enterText(find.byKey(const Key('asset-name')), '招行信用卡');
       await tester.enterText(find.byKey(const Key('credit-limit')), '10000');

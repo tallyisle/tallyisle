@@ -9,27 +9,40 @@ import '../../domain/rules/app_settings_rules.dart';
 import '../../domain/rules/asset_overview.dart';
 import '../../domain/rules/income_expense.dart';
 import '../budget/budget_widgets.dart';
+import '../common/catalog_icons.dart';
 import '../common/common.dart';
 import '../records/record_labels.dart';
 
-class HomePage extends ConsumerWidget {
+class HomePage extends ConsumerStatefulWidget {
   const HomePage({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<HomePage> createState() => _HomePageState();
+}
+
+class _HomePageState extends ConsumerState<HomePage> {
+  bool _pickingBook = false;
+
+  @override
+  Widget build(BuildContext context) {
     final book = ref.watch(currentBookProvider);
     final settings =
         ref.watch(appSettingsProvider).value ?? AppSettings.defaults;
     return Scaffold(
       appBar: AppBar(
         title: InkWell(
-          onTap: () => _pickBook(context, ref),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(book.value?.name ?? '帐屿'),
-              const Icon(Icons.arrow_drop_down),
-            ],
+          key: const Key('book-picker'),
+          borderRadius: BorderRadius.circular(8),
+          onTap: _pickBook,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(book.value?.name ?? '帐屿'),
+                const Icon(Icons.arrow_drop_down),
+              ],
+            ),
           ),
         ),
         actions: [
@@ -65,38 +78,68 @@ class HomePage extends ConsumerWidget {
     );
   }
 
-  Future<void> _pickBook(BuildContext context, WidgetRef ref) async {
-    final books = await ref.read(booksProvider.future);
-    if (!context.mounted) return;
-    final current = ref.read(currentBookIdProvider).value;
-    final picked = await showModalBottomSheet<int>(
-      context: context,
-      builder: (context) => SafeArea(
-        child: ListView(
-          shrinkWrap: true,
-          children: [
-            for (final b in books)
-              ListTile(
-                title: Text(b.name),
-                trailing: b.id == current ? const Icon(Icons.check) : null,
-                onTap: () => Navigator.pop(context, b.id),
+  Future<void> _pickBook() async {
+    if (_pickingBook) return;
+    _pickingBook = true;
+    try {
+      final q = await ref.read(queriesProvider.future);
+      final books = await q.getBooks();
+      final currentId = await q.getCurrentBookId();
+      if (!mounted || !(ModalRoute.of(context)?.isCurrent ?? true)) return;
+      final picked = await showModalBottomSheet<int>(
+        context: context,
+        builder: (ctx) => SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 8, 4),
+                child: Row(
+                  children: [
+                    Text('切换账本', style: Theme.of(ctx).textTheme.titleMedium),
+                    const Spacer(),
+                    TextButton.icon(
+                      key: const Key('book-picker-manage'),
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        if (mounted) {
+                          context.push('/books');
+                        }
+                      },
+                      icon: const Icon(Icons.settings_outlined, size: 18),
+                      label: const Text('账本管理'),
+                    ),
+                  ],
+                ),
               ),
-            const Divider(height: 1),
-            ListTile(
-              leading: const Icon(Icons.settings_outlined),
-              title: const Text('管理账本…'),
-              onTap: () {
-                Navigator.pop(context);
-                context.push('/books');
-              },
-            ),
-          ],
+              const Divider(height: 1),
+              Flexible(
+                child: ListView(
+                  shrinkWrap: true,
+                  children: [
+                    for (final b in books)
+                      ListTile(
+                        key: Key('book-option-${b.id}'),
+                        title: Text(b.name),
+                        trailing: b.id == currentId
+                            ? const Icon(Icons.check)
+                            : null,
+                        onTap: () => Navigator.pop(ctx, b.id),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
-      ),
-    );
-    if (picked == null) return;
-    await (await ref.read(queriesProvider.future)).setCurrentBook(picked);
-    ref.read(periodOffsetProvider.notifier).reset();
+      );
+      if (picked == null || !mounted) return;
+      await q.setCurrentBook(picked);
+      if (!mounted) return;
+      ref.read(periodOffsetProvider.notifier).reset();
+    } finally {
+      _pickingBook = false;
+    }
   }
 }
 
@@ -209,24 +252,115 @@ class _HomeBody extends ConsumerWidget {
         );
       }
       final label = recordLabel(r, categories, assets);
+      final cat = r.recordCatId == noRef
+          ? null
+          : categories.where((c) => c.id == r.recordCatId).firstOrNull;
+      final parentCat = (cat != null && cat.parentCatId != noRef)
+          ? categories.where((c) => c.id == cat.parentCatId).firstOrNull
+          : null;
+      final catDisplayName = cat == null
+          ? null
+          : (parentCat != null ? '${parentCat.name} · ${cat.name}' : cat.name);
+      final catColor =
+          (cat?.colorFill != null && cat!.colorFill!.trim().isNotEmpty)
+          ? cat.colorFill
+          : parentCat?.colorFill;
       widgets.add(
-        ListTile(
-          key: Key('record-${r.recordId}'),
-          leading: CircleAvatar(child: Text(label.title.characters.first)),
-          title: Text(label.title),
-          subtitle: label.subtitle.isEmpty ? null : Text(label.subtitle),
-          trailing: Text(
-            label.amount,
-            style: TextStyle(
-              color: r.type == RecordType.income ? Colors.green.shade700 : null,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          onTap: () => context.push('/record/${r.recordId}'),
+        _HomeRecordTile(
+          record: r,
+          label: label,
+          categoryName: catDisplayName,
+          categoryIcon: cat?.icon,
+          parentCategoryIcon: parentCat?.icon,
+          categoryColor: catColor,
         ),
       );
     }
     return widgets;
+  }
+}
+
+class _HomeRecordTile extends ConsumerWidget {
+  const _HomeRecordTile({
+    required this.record,
+    required this.label,
+    this.categoryName,
+    this.categoryIcon,
+    this.parentCategoryIcon,
+    this.categoryColor,
+  });
+
+  final LedgerRecord record;
+  final RecordLabel label;
+  final String? categoryName;
+  final String? categoryIcon;
+  final String? parentCategoryIcon;
+  final String? categoryColor;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final tags =
+        ref.watch(recordTagsProvider(record.recordId)).value ?? const <Tag>[];
+    final theme = Theme.of(context);
+    final isRefund =
+        (record.type == RecordType.expense ||
+            record.type == RecordType.income) &&
+        record.moneyMinor < BigInt.zero;
+
+    Widget? subtitle;
+    if (label.subtitle.isNotEmpty && tags.isEmpty) {
+      subtitle = Text(label.subtitle);
+    } else if (label.subtitle.isNotEmpty || tags.isNotEmpty) {
+      subtitle = Wrap(
+        spacing: 6,
+        runSpacing: 4,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          if (label.subtitle.isNotEmpty) Text(label.subtitle),
+          for (final t in tags)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.secondaryContainer.withValues(
+                  alpha: 0.7,
+                ),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                '#${t.name}',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: theme.colorScheme.onSecondaryContainer,
+                ),
+              ),
+            ),
+        ],
+      );
+    }
+
+    return ListTile(
+      key: Key('record-${record.recordId}'),
+      leading: RecordTypeIconAvatar(
+        recordType: record.type,
+        subType: record.subType,
+        isRefund: isRefund,
+        categoryName: categoryName,
+        categoryIcon: categoryIcon,
+        parentCategoryIcon: parentCategoryIcon,
+        categoryColor: categoryColor,
+      ),
+      title: Text(label.title),
+      subtitle: subtitle,
+      trailing: Text(
+        label.amount,
+        style: TextStyle(
+          color: record.type == RecordType.income
+              ? Colors.green.shade700
+              : null,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+      onTap: () => context.push('/record/${record.recordId}'),
+    );
   }
 }
 

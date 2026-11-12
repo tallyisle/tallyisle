@@ -3,7 +3,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../app/providers.dart';
+import '../../data/db/database.dart';
+import '../../domain/model/codes.dart';
 import '../../domain/rules/category_stats.dart';
+import '../common/catalog_icons.dart';
 import '../common/common.dart';
 import 'category_stats_providers.dart';
 
@@ -756,6 +759,13 @@ class _CategoryRankingsCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final rows = isFlatten ? result.flattenRows : result.firstLevelRows;
+    final bookId = ref.watch(currentBookIdProvider).value ?? 1;
+    final categories =
+        ref.watch(categoriesProvider(bookId)).value ?? const <RecordCategory>[];
+    final catById = <int, RecordCategory>{for (final c in categories) c.id: c};
+    final catType = result.dimension == StatDimension.income
+        ? RecordType.income
+        : RecordType.expense;
 
     return Card(
       elevation: 2,
@@ -819,7 +829,9 @@ class _CategoryRankingsCard extends ConsumerWidget {
                 _CategoryRowWidget(
                   row: row,
                   isFlatten: isFlatten,
-                  onTap: () => _openDrilldown(context, row),
+                  categoryType: catType,
+                  categoriesById: catById,
+                  onTap: () => _openDrilldown(context, row, catById),
                 ),
 
               // Uncategorized fallback closing row (ASYM-CAT-01)
@@ -828,7 +840,7 @@ class _CategoryRankingsCard extends ConsumerWidget {
                 const Divider(height: 12),
                 _UncategorizedRowWidget(
                   uncategorized: result.uncategorizedRow!,
-                  onTap: () => _openUncategorizedDrilldown(context),
+                  onTap: () => _openUncategorizedDrilldown(context, catById),
                 ),
               ],
             ],
@@ -838,7 +850,11 @@ class _CategoryRankingsCard extends ConsumerWidget {
     );
   }
 
-  void _openDrilldown(BuildContext context, CategoryRowItem row) {
+  void _openDrilldown(
+    BuildContext context,
+    CategoryRowItem row,
+    Map<int, RecordCategory> catById,
+  ) {
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (context) => CategoryDrilldownPage(
@@ -849,12 +865,16 @@ class _CategoryRankingsCard extends ConsumerWidget {
           isFirstLevel: row.isFirstLevel,
           rowItem: row,
           result: result,
+          categoriesById: catById,
         ),
       ),
     );
   }
 
-  void _openUncategorizedDrilldown(BuildContext context) {
+  void _openUncategorizedDrilldown(
+    BuildContext context,
+    Map<int, RecordCategory> catById,
+  ) {
     final uncat = result.uncategorizedRow!;
     Navigator.of(context).push(
       MaterialPageRoute(
@@ -864,6 +884,7 @@ class _CategoryRankingsCard extends ConsumerWidget {
           isFirstLevel: true,
           uncategorizedRow: uncat,
           result: result,
+          categoriesById: catById,
         ),
       ),
     );
@@ -875,11 +896,15 @@ class _CategoryRowWidget extends StatefulWidget {
   const _CategoryRowWidget({
     required this.row,
     required this.isFlatten,
+    required this.categoryType,
+    required this.categoriesById,
     required this.onTap,
   });
 
   final CategoryRowItem row;
   final bool isFlatten;
+  final int categoryType;
+  final Map<int, RecordCategory> categoriesById;
   final VoidCallback onTap;
 
   @override
@@ -894,6 +919,26 @@ class _CategoryRowWidgetState extends State<_CategoryRowWidget> {
     final theme = Theme.of(context);
     final row = widget.row;
     final hasChildren = !widget.isFlatten && row.children.isNotEmpty;
+    final dbCat = widget.categoriesById[row.categoryId];
+    final parentCat = (dbCat != null && dbCat.parentCatId != noRef)
+        ? widget.categoriesById[dbCat.parentCatId]
+        : (row.parentCatId != -1
+              ? widget.categoriesById[row.parentCatId]
+              : null);
+    final catIcon = (dbCat?.icon != null && dbCat!.icon.trim().isNotEmpty)
+        ? dbCat.icon
+        : (row.icon.isNotEmpty ? row.icon : null);
+    final catColor =
+        (dbCat?.colorFill != null && dbCat!.colorFill!.trim().isNotEmpty)
+        ? dbCat.colorFill
+        : parentCat?.colorFill;
+    final visual = resolveCategoryVisual(
+      iconKey: catIcon,
+      parentIconKey: parentCat?.icon,
+      colorHex: catColor,
+      name: row.name,
+      type: widget.categoryType,
+    );
 
     return Column(
       children: [
@@ -905,17 +950,13 @@ class _CategoryRowWidgetState extends State<_CategoryRowWidget> {
             child: Row(
               children: [
                 // Icon Avatar
-                CircleAvatar(
-                  radius: 18,
-                  backgroundColor: theme.colorScheme.primaryContainer,
-                  child: Text(
-                    row.name.isNotEmpty ? row.name.characters.first : '?',
-                    style: TextStyle(
-                      color: theme.colorScheme.onPrimaryContainer,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 14,
-                    ),
-                  ),
+                CategoryIconAvatar(
+                  iconKey: catIcon,
+                  parentIconKey: parentCat?.icon,
+                  colorHex: catColor,
+                  name: row.name,
+                  type: widget.categoryType,
+                  size: 36,
                 ),
                 const SizedBox(width: 12),
 
@@ -1009,6 +1050,7 @@ class _CategoryRowWidgetState extends State<_CategoryRowWidget> {
           child: LinearProgressIndicator(
             value: (row.ratioBasisPoints / 10000.0).clamp(0.01, 1.0),
             minHeight: 4,
+            color: visual.color,
             backgroundColor: theme.colorScheme.surfaceContainerHighest,
           ),
         ),
@@ -1020,48 +1062,79 @@ class _CategoryRowWidgetState extends State<_CategoryRowWidget> {
             child: Column(
               children: [
                 for (final child in row.children)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 4),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Row(
+                  Builder(
+                    builder: (context) {
+                      final childDb = widget.categoriesById[child.categoryId];
+                      final childIcon =
+                          (childDb?.icon != null &&
+                              childDb!.icon.trim().isNotEmpty)
+                          ? childDb.icon
+                          : (child.icon.isNotEmpty ? child.icon : null);
+                      final childColor =
+                          (childDb?.colorFill != null &&
+                              childDb!.colorFill!.trim().isNotEmpty)
+                          ? childDb.colorFill
+                          : catColor;
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Text(
-                              child.name,
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                fontWeight: child.isDirectChild
-                                    ? FontWeight.bold
-                                    : FontWeight.normal,
+                            Flexible(
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  CategoryIconAvatar(
+                                    iconKey: childIcon,
+                                    parentIconKey: catIcon,
+                                    colorHex: childColor,
+                                    name: child.name,
+                                    type: widget.categoryType,
+                                    size: 22,
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Flexible(
+                                    child: Text(
+                                      child.name,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: theme.textTheme.bodySmall
+                                          ?.copyWith(
+                                            fontWeight: child.isDirectChild
+                                                ? FontWeight.bold
+                                                : FontWeight.normal,
+                                          ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    '${child.count}笔',
+                                    style: theme.textTheme.labelSmall?.copyWith(
+                                      color: theme.colorScheme.onSurfaceVariant,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
-                            const SizedBox(width: 6),
-                            Text(
-                              '${child.count}笔',
-                              style: theme.textTheme.labelSmall?.copyWith(
-                                color: theme.colorScheme.onSurfaceVariant,
-                              ),
+                            Row(
+                              children: [
+                                Text(
+                                  '¥${formatMinor(child.moneyMinor)}',
+                                  style: theme.textTheme.bodySmall,
+                                ),
+                                const SizedBox(width: 12),
+                                Text(
+                                  child.ratioText,
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: theme.colorScheme.primary,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
                             ),
                           ],
                         ),
-                        Row(
-                          children: [
-                            Text(
-                              '¥${formatMinor(child.moneyMinor)}',
-                              style: theme.textTheme.bodySmall,
-                            ),
-                            const SizedBox(width: 12),
-                            Text(
-                              child.ratioText,
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: theme.colorScheme.primary,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
+                      );
+                    },
                   ),
               ],
             ),
@@ -1387,6 +1460,7 @@ class CategoryDrilldownPage extends StatefulWidget {
     this.rowItem,
     this.uncategorizedRow,
     required this.result,
+    this.categoriesById = const <int, RecordCategory>{},
   });
 
   final int categoryId;
@@ -1397,6 +1471,7 @@ class CategoryDrilldownPage extends StatefulWidget {
   final CategoryRowItem? rowItem;
   final UncategorizedRowItem? uncategorizedRow;
   final CategoryStatsResult result;
+  final Map<int, RecordCategory> categoriesById;
 
   @override
   State<CategoryDrilldownPage> createState() => _CategoryDrilldownPageState();
@@ -1409,6 +1484,25 @@ class _CategoryDrilldownPageState extends State<CategoryDrilldownPage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isUncat = widget.categoryId == -1;
+    final catType = widget.result.dimension == StatDimension.income
+        ? RecordType.income
+        : RecordType.expense;
+    final headerDbCat = isUncat
+        ? null
+        : widget.categoriesById[widget.categoryId];
+    final headerParentCat =
+        (headerDbCat != null && headerDbCat.parentCatId != noRef)
+        ? widget.categoriesById[headerDbCat.parentCatId]
+        : null;
+    final headerIcon =
+        (headerDbCat?.icon != null && headerDbCat!.icon.trim().isNotEmpty)
+        ? headerDbCat.icon
+        : (widget.categoryIcon.isNotEmpty ? widget.categoryIcon : null);
+    final headerColor =
+        (headerDbCat?.colorFill != null &&
+            headerDbCat!.colorFill!.trim().isNotEmpty)
+        ? headerDbCat.colorFill
+        : headerParentCat?.colorFill;
 
     final BigInt totalAmount = isUncat
         ? (widget.uncategorizedRow?.moneyMinor ?? BigInt.zero)
@@ -1444,24 +1538,36 @@ class _CategoryDrilldownPageState extends State<CategoryDrilldownPage> {
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('该分类总额', style: theme.textTheme.bodySmall),
-                      const SizedBox(height: 4),
-                      Text(
-                        '¥${formatMinor(totalAmount)}',
-                        style: theme.textTheme.headlineSmall?.copyWith(
-                          fontWeight: FontWeight.bold,
-                          color:
-                              widget.result.dimension == StatDimension.expense
-                              ? theme.colorScheme.error
-                              : theme.colorScheme.primary,
+                  if (!isUncat) ...[
+                    CategoryIconAvatar(
+                      iconKey: headerIcon,
+                      parentIconKey: headerParentCat?.icon,
+                      colorHex: headerColor,
+                      name: widget.categoryName,
+                      type: catType,
+                      size: 42,
+                    ),
+                    const SizedBox(width: 12),
+                  ],
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('该分类总额', style: theme.textTheme.bodySmall),
+                        const SizedBox(height: 4),
+                        Text(
+                          '¥${formatMinor(totalAmount)}',
+                          style: theme.textTheme.headlineSmall?.copyWith(
+                            fontWeight: FontWeight.bold,
+                            color:
+                                widget.result.dimension == StatDimension.expense
+                                ? theme.colorScheme.error
+                                : theme.colorScheme.primary,
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.end,
@@ -1501,20 +1607,57 @@ class _CategoryDrilldownPageState extends State<CategoryDrilldownPage> {
                     ),
                     const SizedBox(height: 8),
                     for (final child in widget.rowItem!.children)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 4),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(child.name),
-                            Text(
-                              '¥${formatMinor(child.moneyMinor)} (${child.ratioText})',
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                fontWeight: FontWeight.bold,
-                              ),
+                      Builder(
+                        builder: (context) {
+                          final childDb =
+                              widget.categoriesById[child.categoryId];
+                          final childIcon =
+                              (childDb?.icon != null &&
+                                  childDb!.icon.trim().isNotEmpty)
+                              ? childDb.icon
+                              : (child.icon.isNotEmpty ? child.icon : null);
+                          final childColor =
+                              (childDb?.colorFill != null &&
+                                  childDb!.colorFill!.trim().isNotEmpty)
+                              ? childDb.colorFill
+                              : headerColor;
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 4),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Flexible(
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      CategoryIconAvatar(
+                                        iconKey: childIcon,
+                                        parentIconKey: headerIcon,
+                                        colorHex: childColor,
+                                        name: child.name,
+                                        type: catType,
+                                        size: 22,
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Flexible(
+                                        child: Text(
+                                          child.name,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                Text(
+                                  '¥${formatMinor(child.moneyMinor)} (${child.ratioText})',
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
                             ),
-                          ],
-                        ),
+                          );
+                        },
                       ),
                   ],
                 ),
@@ -1561,31 +1704,69 @@ class _CategoryDrilldownPageState extends State<CategoryDrilldownPage> {
             )
           else
             for (final bill in bills)
-              Card(
-                margin: const EdgeInsets.symmetric(vertical: 4),
-                child: ListTile(
-                  key: Key('drilldown-bill-${bill.recordId}'),
-                  title: Text(
-                    bill.remark.isNotEmpty ? bill.remark : widget.categoryName,
-                  ),
-                  subtitle: Text(
-                    formatDateTime(
-                      DateTime.fromMillisecondsSinceEpoch(bill.recordTime),
+              Builder(
+                builder: (context) {
+                  final entry = bill.entry;
+                  final billCat = entry.recordCatId == noRef
+                      ? null
+                      : widget.categoriesById[entry.recordCatId];
+                  final billParentCat =
+                      (billCat != null && billCat.parentCatId != noRef)
+                      ? widget.categoriesById[billCat.parentCatId]
+                      : null;
+                  final billCatName = billCat != null
+                      ? (billParentCat != null
+                            ? '${billParentCat.name} · ${billCat.name}'
+                            : billCat.name)
+                      : (isUncat ? null : widget.categoryName);
+                  final billColor =
+                      (billCat?.colorFill != null &&
+                          billCat!.colorFill!.trim().isNotEmpty)
+                      ? billCat.colorFill
+                      : (billParentCat?.colorFill ?? headerColor);
+                  final isRefund =
+                      (entry.type == RecordType.expense ||
+                          entry.type == RecordType.income) &&
+                      entry.moneyMinor < BigInt.zero;
+                  return Card(
+                    margin: const EdgeInsets.symmetric(vertical: 4),
+                    child: ListTile(
+                      key: Key('drilldown-bill-${bill.recordId}'),
+                      leading: RecordTypeIconAvatar(
+                        recordType: entry.type,
+                        subType: entry.subType,
+                        isRefund: isRefund,
+                        categoryName: billCatName,
+                        categoryIcon: billCat?.icon ?? headerIcon,
+                        parentCategoryIcon: billParentCat?.icon,
+                        categoryColor: billColor,
+                      ),
+                      title: Text(
+                        bill.remark.isNotEmpty
+                            ? bill.remark
+                            : widget.categoryName,
+                      ),
+                      subtitle: Text(
+                        formatDateTime(
+                          DateTime.fromMillisecondsSinceEpoch(bill.recordTime),
+                        ),
+                      ),
+                      trailing: Text(
+                        '¥${formatMinor(bill.netMinor)}',
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.bold,
+                          color:
+                              widget.result.dimension == StatDimension.expense
+                              ? theme.colorScheme.error
+                              : theme.colorScheme.primary,
+                        ),
+                      ),
+                      onTap: () {
+                        context.push('/record/${bill.recordId}');
+                      },
                     ),
-                  ),
-                  trailing: Text(
-                    '¥${formatMinor(bill.netMinor)}',
-                    style: theme.textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.bold,
-                      color: widget.result.dimension == StatDimension.expense
-                          ? theme.colorScheme.error
-                          : theme.colorScheme.primary,
-                    ),
-                  ),
-                  onTap: () {
-                    context.push('/record/${bill.recordId}');
-                  },
-                ),
+                  );
+                },
               ),
         ],
       ),
@@ -1608,6 +1789,10 @@ class CategoryStatsOverviewCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final resultAsync = ref.watch(categoryStatsResultProvider);
+    final bookId = ref.watch(currentBookIdProvider).value ?? 1;
+    final categories =
+        ref.watch(categoriesProvider(bookId)).value ?? const <RecordCategory>[];
+    final catById = <int, RecordCategory>{for (final c in categories) c.id: c};
 
     return Card(
       elevation: 2,
@@ -1616,6 +1801,9 @@ class CategoryStatsOverviewCard extends ConsumerWidget {
         child: resultAsync.when(
           data: (result) {
             final top5 = result.firstLevelRows.take(5).toList();
+            final catType = result.dimension == StatDimension.income
+                ? RecordType.income
+                : RecordType.expense;
             return Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -1647,38 +1835,78 @@ class CategoryStatsOverviewCard extends ConsumerWidget {
                   )
                 else
                   for (final row in top5)
-                    InkWell(
-                      onTap: () => onTapCategory?.call(row),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 6),
-                        child: Column(
-                          children: [
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    Builder(
+                      builder: (context) {
+                        final dbCat = catById[row.categoryId];
+                        final parentCat =
+                            (dbCat != null && dbCat.parentCatId != noRef)
+                            ? catById[dbCat.parentCatId]
+                            : null;
+                        final catIcon =
+                            (dbCat?.icon != null &&
+                                dbCat!.icon.trim().isNotEmpty)
+                            ? dbCat.icon
+                            : (row.icon.isNotEmpty ? row.icon : null);
+                        final catColor =
+                            (dbCat?.colorFill != null &&
+                                dbCat!.colorFill!.trim().isNotEmpty)
+                            ? dbCat.colorFill
+                            : parentCat?.colorFill;
+                        final visual = resolveCategoryVisual(
+                          iconKey: catIcon,
+                          parentIconKey: parentCat?.icon,
+                          colorHex: catColor,
+                          name: row.name,
+                          type: catType,
+                        );
+                        return InkWell(
+                          onTap: () => onTapCategory?.call(row),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 6),
+                            child: Column(
                               children: [
-                                Text(row.name),
-                                Text(
-                                  '¥${formatMinor(row.moneyMinor)} (${row.ratioText})',
-                                  style: theme.textTheme.bodySmall?.copyWith(
-                                    fontWeight: FontWeight.w600,
+                                Row(
+                                  children: [
+                                    CategoryIconAvatar(
+                                      iconKey: catIcon,
+                                      parentIconKey: parentCat?.icon,
+                                      colorHex: catColor,
+                                      name: row.name,
+                                      type: catType,
+                                      size: 26,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        row.name,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      '¥${formatMinor(row.moneyMinor)} (${row.ratioText})',
+                                      style: theme.textTheme.bodySmall
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 4),
+                                ClipRRect(
+                                  borderRadius: BorderRadius.circular(2),
+                                  child: LinearProgressIndicator(
+                                    value: (row.ratioBasisPoints / 10000.0)
+                                        .clamp(0.01, 1.0),
+                                    minHeight: 4,
+                                    color: visual.color,
                                   ),
                                 ),
                               ],
                             ),
-                            const SizedBox(height: 4),
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(2),
-                              child: LinearProgressIndicator(
-                                value: (row.ratioBasisPoints / 10000.0).clamp(
-                                  0.01,
-                                  1.0,
-                                ),
-                                minHeight: 4,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
+                          ),
+                        );
+                      },
                     ),
               ],
             );

@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../app/providers.dart';
 import '../../data/db/database.dart';
 import '../../domain/model/codes.dart';
+import '../common/catalog_icons.dart';
 import '../common/common.dart';
 
 class CategoriesPage extends ConsumerStatefulWidget {
@@ -31,53 +32,69 @@ class _CategoriesPageState extends ConsumerState<CategoriesPage>
     super.dispose();
   }
 
+  Future<({String name, String icon, String colorHex})?> _createOrRenameDialog({
+    required String title,
+    required String confirmLabel,
+    required Key nameFieldKey,
+    required Key saveButtonKey,
+    required int type,
+    String initialName = '',
+    String? initialIcon,
+    String? initialColor,
+    String? parentName,
+  }) {
+    return showDialog<({String name, String icon, String colorHex})>(
+      context: context,
+      builder: (dialogCtx) => _CategoryEditorDialog(
+        title: title,
+        confirmLabel: confirmLabel,
+        nameFieldKey: nameFieldKey,
+        saveButtonKey: saveButtonKey,
+        type: type,
+        initialName: initialName,
+        initialIcon: initialIcon,
+        initialColor: initialColor,
+        parentName: parentName,
+      ),
+    );
+  }
+
   Future<void> _addCategory(
     int bookId,
     int type, {
     int parentCatId = -1,
+    RecordCategory? parentCategory,
   }) async {
-    final nameController = TextEditingController();
     final isSub = parentCatId != -1;
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (dialogCtx) => AlertDialog(
-        title: Text(isSub ? '新建二级分类' : '新建分类'),
-        content: TextField(
-          key: const Key('category-name'),
-          controller: nameController,
-          autofocus: true,
-          decoration: const InputDecoration(labelText: '分类名称'),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogCtx, false),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            key: const Key('category-save'),
-            onPressed: () => Navigator.pop(dialogCtx, true),
-            child: const Text('创建'),
-          ),
-        ],
-      ),
+    final result = await _createOrRenameDialog(
+      title: isSub ? '新建二级分类' : '新建分类',
+      confirmLabel: '创建',
+      nameFieldKey: const Key('category-name'),
+      saveButtonKey: const Key('category-save'),
+      type: type,
+      initialColor: parentCategory?.colorFill,
+      parentName: parentCategory?.name,
     );
 
-    if (ok != true || !mounted) return;
+    if (result == null || !mounted) return;
     try {
-      final name = nameController.text.trim();
       final service = await ref.read(catalogServiceProvider.future);
       await service.createCategory(
         commandId: _ids.forPayload([
           'add-cat',
           bookId,
-          name,
+          result.name,
           type,
           parentCatId,
+          result.icon,
+          result.colorHex,
         ]),
         accountBookId: bookId,
-        name: name,
+        name: result.name,
         type: type,
         parentCatId: parentCatId,
+        icon: result.icon,
+        colorFill: result.colorHex,
       );
     } catch (e) {
       if (!mounted) return;
@@ -87,40 +104,37 @@ class _CategoriesPageState extends ConsumerState<CategoriesPage>
     }
   }
 
-  Future<void> _editCategory(RecordCategory category) async {
-    final nameController = TextEditingController(text: category.name);
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (dialogCtx) => AlertDialog(
-        title: Text('编辑分类“${category.name}”'),
-        content: TextField(
-          key: const Key('edit-category-name'),
-          controller: nameController,
-          autofocus: true,
-          decoration: const InputDecoration(labelText: '分类名称'),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogCtx, false),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            key: const Key('edit-category-save'),
-            onPressed: () => Navigator.pop(dialogCtx, true),
-            child: const Text('保存'),
-          ),
-        ],
-      ),
+  Future<void> _editCategory(
+    RecordCategory category, {
+    RecordCategory? parentCategory,
+  }) async {
+    final result = await _createOrRenameDialog(
+      title: '编辑分类“${category.name}”',
+      confirmLabel: '保存',
+      nameFieldKey: const Key('edit-category-name'),
+      saveButtonKey: const Key('edit-category-save'),
+      type: category.type,
+      initialName: category.name,
+      initialIcon: category.icon.isEmpty ? null : category.icon,
+      initialColor: category.colorFill,
+      parentName: parentCategory?.name,
     );
 
-    if (ok != true || !mounted) return;
+    if (result == null || !mounted) return;
     try {
-      final name = nameController.text.trim();
       final service = await ref.read(catalogServiceProvider.future);
       await service.updateCategory(
-        commandId: _ids.forPayload(['update-cat', category.id, name]),
+        commandId: _ids.forPayload([
+          'update-cat',
+          category.id,
+          result.name,
+          result.icon,
+          result.colorHex,
+        ]),
         categoryId: category.id,
-        name: name,
+        name: result.name,
+        icon: result.icon,
+        colorFill: result.colorHex,
       );
     } catch (e) {
       if (!mounted) return;
@@ -204,10 +218,21 @@ class _CategoriesPageState extends ConsumerState<CategoriesPage>
                       for (final cand in candidates)
                         DropdownMenuItem(
                           value: cand.id,
-                          child: Text(
-                            cand.parentCatId == -1
-                                ? cand.name
-                                : '  ${cand.name}',
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (cand.parentCatId != -1)
+                                const SizedBox(width: 12),
+                              CategoryIconAvatar(
+                                iconKey: cand.icon,
+                                colorHex: cand.colorFill,
+                                name: cand.name,
+                                type: cand.type,
+                                size: 22,
+                              ),
+                              const SizedBox(width: 8),
+                              Text(cand.name),
+                            ],
                           ),
                         ),
                     ],
@@ -329,18 +354,25 @@ class _CategoriesPageState extends ConsumerState<CategoriesPage>
         for (final top in topLevels) ...[
           ListTile(
             key: Key('category-${top.name}'),
-            leading: Icon(
-              top.isHide
-                  ? Icons.visibility_off_outlined
-                  : Icons.folder_outlined,
-              color: top.isHide ? Colors.grey : null,
+            leading: CategoryIconAvatar(
+              iconKey: top.icon,
+              colorHex: top.colorFill,
+              name: top.name,
+              type: top.type,
+              size: 38,
+              dimmed: top.isHide,
             ),
             title: Row(
               children: [
-                Text(
-                  top.name,
-                  style: TextStyle(
-                    decoration: top.isHide ? TextDecoration.lineThrough : null,
+                Flexible(
+                  child: Text(
+                    top.name,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      decoration: top.isHide
+                          ? TextDecoration.lineThrough
+                          : null,
+                    ),
                   ),
                 ),
                 if (top.isHide) ...[
@@ -359,8 +391,12 @@ class _CategoriesPageState extends ConsumerState<CategoriesPage>
                   key: Key('add-subcat-${top.id}'),
                   icon: const Icon(Icons.add_circle_outline),
                   tooltip: '添加子分类',
-                  onPressed: () =>
-                      _addCategory(bookId, type, parentCatId: top.id),
+                  onPressed: () => _addCategory(
+                    bookId,
+                    type,
+                    parentCatId: top.id,
+                    parentCategory: top,
+                  ),
                 ),
                 IconButton(
                   key: Key('hide-cat-${top.id}'),
@@ -392,14 +428,17 @@ class _CategoriesPageState extends ConsumerState<CategoriesPage>
           // Subcategories
           for (final sub in all.where((c) => c.parentCatId == top.id))
             Padding(
-              padding: const EdgeInsets.only(left: 32),
+              padding: const EdgeInsets.only(left: 28),
               child: ListTile(
                 key: Key('category-${sub.name}'),
-                leading: Icon(
-                  sub.isHide
-                      ? Icons.visibility_off_outlined
-                      : Icons.subdirectory_arrow_right,
-                  color: sub.isHide ? Colors.grey : null,
+                leading: CategoryIconAvatar(
+                  iconKey: sub.icon,
+                  parentIconKey: top.icon,
+                  colorHex: sub.colorFill ?? top.colorFill,
+                  name: '${top.name} · ${sub.name}',
+                  type: sub.type,
+                  size: 32,
+                  dimmed: sub.isHide,
                 ),
                 title: Text(
                   sub.name,
@@ -427,7 +466,7 @@ class _CategoriesPageState extends ConsumerState<CategoriesPage>
                       key: Key('cat-menu-${sub.id}'),
                       onSelected: (val) {
                         if (val == 'edit') {
-                          _editCategory(sub);
+                          _editCategory(sub, parentCategory: top);
                         } else if (val == 'delete') {
                           _deleteCategory(sub, all);
                         }
@@ -443,6 +482,174 @@ class _CategoriesPageState extends ConsumerState<CategoriesPage>
             ),
           const Divider(height: 1),
         ],
+      ],
+    );
+  }
+}
+
+class _CategoryEditorDialog extends StatefulWidget {
+  const _CategoryEditorDialog({
+    required this.title,
+    required this.confirmLabel,
+    required this.nameFieldKey,
+    required this.saveButtonKey,
+    required this.type,
+    required this.initialName,
+    this.initialIcon,
+    this.initialColor,
+    this.parentName,
+  });
+
+  final String title;
+  final String confirmLabel;
+  final Key nameFieldKey;
+  final Key saveButtonKey;
+  final int type;
+  final String initialName;
+  final String? initialIcon;
+  final String? initialColor;
+  final String? parentName;
+
+  @override
+  State<_CategoryEditorDialog> createState() => _CategoryEditorDialogState();
+}
+
+class _CategoryEditorDialogState extends State<_CategoryEditorDialog> {
+  late final TextEditingController _nameController;
+  String? _selectedIcon;
+  String? _selectedColor;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameController = TextEditingController(text: widget.initialName);
+    _selectedIcon = widget.initialIcon;
+    _selectedColor = widget.initialColor;
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    super.dispose();
+  }
+
+  String _effectiveLookupName() {
+    final trimmed = _nameController.text.trim();
+    if (widget.parentName != null && widget.parentName!.isNotEmpty) {
+      return trimmed.isEmpty
+          ? widget.parentName!
+          : '${widget.parentName!} · $trimmed';
+    }
+    return trimmed;
+  }
+
+  Future<void> _openPicker() async {
+    final picked = await showCategoryVisualPicker(
+      context,
+      initialIcon: _selectedIcon,
+      initialColor: _selectedColor,
+      previewName: _nameController.text.trim(),
+      categoryType: widget.type,
+    );
+    if (picked == null || !mounted) return;
+    setState(() {
+      _selectedIcon = picked.icon;
+      _selectedColor = picked.colorHex;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final visual = resolveCategoryVisual(
+      iconKey: _selectedIcon,
+      colorHex: _selectedColor,
+      name: _effectiveLookupName(),
+      type: widget.type,
+    );
+
+    return AlertDialog(
+      title: Text(widget.title),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            TextField(
+              key: widget.nameFieldKey,
+              controller: _nameController,
+              autofocus: true,
+              decoration: const InputDecoration(labelText: '分类名称'),
+              onChanged: (_) => setState(() {}),
+            ),
+            const SizedBox(height: 16),
+            InkWell(
+              key: const Key('category-visual-picker-trigger'),
+              borderRadius: BorderRadius.circular(12),
+              onTap: _openPicker,
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: theme.colorScheme.outlineVariant),
+                ),
+                child: Row(
+                  children: [
+                    CategoryIconAvatar(
+                      iconKey: visual.iconKey,
+                      colorHex: visual.colorHex,
+                      name: visual.label,
+                      type: widget.type,
+                      size: 38,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('图标与配色', style: theme.textTheme.bodyMedium),
+                          Text(
+                            '${visual.label} · 点击更换图标或颜色',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.outline,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Icon(Icons.chevron_right),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          key: widget.saveButtonKey,
+          onPressed: () {
+            final finalVisual = resolveCategoryVisual(
+              iconKey: _selectedIcon,
+              colorHex: _selectedColor,
+              name: _effectiveLookupName(),
+              type: widget.type,
+            );
+            Navigator.pop(context, (
+              name: _nameController.text.trim(),
+              icon: finalVisual.iconKey,
+              colorHex: finalVisual.colorHex,
+            ));
+          },
+          child: Text(widget.confirmLabel),
+        ),
       ],
     );
   }

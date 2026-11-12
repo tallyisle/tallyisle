@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -8,10 +9,29 @@ import '../../core/money.dart';
 import '../../data/db/database.dart';
 import '../../domain/ledger/asset_json.dart';
 import '../../domain/model/codes.dart';
+import '../common/catalog_icons.dart';
 import '../common/common.dart';
-import '../records/record_editor_page.dart';
 
-/// Label for a credit-card day setting.
+final _maxAssetAmount = Money.parse('88888888888.00');
+
+final _amountInputFormatters = <TextInputFormatter>[
+  FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}')),
+];
+
+Money _parseAmount(String text) {
+  final t = text.trim();
+  if (t.isEmpty) return Money.zero();
+  final normalized = t.endsWith('.') ? t.substring(0, t.length - 1) : t;
+  final money = Money.parse(
+    normalized.startsWith('.') ? '0$normalized' : normalized,
+  );
+  if (money.units > _maxAssetAmount.units) {
+    throw const Failure(FailureCode.validation, '金额不能超过 88888888888.00');
+  }
+  return money;
+}
+
+/// Label for a credit-account day setting.
 String creditDayLabel(int day) => switch (day) {
   endOfMonthDay => '月底',
   unsetDay => '未设置',
@@ -19,7 +39,7 @@ String creditDayLabel(int day) => switch (day) {
 };
 
 /// Creates ([assetId] null) or edits an account. Normal accounts and credit
-/// cards (docs/modules/credit-account.md) share this form.
+/// accounts (docs/modules/credit-account.md) share this form.
 class AssetEditorPage extends ConsumerStatefulWidget {
   const AssetEditorPage({super.key, this.assetId, this.initialType});
   final int? assetId;
@@ -37,6 +57,9 @@ class _AssetEditorPageState extends ConsumerState<AssetEditorPage> {
   final ids = CommandIds();
 
   int type = AssetType.normal;
+  String? selectedIcon;
+  String? selectedColor;
+  bool _userPickedVisual = false;
   String? currency;
   bool counted = true, busy = false, loading = true;
   int billDay = 1;
@@ -56,26 +79,34 @@ class _AssetEditorPageState extends ConsumerState<AssetEditorPage> {
   void initState() {
     super.initState();
     type = widget.initialType ?? AssetType.normal;
-    _load();
+    _loadExisting();
   }
 
-  Future<void> _load() async {
+  Future<void> _loadExisting() async {
     try {
       if (editing) {
-        final a = await ref.read(assetProvider(widget.assetId!).future);
-        if (a == null) throw const Failure(FailureCode.conflict, '账户不存在或已删除');
-        original = a;
-        type = a.type;
-        name.text = a.name;
-        remark.text = a.remark ?? '';
-        currency = a.currency;
-        counted = a.type == AssetType.debt
-            ? a.isEffectiveAsset == 0
-            : a.isEffectiveAsset == 1;
-        creditInfo = CreditInfo.parse(a.creditInfo);
-        extra = AssetExtra.parse(a.extraInfo);
+        final id = widget.assetId!;
+        final db = await ref.read(databaseProvider.future);
+        final existing = await (db.select(
+          db.assets,
+        )..where((a) => a.id.equals(id))).getSingleOrNull();
+        if (existing == null) {
+          throw const Failure(FailureCode.conflict, '账户不存在或已删除');
+        }
+        original = existing;
+        type = existing.type;
+        name.text = existing.name;
+        selectedIcon = existing.icon.isEmpty ? null : existing.icon;
+        selectedColor = existing.color;
+        remark.text = existing.remark ?? '';
+        currency = existing.currency;
+        counted = existing.type == AssetType.debt
+            ? existing.isEffectiveAsset == 0
+            : existing.isEffectiveAsset == 1;
+        creditInfo = CreditInfo.parse(existing.creditInfo);
+        extra = AssetExtra.parse(existing.extraInfo);
         if (isCredit) {
-          limit.text = formatMinor(a.initMoneyMinor);
+          limit.text = formatMinor(existing.initMoneyMinor);
           if (creditInfo.billDay != unsetDay) billDay = creditInfo.billDay;
           repaymentAfter = creditInfo.repaymentAfterBillDay;
           if (repaymentAfter) {
@@ -103,6 +134,54 @@ class _AssetEditorPageState extends ConsumerState<AssetEditorPage> {
     super.dispose();
   }
 
+  AssetVisual _currentVisual() {
+    var effectiveIcon = selectedIcon;
+    var effectiveColor = selectedColor;
+    if (editing && !_userPickedVisual && original != null) {
+      final origDefault = resolveAssetVisual(
+        name: original!.name,
+        assetType: original!.type,
+        subType: original!.subType,
+      );
+      final nameChanged = name.text.trim() != original!.name;
+      if (nameChanged &&
+          (original!.icon.isEmpty || original!.icon == origDefault.iconKey) &&
+          (original!.color == null ||
+              original!.color!.toUpperCase() ==
+                  origDefault.colorHex.toUpperCase())) {
+        effectiveIcon = null;
+        effectiveColor = null;
+      }
+    }
+    return resolveAssetVisual(
+      iconKey: effectiveIcon,
+      colorHex: effectiveColor,
+      name: name.text.trim(),
+      assetType: type,
+      subType: original?.subType,
+    );
+  }
+
+  Future<void> _pickVisual() async {
+    final current = _currentVisual();
+    final picked = await showAssetVisualPicker(
+      context,
+      initialIcon: current.iconKey,
+      initialColor: _userPickedVisual || (selectedColor?.isNotEmpty ?? false)
+          ? current.colorHex
+          : null,
+      assetType: type,
+      subType: original?.subType,
+      previewName: name.text.trim(),
+    );
+    if (picked == null || !mounted) return;
+    setState(() {
+      selectedIcon = picked.icon;
+      selectedColor = picked.colorHex;
+      _userPickedVisual = true;
+    });
+  }
+
   Future<void> _save() async {
     if (busy) return;
     setState(() {
@@ -114,7 +193,7 @@ class _AssetEditorPageState extends ConsumerState<AssetEditorPage> {
       String? creditJson = original?.creditInfo;
       String? extraJson = original?.extraInfo;
       if (isCredit) {
-        creditLimit = parseAmount(limit.text);
+        creditLimit = _parseAmount(limit.text);
         final days = int.tryParse(afterDays.text.trim());
         if (repaymentAfter && (days == null || days < 0 || days > 60)) {
           throw const Failure(FailureCode.validation, '“账单日后天数”须为 0–60');
@@ -128,6 +207,7 @@ class _AssetEditorPageState extends ConsumerState<AssetEditorPage> {
         creditJson = creditInfo.encode();
         extraJson = extra.encode();
       }
+      final visual = _currentVisual();
       final service = await ref.read(ledgerServiceProvider.future);
       final rem = remark.text.trim().isEmpty ? null : remark.text.trim();
       if (editing) {
@@ -136,6 +216,8 @@ class _AssetEditorPageState extends ConsumerState<AssetEditorPage> {
             'edit',
             widget.assetId,
             name.text,
+            visual.iconKey,
+            visual.colorHex,
             rem,
             currency,
             counted,
@@ -145,6 +227,8 @@ class _AssetEditorPageState extends ConsumerState<AssetEditorPage> {
           ]),
           assetId: widget.assetId!,
           name: name.text,
+          icon: visual.iconKey,
+          color: visual.colorHex,
           remark: rem,
           groupName: original?.groupName,
           currency: currency,
@@ -154,14 +238,16 @@ class _AssetEditorPageState extends ConsumerState<AssetEditorPage> {
           extraInfo: extraJson,
         );
       } else {
-        // Credit cards: the user enters the current debt as a positive number.
-        var initial = parseAmount(balance.text);
+        // Credit accounts: the user enters the current debt as a positive number.
+        var initial = _parseAmount(balance.text);
         if (isCredit) initial = -initial;
         await service.createAsset(
           commandId: ids.forPayload([
             'create',
             type,
             name.text,
+            visual.iconKey,
+            visual.colorHex,
             initial.toJson(),
             rem,
             currency,
@@ -173,6 +259,8 @@ class _AssetEditorPageState extends ConsumerState<AssetEditorPage> {
           name: name.text,
           initial: initial,
           type: type,
+          icon: visual.iconKey,
+          color: visual.colorHex,
           remark: rem,
           currency: currency,
           countedInNetWorth: counted,
@@ -197,12 +285,18 @@ class _AssetEditorPageState extends ConsumerState<AssetEditorPage> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final currencies = ref.watch(currenciesProvider).value ?? const [];
     final assets = (ref.watch(assetsProvider).value ?? const <Asset>[])
         .where((a) => a.type != AssetType.credit && a.id != widget.assetId)
         .toList();
+    final visual = _currentVisual();
+    final titleText = isCredit
+        ? (editing ? '编辑信用账户' : '新建信用账户')
+        : (editing ? '编辑账户' : '新建账户');
+
     return Scaffold(
-      appBar: AppBar(title: Text(editing ? '编辑账户' : '添加账户')),
+      appBar: AppBar(title: Text(titleText)),
       bottomNavigationBar: SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
@@ -231,23 +325,81 @@ class _AssetEditorPageState extends ConsumerState<AssetEditorPage> {
                           ),
                           ButtonSegment(
                             value: AssetType.credit,
-                            label: Text('信用卡'),
+                            label: Text('信用账户'),
                             icon: Icon(Icons.credit_card),
                           ),
                         ],
                         selected: {type},
                         onSelectionChanged: busy
                             ? null
-                            : (s) => setState(() => type = s.first),
+                            : (s) => setState(() {
+                                type = s.first;
+                                if (!_userPickedVisual) {
+                                  selectedIcon = null;
+                                  selectedColor = null;
+                                }
+                              }),
                       ),
                     const SizedBox(height: 12),
                     TextField(
                       key: const Key('asset-name'),
                       controller: name,
                       enabled: !busy,
+                      onChanged: (_) => setState(() {}),
                       decoration: InputDecoration(
                         labelText: '账户名称',
-                        hintText: isCredit ? '如：招行信用卡' : '如：现金、银行卡',
+                        hintText: isCredit
+                            ? '如：招行信用卡、花呗、白条'
+                            : '如：现金、招行储蓄卡、微信钱包、支付宝',
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    InkWell(
+                      key: const Key('asset-visual-picker-trigger'),
+                      borderRadius: BorderRadius.circular(12),
+                      onTap: busy ? null : _pickVisual,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 10,
+                        ),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: theme.colorScheme.outlineVariant,
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            AssetIconAvatar(
+                              iconKey: visual.iconKey,
+                              colorHex: visual.colorHex,
+                              name: visual.label,
+                              assetType: type,
+                              subType: original?.subType,
+                              size: 40,
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    '账户图标与颜色',
+                                    style: theme.textTheme.bodyMedium,
+                                  ),
+                                  Text(
+                                    '${visual.label} · 点击更换图标或配色',
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      color: theme.colorScheme.outline,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const Icon(Icons.chevron_right),
+                          ],
+                        ),
                       ),
                     ),
                     const SizedBox(height: 12),
@@ -259,7 +411,7 @@ class _AssetEditorPageState extends ConsumerState<AssetEditorPage> {
                         keyboardType: const TextInputType.numberWithOptions(
                           decimal: true,
                         ),
-                        inputFormatters: amountInputFormatters,
+                        inputFormatters: _amountInputFormatters,
                         decoration: InputDecoration(
                           labelText: isCredit ? '当前欠款' : '当前余额',
                           helperText: isCredit ? '没有欠款就留空或填 0' : null,
@@ -283,7 +435,7 @@ class _AssetEditorPageState extends ConsumerState<AssetEditorPage> {
                         keyboardType: const TextInputType.numberWithOptions(
                           decimal: true,
                         ),
-                        inputFormatters: amountInputFormatters,
+                        inputFormatters: _amountInputFormatters,
                         decoration: const InputDecoration(labelText: '信用额度'),
                       ),
                       const SizedBox(height: 12),
@@ -401,9 +553,7 @@ class _AssetEditorPageState extends ConsumerState<AssetEditorPage> {
                       Text(
                         error!,
                         key: const Key('asset-error'),
-                        style: TextStyle(
-                          color: Theme.of(context).colorScheme.error,
-                        ),
+                        style: TextStyle(color: theme.colorScheme.error),
                       ),
                   ],
                 ),

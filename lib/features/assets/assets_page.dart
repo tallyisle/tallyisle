@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../app/providers.dart';
 import '../../data/db/database.dart';
 import '../../domain/model/codes.dart';
+import '../common/catalog_icons.dart';
 import '../common/common.dart';
 import 'asset_detail_page.dart' show creditBalanceLabel;
 
@@ -39,68 +40,6 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
         ],
       ),
     );
-
-    Widget tile(Asset a) {
-      final credit = a.type == AssetType.credit;
-      final status = switch (a.status) {
-        AssetStatus.hidden => '已隐藏',
-        AssetStatus.settled => '已结清',
-        _ => null,
-      };
-      return ListTile(
-        key: Key('asset-${a.name}'),
-        leading: Icon(
-          credit ? Icons.credit_card : Icons.account_balance_wallet_outlined,
-        ),
-        title: Text(a.name),
-        subtitle: Text(
-          [
-            ?status,
-            ?a.currency,
-            if (a.remark != null && a.remark!.isNotEmpty) a.remark!,
-          ].join(' · '),
-        ),
-        trailing: Text(
-          hidden
-              ? '***'
-              : credit
-              ? creditBalanceLabel(a.balanceMinor)
-              : formatMinor(a.balanceMinor),
-        ),
-        onTap: () => context.push('/assets/${a.id}'),
-      );
-    }
-
-    Widget debtTile(Asset a) {
-      final isLend = a.subType == AssetType.debtLend;
-      final dirLabel = isLend ? '借出' : '借入';
-      final status = switch (a.status) {
-        AssetStatus.hidden => '已隐藏',
-        AssetStatus.settled => '已结清',
-        _ => null,
-      };
-      final displayMinor =
-          a.status == AssetStatus.settled || a.balanceMinor < BigInt.zero
-          ? BigInt.zero
-          : a.balanceMinor;
-      return ListTile(
-        key: Key('asset-${a.name}'),
-        leading: Icon(
-          isLend ? Icons.call_made_outlined : Icons.call_received_outlined,
-        ),
-        title: Text(a.name),
-        subtitle: Text(
-          [
-            dirLabel,
-            ?status,
-            ?a.currency,
-            if (a.remark != null && a.remark!.isNotEmpty) a.remark!,
-          ].join(' · '),
-        ),
-        trailing: Text(hidden ? '***' : formatMinor(displayMinor)),
-        onTap: () => context.push('/debts/${a.id}'),
-      );
-    }
 
     return Scaffold(
       appBar: AppBar(
@@ -215,21 +154,51 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
               ),
             ),
             if (allVisibleEmpty)
-              const Padding(
-                padding: EdgeInsets.all(32),
-                child: Center(child: Text('还没有账户，点右下角添加')),
+              Padding(
+                padding: const EdgeInsets.all(32),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text('还没有账户，点右下角添加'),
+                    const SizedBox(height: 16),
+                    Wrap(
+                      spacing: 12,
+                      runSpacing: 8,
+                      alignment: WrapAlignment.center,
+                      children: [
+                        OutlinedButton.icon(
+                          key: const Key('empty-add-normal-asset'),
+                          onPressed: () => context.push('/assets/new'),
+                          icon: const Icon(
+                            Icons.account_balance_wallet_outlined,
+                          ),
+                          label: const Text('新建资金账户'),
+                        ),
+                        OutlinedButton.icon(
+                          key: const Key('empty-add-credit-asset'),
+                          onPressed: () => context.push(
+                            '/assets/new?type=${AssetType.credit}',
+                          ),
+                          icon: const Icon(Icons.credit_card_outlined),
+                          label: const Text('新建信用账户'),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
             if (normal.isNotEmpty) ...[
               header('资金账户'),
-              for (final a in normal) tile(a),
+              for (final a in normal) _AssetTile(asset: a, hidden: hidden),
             ],
             if (credit.isNotEmpty) ...[
-              header('信用卡'),
-              for (final a in credit) tile(a),
+              header('信用账户'),
+              for (final a in credit) _AssetTile(asset: a, hidden: hidden),
             ],
             if (debts.isNotEmpty) ...[
               header('借入 / 借出'),
-              for (final a in debts) debtTile(a),
+              for (final a in debts)
+                _AssetTile(asset: a, hidden: hidden, isDebtSection: true),
             ],
             if (archivedCount > 0)
               TextButton(
@@ -251,6 +220,94 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
         icon: const Icon(Icons.add),
         label: const Text('添加账户'),
       ),
+    );
+  }
+}
+
+class _AssetTile extends StatelessWidget {
+  const _AssetTile({
+    required this.asset,
+    required this.hidden,
+    this.isDebtSection = false,
+  });
+
+  final Asset asset;
+  final bool hidden;
+  final bool isDebtSection;
+
+  @override
+  Widget build(BuildContext context) {
+    final isArchived = asset.status != AssetStatus.active;
+    final statusLabel = switch (asset.status) {
+      AssetStatus.hidden => '已隐藏',
+      AssetStatus.settled => '已结清',
+      _ => null,
+    };
+
+    if (isDebtSection || asset.type == AssetType.debt) {
+      final isLend = asset.subType == AssetType.debtLend;
+      final dirLabel = isLend ? '借出' : '借入';
+      final displayMinor =
+          asset.status == AssetStatus.settled ||
+              asset.balanceMinor < BigInt.zero
+          ? BigInt.zero
+          : asset.balanceMinor;
+      final subtitleParts = <String>[
+        dirLabel,
+        ?statusLabel,
+        ?asset.currency,
+        if (asset.remark != null && asset.remark!.isNotEmpty) asset.remark!,
+      ];
+      return ListTile(
+        key: Key('asset-${asset.name}'),
+        leading: Opacity(
+          opacity: isArchived ? 0.5 : 1.0,
+          child: AssetIconAvatar(
+            iconKey: asset.icon,
+            colorHex: asset.color,
+            name: asset.name,
+            assetType: asset.type,
+            subType: asset.subType,
+            size: 38,
+          ),
+        ),
+        title: Text(asset.name),
+        subtitle: Text(subtitleParts.join(' · ')),
+        trailing: Text(hidden ? '***' : formatMinor(displayMinor)),
+        onTap: () => context.push('/debts/${asset.id}'),
+      );
+    }
+
+    final credit = asset.type == AssetType.credit;
+    final subtitleParts = <String>[
+      ?statusLabel,
+      ?asset.currency,
+      if (asset.remark != null && asset.remark!.isNotEmpty) asset.remark!,
+    ];
+
+    return ListTile(
+      key: Key('asset-${asset.name}'),
+      leading: Opacity(
+        opacity: isArchived ? 0.5 : 1.0,
+        child: AssetIconAvatar(
+          iconKey: asset.icon,
+          colorHex: asset.color,
+          name: asset.name,
+          assetType: asset.type,
+          subType: asset.subType,
+          size: 38,
+        ),
+      ),
+      title: Text(asset.name),
+      subtitle: subtitleParts.isEmpty ? null : Text(subtitleParts.join(' · ')),
+      trailing: Text(
+        hidden
+            ? '***'
+            : credit
+            ? creditBalanceLabel(asset.balanceMinor)
+            : formatMinor(asset.balanceMinor),
+      ),
+      onTap: () => context.push('/assets/${asset.id}'),
     );
   }
 }

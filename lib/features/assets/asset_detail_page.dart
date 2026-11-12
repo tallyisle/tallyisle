@@ -1,16 +1,52 @@
+import 'package:drift/drift.dart' show OrderingTerm;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../app/providers.dart';
+import '../../core/failure.dart';
+import '../../core/money.dart';
 import '../../data/db/database.dart';
+import '../../data/ledger/ledger_service.dart';
 import '../../domain/ledger/asset_json.dart';
 import '../../domain/model/codes.dart';
+import '../common/catalog_icons.dart';
 import '../common/common.dart';
-import '../records/record_editor_page.dart';
 import 'asset_editor_page.dart';
 import 'asset_flow_section.dart';
 import 'credit_section.dart';
+
+final _maxAdjustAmount = Money.parse('88888888888.00');
+
+Money _parseAmount(String text) {
+  final t = text.trim();
+  if (t.isEmpty) return Money.zero();
+  final normalized = t.endsWith('.') ? t.substring(0, t.length - 1) : t;
+  final money = Money.parse(
+    normalized.startsWith('.') ? '0$normalized' : normalized,
+  );
+  if (money.units > _maxAdjustAmount.units) {
+    throw const Failure(FailureCode.validation, '金额不能超过 88888888888.00');
+  }
+  return money;
+}
+
+Future<int> _readCurrentBookId(AppDatabase db) async {
+  final pref = await (db.select(
+    db.preferences,
+  )..where((t) => t.key.equals('current_book_id'))).getSingleOrNull();
+  final parsed = int.tryParse(pref?.value ?? '');
+  if (parsed != null) return parsed;
+  final firstBook =
+      await (db.select(db.accountBooks)
+            ..orderBy([
+              (t) => OrderingTerm.asc(t.sort),
+              (t) => OrderingTerm.asc(t.id),
+            ])
+            ..limit(1))
+          .getSingleOrNull();
+  return firstBook?.id ?? 1;
+}
 
 /// "欠款 320.00" / "溢存款 50.00" for credit balances (reconciliation.md R4:
 /// never a double minus sign).
@@ -65,6 +101,12 @@ class _Header extends StatelessWidget {
       AssetStatus.settled => '已结清',
       _ => null,
     };
+    final accountTypeLabel = credit
+        ? '信用账户'
+        : asset.type == AssetType.debt
+        ? '借贷账户'
+        : '资金账户';
+
     return Card(
       margin: const EdgeInsets.all(16),
       child: Padding(
@@ -74,16 +116,16 @@ class _Header extends StatelessWidget {
           children: [
             Row(
               children: [
-                Icon(
-                  credit
-                      ? Icons.credit_card
-                      : Icons.account_balance_wallet_outlined,
+                AssetIconAvatar(
+                  iconKey: asset.icon,
+                  colorHex: asset.color,
+                  name: asset.name,
+                  assetType: asset.type,
+                  subType: asset.subType,
+                  size: 40,
                 ),
-                const SizedBox(width: 8),
-                Text(
-                  credit ? '信用卡' : '普通账户',
-                  style: theme.textTheme.labelLarge,
-                ),
+                const SizedBox(width: 10),
+                Text(accountTypeLabel, style: theme.textTheme.labelLarge),
                 if (asset.currency != null) ...[
                   const SizedBox(width: 8),
                   Chip(label: Text(asset.currency!)),
@@ -186,7 +228,7 @@ String repayRoute(Asset card, BigInt amount) {
       'to': '${card.id}',
       'from': ?from?.toString(),
       if (amount > BigInt.zero) 'amount': formatMinor(amount),
-      'remark': '信用卡还款',
+      'remark': '信用账户还款',
     },
   ).toString();
 }
@@ -254,50 +296,28 @@ class _AssetMenuState extends ConsumerState<_AssetMenu> {
   }
 
   Future<void> _adjust(Asset asset) async {
+    if (!mounted) return;
     final credit = asset.type == AssetType.credit;
-    final controller = TextEditingController(
-      text: formatMinor(credit ? -asset.balanceMinor : asset.balanceMinor),
+    final initialText = formatMinor(
+      credit ? -asset.balanceMinor : asset.balanceMinor,
     );
     final value = await showDialog<String>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text('调整“${asset.name}”${credit ? '欠款' : '余额'}'),
-        content: TextField(
-          key: const Key('adjust-amount'),
-          controller: controller,
-          autofocus: true,
-          keyboardType: const TextInputType.numberWithOptions(
-            decimal: true,
-            signed: true,
-          ),
-          decoration: InputDecoration(
-            helperText: credit
-                ? '填当前实际欠款（溢存款填负数）；会生成一条“余额变更”记录'
-                : '会生成一条“余额变更”记录',
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            key: const Key('adjust-save'),
-            onPressed: () => Navigator.pop(context, controller.text),
-            child: const Text('保存'),
-          ),
-        ],
+      builder: (_) => _AdjustBalanceDialog(
+        assetName: asset.name,
+        isCredit: credit,
+        initialText: initialText,
       ),
     );
-    controller.dispose();
-    if (value == null) return;
+    if (value == null || !mounted) return;
     final text = value.trim();
     final negative = text.startsWith('-');
-    var target = parseAmount(negative ? text.substring(1) : text);
+    var target = _parseAmount(negative ? text.substring(1) : text);
     if (negative) target = -target;
     if (credit) target = -target;
-    final service = await ref.read(ledgerServiceProvider.future);
-    final bookId = await ref.read(currentBookIdProvider.future);
+    final db = await ref.read(databaseProvider.future);
+    final bookId = await _readCurrentBookId(db);
+    final service = LedgerService(db);
     await service.adjustBalance(
       commandId: ids.forPayload(['adjust', asset.id, target.toJson()]),
       assetId: asset.id,
@@ -332,6 +352,69 @@ class _AssetMenuState extends ConsumerState<_AssetMenu> {
         else
           const PopupMenuItem(value: _Action.settle, child: Text('标记为已结清')),
         const PopupMenuItem(value: _Action.delete, child: Text('删除账户')),
+      ],
+    );
+  }
+}
+
+class _AdjustBalanceDialog extends StatefulWidget {
+  const _AdjustBalanceDialog({
+    required this.assetName,
+    required this.isCredit,
+    required this.initialText,
+  });
+
+  final String assetName;
+  final bool isCredit;
+  final String initialText;
+
+  @override
+  State<_AdjustBalanceDialog> createState() => _AdjustBalanceDialogState();
+}
+
+class _AdjustBalanceDialogState extends State<_AdjustBalanceDialog> {
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialText);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text('调整“${widget.assetName}”${widget.isCredit ? '欠款' : '余额'}'),
+      content: TextField(
+        key: const Key('adjust-amount'),
+        controller: _controller,
+        autofocus: true,
+        keyboardType: const TextInputType.numberWithOptions(
+          decimal: true,
+          signed: true,
+        ),
+        decoration: InputDecoration(
+          helperText: widget.isCredit
+              ? '填当前实际欠款（溢存款填负数）；会生成一条“余额变更”记录'
+              : '会生成一条“余额变更”记录',
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          key: const Key('adjust-save'),
+          onPressed: () => Navigator.pop(context, _controller.text),
+          child: const Text('保存'),
+        ),
       ],
     );
   }

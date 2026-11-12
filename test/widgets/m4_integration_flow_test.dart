@@ -196,7 +196,7 @@ void main() {
       await _settle(tester);
 
       expect(find.text('资金账户'), findsOneWidget);
-      expect(find.text('信用卡'), findsOneWidget);
+      expect(find.text('信用账户'), findsOneWidget);
 
       // Quick-action chips on AssetsPage.
       await tester.tap(find.byKey(const Key('assets-quick-deposits')));

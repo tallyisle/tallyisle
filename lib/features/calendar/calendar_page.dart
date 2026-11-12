@@ -7,6 +7,7 @@ import '../../data/db/database.dart';
 import '../../domain/model/codes.dart';
 import '../../domain/rules/calendar.dart';
 import '../../domain/rules/income_expense.dart';
+import '../common/catalog_icons.dart';
 import '../common/common.dart';
 import '../records/record_labels.dart';
 
@@ -231,6 +232,8 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
     // ISO 8601: Monday=1 .. Sunday=7. Leading blanks count:
     final leadingBlanks = (month.firstWeekday - 1) % 7;
     final totalCells = leadingBlanks + month.daysInMonth;
+    final viewportHeight = MediaQuery.sizeOf(context).height;
+    final cellHeight = viewportHeight < 700 ? 44.0 : 54.0;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -238,9 +241,9 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
         key: const Key('calendar-grid'),
         shrinkWrap: true,
         physics: const NeverScrollableScrollPhysics(),
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: 7,
-          childAspectRatio: 0.95,
+          mainAxisExtent: cellHeight,
         ),
         itemCount: totalCells,
         itemBuilder: (context, index) {
@@ -440,9 +443,32 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
           itemBuilder: (context, index) {
             final r = records[index];
             final label = recordLabel(r, categories, assets);
+            final cat = r.recordCatId == noRef
+                ? null
+                : categories.where((c) => c.id == r.recordCatId).firstOrNull;
+            final parentCat = (cat != null && cat.parentCatId != noRef)
+                ? categories.where((c) => c.id == cat.parentCatId).firstOrNull
+                : null;
+            final catDisplayName = cat == null
+                ? null
+                : (parentCat != null
+                      ? '${parentCat.name} · ${cat.name}'
+                      : cat.name);
+            final catColor = cat?.colorFill ?? parentCat?.colorFill;
+            final isRefund =
+                (r.type == RecordType.expense || r.type == RecordType.income) &&
+                r.moneyMinor < BigInt.zero;
             return ListTile(
               key: Key('calendar-record-${r.recordId}'),
-              leading: CircleAvatar(child: Text(label.title.characters.first)),
+              leading: RecordTypeIconAvatar(
+                recordType: r.type,
+                subType: r.subType,
+                isRefund: isRefund,
+                categoryName: catDisplayName,
+                categoryIcon: cat?.icon,
+                parentCategoryIcon: parentCat?.icon,
+                categoryColor: catColor,
+              ),
               title: Text(label.title),
               subtitle: label.subtitle.isEmpty ? null : Text(label.subtitle),
               trailing: Text(

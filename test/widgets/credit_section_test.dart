@@ -78,7 +78,7 @@ void main() {
     await settle();
 
     // Verify header and credit section
-    expect(find.text('信用卡'), findsOneWidget);
+    expect(find.text('信用账户'), findsOneWidget);
     expect(find.byKey(const Key('credit-usable-limit')), findsOneWidget);
 
     // Year switcher should be present
