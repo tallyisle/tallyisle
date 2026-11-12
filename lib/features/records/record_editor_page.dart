@@ -110,6 +110,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
   final discount = TextEditingController();
   final fee = TextEditingController();
   final remark = TextEditingController();
+  final _amountFocus = FocusNode();
   final _discountFocus = FocusNode();
   final ids = CommandIds();
   final imageIds = CommandIds();
@@ -133,7 +134,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
   bool feeFromTarget = false;
   bool excludeBudget = false, excludeExIn = false;
   bool _attachmentsExpanded = false;
-  bool _keypadVisible = true;
+  bool _savedAndResetBanner = false;
   DateTime time = DateTime.now();
   LedgerRecord? original;
   bool loading = true, busy = false;
@@ -356,21 +357,9 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
     discount.dispose();
     fee.dispose();
     remark.dispose();
+    _amountFocus.dispose();
     _discountFocus.dispose();
     super.dispose();
-  }
-
-  void _handleKeypadTap(String key) {
-    if (busy) return;
-    final next = applyKeypadKey(amount.text, key);
-    setState(() {
-      error = null;
-      amount.value = TextEditingValue(
-        text: next,
-        selection: TextSelection.collapsed(offset: next.length),
-      );
-      _autoConvert();
-    });
   }
 
   Future<void> _save({required bool stayAndReset}) async {
@@ -578,16 +567,9 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
           imageNames = const <String>[];
           location = null;
           _attachmentsExpanded = false;
+          _savedAndResetBanner = true;
           error = null;
         });
-        ScaffoldMessenger.of(context)
-          ..clearSnackBars()
-          ..showSnackBar(
-            const SnackBar(
-              content: Text('已保存，可继续记下一笔'),
-              duration: Duration(seconds: 2),
-            ),
-          );
         return;
       }
 
@@ -961,7 +943,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
     return PopScope(
       canPop: !busy,
       child: Scaffold(
-        resizeToAvoidBottomInset: false,
+        resizeToAvoidBottomInset: true,
         appBar: AppBar(
           toolbarHeight: 48,
           title: Text(editing ? '编辑账单' : '记一笔'),
@@ -1013,25 +995,41 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
                     children: [
                       // Zone 1: Compact Type Bar (primary tabs + secondary pills)
                       _buildTypeSwitcherBar(context),
-                      // Zone 2: Scrollable Visual Category Grid or Transfer Card
+                      // Zone 2 + Zone 3: Scrollable middle zone absorbs keyboard inset,
+                      // while bottom dock smoothly rides above the native OS keyboard.
                       Expanded(
-                        child: _buildScrollableMiddleZone(
-                          context,
-                          bookId: bookId,
-                          categories: categories,
-                          assets: assets,
-                          diyConfig: diyConfig,
+                        child: LayoutBuilder(
+                          builder: (context, areaConstraints) {
+                            return Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                Expanded(
+                                  child: _buildScrollableMiddleZone(
+                                    context,
+                                    bookId: bookId,
+                                    categories: categories,
+                                    assets: assets,
+                                    diyConfig: diyConfig,
+                                  ),
+                                ),
+                                ConstrainedBox(
+                                  constraints: BoxConstraints(
+                                    maxHeight: areaConstraints.maxHeight,
+                                  ),
+                                  child: _buildBottomDock(
+                                    context,
+                                    bookId: bookId,
+                                    assets: assets,
+                                    tags: tags,
+                                    currencies: currencies,
+                                    diyConfig: diyConfig,
+                                    canSubmit: canSubmit,
+                                  ),
+                                ),
+                              ],
+                            );
+                          },
                         ),
-                      ),
-                      // Zone 3: Bottom Integrated Dock + Calculator Keypad
-                      _buildBottomDock(
-                        context,
-                        bookId: bookId,
-                        assets: assets,
-                        tags: tags,
-                        currencies: currencies,
-                        diyConfig: diyConfig,
-                        canSubmit: canSubmit,
                       ),
                     ],
                   ),
@@ -1452,6 +1450,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
     return SafeArea(
       top: false,
       child: Container(
+        key: const Key('editor-bottom-dock'),
         decoration: BoxDecoration(
           color: cs.surface,
           border: Border(
@@ -1468,334 +1467,393 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
             ),
           ],
         ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // Live budget hint bar (0px when no budget set)
-            if (bookId != null &&
-                categoryId != null &&
-                (type == RecordType.expense ||
-                    type == RecordType.income ||
-                    type == RecordType.reimbursable))
-              RecordBudgetHintBar(
-                bookId: bookId,
-                recordTime: time.millisecondsSinceEpoch,
-                categoryId: categoryId!,
-                excludeBudget: excludeBudget,
-              ),
-
-            // Validation / conflict error banner
-            if (error != null)
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 5,
-                ),
-                color: cs.errorContainer.withAlpha(180),
-                child: Row(
-                  children: [
-                    Icon(Icons.error_outline, size: 15, color: cs.error),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(
-                        error!,
-                        key: const Key('form-error'),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontSize: 12, color: cs.error),
-                      ),
-                    ),
-                    InkWell(
-                      onTap: () => setState(() => error = null),
-                      child: Icon(Icons.close, size: 15, color: cs.error),
-                    ),
-                  ],
-                ),
-              ),
-
-            // Foreign-currency conversion row (only when sc != ac)
-            if (sc != ac)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 6, 12, 2),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: SizedBox(
-                        height: 36,
-                        child: TextField(
-                          key: const Key('converted'),
-                          controller: converted,
-                          enabled: !busy,
-                          keyboardType: const TextInputType.numberWithOptions(
-                            decimal: true,
-                          ),
-                          inputFormatters: amountInputFormatters,
-                          style: const TextStyle(fontSize: 13),
-                          onChanged: (_) => convertedEdited = true,
-                          decoration: InputDecoration(
-                            labelText: type == RecordType.transfer
-                                ? '转入金额（$ac）'
-                                : '折合入账（$ac）',
-                            prefixText: '$ac ',
-                            isDense: true,
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 8,
-                            ),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    TextButton.icon(
-                      key: const Key('auto-convert-btn'),
-                      style: TextButton.styleFrom(
-                        visualDensity: VisualDensity.compact,
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                      ),
-                      onPressed: busy
-                          ? null
-                          : () => setState(() {
-                              convertedEdited = false;
-                              _autoConvert();
-                            }),
-                      icon: const Icon(Icons.sync_rounded, size: 15),
-                      label: const Text('按汇率算', style: TextStyle(fontSize: 12)),
-                    ),
-                  ],
-                ),
-              ),
-
-            // Collapsible image attachment strip
-            if ((_attachmentsExpanded || imageNames.isNotEmpty) &&
-                (diyConfig.isEnabled(DiyToolbarAction.images) ||
-                    imageNames.isNotEmpty))
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 6, 12, 2),
-                child: BillAttachmentStrip(
-                  key: const Key('record-attachment-strip'),
-                  imageNames: imageNames,
-                  readOnly: busy,
-                  onChanged: (next) => setState(() => imageNames = next),
-                ),
-              ),
-
-            // Compact Horizontal Scrollable Pill Toolbar (single 36px strip)
-            _buildPillToolbar(
-              context,
-              assets: assets,
-              tags: tags,
-              currencies: currencies,
-              diyConfig: diyConfig,
-            ),
-
-            // Frequent remark chips (0px when empty)
-            if (type != RecordType.transfer && categoryId != null)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: FrequentRemarkChips(
+        child: SingleChildScrollView(
+          physics: const ClampingScrollPhysics(),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Live budget hint bar (0px when no budget set)
+              if (bookId != null &&
+                  categoryId != null &&
+                  (type == RecordType.expense ||
+                      type == RecordType.income ||
+                      type == RecordType.reimbursable))
+                RecordBudgetHintBar(
+                  bookId: bookId,
+                  recordTime: time.millisecondsSinceEpoch,
                   categoryId: categoryId!,
-                  selectedRemark: remark.text,
-                  maxCount: 6,
-                  enabled: !busy,
-                  onSelectRemark: (value) =>
-                      setState(() => remark.text = value),
+                  excludeBudget: excludeBudget,
                 ),
-              ),
 
-            // Remark + Live Amount Expression Bar
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 2, 8, 4),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  Expanded(
-                    flex: 5,
-                    child: TextField(
-                      key: const Key('remark'),
-                      controller: remark,
-                      enabled: !busy,
-                      maxLength: 200,
-                      buildCounter:
-                          (
-                            _, {
-                            required currentLength,
-                            required isFocused,
-                            required maxLength,
-                          }) => null,
-                      onChanged: (_) => setState(() {}),
-                      style: const TextStyle(fontSize: 13.5),
-                      decoration: InputDecoration(
-                        isDense: true,
-                        hintText: '点击填写备注...',
-                        hintStyle: TextStyle(
-                          fontSize: 13,
-                          color: cs.onSurfaceVariant.withAlpha(160),
-                        ),
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 4,
-                          vertical: 8,
-                        ),
-                        border: InputBorder.none,
-                        prefixIcon: Icon(
-                          Icons.edit_note_rounded,
-                          size: 19,
-                          color: cs.onSurfaceVariant,
-                        ),
-                        prefixIconConstraints: const BoxConstraints(
-                          minWidth: 26,
-                          minHeight: 26,
-                        ),
-                        suffixIcon:
-                            type != RecordType.transfer &&
-                                GoRouter.maybeOf(context) != null
-                            ? IconButton(
-                                key: const Key('editor-remarks-btn'),
-                                tooltip: '常用备注管理',
-                                visualDensity: VisualDensity.compact,
-                                padding: EdgeInsets.zero,
-                                icon: const Icon(
-                                  Icons.comment_outlined,
-                                  size: 17,
-                                ),
-                                onPressed: busy
-                                    ? null
-                                    : () => unawaited(
-                                        context.push(
-                                          categoryId == null
-                                              ? '/remarks'
-                                              : '/remarks?categoryId=$categoryId',
-                                        ),
-                                      ),
-                              )
-                            : null,
-                        suffixIconConstraints: const BoxConstraints(
-                          minWidth: 30,
-                          minHeight: 30,
+              // Non-blocking save-and-new confirmation banner
+              if (_savedAndResetBanner && error == null)
+                Container(
+                  key: const Key('save-and-new-banner'),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 4,
+                  ),
+                  color: cs.primaryContainer.withAlpha(160),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.check_circle_outline_rounded,
+                        size: 15,
+                        color: cs.primary,
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          '已保存，可继续记下一笔',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                            color: cs.onPrimaryContainer,
+                          ),
                         ),
                       ),
-                    ),
+                      InkWell(
+                        onTap: () =>
+                            setState(() => _savedAndResetBanner = false),
+                        child: Icon(
+                          Icons.close,
+                          size: 15,
+                          color: cs.onPrimaryContainer,
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(width: 8),
-                  Flexible(
-                    flex: 5,
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        if (livePreview != null)
-                          Text(
-                            '= $livePreview',
-                            key: const Key('amount-live-preview'),
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                              color: cs.primary,
-                              fontFeatures: const [
-                                FontFeature.tabularFigures(),
-                              ],
+                ),
+
+              // Validation / conflict error banner
+              if (error != null)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 5,
+                  ),
+                  color: cs.errorContainer.withAlpha(180),
+                  child: Row(
+                    children: [
+                      Icon(Icons.error_outline, size: 15, color: cs.error),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          error!,
+                          key: const Key('form-error'),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: 12, color: cs.error),
+                        ),
+                      ),
+                      InkWell(
+                        onTap: () => setState(() => error = null),
+                        child: Icon(Icons.close, size: 15, color: cs.error),
+                      ),
+                    ],
+                  ),
+                ),
+
+              // Foreign-currency conversion row (only when sc != ac)
+              if (sc != ac)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 6, 12, 2),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: SizedBox(
+                          height: 36,
+                          child: TextField(
+                            key: const Key('converted'),
+                            controller: converted,
+                            enabled: !busy,
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
                             ),
-                          ),
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              sc,
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                                color: cs.onSurfaceVariant,
+                            inputFormatters: amountInputFormatters,
+                            style: const TextStyle(fontSize: 13),
+                            onChanged: (_) => convertedEdited = true,
+                            decoration: InputDecoration(
+                              labelText: type == RecordType.transfer
+                                  ? '转入金额（$ac）'
+                                  : '折合入账（$ac）',
+                              prefixText: '$ac ',
+                              isDense: true,
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 8,
+                              ),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
                               ),
                             ),
-                            const SizedBox(width: 4),
-                            Flexible(
-                              child: TextField(
-                                key: const Key('amount'),
-                                controller: amount,
-                                enabled: !busy,
-                                readOnly: false,
-                                keyboardType: TextInputType.none,
-                                textAlign: TextAlign.right,
-                                inputFormatters: _keypadExpressionFormatters,
-                                onChanged: (_) => setState(_autoConvert),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      TextButton.icon(
+                        key: const Key('auto-convert-btn'),
+                        style: TextButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                        ),
+                        onPressed: busy
+                            ? null
+                            : () => setState(() {
+                                convertedEdited = false;
+                                _autoConvert();
+                              }),
+                        icon: const Icon(Icons.sync_rounded, size: 15),
+                        label: const Text(
+                          '按汇率算',
+                          style: TextStyle(fontSize: 12),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+              // Collapsible image attachment strip
+              if ((_attachmentsExpanded || imageNames.isNotEmpty) &&
+                  (diyConfig.isEnabled(DiyToolbarAction.images) ||
+                      imageNames.isNotEmpty))
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 6, 12, 2),
+                  child: BillAttachmentStrip(
+                    key: const Key('record-attachment-strip'),
+                    imageNames: imageNames,
+                    readOnly: busy,
+                    onChanged: (next) => setState(() => imageNames = next),
+                  ),
+                ),
+
+              // Compact Horizontal Scrollable Pill Toolbar (single 36px strip)
+              _buildPillToolbar(
+                context,
+                assets: assets,
+                tags: tags,
+                currencies: currencies,
+                diyConfig: diyConfig,
+              ),
+
+              // Frequent remark chips (0px when empty)
+              if (type != RecordType.transfer && categoryId != null)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: FrequentRemarkChips(
+                    categoryId: categoryId!,
+                    selectedRemark: remark.text,
+                    maxCount: 6,
+                    enabled: !busy,
+                    onSelectRemark: (value) =>
+                        setState(() => remark.text = value),
+                  ),
+                ),
+
+              // Remark + Live Amount Expression Bar
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 2, 12, 4),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Expanded(
+                      flex: 5,
+                      child: TextField(
+                        key: const Key('remark'),
+                        controller: remark,
+                        enabled: !busy,
+                        maxLength: 200,
+                        buildCounter:
+                            (
+                              _, {
+                              required currentLength,
+                              required isFocused,
+                              required maxLength,
+                            }) => null,
+                        onChanged: (_) =>
+                            setState(() => _savedAndResetBanner = false),
+                        style: const TextStyle(fontSize: 13.5),
+                        decoration: InputDecoration(
+                          isDense: true,
+                          hintText: '点击填写备注...',
+                          hintStyle: TextStyle(
+                            fontSize: 13,
+                            color: cs.onSurfaceVariant.withAlpha(160),
+                          ),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 4,
+                            vertical: 8,
+                          ),
+                          border: InputBorder.none,
+                          prefixIcon: Icon(
+                            Icons.edit_note_rounded,
+                            size: 19,
+                            color: cs.onSurfaceVariant,
+                          ),
+                          prefixIconConstraints: const BoxConstraints(
+                            minWidth: 26,
+                            minHeight: 26,
+                          ),
+                          suffixIcon:
+                              type != RecordType.transfer &&
+                                  GoRouter.maybeOf(context) != null
+                              ? IconButton(
+                                  key: const Key('editor-remarks-btn'),
+                                  tooltip: '常用备注管理',
+                                  visualDensity: VisualDensity.compact,
+                                  padding: EdgeInsets.zero,
+                                  icon: const Icon(
+                                    Icons.comment_outlined,
+                                    size: 17,
+                                  ),
+                                  onPressed: busy
+                                      ? null
+                                      : () => unawaited(
+                                          context.push(
+                                            categoryId == null
+                                                ? '/remarks'
+                                                : '/remarks?categoryId=$categoryId',
+                                          ),
+                                        ),
+                                )
+                              : null,
+                          suffixIconConstraints: const BoxConstraints(
+                            minWidth: 30,
+                            minHeight: 30,
+                          ),
+                        ),
+                      ),
+                    ),
+                    Container(
+                      width: 1,
+                      height: 22,
+                      margin: const EdgeInsets.symmetric(horizontal: 8),
+                      color: cs.outlineVariant.withAlpha(120),
+                    ),
+                    Expanded(
+                      flex: 5,
+                      child: GestureDetector(
+                        key: const Key('amount-tap-area'),
+                        behavior: HitTestBehavior.opaque,
+                        onTap: busy ? null : _amountFocus.requestFocus,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            if (livePreview != null)
+                              Text(
+                                '= $livePreview',
+                                key: const Key('amount-live-preview'),
                                 style: TextStyle(
-                                  fontSize: 21,
-                                  fontWeight: FontWeight.w800,
-                                  color:
-                                      type == RecordType.income ||
-                                          type == RecordType.advanceIncome
-                                      ? const Color(0xFF2E7D32)
-                                      : (type == RecordType.transfer
-                                            ? cs.primary
-                                            : cs.onSurface),
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: cs.primary,
                                   fontFeatures: const [
                                     FontFeature.tabularFigures(),
                                   ],
                                 ),
-                                decoration: InputDecoration(
-                                  isDense: true,
-                                  hintText: '0.00',
-                                  hintStyle: TextStyle(
-                                    fontSize: 21,
-                                    fontWeight: FontWeight.w700,
-                                    color: cs.outlineVariant,
-                                  ),
-                                  contentPadding: const EdgeInsets.symmetric(
-                                    vertical: 4,
-                                  ),
-                                  border: InputBorder.none,
-                                ),
                               ),
+                            Row(
+                              children: [
+                                Text(
+                                  sc,
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                    color: cs.onSurfaceVariant,
+                                  ),
+                                ),
+                                const SizedBox(width: 4),
+                                Expanded(
+                                  child: TextField(
+                                    key: const Key('amount'),
+                                    controller: amount,
+                                    focusNode: _amountFocus,
+                                    enabled: !busy,
+                                    readOnly: false,
+                                    keyboardType:
+                                        const TextInputType.numberWithOptions(
+                                          decimal: true,
+                                        ),
+                                    textInputAction: TextInputAction.done,
+                                    textAlign: TextAlign.right,
+                                    inputFormatters:
+                                        _keypadExpressionFormatters,
+                                    onChanged: (_) => setState(() {
+                                      error = null;
+                                      _savedAndResetBanner = false;
+                                      _autoConvert();
+                                    }),
+                                    onSubmitted: (_) {
+                                      if (hasPendingOperator(amount.text)) {
+                                        try {
+                                          final next = applyKeypadKey(
+                                            amount.text,
+                                            'EQUALS',
+                                          );
+                                          setState(() {
+                                            error = null;
+                                            amount.value = TextEditingValue(
+                                              text: next,
+                                              selection:
+                                                  TextSelection.collapsed(
+                                                    offset: next.length,
+                                                  ),
+                                            );
+                                            _autoConvert();
+                                          });
+                                        } on Failure catch (e) {
+                                          setState(
+                                            () => error = safeMessage(e),
+                                          );
+                                        }
+                                      }
+                                      _amountFocus.unfocus();
+                                    },
+                                    style: TextStyle(
+                                      fontSize: 21,
+                                      fontWeight: FontWeight.w800,
+                                      color:
+                                          type == RecordType.income ||
+                                              type == RecordType.advanceIncome
+                                          ? const Color(0xFF2E7D32)
+                                          : (type == RecordType.transfer
+                                                ? cs.primary
+                                                : cs.onSurface),
+                                      fontFeatures: const [
+                                        FontFeature.tabularFigures(),
+                                      ],
+                                    ),
+                                    decoration: InputDecoration(
+                                      isDense: true,
+                                      hintText: '0.00',
+                                      hintStyle: TextStyle(
+                                        fontSize: 21,
+                                        fontWeight: FontWeight.w700,
+                                        color: cs.outlineVariant,
+                                      ),
+                                      contentPadding:
+                                          const EdgeInsets.symmetric(
+                                            vertical: 4,
+                                          ),
+                                      border: InputBorder.none,
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
                           ],
                         ),
-                      ],
+                      ),
                     ),
-                  ),
-                  IconButton(
-                    key: const Key('toggle-keypad-btn'),
-                    tooltip: _keypadVisible ? '收起数字键盘' : '展开数字键盘',
-                    visualDensity: VisualDensity.compact,
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(
-                      minWidth: 28,
-                      minHeight: 28,
-                    ),
-                    icon: Icon(
-                      _keypadVisible
-                          ? Icons.keyboard_arrow_down_rounded
-                          : Icons.dialpad_rounded,
-                      size: 19,
-                      color: cs.onSurfaceVariant,
-                    ),
-                    onPressed: () =>
-                        setState(() => _keypadVisible = !_keypadVisible),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
 
-            // Collapsible 4×4+1 Built-in Calculator Keypad (or compact save bar)
-            if (_keypadVisible)
-              RecordKeyboard(
-                expression: amount.text,
-                enabled: canSubmit,
-                busy: busy,
-                showSaveAndNew: !editing,
-                assignSaveKey: true,
-                onKeyTap: _handleKeypadTap,
-                onSave: canSubmit
-                    ? () => unawaited(_save(stayAndReset: false))
-                    : null,
-                onSaveAndNew: canSubmit && !editing
-                    ? () => unawaited(_save(stayAndReset: true))
-                    : null,
-              )
-            else
+              // Compact bottom action bar: [再记一笔] + [保存]
               Padding(
                 padding: const EdgeInsets.fromLTRB(12, 2, 12, 8),
                 child: Row(
@@ -1804,6 +1862,10 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
                       Expanded(
                         child: OutlinedButton(
                           key: const Key('save-and-new'),
+                          style: OutlinedButton.styleFrom(
+                            minimumSize: const Size(64, 40),
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
                           onPressed: canSubmit
                               ? () => unawaited(_save(stayAndReset: true))
                               : null,
@@ -1816,6 +1878,10 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
                       flex: 2,
                       child: FilledButton(
                         key: const Key('save'),
+                        style: FilledButton.styleFrom(
+                          minimumSize: const Size(64, 40),
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
                         onPressed: canSubmit
                             ? () => unawaited(_save(stayAndReset: false))
                             : null,
@@ -1825,7 +1891,8 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
                   ],
                 ),
               ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -2044,7 +2111,8 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
                                     decimal: true,
                                   ),
                               inputFormatters: amountInputFormatters,
-                              onChanged: (_) => setState(() {}),
+                              onChanged: (_) =>
+                                  setState(() => _savedAndResetBanner = false),
                               style: TextStyle(
                                 fontSize: 12,
                                 fontWeight: FontWeight.w600,

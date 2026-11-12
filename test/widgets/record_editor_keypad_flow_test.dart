@@ -47,34 +47,148 @@ Future<void> _settle(WidgetTester tester, [int ticks = 8]) async {
   return (db, closeCleanly);
 }
 
-Future<void> _tapKeypadSequence(WidgetTester tester, List<String> keys) async {
-  for (final k in keys) {
-    final keyFinder = switch (k) {
-      '.' => find.byKey(const Key('keypad-dot')),
-      '+' => find.byKey(const Key('keypad-add')),
-      '-' => find.byKey(const Key('keypad-sub')),
-      '×' || '*' => find.byKey(const Key('keypad-mul')),
-      '÷' || '/' => find.byKey(const Key('keypad-div')),
-      '⌫' => find.byKey(const Key('keypad-backspace')),
-      'C' => find.byKey(const Key('keypad-clear')),
-      '=' => find.byKey(const Key('save')),
-      _ => find.byKey(Key('keypad-$k')),
-    };
-    await tester.tap(keyFinder);
-    await tester.pump();
-  }
-}
-
 void main() {
   driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
 
-  group('RecordEditorPage 3-Zone UX & RecordKeyboard flows (SCR-002)', () {
+  group('RecordEditorPage Native Numeric Keyboard & Auto-Push Dock (SCR-002)', () {
     testWidgets(
-      'keypad evaluates 12.5 + 7.5 = -> 20.00 and saves expense with category grid, subcategory strip, account pill, and tag pill on 800x600 viewport',
+      'uses native decimal keyboard with zero built-in keypad/operator buttons and auto-pushes bottom dock seamlessly on OS keyboard popup',
       (tester) async {
-        // Explicit 800x600 surface check — zero RenderFlex overflow allowed.
+        tester.view.devicePixelRatio = 1.0;
+        tester.view.physicalSize = const Size(800, 600);
         await tester.binding.setSurfaceSize(const Size(800, 600));
-        addTearDown(() => tester.binding.setSurfaceSize(null));
+        addTearDown(() async {
+          tester.view.reset();
+          await tester.binding.setSurfaceSize(null);
+        });
+
+        final (db, closeCleanly) = _openTestDb(tester);
+        await tester.runAsync(() => db.select(db.accountBooks).get());
+
+        await tester.pumpWidget(
+          ProviderScope(
+            retry: (_, _) => null,
+            overrides: [databaseProvider.overrideWith((ref) async => db)],
+            child: const MaterialApp(home: RecordEditorPage()),
+          ),
+        );
+        await _settle(tester);
+        expect(tester.takeException(), isNull);
+
+        // 1. Verify Scaffold.resizeToAvoidBottomInset == true, native numeric keyboard,
+        // and complete absence of built-in RecordKeyboard & extra operator buttons.
+        final scaffold = tester.widget<Scaffold>(find.byType(Scaffold));
+        expect(scaffold.resizeToAvoidBottomInset, isTrue);
+
+        final amountField = tester.widget<TextField>(
+          find.byKey(const Key('amount')),
+        );
+        expect(
+          amountField.keyboardType,
+          const TextInputType.numberWithOptions(decimal: true),
+        );
+        expect(amountField.textInputAction, TextInputAction.done);
+
+        expect(find.byKey(const Key('record-keyboard')), findsNothing);
+        expect(find.byKey(const Key('toggle-keypad-btn')), findsNothing);
+        expect(find.byKey(const Key('keypad-add')), findsNothing);
+        expect(find.byKey(const Key('keypad-sub')), findsNothing);
+        expect(find.byKey(const Key('keypad-mul')), findsNothing);
+        expect(find.byKey(const Key('keypad-div')), findsNothing);
+        expect(find.byKey(const Key('save-and-new')), findsOneWidget);
+        expect(find.byKey(const Key('save')), findsOneWidget);
+
+        // Keyboard closed: bottom dock sits flush at bottom of 800x600 screen.
+        const screenHeight = 600.0;
+        final closedDockRect = tester.getRect(
+          find.byKey(const Key('editor-bottom-dock')),
+        );
+        expect(closedDockRect.bottom, closeTo(screenHeight, 0.5));
+
+        // 2. Tap currency/amount area -> focuses Key('amount'), simulate OS keyboard (280px).
+        await tester.tap(find.text('CNY'));
+        tester.view.viewInsets = const FakeViewPadding(
+          left: 0,
+          top: 0,
+          right: 0,
+          bottom: 280,
+        );
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        expect(amountField.focusNode!.hasFocus, isTrue);
+
+        final amountKbDockRect = tester.getRect(
+          find.byKey(const Key('editor-bottom-dock')),
+        );
+        expect(amountKbDockRect.bottom, lessThanOrEqualTo(screenHeight - 280));
+        expect(amountKbDockRect.bottom, closeTo(screenHeight - 280, 0.5));
+        expect(
+          tester.getRect(find.byKey(const Key('amount'))).bottom,
+          lessThanOrEqualTo(screenHeight - 280),
+        );
+        expect(
+          tester.getRect(find.byKey(const Key('remark'))).bottom,
+          lessThanOrEqualTo(screenHeight - 280),
+        );
+        expect(
+          tester.getRect(find.byKey(const Key('save'))).bottom,
+          lessThanOrEqualTo(screenHeight - 280),
+        );
+
+        // 3. Switch directly to Key('remark') while OS keyboard stays open (280px):
+        // bottom dock stays smoothly docked right above keyboard with zero split or overflow!
+        await tester.tap(find.byKey(const Key('remark')));
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+
+        final remarkKbDockRect = tester.getRect(
+          find.byKey(const Key('editor-bottom-dock')),
+        );
+        expect(remarkKbDockRect.bottom, lessThanOrEqualTo(screenHeight - 280));
+        expect(remarkKbDockRect.bottom, closeTo(screenHeight - 280, 0.5));
+        expect(
+          tester.getRect(find.byKey(const Key('remark'))).bottom,
+          lessThanOrEqualTo(screenHeight - 280),
+        );
+        expect(
+          tester.getRect(find.byKey(const Key('save'))).bottom,
+          lessThanOrEqualTo(screenHeight - 280),
+        );
+
+        // 4. Torture test: tall 300px keyboard on 800x600 with attachment strip expanded -> zero overflow!
+        await tester.tap(find.byKey(const Key('editor-images-pill')));
+        tester.view.viewInsets = const FakeViewPadding(
+          left: 0,
+          top: 0,
+          right: 0,
+          bottom: 300,
+        );
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        expect(
+          tester.getRect(find.byKey(const Key('editor-bottom-dock'))).bottom,
+          lessThanOrEqualTo(screenHeight - 300),
+        );
+
+        // Reset keyboard insets before teardown.
+        tester.view.viewInsets = FakeViewPadding.zero;
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+
+        await closeCleanly();
+      },
+    );
+
+    testWidgets(
+      'silent background expression evaluation supports IME Done submit and auto-evaluation on Save with category grid, subcategory strip, account pill, and tag pill',
+      (tester) async {
+        tester.view.devicePixelRatio = 1.0;
+        tester.view.physicalSize = const Size(390, 844);
+        await tester.binding.setSurfaceSize(const Size(390, 844));
+        addTearDown(() async {
+          tester.view.reset();
+          await tester.binding.setSurfaceSize(null);
+        });
 
         final (db, closeCleanly) = _openTestDb(tester);
         late int walletId;
@@ -121,12 +235,12 @@ void main() {
         );
         await _settle(tester);
 
-        // Open RecordEditorPage via Home FAB.
+        // Open RecordEditorPage via Home FAB on 390x844 phone viewport.
         await tester.tap(find.byKey(const Key('add-record')));
         await _settle(tester);
         expect(tester.takeException(), isNull);
 
-        // 1. Tap visual category grid '餐饮' -> inline subcategory strip appears!
+        // 1. Tap visual category grid '餐饮' -> inline subcategory strip appears.
         await tester.tap(find.byKey(const Key('cat-餐饮')));
         await _settle(tester, 4);
         expect(find.byKey(const Key('subcat-all')), findsOneWidget);
@@ -150,41 +264,36 @@ void main() {
         await _settle(tester, 4);
         expect(find.text('#旅行'), findsOneWidget);
 
-        // 4. Tap keypad digits & operators: 12.5 + 7.5 -> live preview = 20.00, primary button shows '='!
-        await _tapKeypadSequence(tester, [
-          '1',
-          '2',
-          '.',
-          '5',
-          '+',
-          '7',
-          '.',
-          '5',
-        ]);
-        expect(
-          tester
-              .widget<TextField>(find.byKey(const Key('amount')))
-              .controller!
-              .text,
-          '12.5+7.5',
-        );
-        expect(find.byKey(const Key('amount-live-preview')), findsOneWidget);
-        expect(find.text('= 20.00'), findsOneWidget);
-        expect(find.text('='), findsOneWidget);
-
-        // Tap '=' (on primary keypad button) -> evaluates in-place to '20.00' and switches to '保存'!
-        await tester.tap(find.byKey(const Key('save')));
+        // 4a. Test IME Done submit: enter '15+5*2' -> normalized to '15+5×2', preview '= 40.00', Done -> '40.00'.
+        await tester.enterText(find.byKey(const Key('amount')), '15+5*2');
         await tester.pump();
         expect(
           tester
               .widget<TextField>(find.byKey(const Key('amount')))
               .controller!
               .text,
-          '20.00',
+          '15+5×2',
         );
-        expect(find.text('保存'), findsOneWidget);
+        expect(find.byKey(const Key('amount-live-preview')), findsOneWidget);
+        expect(find.text('= 40.00'), findsOneWidget);
 
-        // Tap '保存' (Key('save')) -> saves bill and returns to HomePage!
+        await tester.testTextInput.receiveAction(TextInputAction.done);
+        await tester.pump();
+        expect(
+          tester
+              .widget<TextField>(find.byKey(const Key('amount')))
+              .controller!
+              .text,
+          '40.00',
+        );
+        expect(find.byKey(const Key('amount-live-preview')), findsNothing);
+
+        // 4b. Test direct Save auto-evaluation: enter '12.5+7.5' -> preview '= 20.00' -> tap Save directly!
+        await tester.enterText(find.byKey(const Key('amount')), '12.5+7.5');
+        await tester.pump();
+        expect(find.byKey(const Key('amount-live-preview')), findsOneWidget);
+        expect(find.text('= 20.00'), findsOneWidget);
+
         await tester.tap(find.byKey(const Key('save')));
         await _settle(tester);
 
@@ -257,16 +366,20 @@ void main() {
         await tester.tap(find.text('极速现金').last);
         await _settle(tester, 4);
 
-        // Enter expression 10 + 2 × 3 (= 36.00 left-to-right!) + remark, then tap '再记一笔' directly without '='!
-        await _tapKeypadSequence(tester, ['1', '0', '+', '2', '×', '3']);
+        // Enter expression 10+2*3 (= 36.00 left-to-right!) + remark, then tap '再记一笔'.
+        await tester.enterText(find.byKey(const Key('amount')), '10+2*3');
         await tester.enterText(find.byKey(const Key('remark')), '第一笔早餐');
         await tester.pump();
+        expect(find.text('= 36.00'), findsOneWidget);
 
         await tester.tap(find.byKey(const Key('save-and-new')));
         await _settle(tester);
 
         // Still on RecordEditorPage: amount & remark cleared, account '极速现金' preserved!
-        expect(find.byKey(const Key('record-keyboard')), findsOneWidget);
+        expect(find.byKey(const Key('record-keyboard')), findsNothing);
+        expect(find.byKey(const Key('save-and-new')), findsOneWidget);
+        expect(find.byKey(const Key('save-and-new-banner')), findsOneWidget);
+        expect(find.text('已保存，可继续记下一笔'), findsOneWidget);
         expect(
           tester
               .widget<TextField>(find.byKey(const Key('amount')))
@@ -284,9 +397,10 @@ void main() {
         expect(find.text('极速现金'), findsOneWidget);
 
         // Immediately enter second bill (14.00) and tap '保存'.
-        await _tapKeypadSequence(tester, ['1', '4']);
+        await tester.enterText(find.byKey(const Key('amount')), '14');
         await tester.enterText(find.byKey(const Key('remark')), '第二笔豆浆');
         await tester.pump();
+        expect(find.byKey(const Key('save-and-new-banner')), findsNothing);
         await tester.tap(find.byKey(const Key('save')));
         await _settle(tester);
 
@@ -388,8 +502,8 @@ void main() {
         await tester.tap(find.byKey(const Key('transfer-swap-btn')));
         await tester.pump();
 
-        // Enter 100 via keypad and fee 1.50, then save.
-        await _tapKeypadSequence(tester, ['1', '0', '0']);
+        // Enter 100 via native amount field and fee 1.50, then save.
+        await tester.enterText(find.byKey(const Key('amount')), '100');
         await tester.enterText(find.byKey(const Key('fee')), '1.50');
         await tester.pump();
 
@@ -423,6 +537,8 @@ void main() {
         );
         await _settle(tester);
         expect(tester.takeException(), isNull);
+        expect(find.byKey(const Key('save-and-new')), findsNothing);
+        expect(find.byKey(const Key('save')), findsOneWidget);
         expect(
           tester
               .widget<TextField>(find.byKey(const Key('amount')))
@@ -517,7 +633,8 @@ void main() {
         );
 
         // Save bill 58.00 -> returns to HomePage where RecordTypeIconAvatar renders!
-        await _tapKeypadSequence(tester, ['5', '8']);
+        await tester.enterText(find.byKey(const Key('amount')), '58');
+        await tester.pump();
         await tester.tap(find.byKey(const Key('save')));
         await _settle(tester);
 
