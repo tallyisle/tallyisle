@@ -116,7 +116,10 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
   final fee = TextEditingController();
   final remark = TextEditingController();
   final _amountFocus = FocusNode();
+  final _remarkFocus = FocusNode();
   final _discountFocus = FocusNode();
+  final _feeFocus = FocusNode();
+  final _convertedFocus = FocusNode();
   final _evalBtnFocusNode = FocusNode(canRequestFocus: false);
   final ids = CommandIds();
   final imageIds = CommandIds();
@@ -141,12 +144,55 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
   bool excludeBudget = false, excludeExIn = false;
   bool _attachmentsExpanded = false;
   bool _savedAndResetBanner = false;
+  bool _showCustomKeypad = true;
   DateTime time = DateTime.now();
   LedgerRecord? original;
   bool loading = true, busy = false;
   String? error;
 
   bool get editing => widget.recordId != null;
+
+  bool get _hasOsKeyboardFieldFocus =>
+      _remarkFocus.hasFocus ||
+      _discountFocus.hasFocus ||
+      _feeFocus.hasFocus ||
+      _convertedFocus.hasFocus;
+
+  bool get _isCustomKeypadOpen =>
+      _showCustomKeypad && !_hasOsKeyboardFieldFocus;
+
+  void _setAmountText(String text) {
+    amount.value = TextEditingValue(
+      text: text,
+      selection: TextSelection.collapsed(offset: text.length),
+    );
+  }
+
+  void _unfocusOsKeyboardFields() {
+    if (_remarkFocus.hasFocus) _remarkFocus.unfocus();
+    if (_discountFocus.hasFocus) _discountFocus.unfocus();
+    if (_feeFocus.hasFocus) _feeFocus.unfocus();
+    if (_convertedFocus.hasFocus) _convertedFocus.unfocus();
+  }
+
+  void _activateCustomKeypad() {
+    if (busy) return;
+    _unfocusOsKeyboardFields();
+    if (!_amountFocus.hasFocus) {
+      _amountFocus.requestFocus();
+    }
+    if (!_showCustomKeypad) {
+      setState(() => _showCustomKeypad = true);
+    }
+  }
+
+  void _collapseCustomKeypad() {
+    if (busy) return;
+    if (_amountFocus.hasFocus) {
+      _amountFocus.unfocus();
+    }
+    setState(() => _showCustomKeypad = false);
+  }
 
   /// Direct one-shot lookup of the active book id on [db] (`ti_preference`
   /// `'current_book_id'` -> fallback first `account_book` row -> `1`), avoiding
@@ -220,7 +266,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
       assetId = prefill.assetId;
       fromAssetId = prefill.fromAssetId;
       toAssetId = prefill.toAssetId;
-      amount.text = prefill.amountText;
+      _setAmountText(prefill.amountText);
       fee.text = prefill.feeText;
       feeFromTarget = prefill.feeFromTarget;
       remark.text = prefill.remark;
@@ -234,6 +280,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
   }
 
   Future<void> _pickLocation() async {
+    _unfocusOsKeyboardFields();
     final res = await showDialog<BillLocationInfo>(
       context: context,
       builder: (_) => BillLocationEditorDialog(initial: location),
@@ -243,7 +290,20 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
   }
 
   void _onAmountFocusChanged() {
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    if (_amountFocus.hasFocus) {
+      _showCustomKeypad = true;
+    }
+    setState(() {});
+  }
+
+  void _onOsKeyboardFieldFocusChanged() {
+    if (!mounted) return;
+    if (_hasOsKeyboardFieldFocus) {
+      setState(() => _showCustomKeypad = false);
+    } else {
+      setState(() {});
+    }
   }
 
   void _showCalcError(String message) {
@@ -251,7 +311,8 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
     final mq = MediaQuery.of(context);
     final usableHeight =
         mq.size.height - mq.viewInsets.bottom - mq.padding.vertical;
-    final bottomMargin = usableHeight > 260 ? 140.0 : 8.0;
+    final targetMargin = _isCustomKeypadOpen ? 384.0 : 140.0;
+    final bottomMargin = usableHeight > targetMargin + 96 ? targetMargin : 8.0;
     ScaffoldMessenger.of(context)
       ..clearSnackBars()
       ..showSnackBar(
@@ -264,17 +325,16 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
       );
   }
 
-  void _onOperatorTap(String op) {
+  void _onKeypadKey(String key) {
     if (busy) return;
     ScaffoldMessenger.maybeOf(context)?.clearSnackBars();
-    final next = applyKeypadKey(amount.text, op);
+    _unfocusOsKeyboardFields();
+    final nextValue = applyCustomKeypadValue(amount.value, key);
     setState(() {
       error = null;
       _savedAndResetBanner = false;
-      amount.value = TextEditingValue(
-        text: next,
-        selection: TextSelection.collapsed(offset: next.length),
-      );
+      _showCustomKeypad = true;
+      amount.value = nextValue;
       _autoConvert();
     });
     if (!_amountFocus.hasFocus) {
@@ -304,10 +364,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
       setState(() {
         error = null;
         _savedAndResetBanner = false;
-        amount.value = TextEditingValue(
-          text: evaluated.decimal,
-          selection: TextSelection.collapsed(offset: evaluated.decimal.length),
-        );
+        _setAmountText(evaluated.decimal);
         _autoConvert();
       });
     } on Failure {
@@ -323,12 +380,16 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
   void initState() {
     super.initState();
     _amountFocus.addListener(_onAmountFocusChanged);
+    _remarkFocus.addListener(_onOsKeyboardFieldFocusChanged);
+    _discountFocus.addListener(_onOsKeyboardFieldFocusChanged);
+    _feeFocus.addListener(_onOsKeyboardFieldFocusChanged);
+    _convertedFocus.addListener(_onOsKeyboardFieldFocusChanged);
     type = widget.initialType ?? RecordType.expense;
     categoryId = widget.initialCategory;
     assetId = widget.initialAsset ?? noRef;
     fromAssetId = widget.initialFrom ?? noRef;
     toAssetId = widget.initialTo ?? noRef;
-    if (widget.initialAmount != null) amount.text = widget.initialAmount!;
+    if (widget.initialAmount != null) _setAmountText(widget.initialAmount!);
     if (widget.initialRemark != null) remark.text = widget.initialRemark!;
     unawaited(_load());
   }
@@ -363,7 +424,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
     assetId = r.type == RecordType.reimbursable ? r.fromAssetId : r.assetId;
     fromAssetId = r.fromAssetId;
     toAssetId = r.toAssetId;
-    amount.text = formatMinor(r.moneyMinor);
+    _setAmountText(formatMinor(r.moneyMinor));
     if (r.discountMinor != null && r.discountMinor! > BigInt.zero) {
       discount.text = formatMinor(r.discountMinor!);
     }
@@ -395,7 +456,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
         }
       } else if (sc != ac) {
         sourceCurrency = sc;
-        amount.text = formatMinor(snap.sourceGross);
+        _setAmountText(formatMinor(snap.sourceGross));
         converted.text = formatMinor(snap.assetNet!);
         convertedEdited = true;
       }
@@ -437,13 +498,20 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
   @override
   void dispose() {
     _amountFocus.removeListener(_onAmountFocusChanged);
+    _remarkFocus.removeListener(_onOsKeyboardFieldFocusChanged);
+    _discountFocus.removeListener(_onOsKeyboardFieldFocusChanged);
+    _feeFocus.removeListener(_onOsKeyboardFieldFocusChanged);
+    _convertedFocus.removeListener(_onOsKeyboardFieldFocusChanged);
     amount.dispose();
     converted.dispose();
     discount.dispose();
     fee.dispose();
     remark.dispose();
     _amountFocus.dispose();
+    _remarkFocus.dispose();
     _discountFocus.dispose();
+    _feeFocus.dispose();
+    _convertedFocus.dispose();
     _evalBtnFocusNode.dispose();
     super.dispose();
   }
@@ -664,9 +732,10 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
 
       if (!mounted) return;
       if (stayAndReset && !editing) {
+        _unfocusOsKeyboardFields();
         setState(() {
           _draftNonce++;
-          amount.clear();
+          _setAmountText('');
           converted.clear();
           convertedEdited = false;
           discount.clear();
@@ -676,6 +745,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
           location = null;
           _attachmentsExpanded = false;
           _savedAndResetBanner = true;
+          _showCustomKeypad = true;
           error = null;
         });
         return;
@@ -699,6 +769,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
   }
 
   Future<void> _pickTime() async {
+    _unfocusOsKeyboardFields();
     final date = await showDatePicker(
       context: context,
       initialDate: time,
@@ -830,46 +901,6 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
     return clearBtn ?? remarksBtn;
   }
 
-  Widget _buildOperatorButton(
-    BuildContext context, {
-    required Key key,
-    required String label,
-    required String op,
-    required String tooltip,
-  }) {
-    final cs = Theme.of(context).colorScheme;
-    return Tooltip(
-      message: tooltip,
-      child: SizedBox(
-        width: 34,
-        height: 38,
-        child: Material(
-          color: cs.secondaryContainer.withAlpha(190),
-          borderRadius: BorderRadius.circular(10),
-          clipBehavior: Clip.antiAlias,
-          child: InkWell(
-            key: key,
-            canRequestFocus: false,
-            onTap: busy ? null : () => _onOperatorTap(op),
-            child: Center(
-              child: Text(
-                label,
-                style: TextStyle(
-                  fontSize: 17,
-                  fontWeight: FontWeight.w700,
-                  height: 1.0,
-                  color: busy
-                      ? cs.onSurfaceVariant.withAlpha(110)
-                      : cs.onSecondaryContainer,
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
   Future<void> _openAccountPickerSheet({
     required String title,
     required List<Asset> assets,
@@ -877,6 +908,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
     required bool allowNone,
     required ValueChanged<int> onSelected,
   }) async {
+    _unfocusOsKeyboardFields();
     final chosen = await showModalBottomSheet<int>(
       context: context,
       showDragHandle: true,
@@ -974,6 +1006,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
   }
 
   Future<void> _openTagPickerSheet(List<Tag> tags) async {
+    _unfocusOsKeyboardFields();
     await showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
@@ -1062,6 +1095,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
   }
 
   Future<void> _openCurrencyPickerSheet(List<Currency> currencies) async {
+    _unfocusOsKeyboardFields();
     final current = _currencies().$1;
     final chosen = await showModalBottomSheet<String>(
       context: context,
@@ -1593,6 +1627,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
                 child: TextField(
                   key: const Key('fee'),
                   controller: fee,
+                  focusNode: _feeFocus,
                   enabled: !busy,
                   keyboardType: const TextInputType.numberWithOptions(
                     decimal: true,
@@ -1646,7 +1681,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
     final cs = Theme.of(context).colorScheme;
     final (sc, ac) = _currencies();
     final pendingOp = hasPendingOperator(amount.text);
-    final showOperators = _amountFocus.hasFocus || pendingOp;
+    final isCustomKeypadOpen = _isCustomKeypadOpen;
     final remarksEnabled = diyConfig.isEnabled(
       DiyToolbarAction.frequentRemarks,
     );
@@ -1664,26 +1699,23 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
       }
     }
 
-    return SafeArea(
-      top: false,
-      child: Container(
-        key: const Key('editor-bottom-dock'),
-        decoration: BoxDecoration(
-          color: cs.surface,
-          border: Border(
-            top: BorderSide(
-              color: cs.outlineVariant.withAlpha(130),
-              width: 0.8,
-            ),
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withAlpha(10),
-              blurRadius: 8,
-              offset: const Offset(0, -2),
-            ),
-          ],
+    return Container(
+      key: const Key('editor-bottom-dock'),
+      decoration: BoxDecoration(
+        color: cs.surface,
+        border: Border(
+          top: BorderSide(color: cs.outlineVariant.withAlpha(130), width: 0.8),
         ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withAlpha(10),
+            blurRadius: 8,
+            offset: const Offset(0, -2),
+          ),
+        ],
+      ),
+      child: SafeArea(
+        top: false,
         child: SingleChildScrollView(
           physics: const ClampingScrollPhysics(),
           child: Column(
@@ -1786,6 +1818,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
                           child: TextField(
                             key: const Key('converted'),
                             controller: converted,
+                            focusNode: _convertedFocus,
                             enabled: !busy,
                             keyboardType: const TextInputType.numberWithOptions(
                               decimal: true,
@@ -1883,8 +1916,16 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
                       child: TextField(
                         key: const Key('remark'),
                         controller: remark,
+                        focusNode: _remarkFocus,
                         enabled: !busy,
                         maxLength: 200,
+                        onTap: busy
+                            ? null
+                            : () {
+                                if (_showCustomKeypad) {
+                                  setState(() => _showCustomKeypad = false);
+                                }
+                              },
                         buildCounter:
                             (
                               _, {
@@ -1937,7 +1978,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
                       child: GestureDetector(
                         key: const Key('amount-tap-area'),
                         behavior: HitTestBehavior.opaque,
-                        onTap: busy ? null : _amountFocus.requestFocus,
+                        onTap: busy ? null : _activateCustomKeypad,
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           crossAxisAlignment: CrossAxisAlignment.end,
@@ -1973,14 +2014,13 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
                                     focusNode: _amountFocus,
                                     enabled: !busy,
                                     readOnly: false,
-                                    keyboardType:
-                                        const TextInputType.numberWithOptions(
-                                          decimal: true,
-                                        ),
+                                    showCursor: true,
+                                    keyboardType: TextInputType.none,
                                     textInputAction: TextInputAction.done,
                                     textAlign: TextAlign.right,
                                     inputFormatters:
                                         _keypadExpressionFormatters,
+                                    onTap: busy ? null : _activateCustomKeypad,
                                     onChanged: (_) {
                                       ScaffoldMessenger.maybeOf(
                                         context,
@@ -2014,13 +2054,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
                                           final next = res.money.decimal;
                                           setState(() {
                                             error = null;
-                                            amount.value = TextEditingValue(
-                                              text: next,
-                                              selection:
-                                                  TextSelection.collapsed(
-                                                    offset: next.length,
-                                                  ),
-                                            );
+                                            _setAmountText(next);
                                             _autoConvert();
                                           });
                                         } on Failure catch (e) {
@@ -2070,142 +2104,114 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
                 ),
               ),
 
-              // Compact bottom action bar: optional [+ − × ÷] + [再记一笔] + [= / 保存]
-              Padding(
-                padding: EdgeInsets.fromLTRB(
-                  showOperators ? 10 : 12,
-                  2,
-                  showOperators ? 10 : 12,
-                  8,
-                ),
-                child: Row(
-                  children: [
-                    if (showOperators) ...[
-                      TextFieldTapRegion(
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            _buildOperatorButton(
-                              context,
-                              key: const Key('editor-op-add'),
-                              label: '+',
-                              op: '+',
-                              tooltip: '加',
+              if (isCustomKeypadOpen)
+                RecordCustomKeypad(
+                  amountText: amount.text,
+                  enabled: canSubmit,
+                  busy: busy,
+                  showSaveAndNew: !editing,
+                  onKeyTap: _onKeypadKey,
+                  onBackspace: () => _onKeypadKey('BACKSPACE'),
+                  onClearAll: () => _onKeypadKey('CLEAR'),
+                  onCollapse: _collapseCustomKeypad,
+                  onEvaluate: _evaluateInPlace,
+                  onSave: () => unawaited(_save(stayAndReset: false)),
+                  onSaveAndNew: editing
+                      ? null
+                      : () => unawaited(_save(stayAndReset: true)),
+                )
+              else
+                // Compact bottom action bar above OS keyboard or when collapsed
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 2, 12, 8),
+                  child: Row(
+                    children: [
+                      if (!editing) ...[
+                        Expanded(
+                          flex: 1,
+                          child: OutlinedButton(
+                            key: const Key('save-and-new'),
+                            style: OutlinedButton.styleFrom(
+                              minimumSize: const Size(0, 38),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                              ),
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                             ),
-                            const SizedBox(width: 4),
-                            _buildOperatorButton(
-                              context,
-                              key: const Key('editor-op-sub'),
-                              label: '−',
-                              op: '-',
-                              tooltip: '减',
+                            onPressed: canSubmit
+                                ? () => unawaited(_save(stayAndReset: true))
+                                : null,
+                            child: const Text(
+                              '再记一笔',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                             ),
-                            const SizedBox(width: 4),
-                            _buildOperatorButton(
-                              context,
-                              key: const Key('editor-op-mul'),
-                              label: '×',
-                              op: '×',
-                              tooltip: '乘',
-                            ),
-                            const SizedBox(width: 4),
-                            _buildOperatorButton(
-                              context,
-                              key: const Key('editor-op-div'),
-                              label: '÷',
-                              op: '÷',
-                              tooltip: '除',
-                            ),
-                          ],
+                          ),
                         ),
-                      ),
-                      const SizedBox(width: 6),
-                    ],
-                    if (!editing) ...[
+                        const SizedBox(width: 8),
+                      ],
                       Expanded(
-                        flex: showOperators ? 6 : 1,
-                        child: OutlinedButton(
-                          key: const Key('save-and-new'),
-                          style: OutlinedButton.styleFrom(
-                            minimumSize: const Size(0, 38),
-                            padding: EdgeInsets.symmetric(
-                              horizontal: showOperators ? 6 : 12,
-                            ),
-                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          ),
-                          onPressed: canSubmit
-                              ? () => unawaited(_save(stayAndReset: true))
-                              : null,
-                          child: const Text(
-                            '再记一笔',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
+                        flex: 2,
+                        child: pendingOp
+                            ? TextFieldTapRegion(
+                                child: Tooltip(
+                                  message: '计算结果',
+                                  child: KeyedSubtree(
+                                    key: const Key('editor-save-btn'),
+                                    child: FilledButton(
+                                      key: const Key('save'),
+                                      focusNode: _evalBtnFocusNode,
+                                      style: FilledButton.styleFrom(
+                                        minimumSize: const Size(0, 38),
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 12,
+                                        ),
+                                        tapTargetSize:
+                                            MaterialTapTargetSize.shrinkWrap,
+                                      ),
+                                      onPressed: canSubmit
+                                          ? _evaluateInPlace
+                                          : null,
+                                      child: const Text(
+                                        '=',
+                                        style: TextStyle(
+                                          fontSize: 19,
+                                          fontWeight: FontWeight.w800,
+                                          height: 1.0,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              )
+                            : KeyedSubtree(
+                                key: const Key('editor-save-btn'),
+                                child: FilledButton(
+                                  key: const Key('save'),
+                                  style: FilledButton.styleFrom(
+                                    minimumSize: const Size(0, 38),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 16,
+                                    ),
+                                    tapTargetSize:
+                                        MaterialTapTargetSize.shrinkWrap,
+                                  ),
+                                  onPressed: canSubmit
+                                      ? () => unawaited(
+                                          _save(stayAndReset: false),
+                                        )
+                                      : null,
+                                  child: Text(
+                                    busy ? '保存中…' : '保存',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ),
                       ),
-                      SizedBox(width: showOperators ? 6 : 8),
                     ],
-                    Expanded(
-                      flex: showOperators ? 5 : 2,
-                      child: pendingOp
-                          ? TextFieldTapRegion(
-                              child: Tooltip(
-                                message: '计算结果',
-                                child: KeyedSubtree(
-                                  key: const Key('editor-save-btn'),
-                                  child: FilledButton(
-                                    key: const Key('save'),
-                                    focusNode: _evalBtnFocusNode,
-                                    style: FilledButton.styleFrom(
-                                      minimumSize: const Size(0, 38),
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 8,
-                                      ),
-                                      tapTargetSize:
-                                          MaterialTapTargetSize.shrinkWrap,
-                                    ),
-                                    onPressed: canSubmit
-                                        ? _evaluateInPlace
-                                        : null,
-                                    child: const Text(
-                                      '=',
-                                      style: TextStyle(
-                                        fontSize: 19,
-                                        fontWeight: FontWeight.w800,
-                                        height: 1.0,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            )
-                          : KeyedSubtree(
-                              key: const Key('editor-save-btn'),
-                              child: FilledButton(
-                                key: const Key('save'),
-                                style: FilledButton.styleFrom(
-                                  minimumSize: const Size(0, 38),
-                                  padding: EdgeInsets.symmetric(
-                                    horizontal: showOperators ? 8 : 16,
-                                  ),
-                                  tapTargetSize:
-                                      MaterialTapTargetSize.shrinkWrap,
-                                ),
-                                onPressed: canSubmit
-                                    ? () =>
-                                          unawaited(_save(stayAndReset: false))
-                                    : null,
-                                child: Text(
-                                  busy ? '保存中…' : '保存',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                            ),
-                    ),
-                  ],
+                  ),
                 ),
-              ),
             ],
           ),
         ),
