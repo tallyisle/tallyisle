@@ -7,6 +7,7 @@ import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:sqlite3/sqlite3.dart' as raw_sqlite;
 import 'package:tallyisle/app/providers.dart';
 import 'package:tallyisle/data/db/database.dart';
@@ -14,6 +15,9 @@ import 'package:tallyisle/data/migration/lan_zip_crypto.dart';
 import 'package:tallyisle/data/repo/ledger_queries.dart';
 import 'package:tallyisle/domain/rules/ios_migration_rules.dart';
 import 'package:tallyisle/domain/rules/penny_backup.dart';
+import 'package:tallyisle/features/csv_transfer/csv_import_page.dart';
+import 'package:tallyisle/features/csv_transfer/import_batches_page.dart';
+import 'package:tallyisle/features/me/me_page.dart';
 import 'package:tallyisle/features/migration/migration_page.dart';
 import 'package:tallyisle/features/migration/migration_providers.dart';
 import 'package:tallyisle/features/reminder/reminder_providers.dart';
@@ -126,26 +130,31 @@ void main() {
     }
   }
 
-  Future<(AppDatabase, InMemoryReminderScheduler)> openTestDb(
-    WidgetTester tester,
-  ) async {
+  Future<(AppDatabase, InMemoryReminderScheduler, Future<void> Function())>
+  openTestDb(WidgetTester tester) async {
     late final AppDatabase db;
     await tester.runAsync(() async {
       db = AppDatabase(NativeDatabase.memory());
     });
     final scheduler = InMemoryReminderScheduler();
-    addTearDown(() async {
+    var closed = false;
+    Future<void> disposeCleanly() async {
+      if (closed) return;
+      closed = true;
       await tester.pumpWidget(const SizedBox());
-      await scheduler.dispose();
+      await tester.pump(const Duration(seconds: 1));
+      await tester.runAsync(scheduler.dispose);
       await tester.runAsync(db.close);
-    });
-    return (db, scheduler);
+    }
+
+    addTearDown(disposeCleanly);
+    return (db, scheduler, disposeCleanly);
   }
 
   testWidgets(
-    'MigrationPage: renders unified 从旧软件导入 title, cross-platform .tally unity banner, all 3 legacy import cards, and omits obsolete .ya2i export UI',
+    'MigrationPage: renders modular 第三方数据导入 hub, cross-platform .tally unity banner, Section 1 legacy cards, Section 2 CSV shortcut + extensible note card, and omits obsolete .ya2i export UI',
     (tester) async {
-      final (db, scheduler) = await openTestDb(tester);
+      final (db, scheduler, disposeCleanly) = await openTestDb(tester);
 
       await tester.pumpWidget(
         ProviderScope(
@@ -160,15 +169,21 @@ void main() {
       await settle(tester);
 
       expect(find.byKey(const Key('migration_page')), findsOneWidget);
-      expect(find.text('从旧软件导入'), findsOneWidget);
+      expect(find.text('第三方数据导入'), findsOneWidget);
+      expect(find.text('从旧软件导入'), findsNothing);
 
-      // Cross-platform unity banner
+      // Cross-platform unity & third-party import guidance banner
       expect(
         find.byKey(const Key('migration_unity_banner_card')),
         findsOneWidget,
       );
+      expect(
+        find.textContaining('Android / iOS / Windows / Linux / macOS'),
+        findsOneWidget,
+      );
       expect(find.textContaining('数据格式 100% 统一'), findsOneWidget);
       expect(find.textContaining('.tally / WebDAV / S3'), findsOneWidget);
+      expect(find.textContaining('第三方记账软件与外部平台历史数据迁入'), findsOneWidget);
       expect(find.textContaining('保留本机已有便签与自定义汇率'), findsOneWidget);
 
       // Local overview card
@@ -184,7 +199,9 @@ void main() {
       expect(find.textContaining('导出数据到 iOS'), findsNothing);
       expect(find.textContaining('导出 .ya2i'), findsNothing);
 
-      // Card 1: .penny / .yy
+      // Section 1: 一羽记账备份全量迁入 + 3 cards
+      expect(find.text('一羽记账备份全量迁入'), findsOneWidget);
+      expect(find.byKey(const Key('legacy_import_penny_card')), findsOneWidget);
       expect(
         find.byKey(const Key('legacy_import_penny_button')),
         findsOneWidget,
@@ -197,6 +214,7 @@ void main() {
         const Offset(0, -120),
       );
       await settle(tester);
+      expect(find.byKey(const Key('legacy_import_yi2a_card')), findsOneWidget);
       expect(
         find.byKey(const Key('migration_import_yi2a_button')),
         findsOneWidget,
@@ -210,6 +228,7 @@ void main() {
         const Offset(0, -120),
       );
       await settle(tester);
+      expect(find.byKey(const Key('legacy_restore_lan_card')), findsOneWidget);
       expect(
         find.byKey(const Key('migration_restore_lan_button')),
         findsOneWidget,
@@ -219,13 +238,146 @@ void main() {
         findsOneWidget,
       );
       expect(find.byKey(const Key('export_ya2i_save_button')), findsNothing);
+
+      // Section 2: 电子账单与更多记账软件导入 + CSV shortcut card + extensible note card
+      await tester.dragUntilVisible(
+        find.byKey(const Key('third_party_csv_shortcut_card')),
+        find.byType(ListView),
+        const Offset(0, -140),
+      );
+      await settle(tester);
+      expect(find.text('电子账单与更多记账软件导入'), findsOneWidget);
+      expect(
+        find.byKey(const Key('third_party_csv_shortcut_card')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const Key('go_csv_import_button')), findsOneWidget);
+      expect(find.byKey(const Key('go_import_batches_button')), findsOneWidget);
+
+      await tester.dragUntilVisible(
+        find.byKey(const Key('third_party_extensible_note_card')),
+        find.byType(ListView),
+        const Offset(0, -140),
+      );
+      await settle(tester);
+      final noteCard = find.byKey(
+        const Key('third_party_extensible_note_card'),
+      );
+      expect(noteCard, findsOneWidget);
+      expect(find.textContaining('钱迹'), findsOneWidget);
+      expect(find.textContaining('标准 CSV 模板'), findsOneWidget);
+      // Strictly informational: zero dead/fake buttons inside extensible note card
+      expect(
+        find.descendant(
+          of: noteCard,
+          matching: find.bySubtype<ButtonStyleButton>(),
+        ),
+        findsNothing,
+      );
+      expect(
+        find.descendant(of: noteCard, matching: find.byType(IconButton)),
+        findsNothing,
+      );
+
+      // Standalone MaterialApp fallback navigation works cleanly without GoRouter
+      await tester.ensureVisible(find.byKey(const Key('go_csv_import_button')));
+      await settle(tester);
+      await tester.tap(find.byKey(const Key('go_csv_import_button')));
+      await settle(tester);
+      expect(find.byKey(const Key('csv_import_page')), findsOneWidget);
+      await tester.tap(find.byType(BackButton));
+      await settle(tester);
+      expect(find.byKey(const Key('migration_page')), findsOneWidget);
+
+      await disposeCleanly();
+    },
+  );
+
+  testWidgets(
+    'MePage -> MigrationPage GoRouter flow: renders updated 第三方数据导入 entry and navigates via GoRouter to /migration, /import/csv, and /import/batches',
+    (tester) async {
+      final (db, scheduler, disposeCleanly) = await openTestDb(tester);
+
+      final router = GoRouter(
+        initialLocation: '/me',
+        routes: [
+          GoRoute(path: '/me', builder: (_, _) => const MePage()),
+          GoRoute(path: '/migration', builder: (_, _) => const MigrationPage()),
+          GoRoute(
+            path: '/import/csv',
+            builder: (_, _) => const CsvImportPage(),
+          ),
+          GoRoute(
+            path: '/import/batches',
+            builder: (_, _) => const ImportBatchesPage(),
+          ),
+        ],
+      );
+
+      await tester.pumpWidget(
+        ProviderScope(
+          retry: (_, _) => null,
+          overrides: [
+            databaseProvider.overrideWith((ref) async => db),
+            reminderSchedulerProvider.overrideWithValue(scheduler),
+          ],
+          child: MaterialApp.router(routerConfig: router),
+        ),
+      );
+      await settle(tester);
+
+      await tester.scrollUntilVisible(
+        find.byKey(const Key('me-migration')),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await settle(tester);
+      expect(find.text('第三方数据导入'), findsOneWidget);
+      expect(find.text('支持一羽记账备份迁入、微信/支付宝及第三方账单扩展'), findsOneWidget);
+
+      // Navigate /me -> /migration
+      await tester.tap(find.byKey(const Key('me-migration')));
+      await settle(tester);
+      expect(router.state.matchedLocation, '/migration');
+      expect(find.byKey(const Key('migration_page')), findsOneWidget);
+
+      // Scroll to Section 2 shortcut buttons
+      await tester.dragUntilVisible(
+        find.byKey(const Key('go_csv_import_button')),
+        find.byType(ListView),
+        const Offset(0, -160),
+      );
+      await settle(tester);
+
+      // Navigate /migration -> /import/csv via GoRouter
+      await tester.tap(find.byKey(const Key('go_csv_import_button')));
+      await settle(tester);
+      expect(router.state.matchedLocation, '/import/csv');
+      expect(find.byKey(const Key('csv_import_page')), findsOneWidget);
+
+      await tester.tap(find.byType(BackButton));
+      await settle(tester);
+      expect(router.state.matchedLocation, '/migration');
+
+      // Navigate /migration -> /import/batches via GoRouter
+      await tester.ensureVisible(
+        find.byKey(const Key('go_import_batches_button')),
+      );
+      await settle(tester);
+      await tester.tap(find.byKey(const Key('go_import_batches_button')));
+      await settle(tester);
+      expect(router.state.matchedLocation, '/import/batches');
+      expect(find.byKey(const Key('import_batches_page')), findsOneWidget);
+
+      await disposeCleanly();
+      router.dispose();
     },
   );
 
   testWidgets(
     'MigrationPage .penny import: rejects empty {}, shows full preview (version/counts/remarks/tombstones), and atomically restores 20 tables while preserving local notes & currencies',
     (tester) async {
-      final (db, scheduler) = await openTestDb(tester);
+      final (db, scheduler, disposeCleanly) = await openTestDb(tester);
 
       await tester.runAsync(() async {
         await db
@@ -398,13 +550,15 @@ void main() {
       expect(activeBookId, 2);
       expect(scheduler.scheduledList.single.hour, 21);
       expect(scheduler.scheduledList.single.minute, 0);
+
+      await disposeCleanly();
     },
   );
 
   testWidgets(
     'MigrationPage .yi2a import: blocks empty {} .yi2a before dialog, imports valid .yi2a via picker & initialSharedYi2a while preserving local notes and currencies',
     (tester) async {
-      final (db, scheduler) = await openTestDb(tester);
+      final (db, scheduler, disposeCleanly) = await openTestDb(tester);
 
       await tester.runAsync(() async {
         await db
@@ -519,7 +673,11 @@ void main() {
       await settle(tester);
 
       expect(find.byKey(const Key('yi2a_confirm_dialog')), findsNothing);
-      await tester.drag(find.byType(ListView), const Offset(0, 300));
+      await tester.dragUntilVisible(
+        find.byKey(const Key('migration_local_summary_card')),
+        find.byType(ListView),
+        const Offset(0, 180),
+      );
       await settle(tester);
       expect(find.text('账本 1 · 账户 1 · 账单 2 · 便签 1'), findsOneWidget);
       expect(scheduler.scheduledList, hasLength(1));
@@ -560,13 +718,15 @@ void main() {
       await tester.tap(find.byKey(const Key('migration_confirm_cancel')));
       await settle(tester);
       expect(find.byKey(const Key('yi2a_confirm_dialog')), findsNothing);
+
+      await disposeCleanly();
     },
   );
 
   testWidgets(
     'MigrationPage LAN restore: prompts password dialog for custom AE-2 ZIP (retry on wrong password -> unlock -> confirm) and auto-decrypts historical "YYjz@23!" AE-2 ZIP while preserving local notes & currencies',
     (tester) async {
-      final (db, scheduler) = await openTestDb(tester);
+      final (db, scheduler, disposeCleanly) = await openTestDb(tester);
 
       await tester.runAsync(() async {
         await db
@@ -671,7 +831,11 @@ void main() {
       await settle(tester);
 
       expect(find.byKey(const Key('lan_confirm_dialog')), findsNothing);
-      await tester.drag(find.byType(ListView), const Offset(0, 300));
+      await tester.dragUntilVisible(
+        find.byKey(const Key('migration_local_summary_card')),
+        find.byType(ListView),
+        const Offset(0, 180),
+      );
       await settle(tester);
       expect(find.text('账本 1 · 账户 1 · 账单 1 · 便签 1'), findsOneWidget);
 
@@ -695,6 +859,8 @@ void main() {
         ),
         isTrue,
       );
+
+      await disposeCleanly();
     },
   );
 }

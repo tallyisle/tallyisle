@@ -150,8 +150,8 @@ class MePage extends ConsumerWidget {
             ListTile(
               key: const Key('me-migration'),
               leading: const Icon(Icons.phonelink_setup_outlined),
-              title: const Text('从旧软件导入'),
-              subtitle: const Text('兼容一羽记账 .penny / .yi2a / 局域网备份'),
+              title: const Text('第三方数据导入'),
+              subtitle: const Text('支持一羽记账备份迁入、微信/支付宝及第三方账单扩展'),
               trailing: const Icon(Icons.chevron_right),
               onTap: () => context.push('/migration'),
             ),

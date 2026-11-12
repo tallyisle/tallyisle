@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../app/providers.dart';
 import '../../core/failure.dart';
@@ -11,15 +12,21 @@ import '../../data/migration/cross_migration_service.dart';
 import '../../domain/rules/penny_backup.dart';
 import '../../platform/files.dart';
 import '../common/common.dart';
+import '../csv_transfer/csv_import_page.dart';
+import '../csv_transfer/import_batches_page.dart';
 import '../penny_import/penny_import_providers.dart';
 import '../reminder/reminder_providers.dart';
 import 'migration_providers.dart';
 
-/// Unified one-way legacy original-app import page (`F-035`,
+/// Modular third-party & legacy data import hub (`第三方数据导入`, `F-035`,
 /// `docs/modules/ios-migration.md` & `docs/modules/import-original-backup.md`):
-/// - Original Android encrypted backup (`.penny` / `.yy`)
-/// - Original iOS migration package (`.yi2a`, including external share intent)
-/// - Original LAN transfer archive (`ServerBackup.zip` / bare SQLite `.db`)
+/// - Section 1 (`一羽记账备份全量迁入`):
+///   - Original Android encrypted backup (`.penny` / `.yy`)
+///   - Original iOS migration package (`.yi2a`, including external share intent)
+///   - Original LAN transfer archive (`ServerBackup.zip` / bare SQLite `.db`)
+/// - Section 2 (`电子账单与更多记账软件导入`):
+///   - Shortcut to WeChat Pay / Alipay / standard CSV incremental import & batch undo
+///   - Extensible adapter note for additional third-party apps (such as 钱迹)
 class MigrationPage extends ConsumerStatefulWidget {
   const MigrationPage({super.key, this.initialSharedYi2a});
 
@@ -310,6 +317,32 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
     );
   }
 
+  void _openCsvImport() {
+    final router = GoRouter.maybeOf(context);
+    if (router != null) {
+      unawaited(router.push('/import/csv'));
+      return;
+    }
+    unawaited(
+      Navigator.of(
+        context,
+      ).push(MaterialPageRoute<void>(builder: (_) => const CsvImportPage())),
+    );
+  }
+
+  void _openImportBatches() {
+    final router = GoRouter.maybeOf(context);
+    if (router != null) {
+      unawaited(router.push('/import/batches'));
+      return;
+    }
+    unawaited(
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(builder: (_) => const ImportBatchesPage()),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final summaryAsync = ref.watch(migrationLocalSummaryProvider);
@@ -317,7 +350,7 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
 
     return Scaffold(
       key: const Key('migration_page'),
-      appBar: AppBar(title: const Text('从旧软件导入')),
+      appBar: AppBar(title: const Text('第三方数据导入')),
       body: Column(
         children: [
           if (_busy)
@@ -364,7 +397,7 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
             child: ListView(
               padding: const EdgeInsets.all(16),
               children: [
-                // Cross-platform schema unity & legacy-only guidance banner
+                // Cross-platform schema unity & third-party import guidance banner
                 Card(
                   key: const Key('migration_unity_banner_card'),
                   color: theme.colorScheme.primaryContainer.withValues(
@@ -394,10 +427,10 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          '• 帐屿各平台（Android / iOS / 桌面 / Web）数据格式 100% 统一，'
-                          '日常跨设备请使用「云同步与备份（.tally / WebDAV / S3）」。\n'
-                          '• 本页专用于将原版“一羽记账”历史备份一次性迁入帐屿'
-                          '（导入时均采用单事务安全替换，并自动保留本机已有便签与自定义汇率）。',
+                          '1. 帐屿各端（Android / iOS / Windows / Linux / macOS）数据格式 100% 统一，'
+                          '日常多设备流转请使用「云同步与备份（.tally / WebDAV / S3）」；\n'
+                          '2. 本页专用于第三方记账软件与外部平台历史数据迁入'
+                          '（全量迁入采用单事务安全替换，并自动保留本机已有便签与自定义汇率）。',
                           style: theme.textTheme.bodyMedium,
                         ),
                       ],
@@ -428,7 +461,14 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
                   loading: () => const SizedBox.shrink(),
                   error: (_, _) => const SizedBox.shrink(),
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 16),
+
+                // Section 1: Full original-app backup migration
+                const _MigrationSectionHeader(
+                  icon: Icons.history_toggle_off_outlined,
+                  title: '一羽记账备份全量迁入',
+                ),
+                const SizedBox(height: 8),
 
                 // 1. Original Android encrypted backup (`.penny` / `.yy`)
                 Card(
@@ -524,7 +564,129 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
                     ),
                   ),
                 ),
+                const SizedBox(height: 20),
+
+                // Section 2: Electronic bills & extensible third-party bookkeeping imports
+                const _MigrationSectionHeader(
+                  icon: Icons.table_chart_outlined,
+                  title: '电子账单与更多记账软件导入',
+                ),
+                const SizedBox(height: 8),
+
+                // Working shortcut card for WeChat Pay / Alipay / standard CSV incremental import
+                Card(
+                  key: const Key('third_party_csv_shortcut_card'),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '微信支付 / 支付宝 / 标准 CSV 表格导入',
+                          style: theme.textTheme.titleMedium,
+                        ),
+                        const SizedBox(height: 6),
+                        const Text(
+                          '支持微信支付账单、支付宝交易明细及 14/15 列标准 CSV/Excel 表格解析转换；'
+                          '采用增量方式并入所选账本（不清空现有数据），并支持按导入批次查看明细或一键撤回。',
+                        ),
+                        const SizedBox(height: 12),
+                        Wrap(
+                          spacing: 10,
+                          runSpacing: 8,
+                          children: [
+                            FilledButton.tonalIcon(
+                              key: const Key('go_csv_import_button'),
+                              onPressed: _busy ? null : _openCsvImport,
+                              icon: const Icon(Icons.upload_file_outlined),
+                              label: const Text('前往表格账单导入'),
+                            ),
+                            OutlinedButton.icon(
+                              key: const Key('go_import_batches_button'),
+                              onPressed: _busy ? null : _openImportBatches,
+                              icon: const Icon(Icons.history_edu_outlined),
+                              label: const Text('导入批次管理'),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+
+                // Purely informational extensible adapter note (zero buttons)
+                Card(
+                  key: const Key('third_party_extensible_note_card'),
+                  color: theme.colorScheme.surfaceContainerHighest.withValues(
+                    alpha: 0.5,
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.extension_outlined,
+                              size: 20,
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                '更多第三方记账软件扩展说明',
+                                style: theme.textTheme.titleSmall?.copyWith(
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          '来自其他记账软件（如钱迹等）导出的 CSV/Excel 账单，当前可对照「标准 CSV 模板」映射表头后直接增量入账，'
+                          '并支持按导入批次核对与整批撤回；后续专版解析适配器也将在此分组持续扩展。',
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MigrationSectionHeader extends StatelessWidget {
+  const _MigrationSectionHeader({required this.icon, required this.title});
+
+  final IconData icon;
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: theme.colorScheme.primary),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              title,
+              style: theme.textTheme.titleSmall?.copyWith(
+                color: theme.colorScheme.primary,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
         ],
