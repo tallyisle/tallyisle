@@ -45,6 +45,7 @@ import '../features/periodic/periodic_page.dart';
 import '../features/receipt/diy_toolbar_settings_page.dart';
 import '../features/records/record_detail_page.dart';
 import '../features/records/record_editor_page.dart';
+import '../features/reimburse/reimburse_page.dart';
 import '../features/reminder/reminder_page.dart';
 import '../features/savings/savings_detail_page.dart';
 import '../features/savings/savings_editor_page.dart';
@@ -177,6 +178,11 @@ GoRouter buildRouter() => GoRouter(
     GoRoute(path: '/categories', builder: (_, _) => const CategoriesPage()),
     GoRoute(path: '/tags', builder: (_, _) => const TagsPage()),
     GoRoute(path: '/currencies', builder: (_, _) => const CurrenciesPage()),
+    GoRoute(
+      path: '/reimburse',
+      builder: (context, _) =>
+          ReimbursePage(onRecordTap: (id) => context.push('/record/$id')),
+    ),
     GoRoute(
       path: '/periodic',
       builder: (context, _) =>

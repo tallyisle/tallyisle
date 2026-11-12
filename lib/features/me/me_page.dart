@@ -76,6 +76,13 @@ class MePage extends ConsumerWidget {
             const Divider(),
             sectionHeader('计划与提醒'),
             ListTile(
+              key: const Key('me-reimburse'),
+              leading: const Icon(Icons.request_quote_outlined),
+              title: const Text('报销管理'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => context.push('/reimburse'),
+            ),
+            ListTile(
               key: const Key('me-periodic'),
               leading: const Icon(Icons.event_repeat_outlined),
               title: const Text('周期记账'),

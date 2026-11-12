@@ -8,6 +8,7 @@ import 'package:tallyisle/app/app.dart';
 import 'package:tallyisle/app/providers.dart';
 import 'package:tallyisle/data/db/database.dart';
 import 'package:tallyisle/features/assets/assets_page.dart';
+import 'package:tallyisle/features/me/me_page.dart';
 
 void main() {
   driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
@@ -22,7 +23,7 @@ void main() {
   }
 
   testWidgets(
-    '5-slot bottom bar renders symmetric slots + center add-record, MePage shows 更多 & 0.1.0.rc without 开发版本',
+    '5-slot bottom bar renders symmetric slots + center add-record, MePage shows 更多 & 报销管理 & 0.1.0.rc without 开发版本',
     (tester) async {
       tester.view.physicalSize = const Size(390, 844);
       tester.view.devicePixelRatio = 1.0;
@@ -100,6 +101,15 @@ void main() {
         findsOneWidget,
       );
       expect(find.text('我的'), findsNothing);
+
+      // '报销管理' entry exists under '计划与提醒' and navigates to ReimbursePage via live /reimburse route.
+      expect(find.byKey(const Key('me-reimburse')), findsOneWidget);
+      expect(find.text('报销管理'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('me-reimburse')));
+      await settle(tester);
+      expect(find.byKey(const Key('reimburse-pending-total')), findsOneWidget);
+      await tester.tap(find.byType(BackButton));
+      await settle(tester);
 
       // Scroll down to verify version string '当前版本 · 0.1.0.rc' and zero '开发版本'.
       await tester.scrollUntilVisible(
@@ -200,60 +210,73 @@ void main() {
     },
   );
 
-  testWidgets('tapping AssetsPage 3 quick items pushes expected routes', (
-    tester,
-  ) async {
-    final db = AppDatabase(NativeDatabase.memory());
-    final router = GoRouter(
-      initialLocation: '/assets',
-      routes: [
-        GoRoute(path: '/assets', builder: (_, _) => const AssetsPage()),
-        GoRoute(
-          path: '/debts',
-          builder: (_, _) =>
-              const Scaffold(body: Center(child: Text('DEBTS_DEST'))),
+  testWidgets(
+    'tapping AssetsPage 3 quick items and MePage me-reimburse pushes expected routes',
+    (tester) async {
+      final db = AppDatabase(NativeDatabase.memory());
+      final router = GoRouter(
+        initialLocation: '/assets',
+        routes: [
+          GoRoute(path: '/assets', builder: (_, _) => const AssetsPage()),
+          GoRoute(path: '/me', builder: (_, _) => const MePage()),
+          GoRoute(
+            path: '/debts',
+            builder: (_, _) =>
+                const Scaffold(body: Center(child: Text('DEBTS_DEST'))),
+          ),
+          GoRoute(
+            path: '/installments',
+            builder: (_, _) =>
+                const Scaffold(body: Center(child: Text('INSTALLMENTS_DEST'))),
+          ),
+          GoRoute(
+            path: '/deposits',
+            builder: (_, _) =>
+                const Scaffold(body: Center(child: Text('DEPOSITS_DEST'))),
+          ),
+          GoRoute(
+            path: '/reimburse',
+            builder: (_, _) =>
+                const Scaffold(body: Center(child: Text('REIMBURSE_DEST'))),
+          ),
+        ],
+      );
+      addTearDown(router.dispose);
+
+      await tester.pumpWidget(
+        ProviderScope(
+          retry: (_, _) => null,
+          overrides: [databaseProvider.overrideWith((ref) async => db)],
+          child: MaterialApp.router(routerConfig: router),
         ),
-        GoRoute(
-          path: '/installments',
-          builder: (_, _) =>
-              const Scaffold(body: Center(child: Text('INSTALLMENTS_DEST'))),
-        ),
-        GoRoute(
-          path: '/deposits',
-          builder: (_, _) =>
-              const Scaffold(body: Center(child: Text('DEPOSITS_DEST'))),
-        ),
-      ],
-    );
-    addTearDown(router.dispose);
+      );
+      await settle(tester);
 
-    await tester.pumpWidget(
-      ProviderScope(
-        retry: (_, _) => null,
-        overrides: [databaseProvider.overrideWith((ref) async => db)],
-        child: MaterialApp.router(routerConfig: router),
-      ),
-    );
-    await settle(tester);
+      await tester.tap(find.byKey(const Key('assets-quick-debts')));
+      await settle(tester);
+      expect(find.text('DEBTS_DEST'), findsOneWidget);
 
-    await tester.tap(find.byKey(const Key('assets-quick-debts')));
-    await settle(tester);
-    expect(find.text('DEBTS_DEST'), findsOneWidget);
+      router.go('/assets');
+      await settle(tester);
+      await tester.tap(find.byKey(const Key('assets-quick-installments')));
+      await settle(tester);
+      expect(find.text('INSTALLMENTS_DEST'), findsOneWidget);
 
-    router.go('/assets');
-    await settle(tester);
-    await tester.tap(find.byKey(const Key('assets-quick-installments')));
-    await settle(tester);
-    expect(find.text('INSTALLMENTS_DEST'), findsOneWidget);
+      router.go('/assets');
+      await settle(tester);
+      await tester.tap(find.byKey(const Key('assets-quick-deposits')));
+      await settle(tester);
+      expect(find.text('DEPOSITS_DEST'), findsOneWidget);
 
-    router.go('/assets');
-    await settle(tester);
-    await tester.tap(find.byKey(const Key('assets-quick-deposits')));
-    await settle(tester);
-    expect(find.text('DEPOSITS_DEST'), findsOneWidget);
+      router.go('/me');
+      await settle(tester);
+      await tester.tap(find.byKey(const Key('me-reimburse')));
+      await settle(tester);
+      expect(find.text('REIMBURSE_DEST'), findsOneWidget);
 
-    await tester.pumpWidget(const SizedBox());
-    await settle(tester);
-    await tester.pump(const Duration(seconds: 1));
-  });
+      await tester.pumpWidget(const SizedBox());
+      await settle(tester);
+      await tester.pump(const Duration(seconds: 1));
+    },
+  );
 }
