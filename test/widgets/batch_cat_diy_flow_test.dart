@@ -541,17 +541,29 @@ void main() {
       );
       await settle(tester);
 
-      expect(find.text('当前启用预览（8/8）'), findsOneWidget);
+      expect(find.text('当前启用预览（8/9）'), findsOneWidget);
       await tester.tap(find.byKey(const Key('diy-switch-tags')));
       await settle(tester);
-      expect(find.text('当前启用预览（7/8）'), findsOneWidget);
+      expect(find.text('当前启用预览（7/9）'), findsOneWidget);
 
-      await tester.tap(find.byKey(const Key('diy-down-tags')));
+      await tester.scrollUntilVisible(
+        find.byKey(const Key('diy-switch-frequent_remarks')),
+        160,
+        scrollable: find.byType(Scrollable).last,
+      );
       await settle(tester);
+      final remarkSwitchBefore = tester.widget<Switch>(
+        find.byKey(const Key('diy-switch-frequent_remarks')),
+      );
+      expect(remarkSwitchBefore.value, isFalse);
+
+      await tester.tap(find.byKey(const Key('diy-switch-frequent_remarks')));
+      await settle(tester);
+      expect(find.text('当前启用预览（8/9）'), findsOneWidget);
 
       await tester.tap(find.byKey(const Key('diy-toolbar-reset-btn')));
       await settle(tester);
-      expect(find.text('当前启用预览（8/8）'), findsOneWidget);
+      expect(find.text('当前启用预览（8/9）'), findsOneWidget);
 
       await unmountCleanly(tester);
 

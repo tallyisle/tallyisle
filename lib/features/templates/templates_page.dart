@@ -12,7 +12,7 @@ import 'template_editor_page.dart';
 import 'template_providers.dart';
 
 export '../../domain/rules/template_card_rules.dart' show TemplatePrefill;
-export 'remarks_page.dart' show FrequentRemarkChips;
+export 'remarks_page.dart' show FrequentRemarkChips, RemarksPage;
 
 const _quickUuid = Uuid();
 

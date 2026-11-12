@@ -11,6 +11,7 @@ import 'package:tallyisle/data/ledger/ledger_service.dart';
 import 'package:tallyisle/data/tools/template_remark_service.dart';
 import 'package:tallyisle/domain/model/codes.dart';
 import 'package:tallyisle/features/bank_cards/bank_cards_page.dart';
+import 'package:tallyisle/features/receipt/diy_toolbar_settings_page.dart';
 import 'package:tallyisle/features/templates/templates_page.dart';
 
 void main() {
@@ -77,6 +78,15 @@ void main() {
       await tester.tap(find.byKey(const Key('open_remarks_page_button')));
       await settle(tester);
       expect(find.byKey(const Key('remarks_empty_state')), findsOneWidget);
+      expect(find.byKey(const Key('remarks-feature-toggle')), findsOneWidget);
+      expect(
+        tester
+            .widget<SwitchListTile>(
+              find.byKey(const Key('remarks-feature-toggle')),
+            )
+            .value,
+        isFalse,
+      );
 
       // Create temporary remark (id = 1)
       await tester.tap(find.byKey(const Key('add_remark_fab')));
@@ -449,6 +459,50 @@ void main() {
       await tester.tap(find.text('删除'));
       await settle(tester);
       expect(find.text('工商工资卡'), findsNothing);
+
+      await closeCleanly();
+    },
+  );
+
+  testWidgets(
+    'RemarksPage remarks-feature-toggle starts OFF and syncs two-way with DiyToolbarSettingsPage',
+    (tester) async {
+      final (db, closeCleanly) = openTestDb(tester);
+
+      await tester.pumpWidget(
+        buildApp(
+          db,
+          const Column(
+            children: [
+              Expanded(child: RemarksPage()),
+              Expanded(child: DiyToolbarSettingsPage()),
+            ],
+          ),
+        ),
+      );
+      await settle(tester);
+
+      SwitchListTile remarksToggle() => tester.widget<SwitchListTile>(
+        find.byKey(const Key('remarks-feature-toggle')),
+      );
+
+      // Default OFF in RemarksPage and 8/9 enabled in DiyToolbarSettingsPage.
+      expect(remarksToggle().value, isFalse);
+      expect(find.textContaining('已关闭（默认）'), findsOneWidget);
+      expect(find.text('当前启用预览（8/9）'), findsOneWidget);
+
+      // Toggle ON in RemarksPage -> syncs to DiyToolbarSettingsPage (9/9)!
+      await tester.tap(find.byKey(const Key('remarks-feature-toggle')));
+      await settle(tester);
+      expect(remarksToggle().value, isTrue);
+      expect(find.textContaining('已开启'), findsOneWidget);
+      expect(find.text('当前启用预览（9/9）'), findsOneWidget);
+
+      // Reset to defaults in DiyToolbarSettingsPage -> syncs back to RemarksPage (OFF)!
+      await tester.tap(find.byKey(const Key('diy-toolbar-reset-btn')));
+      await settle(tester);
+      expect(remarksToggle().value, isFalse);
+      expect(find.text('当前启用预览（8/9）'), findsOneWidget);
 
       await closeCleanly();
     },

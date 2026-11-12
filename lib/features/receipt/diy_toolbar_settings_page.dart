@@ -30,6 +30,7 @@ class _DiyToolbarSettingsPageState
     DiyToolbarAction.excludeExIn => Icons.visibility_off_outlined,
     DiyToolbarAction.currency => Icons.currency_exchange,
     DiyToolbarAction.templates => Icons.bookmarks_outlined,
+    DiyToolbarAction.frequentRemarks => Icons.comment_outlined,
   };
 
   Future<void> _persist(DiyToolbarConfig next) async {

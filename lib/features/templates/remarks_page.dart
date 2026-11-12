@@ -4,7 +4,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/providers.dart';
 import '../../data/db/database.dart';
 import '../../domain/model/codes.dart';
+import '../attachments/attachment_providers.dart'
+    show billAttachmentServiceProvider;
 import '../common/common.dart';
+import '../receipt/receipt_diy_providers.dart'
+    show DiyToolbarAction, DiyToolbarConfig, diyToolbarConfigProvider;
 import 'template_providers.dart';
 
 /// Reusable frequent-remark suggestion chips for `RecordEditorPage` and
@@ -100,8 +104,11 @@ class _RemarksPageState extends ConsumerState<RemarksPage> {
 
   final TextEditingController _searchController = TextEditingController();
   final CommandIds _deleteIds = CommandIds();
+  final CommandIds _toggleIds = CommandIds();
   late int _selectedFilter;
   String _keyword = '';
+  bool _toggleBusy = false;
+  int _toggleSeq = 0;
 
   @override
   void initState() {
@@ -168,8 +175,46 @@ class _RemarksPageState extends ConsumerState<RemarksPage> {
     }
   }
 
+  Future<void> _toggleFrequentRemarks(
+    DiyToolbarConfig current,
+    bool enabled,
+  ) async {
+    if (_toggleBusy) return;
+    setState(() => _toggleBusy = true);
+    try {
+      final service = await ref.read(billAttachmentServiceProvider.future);
+      final next = current.setEnabled(
+        DiyToolbarAction.frequentRemarks,
+        enabled,
+      );
+      final seq = _toggleSeq++;
+      await service.saveDiyToolbarConfig(
+        commandId: _toggleIds.forPayload(<Object?>[
+          'remarks-feature-toggle',
+          seq,
+          next.toJson(),
+        ]),
+        config: next,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..clearSnackBars()
+        ..showSnackBar(SnackBar(content: Text(safeMessage(e))));
+    } finally {
+      if (mounted) setState(() => _toggleBusy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final diyConfig =
+        ref.watch(diyToolbarConfigProvider).value ??
+        DiyToolbarConfig.defaults();
+    final remarksEnabled = diyConfig.isEnabled(
+      DiyToolbarAction.frequentRemarks,
+    );
     final bookId = ref.watch(currentBookIdProvider).value;
     final bookCategories = bookId == null
         ? const <RecordCategory>[]
@@ -203,8 +248,41 @@ class _RemarksPageState extends ConsumerState<RemarksPage> {
           constraints: const BoxConstraints(maxWidth: 720),
           child: Column(
             children: [
+              Card(
+                margin: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                elevation: 0,
+                color: remarksEnabled
+                    ? cs.primaryContainer.withAlpha(90)
+                    : cs.surfaceContainerLow,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  side: BorderSide(color: cs.outlineVariant.withAlpha(120)),
+                ),
+                child: SwitchListTile(
+                  key: const Key('remarks-feature-toggle'),
+                  dense: true,
+                  secondary: Icon(
+                    Icons.comment_outlined,
+                    color: remarksEnabled ? cs.primary : cs.onSurfaceVariant,
+                  ),
+                  title: const Text(
+                    '记一笔常用备注联想与自动统计',
+                    style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+                  ),
+                  subtitle: Text(
+                    remarksEnabled
+                        ? '已开启：记账时展示分类常用备注候选，并在保存账单时自动累计备注词频'
+                        : '已关闭（默认）：记账时不展示备注候选条，也不自动统计新备注词频',
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                  value: remarksEnabled,
+                  onChanged: _toggleBusy
+                      ? null
+                      : (enabled) => _toggleFrequentRemarks(diyConfig, enabled),
+                ),
+              ),
               Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
                 child: Row(
                   children: [
                     Expanded(

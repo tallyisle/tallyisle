@@ -32,7 +32,12 @@ import '../receipt/record_receipt_dialog.dart' show BillLocationEditorDialog;
 import '../tags/tags_page.dart';
 import '../templates/template_providers.dart';
 import '../templates/templates_page.dart'
-    show FrequentRemarkChips, TemplatePrefill, TemplateQuickBar, TemplatesPage;
+    show
+        FrequentRemarkChips,
+        RemarksPage,
+        TemplatePrefill,
+        TemplateQuickBar,
+        TemplatesPage;
 import 'record_keypad.dart';
 
 /// Original keyboard upper bound (`docs/reference/ledger-catalog.md` §5).
@@ -112,6 +117,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
   final remark = TextEditingController();
   final _amountFocus = FocusNode();
   final _discountFocus = FocusNode();
+  final _evalBtnFocusNode = FocusNode(canRequestFocus: false);
   final ids = CommandIds();
   final imageIds = CommandIds();
   final remarkIds = CommandIds();
@@ -236,9 +242,87 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
     setState(() => location = res.isEmpty ? null : res);
   }
 
+  void _onAmountFocusChanged() {
+    if (mounted) setState(() {});
+  }
+
+  void _showCalcError(String message) {
+    if (!mounted) return;
+    final mq = MediaQuery.of(context);
+    final usableHeight =
+        mq.size.height - mq.viewInsets.bottom - mq.padding.vertical;
+    final bottomMargin = usableHeight > 260 ? 140.0 : 8.0;
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(message),
+          behavior: SnackBarBehavior.floating,
+          margin: EdgeInsets.fromLTRB(16, 0, 16, bottomMargin),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+  }
+
+  void _onOperatorTap(String op) {
+    if (busy) return;
+    ScaffoldMessenger.maybeOf(context)?.clearSnackBars();
+    final next = applyKeypadKey(amount.text, op);
+    setState(() {
+      error = null;
+      _savedAndResetBanner = false;
+      amount.value = TextEditingValue(
+        text: next,
+        selection: TextSelection.collapsed(offset: next.length),
+      );
+      _autoConvert();
+    });
+    if (!_amountFocus.hasFocus) {
+      _amountFocus.requestFocus();
+    }
+  }
+
+  void _evaluateInPlace() {
+    if (busy) return;
+    final hadFocus = _amountFocus.hasFocus;
+    try {
+      final res = evaluateKeypadExpression(amount.text);
+      if (res.dividedByZero) {
+        _showCalcError('算式无效或除数不能为 0');
+        return;
+      }
+      if (res.isNegative) {
+        _showCalcError('计算结果不能小于 0');
+        return;
+      }
+      if (res.exceededMax) {
+        _showCalcError('金额不能超过 88888888888.00');
+        return;
+      }
+      final evaluated = res.money;
+      ScaffoldMessenger.maybeOf(context)?.clearSnackBars();
+      setState(() {
+        error = null;
+        _savedAndResetBanner = false;
+        amount.value = TextEditingValue(
+          text: evaluated.decimal,
+          selection: TextSelection.collapsed(offset: evaluated.decimal.length),
+        );
+        _autoConvert();
+      });
+    } on Failure {
+      _showCalcError('算式无效或除数不能为 0');
+    } finally {
+      if (hadFocus && !_amountFocus.hasFocus && mounted) {
+        _amountFocus.requestFocus();
+      }
+    }
+  }
+
   @override
   void initState() {
     super.initState();
+    _amountFocus.addListener(_onAmountFocusChanged);
     type = widget.initialType ?? RecordType.expense;
     categoryId = widget.initialCategory;
     assetId = widget.initialAsset ?? noRef;
@@ -352,6 +436,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
 
   @override
   void dispose() {
+    _amountFocus.removeListener(_onAmountFocusChanged);
     amount.dispose();
     converted.dispose();
     discount.dispose();
@@ -359,6 +444,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
     remark.dispose();
     _amountFocus.dispose();
     _discountFocus.dispose();
+    _evalBtnFocusNode.dispose();
     super.dispose();
   }
 
@@ -377,6 +463,10 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
 
       // Auto-evaluate any pending expression (e.g. `12+8` -> `20.00`) or
       // trailing operator (`12.5+` -> `12.50`) before validating & saving.
+      final evalRes = evaluateKeypadExpression(amount.text);
+      if (evalRes.dividedByZero) {
+        throw const Failure(FailureCode.validation, '算式无效或除数不能为 0');
+      }
       final money = confirmKeypadAmount(amount.text);
       if (amount.text.trim().isNotEmpty) {
         amount.value = TextEditingValue(
@@ -522,7 +612,25 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
         );
       }
 
-      if (type != RecordType.transfer && draft.remark.isNotEmpty) {
+      final providerDiyConfig = ref.read(diyToolbarConfigProvider).value;
+      final bool remarksEnabled;
+      if (providerDiyConfig != null) {
+        remarksEnabled = providerDiyConfig.isEnabled(
+          DiyToolbarAction.frequentRemarks,
+        );
+      } else {
+        final diyPrefRow =
+            await (db.select(db.preferences)
+                  ..where((t) => t.key.equals(prefKeyRecordDiyToolbar)))
+                .getSingleOrNull();
+        remarksEnabled = DiyToolbarConfig.decode(
+          diyPrefRow?.value,
+        ).isEnabled(DiyToolbarAction.frequentRemarks);
+      }
+
+      if (remarksEnabled &&
+          type != RecordType.transfer &&
+          draft.remark.isNotEmpty) {
         try {
           final remarkSvc = await ref.read(
             templateRemarkServiceProvider.future,
@@ -660,6 +768,106 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
         ).push(MaterialPageRoute<void>(builder: (_) => const TemplatesPage())),
       );
     }
+  }
+
+  void _openRemarksManager() {
+    if (GoRouter.maybeOf(context) != null) {
+      unawaited(
+        context.push(
+          categoryId == null ? '/remarks' : '/remarks?categoryId=$categoryId',
+        ),
+      );
+    } else {
+      unawaited(
+        Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => RemarksPage(initialCategoryId: categoryId),
+          ),
+        ),
+      );
+    }
+  }
+
+  Widget? _buildRemarkSuffixIcon({required bool remarksEnabled}) {
+    final hasText = remark.text.isNotEmpty;
+    final clearBtn = hasText
+        ? IconButton(
+            key: const Key('editor-remark-clear-btn'),
+            tooltip: '清空备注',
+            visualDensity: VisualDensity.compact,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints.tightFor(width: 26, height: 26),
+            icon: const Icon(Icons.cancel, size: 16),
+            onPressed: busy
+                ? null
+                : () => setState(() {
+                    remark.clear();
+                    _savedAndResetBanner = false;
+                  }),
+          )
+        : null;
+
+    final showRemarksBtn = remarksEnabled && type != RecordType.transfer;
+    final remarksBtn = showRemarksBtn
+        ? IconButton(
+            key: const Key('editor-remarks-btn'),
+            tooltip: '常用备注管理',
+            visualDensity: VisualDensity.compact,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints.tightFor(width: 28, height: 28),
+            icon: const Icon(Icons.comment_outlined, size: 17),
+            onPressed: busy ? null : _openRemarksManager,
+          )
+        : null;
+
+    if (clearBtn == null && remarksBtn == null) return null;
+    if (clearBtn != null && remarksBtn != null) {
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [clearBtn, remarksBtn],
+      );
+    }
+    return clearBtn ?? remarksBtn;
+  }
+
+  Widget _buildOperatorButton(
+    BuildContext context, {
+    required Key key,
+    required String label,
+    required String op,
+    required String tooltip,
+  }) {
+    final cs = Theme.of(context).colorScheme;
+    return Tooltip(
+      message: tooltip,
+      child: SizedBox(
+        width: 34,
+        height: 38,
+        child: Material(
+          color: cs.secondaryContainer.withAlpha(190),
+          borderRadius: BorderRadius.circular(10),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            key: key,
+            canRequestFocus: false,
+            onTap: busy ? null : () => _onOperatorTap(op),
+            child: Center(
+              child: Text(
+                label,
+                style: TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w700,
+                  height: 1.0,
+                  color: busy
+                      ? cs.onSurfaceVariant.withAlpha(110)
+                      : cs.onSecondaryContainer,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> _openAccountPickerSheet({
@@ -1438,10 +1646,19 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
     final cs = Theme.of(context).colorScheme;
     final (sc, ac) = _currencies();
     final pendingOp = hasPendingOperator(amount.text);
+    final showOperators = _amountFocus.hasFocus || pendingOp;
+    final remarksEnabled = diyConfig.isEnabled(
+      DiyToolbarAction.frequentRemarks,
+    );
     String? livePreview;
     if (pendingOp) {
       try {
-        livePreview = evaluateKeypadExpression(amount.text).formatted;
+        final previewRes = evaluateKeypadExpression(amount.text);
+        if (!previewRes.dividedByZero &&
+            !previewRes.isNegative &&
+            !previewRes.exceededMax) {
+          livePreview = previewRes.formatted;
+        }
       } on Failure {
         livePreview = null;
       }
@@ -1639,8 +1856,10 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
                 diyConfig: diyConfig,
               ),
 
-              // Frequent remark chips (0px when empty)
-              if (type != RecordType.transfer && categoryId != null)
+              // Frequent remark chips (0px when disabled or empty)
+              if (remarksEnabled &&
+                  type != RecordType.transfer &&
+                  categoryId != null)
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 12),
                   child: FrequentRemarkChips(
@@ -1697,32 +1916,12 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
                             minWidth: 26,
                             minHeight: 26,
                           ),
-                          suffixIcon:
-                              type != RecordType.transfer &&
-                                  GoRouter.maybeOf(context) != null
-                              ? IconButton(
-                                  key: const Key('editor-remarks-btn'),
-                                  tooltip: '常用备注管理',
-                                  visualDensity: VisualDensity.compact,
-                                  padding: EdgeInsets.zero,
-                                  icon: const Icon(
-                                    Icons.comment_outlined,
-                                    size: 17,
-                                  ),
-                                  onPressed: busy
-                                      ? null
-                                      : () => unawaited(
-                                          context.push(
-                                            categoryId == null
-                                                ? '/remarks'
-                                                : '/remarks?categoryId=$categoryId',
-                                          ),
-                                        ),
-                                )
-                              : null,
+                          suffixIcon: _buildRemarkSuffixIcon(
+                            remarksEnabled: remarksEnabled,
+                          ),
                           suffixIconConstraints: const BoxConstraints(
-                            minWidth: 30,
-                            minHeight: 30,
+                            minWidth: 26,
+                            minHeight: 26,
                           ),
                         ),
                       ),
@@ -1782,18 +1981,37 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
                                     textAlign: TextAlign.right,
                                     inputFormatters:
                                         _keypadExpressionFormatters,
-                                    onChanged: (_) => setState(() {
-                                      error = null;
-                                      _savedAndResetBanner = false;
-                                      _autoConvert();
-                                    }),
+                                    onChanged: (_) {
+                                      ScaffoldMessenger.maybeOf(
+                                        context,
+                                      )?.clearSnackBars();
+                                      setState(() {
+                                        error = null;
+                                        _savedAndResetBanner = false;
+                                        _autoConvert();
+                                      });
+                                    },
                                     onSubmitted: (_) {
                                       if (hasPendingOperator(amount.text)) {
                                         try {
-                                          final next = applyKeypadKey(
+                                          final res = evaluateKeypadExpression(
                                             amount.text,
-                                            'EQUALS',
                                           );
+                                          if (res.dividedByZero) {
+                                            _showCalcError('算式无效或除数不能为 0');
+                                            return;
+                                          }
+                                          if (res.isNegative) {
+                                            _showCalcError('计算结果不能小于 0');
+                                            return;
+                                          }
+                                          if (res.exceededMax) {
+                                            _showCalcError(
+                                              '金额不能超过 88888888888.00',
+                                            );
+                                            return;
+                                          }
+                                          final next = res.money.decimal;
                                           setState(() {
                                             error = null;
                                             amount.value = TextEditingValue(
@@ -1806,9 +2024,8 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
                                             _autoConvert();
                                           });
                                         } on Failure catch (e) {
-                                          setState(
-                                            () => error = safeMessage(e),
-                                          );
+                                          _showCalcError(safeMessage(e));
+                                          return;
                                         }
                                       }
                                       _amountFocus.unfocus();
@@ -1853,40 +2070,138 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
                 ),
               ),
 
-              // Compact bottom action bar: [再记一笔] + [保存]
+              // Compact bottom action bar: optional [+ − × ÷] + [再记一笔] + [= / 保存]
               Padding(
-                padding: const EdgeInsets.fromLTRB(12, 2, 12, 8),
+                padding: EdgeInsets.fromLTRB(
+                  showOperators ? 10 : 12,
+                  2,
+                  showOperators ? 10 : 12,
+                  8,
+                ),
                 child: Row(
                   children: [
+                    if (showOperators) ...[
+                      TextFieldTapRegion(
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            _buildOperatorButton(
+                              context,
+                              key: const Key('editor-op-add'),
+                              label: '+',
+                              op: '+',
+                              tooltip: '加',
+                            ),
+                            const SizedBox(width: 4),
+                            _buildOperatorButton(
+                              context,
+                              key: const Key('editor-op-sub'),
+                              label: '−',
+                              op: '-',
+                              tooltip: '减',
+                            ),
+                            const SizedBox(width: 4),
+                            _buildOperatorButton(
+                              context,
+                              key: const Key('editor-op-mul'),
+                              label: '×',
+                              op: '×',
+                              tooltip: '乘',
+                            ),
+                            const SizedBox(width: 4),
+                            _buildOperatorButton(
+                              context,
+                              key: const Key('editor-op-div'),
+                              label: '÷',
+                              op: '÷',
+                              tooltip: '除',
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                    ],
                     if (!editing) ...[
                       Expanded(
+                        flex: showOperators ? 6 : 1,
                         child: OutlinedButton(
                           key: const Key('save-and-new'),
                           style: OutlinedButton.styleFrom(
-                            minimumSize: const Size(64, 40),
+                            minimumSize: const Size(0, 38),
+                            padding: EdgeInsets.symmetric(
+                              horizontal: showOperators ? 6 : 12,
+                            ),
                             tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                           ),
                           onPressed: canSubmit
                               ? () => unawaited(_save(stayAndReset: true))
                               : null,
-                          child: const Text('再记一笔'),
+                          child: const Text(
+                            '再记一笔',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
                       ),
-                      const SizedBox(width: 8),
+                      SizedBox(width: showOperators ? 6 : 8),
                     ],
                     Expanded(
-                      flex: 2,
-                      child: FilledButton(
-                        key: const Key('save'),
-                        style: FilledButton.styleFrom(
-                          minimumSize: const Size(64, 40),
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        ),
-                        onPressed: canSubmit
-                            ? () => unawaited(_save(stayAndReset: false))
-                            : null,
-                        child: Text(busy ? '保存中…' : '保存'),
-                      ),
+                      flex: showOperators ? 5 : 2,
+                      child: pendingOp
+                          ? TextFieldTapRegion(
+                              child: Tooltip(
+                                message: '计算结果',
+                                child: KeyedSubtree(
+                                  key: const Key('editor-save-btn'),
+                                  child: FilledButton(
+                                    key: const Key('save'),
+                                    focusNode: _evalBtnFocusNode,
+                                    style: FilledButton.styleFrom(
+                                      minimumSize: const Size(0, 38),
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 8,
+                                      ),
+                                      tapTargetSize:
+                                          MaterialTapTargetSize.shrinkWrap,
+                                    ),
+                                    onPressed: canSubmit
+                                        ? _evaluateInPlace
+                                        : null,
+                                    child: const Text(
+                                      '=',
+                                      style: TextStyle(
+                                        fontSize: 19,
+                                        fontWeight: FontWeight.w800,
+                                        height: 1.0,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            )
+                          : KeyedSubtree(
+                              key: const Key('editor-save-btn'),
+                              child: FilledButton(
+                                key: const Key('save'),
+                                style: FilledButton.styleFrom(
+                                  minimumSize: const Size(0, 38),
+                                  padding: EdgeInsets.symmetric(
+                                    horizontal: showOperators ? 8 : 16,
+                                  ),
+                                  tapTargetSize:
+                                      MaterialTapTargetSize.shrinkWrap,
+                                ),
+                                onPressed: canSubmit
+                                    ? () =>
+                                          unawaited(_save(stayAndReset: false))
+                                    : null,
+                                child: Text(
+                                  busy ? '保存中…' : '保存',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ),
                     ),
                   ],
                 ),
@@ -2217,6 +2532,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
           }
 
         case DiyToolbarAction.templates:
+        case DiyToolbarAction.frequentRemarks:
           break;
       }
     }

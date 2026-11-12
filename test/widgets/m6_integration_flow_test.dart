@@ -327,9 +327,22 @@ void main() {
         );
         await _settle(tester);
 
-        // 1. Record an expense with remark, discount, and location.
+        // 1. Enable frequentRemarks via DIY toolbar settings, then record an expense with remark, discount, and location.
         await tester.tap(find.byKey(const Key('add-record')));
         await _settle(tester);
+        expect(find.byKey(const Key('editor-remarks-btn')), findsNothing);
+        await tester.tap(find.byKey(const Key('editor-diy-toolbar-btn')));
+        await _settle(tester);
+        await tester.scrollUntilVisible(
+          find.byKey(const Key('diy-switch-frequent_remarks')),
+          160,
+          scrollable: find.byType(Scrollable).last,
+        );
+        await _settle(tester, 4);
+        await tester.tap(find.byKey(const Key('diy-switch-frequent_remarks')));
+        await _settle(tester);
+        await _goBack(tester);
+
         await tester.enterText(find.byKey(const Key('amount')), '35.00');
         await tester.tap(find.byKey(const Key('cat-餐饮')));
         await _settle(tester, 4);

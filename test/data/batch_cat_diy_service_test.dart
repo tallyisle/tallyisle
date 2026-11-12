@@ -1092,9 +1092,13 @@ void main() {
     test(
       'persists DiyToolbarConfig in ti_preference and updates record.extra_info.loc safely',
       () async {
-        // Default DIY toolbar config emitted initially
+        // Default DIY toolbar config emitted initially (frequentRemarks defaults OFF)
         final initial = await attService.getDiyToolbarConfig();
-        expect(initial.visibleActions, DiyToolbarAction.values);
+        expect(initial.isEnabled(DiyToolbarAction.frequentRemarks), isFalse);
+        expect(
+          initial.visibleActions,
+          DiyToolbarAction.values.where((a) => a.defaultEnabled).toList(),
+        );
 
         final custom = initial
             .setEnabled(DiyToolbarAction.currency, false)

@@ -708,7 +708,11 @@ void main() {
       () {
         final def = DiyToolbarConfig.defaults();
         expect(def.items, hasLength(DiyToolbarAction.values.length));
-        expect(def.visibleActions, DiyToolbarAction.values);
+        expect(def.isEnabled(DiyToolbarAction.frequentRemarks), isFalse);
+        expect(
+          def.visibleActions,
+          DiyToolbarAction.values.where((a) => a.defaultEnabled).toList(),
+        );
 
         // Corrupt or partial JSON recovers missing actions cleanly
         final fallback = DiyToolbarConfig.decode('{not-json');

@@ -59,7 +59,6 @@ import '../features/stats/category_stats_page.dart';
 import '../features/stats/stats_page.dart';
 import '../features/stats/tag_stats_page.dart';
 import '../features/tags/tags_page.dart';
-import '../features/templates/remarks_page.dart';
 import '../features/templates/template_editor_page.dart';
 import '../features/templates/templates_page.dart';
 import '../features/wishes/wish_editor_page.dart';

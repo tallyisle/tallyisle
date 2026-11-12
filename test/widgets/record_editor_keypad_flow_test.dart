@@ -288,11 +288,24 @@ void main() {
         );
         expect(find.byKey(const Key('amount-live-preview')), findsNothing);
 
-        // 4b. Test direct Save auto-evaluation: enter '12.5+7.5' -> preview '= 20.00' -> tap Save directly!
+        // 4b. Test smart '=' in-place evaluation followed by Save:
+        // enter '12.5+7.5' -> preview '= 20.00' & button '=' -> tap '=' -> '20.00' -> tap '保存'!
         await tester.enterText(find.byKey(const Key('amount')), '12.5+7.5');
         await tester.pump();
         expect(find.byKey(const Key('amount-live-preview')), findsOneWidget);
         expect(find.text('= 20.00'), findsOneWidget);
+        expect(find.text('='), findsOneWidget);
+
+        await tester.tap(find.byKey(const Key('save')));
+        await tester.pump();
+        expect(
+          tester
+              .widget<TextField>(find.byKey(const Key('amount')))
+              .controller!
+              .text,
+          '20.00',
+        );
+        expect(find.text('保存'), findsOneWidget);
 
         await tester.tap(find.byKey(const Key('save')));
         await _settle(tester);

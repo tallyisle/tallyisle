@@ -321,12 +321,24 @@ enum DiyToolbarAction {
   excludeBudget('exclude_budget', '不计入预算', '开启后本笔账单不占用当期预算额度'),
   excludeExIn('exclude_ex_in', '不计入收支', '开启后本笔账单不计入月度/年度收支统计'),
   currency('currency', '多币种', '选择外币录入并按汇率折算入账金额'),
-  templates('templates', '模板', '从常用记账模板快速填充账单内容');
+  templates('templates', '模板', '从常用记账模板快速填充账单内容'),
+  frequentRemarks(
+    'frequent_remarks',
+    '常用备注',
+    '展示分类常用备注候选条并自动统计备注词频（默认关闭）',
+    defaultEnabled: false,
+  );
 
-  const DiyToolbarAction(this.key, this.label, this.description);
+  const DiyToolbarAction(
+    this.key,
+    this.label,
+    this.description, {
+    this.defaultEnabled = true,
+  });
   final String key;
   final String label;
   final String description;
+  final bool defaultEnabled;
 
   static DiyToolbarAction? fromKey(String key) {
     for (final a in values) {
@@ -364,7 +376,7 @@ final class DiyToolbarConfig {
 
   factory DiyToolbarConfig.defaults() => DiyToolbarConfig._([
     for (final action in DiyToolbarAction.values)
-      DiyToolbarItem(action: action, enabled: true),
+      DiyToolbarItem(action: action, enabled: action.defaultEnabled),
   ]);
 
   factory DiyToolbarConfig.normalize(Iterable<DiyToolbarItem> rawItems) {
@@ -377,7 +389,9 @@ final class DiyToolbarConfig {
     }
     for (final action in DiyToolbarAction.values) {
       if (seen.add(action)) {
-        normalized.add(DiyToolbarItem(action: action, enabled: true));
+        normalized.add(
+          DiyToolbarItem(action: action, enabled: action.defaultEnabled),
+        );
       }
     }
     return DiyToolbarConfig._(normalized);
@@ -458,7 +472,7 @@ final class DiyToolbarConfig {
         if (action == null) continue;
         final enabled = entry['enabled'] is bool
             ? entry['enabled'] as bool
-            : true;
+            : action.defaultEnabled;
         parsed.add(DiyToolbarItem(action: action, enabled: enabled));
       } else if (entry is String) {
         final action = DiyToolbarAction.fromKey(entry.trim());
