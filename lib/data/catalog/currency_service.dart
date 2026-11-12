@@ -13,6 +13,11 @@ import '../db/database.dart';
 import '../db/failures.dart';
 import 'exchange_rate_provider.dart';
 
+/// Validates and canonicalizes an exact `rate_to_anchor` decimal string
+/// (`1 CNY = r <CODE>`, up to 12 fractional digits `HALF_UP`, strictly `> 0`).
+String parseRateToAnchor(String raw) =>
+    convertOnlineQuoteToRateToAnchor(raw.trim());
+
 /// Summary of an atomic online exchange-rate synchronization run.
 final class OnlineRateSyncResult {
   OnlineRateSyncResult({
@@ -102,15 +107,34 @@ final class CurrencyService {
   }
 
   /// Adds or updates a currency. [price] is "1 [code] = price CNY".
+  ///
+  /// When [rateToAnchorOverride] is provided (e.g. from a live online rate
+  /// fetch), it is validated via [parseRateToAnchor] so the exact 12-decimal
+  /// `rate_to_anchor` is stored without 4-decimal display rounding loss;
+  /// otherwise `rateToAnchorFromPrice(price)` is used.
+  /// When [onlineSyncSource] is non-empty, `online_rate_settings`
+  /// (`lastSyncedAtMs`, `lastSyncSource`) is updated in the same transaction.
   Future<void> saveCurrency({
     required String commandId,
     required String code,
     required String name,
     required String symbol,
     required String price,
+    String? rateToAnchorOverride,
+    String? onlineSyncSource,
   }) => _command(
     commandId,
-    ['save-currency-v1', code, name, symbol, price],
+    rateToAnchorOverride == null && onlineSyncSource == null
+        ? ['save-currency-v1', code, name, symbol, price]
+        : [
+            'save-currency-v2',
+            code,
+            name,
+            symbol,
+            price,
+            rateToAnchorOverride,
+            onlineSyncSource,
+          ],
     () async {
       final c = normalizeCurrency(code);
       if (c == null || !RegExp(r'^[A-Z]{3,8}$').hasMatch(c)) {
@@ -123,7 +147,10 @@ final class CurrencyService {
       if (n.isEmpty || n.length > 30) {
         throw const Failure(FailureCode.validation, '币种名称须为 1–30 字');
       }
-      final rate = rateToAnchorFromPrice(price);
+      final rate = rateToAnchorOverride != null
+          ? parseRateToAnchor(rateToAnchorOverride)
+          : rateToAnchorFromPrice(price);
+      final now = db.nowMs();
       await db
           .into(db.currencies)
           .insertOnConflictUpdate(
@@ -133,13 +160,105 @@ final class CurrencyService {
               symbol: symbol.trim().isEmpty ? c : symbol.trim(),
               rateToAnchor: rate,
               anchorCode: baseCurrency,
-              rateRefreshTime: Value(db.nowMs()),
+              rateRefreshTime: Value(now),
             ),
           );
+      final cleanSource = onlineSyncSource?.trim() ?? '';
+      if (cleanSource.isNotEmpty) {
+        final currentSettings = await _readSettingsUnsafe();
+        final updatedSettings = currentSettings
+            .copyWith(lastSyncedAtMs: now, lastSyncSource: cleanSource)
+            .validated();
+        await db
+            .into(db.preferences)
+            .insertOnConflictUpdate(
+              PreferencesCompanion.insert(
+                key: onlineRateSettingsPreferenceKey,
+                value: updatedSettings.encode(),
+              ),
+            );
+      }
       return c;
     },
     (_) {},
   );
+
+  /// Looks up a normalized currency [code] inside [fetched], returning its
+  /// exact 12-decimal `rateToAnchor`, CNY `displayPrice`, and `sourceLabel`,
+  /// or `null` if [code] is invalid, is [baseCurrency], or is absent.
+  static ({String rateToAnchor, String displayPrice, String sourceLabel})?
+  lookupFetchedRate(FetchedExchangeRates fetched, String code) {
+    final c = normalizeCurrency(code);
+    if (c == null || c == baseCurrency) return null;
+    final rawRate = fetched.ratesToAnchor[c];
+    if (rawRate == null) return null;
+    final String canonicalRate;
+    try {
+      canonicalRate = parseRateToAnchor(rawRate);
+    } on Failure {
+      return null;
+    }
+    var displayPrice = priceFromRateToAnchor(canonicalRate);
+    if (displayPrice == '0') {
+      final parsed = DecimalValue.parse(canonicalRate);
+      if (parsed.coefficient <= BigInt.zero) return null;
+      final coeff8 = divideRounded(
+        powerOfTen(parsed.scale + 8),
+        parsed.coefficient,
+        RoundingMode.halfUp,
+      );
+      displayPrice = formatRateDecimal(coeff8, 8);
+      if (displayPrice == '0') return null;
+    }
+    return (
+      rateToAnchor: canonicalRate,
+      displayPrice: displayPrice,
+      sourceLabel: fetched.sourceLabel,
+    );
+  }
+
+  /// Fetches the live online exchange-rate table via [provider] outside the
+  /// SQLite write lock and updates `online_rate_settings` (`lastSyncedAtMs`,
+  /// `lastSyncSource`) upon success.
+  Future<FetchedExchangeRates> fetchLiveExchangeRates({
+    required ExchangeRateProvider provider,
+  }) async {
+    final capability = provider.capability;
+    if (capability.state != CapabilityState.available) {
+      throw Failure(FailureCode.unsupportedCapability, capability.reason);
+    }
+    final fetched = await provider.fetchRatesRelativeToBase(
+      baseCode: baseCurrency,
+    );
+    await guardDatabase(
+      () => db.transaction(() async {
+        final now = db.nowMs();
+        final currentSettings = await _readSettingsUnsafe();
+        final updatedSettings = currentSettings
+            .copyWith(lastSyncedAtMs: now, lastSyncSource: fetched.sourceLabel)
+            .validated();
+        await db
+            .into(db.preferences)
+            .insertOnConflictUpdate(
+              PreferencesCompanion.insert(
+                key: onlineRateSettingsPreferenceKey,
+                value: updatedSettings.encode(),
+              ),
+            );
+      }),
+    );
+    return fetched;
+  }
+
+  /// Fetches live online rates from [provider] and looks up [code].
+  Future<({String rateToAnchor, String displayPrice, String sourceLabel})?>
+  fetchOnlineRateForCurrency({
+    required String code,
+    required ExchangeRateProvider provider,
+  }) async {
+    final fetched = await fetchLiveExchangeRates(provider: provider);
+    return lookupFetchedRate(fetched, code);
+  }
 
   /// Removes a currency no account or bill uses.
   Future<void> deleteCurrency({

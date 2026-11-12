@@ -4,7 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
+import '../../core/failure.dart';
+import '../../data/catalog/currency_service.dart';
+import '../../data/catalog/exchange_rate_provider.dart';
 import '../../data/db/database.dart';
+import '../../domain/rules/asset_overview.dart' show normalizeCurrency;
 import '../../domain/rules/currency_rates.dart';
 import '../../domain/rules/online_rate_rules.dart';
 import '../common/common.dart';
@@ -120,31 +124,12 @@ class _CurrenciesPageState extends ConsumerState<CurrenciesPage> {
   }
 
   Future<void> _edit({Currency? existing, required Set<String> used}) async {
-    final result = await showDialog<(String, String, String, String)>(
+    final saved = await showDialog<bool>(
       context: context,
       builder: (_) => _CurrencyDialog(existing: existing, used: used),
     );
-    if (result == null) return;
-    final (code, name, symbol, price) = result;
-    try {
-      final service = await ref.read(currencyServiceProvider.future);
-      await service.saveCurrency(
-        commandId: ids.forPayload([
-          'save',
-          _completedGeneration,
-          code,
-          name,
-          symbol,
-          price,
-        ]),
-        code: code,
-        name: name,
-        symbol: symbol,
-        price: price,
-      );
+    if (saved == true) {
       _completedGeneration++;
-    } catch (e) {
-      _toast(safeMessage(e));
     }
   }
 
@@ -411,15 +396,19 @@ class _CustomRateSourceDialogState extends State<_CustomRateSourceDialog> {
   }
 }
 
-class _CurrencyDialog extends StatefulWidget {
+class _CurrencyDialog extends ConsumerStatefulWidget {
   const _CurrencyDialog({this.existing, required this.used});
   final Currency? existing;
   final Set<String> used;
   @override
-  State<_CurrencyDialog> createState() => _CurrencyDialogState();
+  ConsumerState<_CurrencyDialog> createState() => _CurrencyDialogState();
 }
 
-class _CurrencyDialogState extends State<_CurrencyDialog> {
+class _CurrencyDialogState extends ConsumerState<_CurrencyDialog> {
+  final _ids = CommandIds();
+  int _cmdGen = 0;
+  int _autoFetchRequestId = 0;
+
   late final code = TextEditingController(text: widget.existing?.code ?? '');
   late final name = TextEditingController(text: widget.existing?.name ?? '');
   late final symbol = TextEditingController(
@@ -430,6 +419,17 @@ class _CurrencyDialogState extends State<_CurrencyDialog> {
         ? ''
         : priceFromRateToAnchor(widget.existing!.rateToAnchor),
   );
+
+  FetchedExchangeRates? _cachedRates;
+  Future<FetchedExchangeRates>? _inFlightFetch;
+  bool _fetching = false;
+  bool _saving = false;
+  bool _priceManuallyEdited = false;
+  String? _fetchedForCode;
+  String? _fetchedRateToAnchor;
+  String? _fetchedDisplayPrice;
+  String? _fetchedSourceLabel;
+  String? _statusHelper;
   String? error;
 
   @override
@@ -441,14 +441,445 @@ class _CurrencyDialogState extends State<_CurrencyDialog> {
     super.dispose();
   }
 
+  Future<FetchedExchangeRates> _ensureRatesFetched({
+    required bool enableIfDisabled,
+    bool forceRefresh = false,
+  }) {
+    if (!forceRefresh && _cachedRates != null) {
+      return Future<FetchedExchangeRates>.value(_cachedRates!);
+    }
+    if (!forceRefresh && _inFlightFetch != null) {
+      return _inFlightFetch!;
+    }
+
+    Future<FetchedExchangeRates> doFetch() async {
+      if (mounted) {
+        setState(() => _fetching = true);
+      }
+      try {
+        final service = await ref.read(currencyServiceProvider.future);
+        var settings = await service.getOnlineRateSettings();
+        if (!settings.enabled) {
+          if (!enableIfDisabled) {
+            throw const Failure(
+              FailureCode.unsupportedCapability,
+              offlineExchangeRateCapabilityReason,
+            );
+          }
+          settings = await service.saveOnlineRateSettings(
+            commandId: _ids.forPayload([
+              'dialog-enable-online-rates',
+              _cmdGen++,
+              settings.toJson(),
+            ]),
+            settings: settings.copyWith(enabled: true),
+          );
+          if (mounted) {
+            ref.invalidate(onlineRateSettingsProvider);
+            ref.invalidate(exchangeRateProviderInstanceProvider);
+          }
+        }
+        final provider = HttpExchangeRateProvider(
+          settings: settings,
+          httpClientFactory: ref.read(onlineRateHttpClientFactoryProvider),
+          nowMs: service.db.nowMs,
+        );
+        final fetched = await service.fetchLiveExchangeRates(
+          provider: provider,
+        );
+        _cachedRates = fetched;
+        if (mounted) {
+          ref.invalidate(onlineRateSettingsProvider);
+        }
+        return fetched;
+      } finally {
+        _inFlightFetch = null;
+        if (mounted) {
+          setState(() => _fetching = false);
+        }
+      }
+    }
+
+    final future = doFetch();
+    _inFlightFetch = future;
+    return future;
+  }
+
+  Future<({String rateToAnchor, String displayPrice, String sourceLabel})?>
+  _fetchAndApplyForCode(
+    String targetCode, {
+    required bool enableIfDisabled,
+    required bool isManualTrigger,
+    bool forceRefresh = false,
+    required int requestId,
+  }) async {
+    try {
+      final fetched = await _ensureRatesFetched(
+        enableIfDisabled: enableIfDisabled,
+        forceRefresh: forceRefresh,
+      );
+      if (!mounted) return null;
+      if (!isManualTrigger &&
+          (requestId != _autoFetchRequestId ||
+              _priceManuallyEdited ||
+              normalizeCurrency(code.text) != targetCode)) {
+        return null;
+      }
+      final hit = CurrencyService.lookupFetchedRate(fetched, targetCode);
+      if (hit == null) {
+        final msg = '未查询到 $targetCode 的在线汇率，请手动填写汇率';
+        setState(() {
+          if (isManualTrigger) {
+            error = msg;
+          } else {
+            _statusHelper = msg;
+          }
+        });
+        return null;
+      }
+      setState(() {
+        price.text = hit.displayPrice;
+        _priceManuallyEdited = false;
+        _fetchedForCode = targetCode;
+        _fetchedRateToAnchor = hit.rateToAnchor;
+        _fetchedDisplayPrice = hit.displayPrice;
+        _fetchedSourceLabel = hit.sourceLabel;
+        error = null;
+        _statusHelper = null;
+      });
+      return hit;
+    } catch (e) {
+      if (!mounted) return null;
+      if (!isManualTrigger &&
+          (requestId != _autoFetchRequestId ||
+              _priceManuallyEdited ||
+              normalizeCurrency(code.text) != targetCode)) {
+        return null;
+      }
+      final msg = safeMessage(e);
+      setState(() {
+        if (isManualTrigger) {
+          error = msg;
+        } else {
+          _statusHelper = '$msg，可手动填写汇率';
+        }
+      });
+      return null;
+    }
+  }
+
+  Future<void> _autoFetchIfEnabled(String targetCode) async {
+    final reqId = ++_autoFetchRequestId;
+    try {
+      final service = await ref.read(currencyServiceProvider.future);
+      if (!mounted || reqId != _autoFetchRequestId) return;
+      final settings = await service.getOnlineRateSettings();
+      if (!mounted || reqId != _autoFetchRequestId) return;
+      if (!settings.enabled) return;
+      if (_priceManuallyEdited || normalizeCurrency(code.text) != targetCode) {
+        return;
+      }
+      await _fetchAndApplyForCode(
+        targetCode,
+        enableIfDisabled: false,
+        isManualTrigger: false,
+        requestId: reqId,
+      );
+    } catch (_) {
+      // Silent background guard; user can always type rate manually.
+    }
+  }
+
   void _pickPreset(String? value) {
     final p = presetCurrencies.where((e) => e.$1 == value).firstOrNull;
     if (p == null) return;
+    final targetCode = p.$1;
     setState(() {
-      code.text = p.$1;
+      code.text = targetCode;
       name.text = p.$2;
       symbol.text = p.$3;
+      error = null;
+      _statusHelper = null;
+      _priceManuallyEdited = false;
+      _fetchedForCode = null;
+      _fetchedRateToAnchor = null;
+      _fetchedDisplayPrice = null;
+      _fetchedSourceLabel = null;
+      if (_cachedRates != null) {
+        final hit = CurrencyService.lookupFetchedRate(
+          _cachedRates!,
+          targetCode,
+        );
+        if (hit != null) {
+          price.text = hit.displayPrice;
+          _fetchedForCode = targetCode;
+          _fetchedRateToAnchor = hit.rateToAnchor;
+          _fetchedDisplayPrice = hit.displayPrice;
+          _fetchedSourceLabel = hit.sourceLabel;
+        } else {
+          price.text = '';
+          _statusHelper = '未查询到 $targetCode 的在线汇率，请手动填写汇率';
+        }
+      }
     });
+    if (_cachedRates == null) {
+      unawaited(_autoFetchIfEnabled(targetCode));
+    }
+  }
+
+  void _onCodeChanged(String raw) {
+    final c = normalizeCurrency(raw);
+    setState(() {
+      error = null;
+      _statusHelper = null;
+      if (c != _fetchedForCode) {
+        if (!_priceManuallyEdited && widget.existing == null) {
+          price.text = '';
+        }
+        _fetchedForCode = null;
+        _fetchedRateToAnchor = null;
+        _fetchedDisplayPrice = null;
+        _fetchedSourceLabel = null;
+      }
+      if (!_priceManuallyEdited &&
+          c != null &&
+          c != baseCurrency &&
+          RegExp(r'^[A-Z]{3,8}$').hasMatch(c) &&
+          _cachedRates != null) {
+        final hit = CurrencyService.lookupFetchedRate(_cachedRates!, c);
+        if (hit != null) {
+          price.text = hit.displayPrice;
+          _fetchedForCode = c;
+          _fetchedRateToAnchor = hit.rateToAnchor;
+          _fetchedDisplayPrice = hit.displayPrice;
+          _fetchedSourceLabel = hit.sourceLabel;
+        } else {
+          _statusHelper = '未查询到 $c 的在线汇率，请手动填写汇率';
+        }
+      }
+    });
+    if (!_priceManuallyEdited &&
+        _cachedRates == null &&
+        c != null &&
+        c != baseCurrency &&
+        RegExp(r'^[A-Z]{3,8}$').hasMatch(c)) {
+      unawaited(_autoFetchIfEnabled(c));
+    }
+  }
+
+  void _onPriceChanged(String raw) {
+    final trimmed = raw.trim();
+    setState(() {
+      error = null;
+      if (trimmed.isEmpty) {
+        _priceManuallyEdited = false;
+        _fetchedForCode = null;
+        _fetchedRateToAnchor = null;
+        _fetchedDisplayPrice = null;
+        _fetchedSourceLabel = null;
+      } else if (trimmed != _fetchedDisplayPrice) {
+        _priceManuallyEdited = true;
+      }
+    });
+  }
+
+  void _autoFillPresetMetadataIfNeeded(String? normalizedCode) {
+    if (normalizedCode == null || name.text.trim().isNotEmpty) return;
+    final preset = presetCurrencies
+        .where((p) => p.$1 == normalizedCode)
+        .firstOrNull;
+    if (preset == null) return;
+    name.text = preset.$2;
+    if (symbol.text.trim().isEmpty) {
+      symbol.text = preset.$3;
+    }
+  }
+
+  Future<void> _onFetchOnlinePressed() async {
+    if (_fetching || _saving) return;
+    final c = normalizeCurrency(code.text);
+    if (c == null || !RegExp(r'^[A-Z]{3,8}$').hasMatch(c)) {
+      setState(() => error = '请先选择常用币种或输入 3–8 位币种代码');
+      return;
+    }
+    if (c == baseCurrency) {
+      setState(() => error = '人民币是本位币，汇率固定为 1');
+      return;
+    }
+    setState(() {
+      _autoFillPresetMetadataIfNeeded(c);
+      error = null;
+      _statusHelper = null;
+      _priceManuallyEdited = false;
+    });
+
+    final cachedHit = _cachedRates == null
+        ? null
+        : CurrencyService.lookupFetchedRate(_cachedRates!, c);
+    final forceRefresh =
+        cachedHit != null && price.text.trim() == cachedHit.displayPrice;
+
+    await _fetchAndApplyForCode(
+      c,
+      enableIfDisabled: true,
+      isManualTrigger: true,
+      forceRefresh: forceRefresh,
+      requestId: ++_autoFetchRequestId,
+    );
+  }
+
+  Future<void> _persistAndClose({
+    required String code,
+    required String name,
+    required String symbol,
+    required String price,
+    String? rateToAnchorOverride,
+    String? onlineSyncSource,
+  }) async {
+    setState(() {
+      _saving = true;
+      error = null;
+    });
+    try {
+      final service = await ref.read(currencyServiceProvider.future);
+      await service.saveCurrency(
+        commandId: _ids.forPayload([
+          'save-currency-dialog',
+          _cmdGen,
+          code,
+          name,
+          symbol,
+          price,
+          rateToAnchorOverride,
+          onlineSyncSource,
+        ]),
+        code: code,
+        name: name,
+        symbol: symbol,
+        price: price,
+        rateToAnchorOverride: rateToAnchorOverride,
+        onlineSyncSource: onlineSyncSource,
+      );
+      _cmdGen++;
+      if (!mounted) return;
+      if (onlineSyncSource != null && onlineSyncSource.isNotEmpty) {
+        ref.invalidate(onlineRateSettingsProvider);
+      }
+      Navigator.pop(context, true);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        error = safeMessage(e);
+      });
+    }
+  }
+
+  Future<void> _onSave() async {
+    if (_saving) return;
+    final normalizedCode = normalizeCurrency(code.text);
+    setState(() {
+      _autoFillPresetMetadataIfNeeded(normalizedCode);
+    });
+    if (normalizedCode == null ||
+        !RegExp(r'^[A-Z]{3,8}$').hasMatch(normalizedCode)) {
+      setState(() => error = '币种代码须为 3–8 位英文字母');
+      return;
+    }
+    if (normalizedCode == baseCurrency) {
+      setState(() => error = '人民币是本位币，汇率固定为 1');
+      return;
+    }
+    final trimmedName = name.text.trim();
+    if (trimmedName.isEmpty || trimmedName.length > 30) {
+      setState(() => error = '币种名称须为 1–30 字');
+      return;
+    }
+
+    final trimmedPrice = price.text.trim();
+    if (trimmedPrice.isNotEmpty) {
+      try {
+        rateToAnchorFromPrice(trimmedPrice);
+      } catch (e) {
+        setState(() => error = safeMessage(e));
+        return;
+      }
+      final useFetchedExact =
+          !_priceManuallyEdited &&
+          _fetchedForCode == normalizedCode &&
+          _fetchedDisplayPrice == trimmedPrice &&
+          _fetchedRateToAnchor != null;
+      await _persistAndClose(
+        code: normalizedCode,
+        name: trimmedName,
+        symbol: symbol.text.trim(),
+        price: trimmedPrice,
+        rateToAnchorOverride: useFetchedExact ? _fetchedRateToAnchor : null,
+        onlineSyncSource: useFetchedExact ? _fetchedSourceLabel : null,
+      );
+      return;
+    }
+
+    // Price was left empty -> auto-fetch if online rates enabled, or prompt 1-tap opt-in!
+    final service = await ref.read(currencyServiceProvider.future);
+    if (!mounted) return;
+    final settings = await service.getOnlineRateSettings();
+    if (!mounted) return;
+
+    if (settings.enabled) {
+      final hit = await _fetchAndApplyForCode(
+        normalizedCode,
+        enableIfDisabled: false,
+        isManualTrigger: true,
+        requestId: ++_autoFetchRequestId,
+      );
+      if (!mounted || hit == null) return;
+      await _persistAndClose(
+        code: normalizedCode,
+        name: trimmedName,
+        symbol: symbol.text.trim(),
+        price: hit.displayPrice,
+        rateToAnchorOverride: hit.rateToAnchor,
+        onlineSyncSource: hit.sourceLabel,
+      );
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('自动联网获取汇率？'),
+        content: Text('尚未填写汇率，是否开启联网汇率并自动获取 $normalizedCode 的最新人民币汇率后保存？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('手动填写'),
+          ),
+          FilledButton(
+            key: const Key('confirm-online-fetch-save'),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('联网获取并保存'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || confirmed != true) return;
+
+    final hit = await _fetchAndApplyForCode(
+      normalizedCode,
+      enableIfDisabled: true,
+      isManualTrigger: true,
+      requestId: ++_autoFetchRequestId,
+    );
+    if (!mounted || hit == null) return;
+    await _persistAndClose(
+      code: normalizedCode,
+      name: trimmedName,
+      symbol: symbol.text.trim(),
+      price: hit.displayPrice,
+      rateToAnchorOverride: hit.rateToAnchor,
+      onlineSyncSource: hit.sourceLabel,
+    );
   }
 
   @override
@@ -457,79 +888,120 @@ class _CurrencyDialogState extends State<_CurrencyDialog> {
     final presets = presetCurrencies
         .where((p) => !widget.used.contains(p.$1))
         .toList();
+    final displayCode = normalizeCurrency(code.text) ?? '外币';
+    final helperText = _fetching
+        ? '正在联网获取最新汇率…'
+        : (!_priceManuallyEdited && _fetchedSourceLabel != null)
+        ? '实时汇率来源：$_fetchedSourceLabel'
+        : _statusHelper;
+
     return AlertDialog(
       title: Text(editing ? '修改汇率' : '添加币种'),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (!editing && presets.isNotEmpty)
-              DropdownButtonFormField<String>(
-                key: const Key('currency-preset'),
-                decoration: const InputDecoration(labelText: '常用币种'),
-                items: [
-                  for (final p in presets)
-                    DropdownMenuItem(
-                      value: p.$1,
-                      child: Text('${p.$2}（${p.$1}）'),
+      content: SizedBox(
+        width: 360,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (!editing && presets.isNotEmpty)
+                DropdownButtonFormField<String>(
+                  key: const Key('currency-preset'),
+                  decoration: const InputDecoration(labelText: '常用币种'),
+                  items: [
+                    for (final p in presets)
+                      DropdownMenuItem(
+                        value: p.$1,
+                        child: Text('${p.$2}（${p.$1}）'),
+                      ),
+                  ],
+                  onChanged: _saving ? null : _pickPreset,
+                ),
+              TextField(
+                key: const Key('currency-code'),
+                controller: code,
+                enabled: !editing && !_saving,
+                textCapitalization: TextCapitalization.characters,
+                onChanged: _onCodeChanged,
+                decoration: const InputDecoration(labelText: '代码（如 USD）'),
+              ),
+              TextField(
+                key: const Key('currency-name'),
+                controller: name,
+                enabled: !_saving,
+                onChanged: (_) {
+                  if (error != null) setState(() => error = null);
+                },
+                decoration: const InputDecoration(labelText: '名称'),
+              ),
+              TextField(
+                controller: symbol,
+                enabled: !_saving,
+                decoration: const InputDecoration(labelText: '符号（可选）'),
+              ),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: TextField(
+                      key: const Key('currency-price'),
+                      controller: price,
+                      enabled: !_saving,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      onChanged: _onPriceChanged,
+                      decoration: InputDecoration(
+                        labelText: editing ? '汇率' : '汇率（留空或点右侧可自动联网获取）',
+                        prefixText: '1 $displayCode = ',
+                        suffixText: 'CNY',
+                        helperText: helperText,
+                        helperMaxLines: 2,
+                        errorText: error,
+                        errorMaxLines: 2,
+                      ),
                     ),
+                  ),
+                  const SizedBox(width: 8),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 10),
+                    child: OutlinedButton.icon(
+                      key: const Key('currency-fetch-online-btn'),
+                      onPressed: (_fetching || _saving)
+                          ? null
+                          : _onFetchOnlinePressed,
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 8,
+                        ),
+                        visualDensity: VisualDensity.compact,
+                      ),
+                      icon: _fetching
+                          ? const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.cloud_download_outlined, size: 16),
+                      label: const Text('联网获取'),
+                    ),
+                  ),
                 ],
-                onChanged: _pickPreset,
               ),
-            TextField(
-              key: const Key('currency-code'),
-              controller: code,
-              enabled: !editing,
-              textCapitalization: TextCapitalization.characters,
-              decoration: const InputDecoration(labelText: '代码（如 USD）'),
-            ),
-            TextField(
-              key: const Key('currency-name'),
-              controller: name,
-              decoration: const InputDecoration(labelText: '名称'),
-            ),
-            TextField(
-              controller: symbol,
-              decoration: const InputDecoration(labelText: '符号（可选）'),
-            ),
-            TextField(
-              key: const Key('currency-price'),
-              controller: price,
-              keyboardType: const TextInputType.numberWithOptions(
-                decimal: true,
-              ),
-              decoration: InputDecoration(
-                labelText: '汇率',
-                prefixText: '1 ${code.text.isEmpty ? '外币' : code.text} = ',
-                suffixText: 'CNY',
-                errorText: error,
-              ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
       actions: [
         TextButton(
-          onPressed: () => Navigator.pop(context),
+          onPressed: _saving ? null : () => Navigator.pop(context),
           child: const Text('取消'),
         ),
         FilledButton(
           key: const Key('currency-save'),
-          onPressed: () {
-            try {
-              rateToAnchorFromPrice(price.text);
-            } catch (e) {
-              setState(() => error = safeMessage(e));
-              return;
-            }
-            Navigator.pop(context, (
-              code.text.trim().toUpperCase(),
-              name.text.trim(),
-              symbol.text.trim(),
-              price.text.trim(),
-            ));
-          },
-          child: const Text('保存'),
+          onPressed: _saving ? null : _onSave,
+          child: Text(_saving ? '保存中…' : '保存'),
         ),
       ],
     );
