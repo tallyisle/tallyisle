@@ -404,4 +404,268 @@ void main() {
       },
     );
   });
+
+  group('LocalAutoBackupPolicy & Upgraded CloudSyncSettings Trigger Rules', () {
+    test(
+      'LocalAutoBackupPolicy defaults all triggers to false, clamps intervals/keepCount, and round-trips JSON',
+      () {
+        const defaults = LocalAutoBackupPolicy();
+        expect(defaults.backupOnStartup, isFalse);
+        expect(defaults.backupOnExit, isFalse);
+        expect(defaults.backupOnIdle, isFalse);
+        expect(defaults.idleMinutes, 5);
+        expect(defaults.backupOnSchedule, isFalse);
+        expect(defaults.scheduleIntervalMinutes, 360);
+        expect(defaults.keepCount, 10);
+        expect(defaults.hasAnyTrigger, isFalse);
+
+        // Corrupt or null JSON resolves safely to all-false defaults
+        expect(resolveLocalAutoBackupPolicy(null), defaults);
+        expect(resolveLocalAutoBackupPolicy('{not-valid-json'), defaults);
+
+        // Bounds clamping: idleMinutes 1..1440, schedule 5..10080, keepCount 1..200
+        const clampedLow = LocalAutoBackupPolicy(
+          idleMinutes: 0,
+          scheduleIntervalMinutes: 1,
+          keepCount: -5,
+        );
+        expect(clampedLow.idleMinutes, 1);
+        expect(clampedLow.scheduleIntervalMinutes, 5);
+        expect(clampedLow.keepCount, 1);
+
+        const clampedHigh = LocalAutoBackupPolicy(
+          idleMinutes: 99999,
+          scheduleIntervalMinutes: 99999,
+          keepCount: 500,
+        );
+        expect(clampedHigh.idleMinutes, 1440);
+        expect(clampedHigh.scheduleIntervalMinutes, 10080);
+        expect(clampedHigh.keepCount, 200);
+
+        final custom = defaults.copyWith(
+          backupOnStartup: true,
+          backupOnIdle: true,
+          idleMinutes: 15,
+          backupOnSchedule: true,
+          scheduleIntervalMinutes: 720,
+          keepCount: 20,
+        );
+        expect(custom.hasAnyTrigger, isTrue);
+        final roundTripped = resolveLocalAutoBackupPolicy(
+          jsonEncode(custom.toJson()),
+        );
+        expect(roundTripped, custom);
+      },
+    );
+
+    test(
+      'CloudSyncSettings defaults all 4 triggers to false, migrates legacy auto_sync_enabled, and round-trips JSON',
+      () {
+        const fresh = CloudSyncSettings(deviceId: 'dev-fresh');
+        expect(fresh.syncOnStartup, isFalse);
+        expect(fresh.syncOnExit, isFalse);
+        expect(fresh.syncOnIdle, isFalse);
+        expect(fresh.idleMinutes, 3);
+        expect(fresh.syncOnSchedule, isFalse);
+        expect(fresh.scheduleIntervalMinutes, 60);
+        expect(fresh.autoSyncEnabled, isFalse);
+
+        // Constructor legacy compatibility: autoSyncEnabled: true without explicit triggers
+        const legacyCtor = CloudSyncSettings(
+          backend: CloudBackendType.s3,
+          autoSyncEnabled: true,
+          deviceId: 'dev-ctor',
+        );
+        expect(legacyCtor.syncOnStartup, isTrue);
+        expect(legacyCtor.syncOnExit, isTrue);
+        expect(legacyCtor.syncOnIdle, isFalse);
+        expect(legacyCtor.syncOnSchedule, isFalse);
+        expect(legacyCtor.autoSyncEnabled, isTrue);
+
+        // JSON legacy migration: {"auto_sync_enabled": true} without sync_on_* keys
+        final migratedTrue = CloudSyncSettings.fromJson(const <String, Object?>{
+          'backend': 'webdav',
+          'explicit_backend': true,
+          'auto_sync_enabled': true,
+          'device_id': 'dev-legacy',
+        }, fallbackDeviceId: 'fallback');
+        expect(migratedTrue.syncOnStartup, isTrue);
+        expect(migratedTrue.syncOnExit, isTrue);
+        expect(migratedTrue.syncOnIdle, isFalse);
+        expect(migratedTrue.syncOnSchedule, isFalse);
+        expect(migratedTrue.autoSyncEnabled, isTrue);
+
+        // JSON legacy migration: {"auto_sync_enabled": false} keeps all 4 false
+        final migratedFalse = CloudSyncSettings.fromJson(
+          const <String, Object?>{
+            'backend': 'webdav',
+            'auto_sync_enabled': false,
+          },
+          fallbackDeviceId: 'dev-legacy-off',
+        );
+        expect(migratedFalse.autoSyncEnabled, isFalse);
+        expect(migratedFalse.syncOnStartup, isFalse);
+        expect(migratedFalse.syncOnExit, isFalse);
+
+        // Fine-grained single trigger (e.g. only syncOnIdle: true)
+        final idleOnly = fresh.copyWith(
+          backend: CloudBackendType.s3,
+          explicitBackend: true,
+          syncOnIdle: true,
+          idleMinutes: 10,
+          scheduleIntervalMinutes: 15,
+        );
+        expect(idleOnly.autoSyncEnabled, isTrue);
+        expect(idleOnly.syncOnStartup, isFalse);
+        expect(idleOnly.syncOnExit, isFalse);
+        expect(idleOnly.syncOnIdle, isTrue);
+        expect(idleOnly.idleMinutes, 10);
+
+        final parsedIdleOnly = CloudSyncSettings.fromJson(
+          idleOnly.toJson(),
+          fallbackDeviceId: 'fallback',
+        );
+        expect(parsedIdleOnly, idleOnly);
+
+        // Turning master autoSyncEnabled: false clears all 4 triggers
+        final cleared = idleOnly.copyWith(autoSyncEnabled: false);
+        expect(cleared.autoSyncEnabled, isFalse);
+        expect(cleared.syncOnStartup, isFalse);
+        expect(cleared.syncOnExit, isFalse);
+        expect(cleared.syncOnIdle, isFalse);
+        expect(cleared.syncOnSchedule, isFalse);
+      },
+    );
+
+    test(
+      'shouldRunLocalAutoBackupForTrigger & shouldRunCloudAutoSyncForTrigger evaluate all 5 AutoTriggerSource modes',
+      () {
+        const localPolicy = LocalAutoBackupPolicy(
+          backupOnStartup: true,
+          backupOnExit: false,
+          backupOnIdle: true,
+          idleMinutes: 5,
+          backupOnSchedule: true,
+          scheduleIntervalMinutes: 60,
+          keepCount: 5,
+        );
+
+        // Local startup/windowFocus requires localDataChanged == true
+        expect(
+          shouldRunLocalAutoBackupForTrigger(
+            policy: localPolicy,
+            source: AutoTriggerSource.startup,
+            localDataChanged: false,
+            lastAutoBackupAtMs: null,
+            nowMs: 100000,
+          ),
+          isFalse,
+        );
+        expect(
+          shouldRunLocalAutoBackupForTrigger(
+            policy: localPolicy,
+            source: AutoTriggerSource.windowFocus,
+            localDataChanged: true,
+            lastAutoBackupAtMs: null,
+            nowMs: 100000,
+          ),
+          isTrue,
+        );
+        // backupOnExit is false
+        expect(
+          shouldRunLocalAutoBackupForTrigger(
+            policy: localPolicy,
+            source: AutoTriggerSource.exit,
+            localDataChanged: true,
+            lastAutoBackupAtMs: null,
+            nowMs: 100000,
+          ),
+          isFalse,
+        );
+        // schedule throttled until 60m (3,600,000 ms) elapsed
+        expect(
+          shouldRunLocalAutoBackupForTrigger(
+            policy: localPolicy,
+            source: AutoTriggerSource.schedule,
+            localDataChanged: true,
+            lastAutoBackupAtMs: 100000,
+            nowMs: 100000 + 59 * 60 * 1000,
+          ),
+          isFalse,
+        );
+        expect(
+          shouldRunLocalAutoBackupForTrigger(
+            policy: localPolicy,
+            source: AutoTriggerSource.schedule,
+            localDataChanged: true,
+            lastAutoBackupAtMs: 100000,
+            nowMs: 100000 + 60 * 60 * 1000,
+          ),
+          isTrue,
+        );
+
+        const cloudSettings = CloudSyncSettings(
+          backend: CloudBackendType.s3,
+          explicitBackend: true,
+          syncOnStartup: true,
+          syncOnExit: false,
+          syncOnIdle: true,
+          idleMinutes: 3,
+          syncOnSchedule: true,
+          scheduleIntervalMinutes: 30,
+          deviceId: 'dev-elig',
+        );
+        expect(
+          shouldRunCloudAutoSyncForTrigger(
+            settings: cloudSettings,
+            isBackendConfigured: false,
+            source: AutoTriggerSource.startup,
+            lastScheduleCheckAtMs: null,
+            nowMs: 50000,
+          ),
+          isFalse,
+        );
+        expect(
+          shouldRunCloudAutoSyncForTrigger(
+            settings: cloudSettings,
+            isBackendConfigured: true,
+            source: AutoTriggerSource.windowFocus,
+            lastScheduleCheckAtMs: null,
+            nowMs: 50000,
+          ),
+          isTrue,
+        );
+        expect(
+          shouldRunCloudAutoSyncForTrigger(
+            settings: cloudSettings,
+            isBackendConfigured: true,
+            source: AutoTriggerSource.exit,
+            lastScheduleCheckAtMs: null,
+            nowMs: 50000,
+          ),
+          isFalse,
+        );
+        expect(
+          shouldRunCloudAutoSyncForTrigger(
+            settings: cloudSettings,
+            isBackendConfigured: true,
+            source: AutoTriggerSource.schedule,
+            lastScheduleCheckAtMs: 50000,
+            nowMs: 50000 + 29 * 60 * 1000,
+          ),
+          isFalse,
+        );
+        expect(
+          shouldRunCloudAutoSyncForTrigger(
+            settings: cloudSettings,
+            isBackendConfigured: true,
+            source: AutoTriggerSource.schedule,
+            lastScheduleCheckAtMs: 50000,
+            nowMs: 50000 + 30 * 60 * 1000,
+          ),
+          isTrue,
+        );
+      },
+    );
+  });
 }

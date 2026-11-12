@@ -331,10 +331,16 @@ void main() {
       expect(find.text('已配置'), findsOneWidget);
 
       // 3. Toggle 自动多端同步 and tap 立即多端同步 -> pushes r1 to S3 AND auto-archives initial 24h .tally backup
-      await tester.tap(find.byKey(const Key('auto_cloud_sync_switch')));
+      final autoSwitch = find.byKey(const Key('auto_cloud_sync_switch'));
+      await tester.ensureVisible(autoSwitch);
+      await settle(tester);
+      await tester.tap(autoSwitch);
       await settle(tester);
 
-      await tester.tap(find.byKey(const Key('cloud_sync_now_button')));
+      final syncNowBtn = find.byKey(const Key('cloud_sync_now_button'));
+      await tester.ensureVisible(syncNowBtn);
+      await settle(tester);
+      await tester.tap(syncNowBtn);
       await settle(tester);
       expect(find.textContaining('已同步版本 r1'), findsOneWidget);
       expect(s3Server.objects.containsKey('TallyIsle/sync/head.json'), isTrue);
@@ -543,7 +549,10 @@ void main() {
       );
 
       // Re-open dialog via 处理冲突 and choose 采用云端版本
-      await tester.tap(find.byKey(const Key('reopen_conflict_dialog_button')));
+      final reopenBtn = find.byKey(const Key('reopen_conflict_dialog_button'));
+      await tester.ensureVisible(reopenBtn);
+      await settle(tester);
+      await tester.tap(reopenBtn);
       await settle(tester);
       await tester.tap(find.byKey(const Key('conflict_use_remote_button')));
       await settle(tester);
@@ -554,6 +563,168 @@ void main() {
       );
       expect(notesNow, hasLength(1));
       expect(notesNow!.single.content, '云端最新便签');
+
+      await tester.pumpWidget(const SizedBox());
+      await settle(tester);
+      await tester.pump(const Duration(seconds: 1));
+    },
+  );
+
+  testWidgets(
+    'BackupPage toggles all 4 cloud sync triggers, 4 local auto-backup triggers, and interval/keepCount selectors with defaults off',
+    (tester) async {
+      HttpOverrides.global = null;
+      late final AppDatabase db;
+      late final TallyBackupService service;
+      final scheduler = InMemoryReminderScheduler();
+      final s3Server = (await tester.runAsync(_WidgetTestS3Server.start))!;
+      final tempRoot = (await tester.runAsync(
+        () => Directory.systemTemp.createTemp('cloud_sync_widget_3_'),
+      ))!;
+      final localDir = Directory(p.join(tempRoot.path, 'local'));
+      final attDir = Directory(p.join(tempRoot.path, 'att'));
+
+      await tester.runAsync(() async {
+        db = AppDatabase(NativeDatabase.memory());
+        service = TallyBackupService(
+          db,
+          reminderService: ReminderService(db, scheduler: scheduler),
+          localBackupsDirectoryProvider: () async => localDir,
+          attachmentsDirectoryProvider: () async => attDir,
+        );
+        await service.saveS3Config(
+          S3Config(
+            endpoint: s3Server.endpoint,
+            region: 'auto',
+            bucket: _WidgetTestS3Server.bucket,
+            accessKeyId: _WidgetTestS3Server.accessKey,
+            secretAccessKey: _WidgetTestS3Server.secretKey,
+            remotePrefix: 'TallyIsle',
+          ),
+        );
+      });
+
+      addTearDown(() async {
+        await tester.pumpWidget(const SizedBox());
+        await scheduler.dispose();
+        await tester.runAsync(s3Server.close);
+        await tester.runAsync(db.close);
+        await tester.runAsync(() async {
+          if (await tempRoot.exists()) await tempRoot.delete(recursive: true);
+        });
+      });
+
+      await tester.pumpWidget(
+        buildTestApp(
+          db: db,
+          localDir: localDir,
+          attDir: attDir,
+          scheduler: scheduler,
+        ),
+      );
+      await settle(tester);
+
+      // 1. Verify all 8 automatic triggers default to false on fresh install
+      for (final keyName in <String>[
+        'cloud_sync_trigger_startup',
+        'cloud_sync_trigger_exit',
+        'cloud_sync_trigger_idle',
+        'cloud_sync_trigger_schedule',
+        'local_backup_trigger_startup',
+        'local_backup_trigger_exit',
+        'local_backup_trigger_idle',
+        'local_backup_trigger_schedule',
+      ]) {
+        final sw = tester.widget<SwitchListTile>(find.byKey(Key(keyName)));
+        expect(sw.value, isFalse, reason: '$keyName must default to false');
+      }
+
+      Future<void> scrollAndTap(Key key) async {
+        final finder = find.byKey(key);
+        await tester.ensureVisible(finder);
+        await settle(tester);
+        await tester.tap(finder);
+        await settle(tester);
+      }
+
+      Future<void> selectDropdownLabel(Key dropdownKey, String label) async {
+        final finder = find.byKey(dropdownKey);
+        await tester.ensureVisible(finder);
+        await settle(tester);
+        await tester.tap(finder);
+        await settle(tester);
+        await tester.tap(find.text(label).last);
+        await settle(tester);
+      }
+
+      // 2. Toggle all 4 Cloud Sync triggers & change idle minutes (10 分钟) + schedule interval (6 小时)
+      await scrollAndTap(const Key('cloud_sync_trigger_startup'));
+      await scrollAndTap(const Key('cloud_sync_trigger_exit'));
+      await scrollAndTap(const Key('cloud_sync_trigger_idle'));
+      await selectDropdownLabel(
+        const Key('cloud_sync_idle_minutes_selector'),
+        '10 分钟',
+      );
+      await scrollAndTap(const Key('cloud_sync_trigger_schedule'));
+      await selectDropdownLabel(
+        const Key('cloud_sync_schedule_interval_selector'),
+        '6 小时',
+      );
+
+      final savedCloud = (await tester.runAsync(service.getCloudSyncSettings))!;
+      expect(savedCloud.syncOnStartup, isTrue);
+      expect(savedCloud.syncOnExit, isTrue);
+      expect(savedCloud.syncOnIdle, isTrue);
+      expect(savedCloud.idleMinutes, 10);
+      expect(savedCloud.syncOnSchedule, isTrue);
+      expect(savedCloud.scheduleIntervalMinutes, 360);
+      expect(savedCloud.autoSyncEnabled, isTrue);
+
+      // 3. Configure Local Auto-Backup keepCount (20 份), toggle all 4 triggers, and select 15 分钟 + 12 小时
+      await selectDropdownLabel(
+        const Key('local_backup_keep_count_selector'),
+        '20 份',
+      );
+      await scrollAndTap(const Key('local_backup_trigger_startup'));
+      await scrollAndTap(const Key('local_backup_trigger_exit'));
+      await scrollAndTap(const Key('local_backup_trigger_idle'));
+      await selectDropdownLabel(
+        const Key('local_backup_idle_minutes_selector'),
+        '15 分钟',
+      );
+      await scrollAndTap(const Key('local_backup_trigger_schedule'));
+      await selectDropdownLabel(
+        const Key('local_backup_schedule_interval_selector'),
+        '12 小时',
+      );
+
+      final savedLocal = (await tester.runAsync(
+        service.getLocalAutoBackupPolicy,
+      ))!;
+      expect(savedLocal.keepCount, 20);
+      expect(savedLocal.backupOnStartup, isTrue);
+      expect(savedLocal.backupOnExit, isTrue);
+      expect(savedLocal.backupOnIdle, isTrue);
+      expect(savedLocal.idleMinutes, 15);
+      expect(savedLocal.backupOnSchedule, isTrue);
+      expect(savedLocal.scheduleIntervalMinutes, 720);
+      expect(savedLocal.hasAnyTrigger, isTrue);
+
+      // 4. Master auto_cloud_sync_switch turns off all 4 cloud sync triggers cleanly while leaving local policy intact
+      await scrollAndTap(const Key('auto_cloud_sync_switch'));
+      final afterMasterOff = (await tester.runAsync(
+        service.getCloudSyncSettings,
+      ))!;
+      expect(afterMasterOff.autoSyncEnabled, isFalse);
+      expect(afterMasterOff.syncOnStartup, isFalse);
+      expect(afterMasterOff.syncOnExit, isFalse);
+      expect(afterMasterOff.syncOnIdle, isFalse);
+      expect(afterMasterOff.syncOnSchedule, isFalse);
+
+      final localStillOn = (await tester.runAsync(
+        service.getLocalAutoBackupPolicy,
+      ))!;
+      expect(localStillOn.hasAnyTrigger, isTrue);
 
       await tester.pumpWidget(const SizedBox());
       await settle(tester);

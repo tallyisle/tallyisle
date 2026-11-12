@@ -58,6 +58,13 @@ final cloudSyncSettingsProvider = StreamProvider<CloudSyncSettings>((
   yield* service.watchCloudSyncSettings();
 });
 
+final localAutoBackupPolicyProvider = StreamProvider<LocalAutoBackupPolicy>((
+  ref,
+) async* {
+  final service = await ref.watch(tallyBackupServiceProvider.future);
+  yield* service.watchLocalAutoBackupPolicy();
+});
+
 final cloudSyncCursorProvider = StreamProvider<LocalSyncCursor>((ref) async* {
   final service = await ref.watch(tallyBackupServiceProvider.future);
   yield* service.watchSyncCursor();
@@ -114,7 +121,11 @@ final activeCloudBackupsProvider =
 
 final lastBackupAtMsProvider = FutureProvider<int?>((ref) async {
   final service = await ref.watch(tallyBackupServiceProvider.future);
-  return service.getLastBackupAtMs();
+  final cloudAt = await service.getLastBackupAtMs();
+  final localAt = await service.getLastLocalAutoBackupAtMs();
+  if (cloudAt == null) return localAt;
+  if (localAt == null) return cloudAt;
+  return cloudAt > localAt ? cloudAt : localAt;
 });
 
 /// Optional silent auto-backup check provider (R7) for app startup / foreground resume.

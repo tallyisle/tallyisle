@@ -54,14 +54,24 @@ class _BackupPageState extends ConsumerState<BackupPage>
   Future<void> _checkSilentTasksOnResume() async {
     try {
       final service = await ref.read(tallyBackupServiceProvider.future);
-      final syncOutcome = await service.runSilentCloudSyncIfNeeded();
-      if (syncOutcome != null && mounted) {
-        if (syncOutcome.status == CloudSyncStatus.pulled) {
-          _refreshAfterRestore();
-        } else if (syncOutcome.isConflict) {
-          setState(() => _pendingConflict = syncOutcome);
-          _refreshAfterBackupChange();
-        } else {
+      if (!service.hasAttachedScheduler) {
+        final syncOutcome = await service.runCloudAutoSyncForTrigger(
+          AutoTriggerSource.windowFocus,
+        );
+        if (syncOutcome != null && mounted) {
+          if (syncOutcome.status == CloudSyncStatus.pulled) {
+            _refreshAfterRestore();
+          } else if (syncOutcome.isConflict) {
+            setState(() => _pendingConflict = syncOutcome);
+            _refreshAfterBackupChange();
+          } else {
+            _refreshAfterBackupChange();
+          }
+        }
+        final localSaved = await service.runLocalAutoBackupForTrigger(
+          AutoTriggerSource.windowFocus,
+        );
+        if (localSaved != null && mounted) {
           _refreshAfterBackupChange();
         }
       }
@@ -138,6 +148,42 @@ class _BackupPageState extends ConsumerState<BackupPage>
       final service = await ref.read(tallyBackupServiceProvider.future);
       await service.setAutoSyncEnabled(value);
       ref.invalidate(cloudSyncSettingsProvider);
+    } catch (e) {
+      _showMessage(safeMessage(e));
+    }
+  }
+
+  Future<void> _updateCloudSyncTriggers({
+    bool? syncOnStartup,
+    bool? syncOnExit,
+    bool? syncOnIdle,
+    int? idleMinutes,
+    bool? syncOnSchedule,
+    int? scheduleIntervalMinutes,
+  }) async {
+    try {
+      final service = await ref.read(tallyBackupServiceProvider.future);
+      await service.updateCloudSyncTriggers(
+        syncOnStartup: syncOnStartup,
+        syncOnExit: syncOnExit,
+        syncOnIdle: syncOnIdle,
+        idleMinutes: idleMinutes,
+        syncOnSchedule: syncOnSchedule,
+        scheduleIntervalMinutes: scheduleIntervalMinutes,
+      );
+      ref.invalidate(cloudSyncSettingsProvider);
+    } catch (e) {
+      _showMessage(safeMessage(e));
+    }
+  }
+
+  Future<void> _updateLocalAutoBackupPolicy(
+    LocalAutoBackupPolicy nextPolicy,
+  ) async {
+    try {
+      final service = await ref.read(tallyBackupServiceProvider.future);
+      await service.saveLocalAutoBackupPolicy(nextPolicy);
+      ref.invalidate(localAutoBackupPolicyProvider);
     } catch (e) {
       _showMessage(safeMessage(e));
     }
@@ -600,6 +646,13 @@ class _BackupPageState extends ConsumerState<BackupPage>
     return '共 ${m.totalRows} 条 · 账单 ${m.recordCount} · 便签 ${m.noteCount} · 币种 ${m.currencyCount}$attSuffix';
   }
 
+  static String _formatIntervalMinutes(int minutes) {
+    if (minutes >= 60 && minutes % 60 == 0) {
+      return '${minutes ~/ 60} 小时';
+    }
+    return '$minutes 分钟';
+  }
+
   static String _buildSyncStatusSummary({
     required CloudSyncSettings settings,
     required LocalSyncCursor cursor,
@@ -625,6 +678,7 @@ class _BackupPageState extends ConsumerState<BackupPage>
     final davConfigAsync = ref.watch(webDavConfigProvider);
     final s3ConfigAsync = ref.watch(s3ConfigProvider);
     final syncSettingsAsync = ref.watch(cloudSyncSettingsProvider);
+    final localPolicyAsync = ref.watch(localAutoBackupPolicyProvider);
     final syncCursorAsync = ref.watch(cloudSyncCursorProvider);
     final localListAsync = ref.watch(localBackupsProvider);
     final lastBackupAsync = ref.watch(lastBackupAtMsProvider);
@@ -647,10 +701,35 @@ class _BackupPageState extends ConsumerState<BackupPage>
         deviceId: 'pending',
       ),
     );
+    final localPolicy = localPolicyAsync.maybeWhen(
+      data: (p) => p,
+      orElse: () => LocalAutoBackupPolicy.defaults,
+    );
     final syncCursor = syncCursorAsync.maybeWhen(
       data: (c) => c,
       orElse: LocalSyncCursor.initial,
     );
+
+    final cloudIdleOptions = <int>{
+      ...autoIdleMinutesChoices,
+      syncSettings.idleMinutes,
+    }.toList()..sort();
+    final cloudScheduleOptions = <int>{
+      ...cloudScheduleIntervalMinutesChoices,
+      syncSettings.scheduleIntervalMinutes,
+    }.toList()..sort();
+    final localKeepOptions = <int>{
+      ...localBackupKeepCountChoices,
+      localPolicy.keepCount,
+    }.toList()..sort();
+    final localIdleOptions = <int>{
+      ...autoIdleMinutesChoices,
+      localPolicy.idleMinutes,
+    }.toList()..sort();
+    final localScheduleOptions = <int>{
+      ...localScheduleIntervalMinutesChoices,
+      localPolicy.scheduleIntervalMinutes,
+    }.toList()..sort();
 
     final activeBackend = syncSettings.backend;
     final isActiveCloudReady = switch (activeBackend) {
@@ -844,16 +923,138 @@ class _BackupPageState extends ConsumerState<BackupPage>
                               ),
                             ],
                           ),
+                          const Divider(height: 20),
                           SwitchListTile(
                             key: const Key('auto_cloud_sync_switch'),
                             contentPadding: EdgeInsets.zero,
                             dense: true,
-                            title: const Text('自动多端同步'),
-                            subtitle: const Text('应用回到前台时静默拉取或推送最新账务快照'),
+                            title: const Text('自动多端同步策略'),
+                            subtitle: const Text('按需独立开启各自动同步时机（默认全部关闭，零静默联网）'),
                             value: syncSettings.autoSyncEnabled,
                             onChanged: !_busy && isActiveCloudReady
                                 ? _toggleAutoSync
                                 : null,
+                          ),
+                          SwitchListTile(
+                            key: const Key('cloud_sync_trigger_startup'),
+                            contentPadding: EdgeInsets.zero,
+                            dense: true,
+                            title: const Text('启动 / 窗口激活时自动同步'),
+                            subtitle: const Text('桌面获焦或回到前台时自动拉取或推送，预防多端陈旧冲突'),
+                            value: syncSettings.syncOnStartup,
+                            onChanged: !_busy && isActiveCloudReady
+                                ? (v) =>
+                                      _updateCloudSyncTriggers(syncOnStartup: v)
+                                : null,
+                          ),
+                          SwitchListTile(
+                            key: const Key('cloud_sync_trigger_exit'),
+                            contentPadding: EdgeInsets.zero,
+                            dense: true,
+                            title: const Text('退出 / 切入后台时自动同步'),
+                            subtitle: const Text(
+                              '切入后台或桌面关窗时自动同步（含 5 秒超时保护，离线绝不卡死）',
+                            ),
+                            value: syncSettings.syncOnExit,
+                            onChanged: !_busy && isActiveCloudReady
+                                ? (v) => _updateCloudSyncTriggers(syncOnExit: v)
+                                : null,
+                          ),
+                          SwitchListTile(
+                            key: const Key('cloud_sync_trigger_idle'),
+                            contentPadding: EdgeInsets.zero,
+                            dense: true,
+                            title: const Text('记账变更静置后自动同步'),
+                            subtitle: const Text('连续记账结束后静置指定时长合并推送一次'),
+                            value: syncSettings.syncOnIdle,
+                            onChanged: !_busy && isActiveCloudReady
+                                ? (v) => _updateCloudSyncTriggers(syncOnIdle: v)
+                                : null,
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: InputDecorator(
+                              decoration: const InputDecoration(
+                                labelText: '记账静置同步等待时长',
+                                border: OutlineInputBorder(),
+                                isDense: true,
+                              ),
+                              child: DropdownButtonHideUnderline(
+                                child: DropdownButton<int>(
+                                  key: const Key(
+                                    'cloud_sync_idle_minutes_selector',
+                                  ),
+                                  isExpanded: true,
+                                  isDense: true,
+                                  value: syncSettings.idleMinutes,
+                                  items: [
+                                    for (final m in cloudIdleOptions)
+                                      DropdownMenuItem<int>(
+                                        value: m,
+                                        child: Text('$m 分钟'),
+                                      ),
+                                  ],
+                                  onChanged: _busy
+                                      ? null
+                                      : (val) {
+                                          if (val != null) {
+                                            _updateCloudSyncTriggers(
+                                              idleMinutes: val,
+                                            );
+                                          }
+                                        },
+                                ),
+                              ),
+                            ),
+                          ),
+                          SwitchListTile(
+                            key: const Key('cloud_sync_trigger_schedule'),
+                            contentPadding: EdgeInsets.zero,
+                            dense: true,
+                            title: const Text('定时周期自动同步'),
+                            subtitle: const Text('应用运行期间按固定间隔自动检查同步'),
+                            value: syncSettings.syncOnSchedule,
+                            onChanged: !_busy && isActiveCloudReady
+                                ? (v) => _updateCloudSyncTriggers(
+                                    syncOnSchedule: v,
+                                  )
+                                : null,
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 4),
+                            child: InputDecorator(
+                              decoration: const InputDecoration(
+                                labelText: '定时自动同步周期',
+                                border: OutlineInputBorder(),
+                                isDense: true,
+                              ),
+                              child: DropdownButtonHideUnderline(
+                                child: DropdownButton<int>(
+                                  key: const Key(
+                                    'cloud_sync_schedule_interval_selector',
+                                  ),
+                                  isExpanded: true,
+                                  isDense: true,
+                                  value: syncSettings.scheduleIntervalMinutes,
+                                  items: [
+                                    for (final m in cloudScheduleOptions)
+                                      DropdownMenuItem<int>(
+                                        value: m,
+                                        child: Text(_formatIntervalMinutes(m)),
+                                      ),
+                                  ],
+                                  onChanged: _busy
+                                      ? null
+                                      : (val) {
+                                          if (val != null) {
+                                            _updateCloudSyncTriggers(
+                                              scheduleIntervalMinutes: val,
+                                            );
+                                          }
+                                        },
+                                ),
+                              ),
+                            ),
                           ),
                           if (_pendingConflict != null) ...[
                             const SizedBox(height: 8),
@@ -951,6 +1152,176 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                 label: const Text('从文件恢复'),
                               ),
                             ],
+                          ),
+                          const Divider(height: 24),
+                          Text(
+                            '本地自动备份策略',
+                            style: Theme.of(context).textTheme.titleSmall,
+                          ),
+                          const SizedBox(height: 8),
+                          InputDecorator(
+                            decoration: const InputDecoration(
+                              labelText: '本地备份保留份数',
+                              border: OutlineInputBorder(),
+                              isDense: true,
+                            ),
+                            child: DropdownButtonHideUnderline(
+                              child: DropdownButton<int>(
+                                key: const Key(
+                                  'local_backup_keep_count_selector',
+                                ),
+                                isExpanded: true,
+                                isDense: true,
+                                value: localPolicy.keepCount,
+                                items: [
+                                  for (final n in localKeepOptions)
+                                    DropdownMenuItem<int>(
+                                      value: n,
+                                      child: Text('$n 份'),
+                                    ),
+                                ],
+                                onChanged: _busy
+                                    ? null
+                                    : (val) {
+                                        if (val != null) {
+                                          _updateLocalAutoBackupPolicy(
+                                            localPolicy.copyWith(
+                                              keepCount: val,
+                                            ),
+                                          );
+                                        }
+                                      },
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          SwitchListTile(
+                            key: const Key('local_backup_trigger_startup'),
+                            contentPadding: EdgeInsets.zero,
+                            dense: true,
+                            title: const Text('启动 App 时自动备份'),
+                            subtitle: const Text('仅在本地账务数据有变更时生成新快照'),
+                            value: localPolicy.backupOnStartup,
+                            onChanged: _busy
+                                ? null
+                                : (v) => _updateLocalAutoBackupPolicy(
+                                    localPolicy.copyWith(backupOnStartup: v),
+                                  ),
+                          ),
+                          SwitchListTile(
+                            key: const Key('local_backup_trigger_exit'),
+                            contentPadding: EdgeInsets.zero,
+                            dense: true,
+                            title: const Text('退出 / 切入后台时自动备份'),
+                            subtitle: const Text('切入后台或关闭桌面窗口时保存变更快照'),
+                            value: localPolicy.backupOnExit,
+                            onChanged: _busy
+                                ? null
+                                : (v) => _updateLocalAutoBackupPolicy(
+                                    localPolicy.copyWith(backupOnExit: v),
+                                  ),
+                          ),
+                          SwitchListTile(
+                            key: const Key('local_backup_trigger_idle'),
+                            contentPadding: EdgeInsets.zero,
+                            dense: true,
+                            title: const Text('记账变更静置后自动备份'),
+                            subtitle: const Text('连续记账结束后静置指定分钟数自动打包备份'),
+                            value: localPolicy.backupOnIdle,
+                            onChanged: _busy
+                                ? null
+                                : (v) => _updateLocalAutoBackupPolicy(
+                                    localPolicy.copyWith(backupOnIdle: v),
+                                  ),
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: InputDecorator(
+                              decoration: const InputDecoration(
+                                labelText: '本地静置备份等待时长',
+                                border: OutlineInputBorder(),
+                                isDense: true,
+                              ),
+                              child: DropdownButtonHideUnderline(
+                                child: DropdownButton<int>(
+                                  key: const Key(
+                                    'local_backup_idle_minutes_selector',
+                                  ),
+                                  isExpanded: true,
+                                  isDense: true,
+                                  value: localPolicy.idleMinutes,
+                                  items: [
+                                    for (final m in localIdleOptions)
+                                      DropdownMenuItem<int>(
+                                        value: m,
+                                        child: Text('$m 分钟'),
+                                      ),
+                                  ],
+                                  onChanged: _busy
+                                      ? null
+                                      : (val) {
+                                          if (val != null) {
+                                            _updateLocalAutoBackupPolicy(
+                                              localPolicy.copyWith(
+                                                idleMinutes: val,
+                                              ),
+                                            );
+                                          }
+                                        },
+                                ),
+                              ),
+                            ),
+                          ),
+                          SwitchListTile(
+                            key: const Key('local_backup_trigger_schedule'),
+                            contentPadding: EdgeInsets.zero,
+                            dense: true,
+                            title: const Text('定时周期自动备份'),
+                            subtitle: const Text('距上次本地备份满设定周期且有数据变更时生成'),
+                            value: localPolicy.backupOnSchedule,
+                            onChanged: _busy
+                                ? null
+                                : (v) => _updateLocalAutoBackupPolicy(
+                                    localPolicy.copyWith(backupOnSchedule: v),
+                                  ),
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 4),
+                            child: InputDecorator(
+                              decoration: const InputDecoration(
+                                labelText: '本地定时备份周期',
+                                border: OutlineInputBorder(),
+                                isDense: true,
+                              ),
+                              child: DropdownButtonHideUnderline(
+                                child: DropdownButton<int>(
+                                  key: const Key(
+                                    'local_backup_schedule_interval_selector',
+                                  ),
+                                  isExpanded: true,
+                                  isDense: true,
+                                  value: localPolicy.scheduleIntervalMinutes,
+                                  items: [
+                                    for (final m in localScheduleOptions)
+                                      DropdownMenuItem<int>(
+                                        value: m,
+                                        child: Text(_formatIntervalMinutes(m)),
+                                      ),
+                                  ],
+                                  onChanged: _busy
+                                      ? null
+                                      : (val) {
+                                          if (val != null) {
+                                            _updateLocalAutoBackupPolicy(
+                                              localPolicy.copyWith(
+                                                scheduleIntervalMinutes: val,
+                                              ),
+                                            );
+                                          }
+                                        },
+                                ),
+                              ),
+                            ),
                           ),
                           const Divider(height: 24),
                           localListAsync.when(

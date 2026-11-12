@@ -12,8 +12,158 @@ const String cloudSyncAttachmentsDir = 'sync/attachments';
 const String prefKeyCloudSyncSettings = 'cloud_sync_settings';
 const String prefKeyCloudSyncCursor = 'cloud_sync_cursor';
 const String prefKeyS3Config = 'backup_s3_config';
+const String prefKeyLocalAutoBackupPolicy = 'local_auto_backup_policy';
+const String prefKeyLocalAutoBackupLastAtMs = 'local_auto_backup_last_at_ms';
+const String prefKeyLocalAutoBackupLastSha256 = 'local_auto_backup_last_sha256';
+const String prefKeyCloudSyncLastScheduleCheckAtMs =
+    'cloud_sync_last_schedule_check_at_ms';
+
+const List<int> autoIdleMinutesChoices = <int>[1, 3, 5, 10, 15, 30];
+const List<int> localScheduleIntervalMinutesChoices = <int>[
+  30,
+  60,
+  360,
+  720,
+  1440,
+];
+const List<int> cloudScheduleIntervalMinutesChoices = <int>[
+  15,
+  30,
+  60,
+  360,
+  720,
+  1440,
+];
+const List<int> localBackupKeepCountChoices = <int>[5, 10, 20, 50, 100];
 
 final RegExp _hex64LowerOrUpper = RegExp(r'^[0-9a-fA-F]{64}$');
+
+/// Trigger source for automatic local backup or multi-device cloud sync.
+enum AutoTriggerSource { startup, windowFocus, exit, idleAfterChange, schedule }
+
+/// Independent user-configured policy for automatic local `.tally` backups
+/// stored in `ti_preference` (`local_auto_backup_policy`).
+///
+/// All triggers default to `false` on fresh installs.
+final class LocalAutoBackupPolicy {
+  const LocalAutoBackupPolicy({
+    this.backupOnStartup = false,
+    this.backupOnExit = false,
+    this.backupOnIdle = false,
+    int idleMinutes = 5,
+    this.backupOnSchedule = false,
+    int scheduleIntervalMinutes = 360,
+    int keepCount = defaultWebDavKeepCount,
+  }) : idleMinutes = idleMinutes < 1
+           ? 1
+           : (idleMinutes > 1440 ? 1440 : idleMinutes),
+       scheduleIntervalMinutes = scheduleIntervalMinutes < 5
+           ? 5
+           : (scheduleIntervalMinutes > 10080
+                 ? 10080
+                 : scheduleIntervalMinutes),
+       keepCount = keepCount < 1 ? 1 : (keepCount > 200 ? 200 : keepCount);
+
+  static const LocalAutoBackupPolicy defaults = LocalAutoBackupPolicy();
+
+  final bool backupOnStartup;
+  final bool backupOnExit;
+  final bool backupOnIdle;
+  final int idleMinutes;
+  final bool backupOnSchedule;
+  final int scheduleIntervalMinutes;
+  final int keepCount;
+
+  bool get hasAnyTrigger =>
+      backupOnStartup || backupOnExit || backupOnIdle || backupOnSchedule;
+
+  int get idleDurationMs => idleMinutes * 60 * 1000;
+  int get scheduleIntervalMs => scheduleIntervalMinutes * 60 * 1000;
+
+  LocalAutoBackupPolicy copyWith({
+    bool? backupOnStartup,
+    bool? backupOnExit,
+    bool? backupOnIdle,
+    int? idleMinutes,
+    bool? backupOnSchedule,
+    int? scheduleIntervalMinutes,
+    int? keepCount,
+  }) => LocalAutoBackupPolicy(
+    backupOnStartup: backupOnStartup ?? this.backupOnStartup,
+    backupOnExit: backupOnExit ?? this.backupOnExit,
+    backupOnIdle: backupOnIdle ?? this.backupOnIdle,
+    idleMinutes: idleMinutes ?? this.idleMinutes,
+    backupOnSchedule: backupOnSchedule ?? this.backupOnSchedule,
+    scheduleIntervalMinutes:
+        scheduleIntervalMinutes ?? this.scheduleIntervalMinutes,
+    keepCount: keepCount ?? this.keepCount,
+  );
+
+  Map<String, Object> toJson() => <String, Object>{
+    'backup_on_startup': backupOnStartup,
+    'backup_on_exit': backupOnExit,
+    'backup_on_idle': backupOnIdle,
+    'idle_minutes': idleMinutes,
+    'backup_on_schedule': backupOnSchedule,
+    'schedule_interval_minutes': scheduleIntervalMinutes,
+    'keep_count': keepCount,
+  };
+
+  factory LocalAutoBackupPolicy.fromJson(Map<String, Object?> json) {
+    final rawIdle = json['idle_minutes'];
+    final rawSchedule = json['schedule_interval_minutes'];
+    final rawKeep = json['keep_count'];
+    return LocalAutoBackupPolicy(
+      backupOnStartup: (json['backup_on_startup'] as bool?) ?? false,
+      backupOnExit: (json['backup_on_exit'] as bool?) ?? false,
+      backupOnIdle: (json['backup_on_idle'] as bool?) ?? false,
+      idleMinutes: rawIdle is int ? rawIdle : 5,
+      backupOnSchedule: (json['backup_on_schedule'] as bool?) ?? false,
+      scheduleIntervalMinutes: rawSchedule is int ? rawSchedule : 360,
+      keepCount: rawKeep is int ? rawKeep : defaultWebDavKeepCount,
+    );
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is LocalAutoBackupPolicy &&
+          other.backupOnStartup == backupOnStartup &&
+          other.backupOnExit == backupOnExit &&
+          other.backupOnIdle == backupOnIdle &&
+          other.idleMinutes == idleMinutes &&
+          other.backupOnSchedule == backupOnSchedule &&
+          other.scheduleIntervalMinutes == scheduleIntervalMinutes &&
+          other.keepCount == keepCount);
+
+  @override
+  int get hashCode => Object.hash(
+    backupOnStartup,
+    backupOnExit,
+    backupOnIdle,
+    idleMinutes,
+    backupOnSchedule,
+    scheduleIntervalMinutes,
+    keepCount,
+  );
+}
+
+/// Decodes [LocalAutoBackupPolicy] from preference JSON, falling back to
+/// [LocalAutoBackupPolicy.defaults] (all triggers `false`) if unset or corrupt.
+LocalAutoBackupPolicy resolveLocalAutoBackupPolicy(String? rawJson) {
+  if (rawJson == null || rawJson.trim().isEmpty) {
+    return LocalAutoBackupPolicy.defaults;
+  }
+  try {
+    final decoded = jsonDecode(rawJson);
+    if (decoded is Map<String, Object?>) {
+      return LocalAutoBackupPolicy.fromJson(decoded);
+    }
+  } catch (_) {
+    // Safe default on corrupt preference JSON.
+  }
+  return LocalAutoBackupPolicy.defaults;
+}
 
 /// Active cloud synchronization & backup channel.
 enum CloudBackendType {
@@ -37,44 +187,112 @@ enum CloudBackendType {
 
 /// User-selected multi-device sync preferences stored in `ti_preference`
 /// (`cloud_sync_settings`).
+///
+/// All automatic triggers default to `false` on fresh installs.
 final class CloudSyncSettings {
   const CloudSyncSettings({
     this.backend = CloudBackendType.none,
     this.explicitBackend = false,
-    this.autoSyncEnabled = false,
+    bool autoSyncEnabled = false,
+    bool? syncOnStartup,
+    bool? syncOnExit,
+    this.syncOnIdle = false,
+    int idleMinutes = 3,
+    this.syncOnSchedule = false,
+    int scheduleIntervalMinutes = 60,
     this.autoArchiveBackupEnabled = true,
     required this.deviceId,
     this.deviceName = '帐屿本机',
-  });
+  }) : syncOnStartup =
+           syncOnStartup ?? (autoSyncEnabled && !syncOnIdle && !syncOnSchedule),
+       syncOnExit =
+           syncOnExit ?? (autoSyncEnabled && !syncOnIdle && !syncOnSchedule),
+       idleMinutes = idleMinutes < 1
+           ? 1
+           : (idleMinutes > 1440 ? 1440 : idleMinutes),
+       scheduleIntervalMinutes = scheduleIntervalMinutes < 5
+           ? 5
+           : (scheduleIntervalMinutes > 10080
+                 ? 10080
+                 : scheduleIntervalMinutes);
 
   final CloudBackendType backend;
   final bool explicitBackend;
-  final bool autoSyncEnabled;
+  final bool syncOnStartup;
+  final bool syncOnExit;
+  final bool syncOnIdle;
+  final int idleMinutes;
+  final bool syncOnSchedule;
+  final int scheduleIntervalMinutes;
   final bool autoArchiveBackupEnabled;
   final String deviceId;
   final String deviceName;
+
+  /// Returns `true` whenever at least one automatic sync trigger is enabled.
+  bool get autoSyncEnabled =>
+      syncOnStartup || syncOnExit || syncOnIdle || syncOnSchedule;
+
+  int get idleDurationMs => idleMinutes * 60 * 1000;
+  int get scheduleIntervalMs => scheduleIntervalMinutes * 60 * 1000;
 
   CloudSyncSettings copyWith({
     CloudBackendType? backend,
     bool? explicitBackend,
     bool? autoSyncEnabled,
+    bool? syncOnStartup,
+    bool? syncOnExit,
+    bool? syncOnIdle,
+    int? idleMinutes,
+    bool? syncOnSchedule,
+    int? scheduleIntervalMinutes,
     bool? autoArchiveBackupEnabled,
     String? deviceId,
     String? deviceName,
-  }) => CloudSyncSettings(
-    backend: backend ?? this.backend,
-    explicitBackend: explicitBackend ?? this.explicitBackend,
-    autoSyncEnabled: autoSyncEnabled ?? this.autoSyncEnabled,
-    autoArchiveBackupEnabled:
-        autoArchiveBackupEnabled ?? this.autoArchiveBackupEnabled,
-    deviceId: deviceId ?? this.deviceId,
-    deviceName: deviceName ?? this.deviceName,
-  );
+  }) {
+    var nextStartup = syncOnStartup ?? this.syncOnStartup;
+    var nextExit = syncOnExit ?? this.syncOnExit;
+    var nextIdle = syncOnIdle ?? this.syncOnIdle;
+    var nextSchedule = syncOnSchedule ?? this.syncOnSchedule;
+
+    if (autoSyncEnabled != null) {
+      if (!autoSyncEnabled) {
+        if (syncOnStartup == null) nextStartup = false;
+        if (syncOnExit == null) nextExit = false;
+        if (syncOnIdle == null) nextIdle = false;
+        if (syncOnSchedule == null) nextSchedule = false;
+      } else if (!nextStartup && !nextExit && !nextIdle && !nextSchedule) {
+        nextStartup = true;
+        nextExit = true;
+      }
+    }
+
+    return CloudSyncSettings(
+      backend: backend ?? this.backend,
+      explicitBackend: explicitBackend ?? this.explicitBackend,
+      syncOnStartup: nextStartup,
+      syncOnExit: nextExit,
+      syncOnIdle: nextIdle,
+      idleMinutes: idleMinutes ?? this.idleMinutes,
+      syncOnSchedule: nextSchedule,
+      scheduleIntervalMinutes:
+          scheduleIntervalMinutes ?? this.scheduleIntervalMinutes,
+      autoArchiveBackupEnabled:
+          autoArchiveBackupEnabled ?? this.autoArchiveBackupEnabled,
+      deviceId: deviceId ?? this.deviceId,
+      deviceName: deviceName ?? this.deviceName,
+    );
+  }
 
   Map<String, Object> toJson() => <String, Object>{
     'backend': backend.wireValue,
     'explicit_backend': explicitBackend,
     'auto_sync_enabled': autoSyncEnabled,
+    'sync_on_startup': syncOnStartup,
+    'sync_on_exit': syncOnExit,
+    'sync_on_idle': syncOnIdle,
+    'idle_minutes': idleMinutes,
+    'sync_on_schedule': syncOnSchedule,
+    'schedule_interval_minutes': scheduleIntervalMinutes,
     'auto_archive_backup_enabled': autoArchiveBackupEnabled,
     'device_id': deviceId,
     'device_name': deviceName.trim().isEmpty ? '帐屿本机' : deviceName.trim(),
@@ -87,16 +305,140 @@ final class CloudSyncSettings {
   }) {
     final rawDeviceId = (json['device_id'] as String?)?.trim() ?? '';
     final rawDeviceName = (json['device_name'] as String?)?.trim() ?? '';
+    final hasExplicitTriggerKeys =
+        json.containsKey('sync_on_startup') ||
+        json.containsKey('sync_on_exit') ||
+        json.containsKey('sync_on_idle') ||
+        json.containsKey('sync_on_schedule');
+    final legacyAutoSync = (json['auto_sync_enabled'] as bool?) ?? false;
+    final rawIdle = json['idle_minutes'];
+    final rawSchedule = json['schedule_interval_minutes'];
+
     return CloudSyncSettings(
       backend: CloudBackendType.fromWire(json['backend'] as String?),
       explicitBackend: (json['explicit_backend'] as bool?) ?? false,
-      autoSyncEnabled: (json['auto_sync_enabled'] as bool?) ?? false,
+      syncOnStartup: hasExplicitTriggerKeys
+          ? ((json['sync_on_startup'] as bool?) ?? false)
+          : legacyAutoSync,
+      syncOnExit: hasExplicitTriggerKeys
+          ? ((json['sync_on_exit'] as bool?) ?? false)
+          : legacyAutoSync,
+      syncOnIdle: hasExplicitTriggerKeys
+          ? ((json['sync_on_idle'] as bool?) ?? false)
+          : false,
+      idleMinutes: rawIdle is int ? rawIdle : 3,
+      syncOnSchedule: hasExplicitTriggerKeys
+          ? ((json['sync_on_schedule'] as bool?) ?? false)
+          : false,
+      scheduleIntervalMinutes: rawSchedule is int ? rawSchedule : 60,
       autoArchiveBackupEnabled:
           (json['auto_archive_backup_enabled'] as bool?) ?? true,
       deviceId: rawDeviceId.isEmpty ? fallbackDeviceId : rawDeviceId,
       deviceName: rawDeviceName.isEmpty ? fallbackDeviceName : rawDeviceName,
     );
   }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is CloudSyncSettings &&
+          other.backend == backend &&
+          other.explicitBackend == explicitBackend &&
+          other.syncOnStartup == syncOnStartup &&
+          other.syncOnExit == syncOnExit &&
+          other.syncOnIdle == syncOnIdle &&
+          other.idleMinutes == idleMinutes &&
+          other.syncOnSchedule == syncOnSchedule &&
+          other.scheduleIntervalMinutes == scheduleIntervalMinutes &&
+          other.autoArchiveBackupEnabled == autoArchiveBackupEnabled &&
+          other.deviceId == deviceId &&
+          other.deviceName == deviceName);
+
+  @override
+  int get hashCode => Object.hash(
+    backend,
+    explicitBackend,
+    syncOnStartup,
+    syncOnExit,
+    syncOnIdle,
+    idleMinutes,
+    syncOnSchedule,
+    scheduleIntervalMinutes,
+    autoArchiveBackupEnabled,
+    deviceId,
+    deviceName,
+  );
+}
+
+/// Returns `true` if the specific [source] switch is turned on in [policy].
+bool isLocalTriggerEnabled(
+  LocalAutoBackupPolicy policy,
+  AutoTriggerSource source,
+) {
+  return switch (source) {
+    AutoTriggerSource.startup ||
+    AutoTriggerSource.windowFocus => policy.backupOnStartup,
+    AutoTriggerSource.exit => policy.backupOnExit,
+    AutoTriggerSource.idleAfterChange => policy.backupOnIdle,
+    AutoTriggerSource.schedule => policy.backupOnSchedule,
+  };
+}
+
+/// Pure eligibility rule evaluating whether a local `.tally` auto-backup should
+/// execute for [source].
+bool shouldRunLocalAutoBackupForTrigger({
+  required LocalAutoBackupPolicy policy,
+  required AutoTriggerSource source,
+  required bool localDataChanged,
+  required int? lastAutoBackupAtMs,
+  required int nowMs,
+}) {
+  if (!isLocalTriggerEnabled(policy, source) || !localDataChanged) {
+    return false;
+  }
+  if (source == AutoTriggerSource.schedule) {
+    if (lastAutoBackupAtMs != null &&
+        (nowMs - lastAutoBackupAtMs) < policy.scheduleIntervalMs) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/// Returns `true` if the specific [source] switch is turned on in [settings].
+bool isCloudTriggerEnabled(
+  CloudSyncSettings settings,
+  AutoTriggerSource source,
+) {
+  if (settings.backend == CloudBackendType.none) return false;
+  return switch (source) {
+    AutoTriggerSource.startup ||
+    AutoTriggerSource.windowFocus => settings.syncOnStartup,
+    AutoTriggerSource.exit => settings.syncOnExit,
+    AutoTriggerSource.idleAfterChange => settings.syncOnIdle,
+    AutoTriggerSource.schedule => settings.syncOnSchedule,
+  };
+}
+
+/// Pure eligibility rule evaluating whether multi-device cloud sync should
+/// execute for [source].
+bool shouldRunCloudAutoSyncForTrigger({
+  required CloudSyncSettings settings,
+  required bool isBackendConfigured,
+  required AutoTriggerSource source,
+  required int? lastScheduleCheckAtMs,
+  required int nowMs,
+}) {
+  if (!isBackendConfigured || !isCloudTriggerEnabled(settings, source)) {
+    return false;
+  }
+  if (source == AutoTriggerSource.schedule) {
+    if (lastScheduleCheckAtMs != null &&
+        (nowMs - lastScheduleCheckAtMs) < settings.scheduleIntervalMs) {
+      return false;
+    }
+  }
+  return true;
 }
 
 /// Resolves effective [CloudSyncSettings], seamlessly recognizing legacy

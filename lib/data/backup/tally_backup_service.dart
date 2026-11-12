@@ -195,6 +195,28 @@ final class TallyBackupService {
 
   String? _cachedFallbackDeviceId;
   Future<void>? _syncSerialChain;
+  Future<void>? _localAutoBackupSerialChain;
+  int _internalRestoreDepth = 0;
+  int _attachedSchedulerCount = 0;
+
+  /// `true` while [restoreFromBytes] or a remote sync pull is replacing the 22
+  /// business tables, allowing [BackupSyncScheduler] to suppress table-change
+  /// idle debounce loops.
+  bool get isSuppressingTableChangeTriggers => _internalRestoreDepth > 0;
+
+  /// `true` when an app-level [BackupSyncScheduler] is actively managing
+  /// lifecycle and idle triggers for this service instance.
+  bool get hasAttachedScheduler => _attachedSchedulerCount > 0;
+
+  void registerAttachedScheduler() {
+    _attachedSchedulerCount++;
+  }
+
+  void unregisterAttachedScheduler() {
+    if (_attachedSchedulerCount > 0) {
+      _attachedSchedulerCount--;
+    }
+  }
 
   static Directory? _headlessSupportRoot;
 
@@ -361,27 +383,96 @@ final class TallyBackupService {
     await saveCloudSyncSettings(updated);
   }
 
-  /// Enables or disables automatic multi-device cloud sync on app resume.
+  /// Reactive stream of [LocalAutoBackupPolicy] from `ti_preference`.
+  Stream<LocalAutoBackupPolicy> watchLocalAutoBackupPolicy() =>
+      (db.select(db.preferences)
+            ..where((t) => t.key.equals(prefKeyLocalAutoBackupPolicy)))
+          .watchSingleOrNull()
+          .map((row) => resolveLocalAutoBackupPolicy(row?.value));
+
+  /// Reads current [LocalAutoBackupPolicy] snapshot (defaults to all `false`).
+  Future<LocalAutoBackupPolicy> getLocalAutoBackupPolicy() async {
+    final row = await guardDatabase(
+      () =>
+          (db.select(db.preferences)
+                ..where((t) => t.key.equals(prefKeyLocalAutoBackupPolicy)))
+              .getSingleOrNull(),
+    );
+    return resolveLocalAutoBackupPolicy(row?.value);
+  }
+
+  /// Validates and persists [policy] to `ti_preference` (`local_auto_backup_policy`).
+  Future<void> saveLocalAutoBackupPolicy(LocalAutoBackupPolicy policy) async {
+    if (policy.keepCount < 1 || policy.keepCount > 200) {
+      throw const Failure(FailureCode.validation, '本地备份保留份数须在 1–200 之间');
+    }
+    await guardDatabase(
+      () => db
+          .into(db.preferences)
+          .insertOnConflictUpdate(
+            PreferencesCompanion.insert(
+              key: prefKeyLocalAutoBackupPolicy,
+              value: jsonEncode(policy.toJson()),
+            ),
+          ),
+    );
+  }
+
+  Future<void> _ensureCloudBackendConfigured(CloudBackendType backend) async {
+    if (backend == CloudBackendType.none) {
+      throw const Failure(FailureCode.validation, '请先选择并配置 WebDAV 或 S3 云存储通道');
+    }
+    if (backend == CloudBackendType.webdav) {
+      final dav = await getWebDavConfig();
+      if (!dav.isConfigured) {
+        throw const Failure(FailureCode.validation, '请先完成 WebDAV 配置再开启自动同步');
+      }
+    } else if (backend == CloudBackendType.s3) {
+      final s3 = await getS3Config();
+      if (!s3.isConfigured) {
+        throw const Failure(FailureCode.validation, '请先完成 S3 配置再开启自动同步');
+      }
+    }
+  }
+
+  /// Updates any combination of multi-device cloud sync trigger options cleanly.
+  Future<CloudSyncSettings> updateCloudSyncTriggers({
+    bool? syncOnStartup,
+    bool? syncOnExit,
+    bool? syncOnIdle,
+    int? idleMinutes,
+    bool? syncOnSchedule,
+    int? scheduleIntervalMinutes,
+    bool? autoArchiveBackupEnabled,
+  }) async {
+    final current = await getCloudSyncSettings();
+    final updated = current.copyWith(
+      syncOnStartup: syncOnStartup,
+      syncOnExit: syncOnExit,
+      syncOnIdle: syncOnIdle,
+      idleMinutes: idleMinutes,
+      syncOnSchedule: syncOnSchedule,
+      scheduleIntervalMinutes: scheduleIntervalMinutes,
+      autoArchiveBackupEnabled: autoArchiveBackupEnabled,
+    );
+    final enablingNewTrigger =
+        (syncOnStartup == true && !current.syncOnStartup) ||
+        (syncOnExit == true && !current.syncOnExit) ||
+        (syncOnIdle == true && !current.syncOnIdle) ||
+        (syncOnSchedule == true && !current.syncOnSchedule);
+    if (enablingNewTrigger ||
+        (!current.autoSyncEnabled && updated.autoSyncEnabled)) {
+      await _ensureCloudBackendConfigured(updated.backend);
+    }
+    await saveCloudSyncSettings(updated);
+    return updated;
+  }
+
+  /// Enables or disables automatic multi-device cloud sync on app resume/exit.
   Future<void> setAutoSyncEnabled(bool enabled) async {
     final settings = await getCloudSyncSettings();
     if (enabled) {
-      if (settings.backend == CloudBackendType.none) {
-        throw const Failure(
-          FailureCode.validation,
-          '请先选择并配置 WebDAV 或 S3 云存储通道',
-        );
-      }
-      if (settings.backend == CloudBackendType.webdav) {
-        final dav = await getWebDavConfig();
-        if (!dav.isConfigured) {
-          throw const Failure(FailureCode.validation, '请先完成 WebDAV 配置再开启自动同步');
-        }
-      } else if (settings.backend == CloudBackendType.s3) {
-        final s3 = await getS3Config();
-        if (!s3.isConfigured) {
-          throw const Failure(FailureCode.validation, '请先完成 S3 配置再开启自动同步');
-        }
-      }
+      await _ensureCloudBackendConfigured(settings.backend);
     }
     await saveCloudSyncSettings(settings.copyWith(autoSyncEnabled: enabled));
   }
@@ -853,7 +944,9 @@ final class TallyBackupService {
     );
   }
 
-  /// Generates a `.tally` backup inside the app-managed local backup directory.
+  /// Generates a `.tally` backup inside the app-managed local backup directory,
+  /// records the independent local backup digest & timestamp, and prunes older
+  /// routine backups exceeding `policy.keepCount` while preserving `conflict_*`.
   Future<BackupFileMetadata> createLocalBackup({
     bool? includeAttachments,
     String? customFileName,
@@ -862,18 +955,57 @@ final class TallyBackupService {
     final packed = await createBackupBytes(
       includeAttachments: includeAttachments,
     );
-    final fileName =
-        customFileName ??
-        formatTallyBackupFileName(
-          DateTime.fromMillisecondsSinceEpoch(packed.manifest.createdAtMs),
-        );
+    String fileName;
+    if (customFileName != null) {
+      fileName = customFileName;
+    } else {
+      final base = formatTallyBackupFileName(
+        DateTime.fromMillisecondsSinceEpoch(packed.manifest.createdAtMs),
+      );
+      fileName = await _resolveUniqueLocalBackupFileName(base);
+    }
     final saved = await localTarget.writeBackup(
       fileName,
       packed.bytes,
       onProgress: onProgress,
     );
-    await _recordCompletedBackupState(packed.manifest.createdAtMs);
+    await _recordCompletedLocalBackupState(packed.manifest.createdAtMs);
+    await _pruneLocalBackupsIfNeeded(protectedFileName: saved.fileName);
     return saved;
+  }
+
+  Future<String> _resolveUniqueLocalBackupFileName(String baseFileName) async {
+    final dir = await _localBackupsDirProvider();
+    if (!await dir.exists()) return baseFileName;
+    if (!await File(p.join(dir.path, baseFileName)).exists()) {
+      return baseFileName;
+    }
+    final dotIdx = baseFileName.lastIndexOf('.');
+    final stem = dotIdx > 0 ? baseFileName.substring(0, dotIdx) : baseFileName;
+    final ext = dotIdx > 0 ? baseFileName.substring(dotIdx) : '';
+    var seq = 2;
+    while (await File(p.join(dir.path, '${stem}_$seq$ext')).exists()) {
+      seq++;
+    }
+    return '${stem}_$seq$ext';
+  }
+
+  Future<void> _pruneLocalBackupsIfNeeded({String? protectedFileName}) async {
+    final policy = await getLocalAutoBackupPolicy();
+    final allLocal = await localTarget.listBackups();
+    final toPrune = selectNonConflictBackupsToPrune(
+      allLocal.map(
+        (b) => BackupRetentionItem(
+          fileName: b.fileName,
+          modifiedAtMs: b.modifiedAtMs,
+        ),
+      ),
+      keepCount: policy.keepCount,
+    );
+    for (final name in toPrune) {
+      if (name == protectedFileName) continue;
+      await localTarget.deleteBackup(name);
+    }
   }
 
   /// Exports a `.tally` backup to a user-chosen OS location (SAF on Android,
@@ -1209,6 +1341,153 @@ final class TallyBackupService {
     return uploadBackupToWebDav(onProgress: onProgress);
   }
 
+  /// Returns epoch milliseconds of the last successful local `.tally` backup, if any.
+  Future<int?> getLastLocalAutoBackupAtMs() async {
+    final row = await guardDatabase(
+      () =>
+          (db.select(db.preferences)
+                ..where((t) => t.key.equals(prefKeyLocalAutoBackupLastAtMs)))
+              .getSingleOrNull(),
+    );
+    return row == null ? null : int.tryParse(row.value);
+  }
+
+  /// Returns `true` if any of the 22 business tables or local attachments
+  /// changed since the last completed local `.tally` backup.
+  ///
+  /// Tracked in `local_auto_backup_last_sha256` completely independently of
+  /// cloud backup (`backup_last_data_sha256`) and cloud sync (`cloud_sync_cursor`).
+  Future<bool> hasLocalDataChangedForLocalBackup() async {
+    final prevRow = await guardDatabase(
+      () =>
+          (db.select(db.preferences)
+                ..where((t) => t.key.equals(prefKeyLocalAutoBackupLastSha256)))
+              .getSingleOrNull(),
+    );
+    final currentDigest = await _computeCanonicalStateDigest();
+    return prevRow?.value != currentDigest;
+  }
+
+  /// Returns epoch milliseconds of the last periodic cloud sync schedule check.
+  Future<int?> getLastCloudScheduleCheckAtMs() async {
+    final row = await guardDatabase(
+      () =>
+          (db.select(db.preferences)..where(
+                (t) => t.key.equals(prefKeyCloudSyncLastScheduleCheckAtMs),
+              ))
+              .getSingleOrNull(),
+    );
+    return row == null ? null : int.tryParse(row.value);
+  }
+
+  Future<void> _recordCloudScheduleCheckAtMs(int timestampMs) => guardDatabase(
+    () => db
+        .into(db.preferences)
+        .insertOnConflictUpdate(
+          PreferencesCompanion.insert(
+            key: prefKeyCloudSyncLastScheduleCheckAtMs,
+            value: '$timestampMs',
+          ),
+        ),
+  );
+
+  /// Evaluates [LocalAutoBackupPolicy] for [source] and generates a pruned
+  /// local `.tally` backup when eligible and local data changed.
+  Future<BackupFileMetadata?> runLocalAutoBackupForTrigger(
+    AutoTriggerSource source, {
+    BackupProgressCallback? onProgress,
+  }) {
+    final prev = _localAutoBackupSerialChain ?? Future<void>.value();
+    final completer = Completer<BackupFileMetadata?>();
+    _localAutoBackupSerialChain = prev.catchError((_) {}).then((_) async {
+      try {
+        final saved = await _runLocalAutoBackupForTriggerUnlocked(
+          source,
+          onProgress: onProgress,
+        );
+        completer.complete(saved);
+      } catch (e, st) {
+        completer.completeError(e, st);
+      }
+    });
+    return completer.future;
+  }
+
+  Future<BackupFileMetadata?> _runLocalAutoBackupForTriggerUnlocked(
+    AutoTriggerSource source, {
+    BackupProgressCallback? onProgress,
+  }) async {
+    final policy = await getLocalAutoBackupPolicy();
+    if (!isLocalTriggerEnabled(policy, source)) {
+      return null;
+    }
+    int? lastAtMs;
+    final now = _nowMs();
+    if (source == AutoTriggerSource.schedule) {
+      lastAtMs = await getLastLocalAutoBackupAtMs();
+      if (lastAtMs != null && (now - lastAtMs) < policy.scheduleIntervalMs) {
+        return null;
+      }
+    }
+    final changed = await hasLocalDataChangedForLocalBackup();
+    if (!shouldRunLocalAutoBackupForTrigger(
+      policy: policy,
+      source: source,
+      localDataChanged: changed,
+      lastAutoBackupAtMs: lastAtMs,
+      nowMs: _nowMs(),
+    )) {
+      return null;
+    }
+    return createLocalBackup(onProgress: onProgress);
+  }
+
+  /// Evaluates [CloudSyncSettings] for [source] and executes silent multi-device
+  /// cloud sync when eligible, performing zero network I/O when disabled or
+  /// unconfigured.
+  Future<CloudSyncOutcome?> runCloudAutoSyncForTrigger(
+    AutoTriggerSource source, {
+    BackupProgressCallback? onProgress,
+  }) async {
+    final settings = await getCloudSyncSettings();
+    if (!isCloudTriggerEnabled(settings, source)) {
+      return null;
+    }
+    final bool isConfigured;
+    switch (settings.backend) {
+      case CloudBackendType.none:
+        return null;
+      case CloudBackendType.webdav:
+        isConfigured = (await getWebDavConfig()).isConfigured;
+      case CloudBackendType.s3:
+        isConfigured = (await getS3Config()).isConfigured;
+    }
+    if (!isConfigured) {
+      return null;
+    }
+
+    int? lastScheduleCheckAtMs;
+    final now = _nowMs();
+    if (source == AutoTriggerSource.schedule) {
+      lastScheduleCheckAtMs = await getLastCloudScheduleCheckAtMs();
+    }
+    if (!shouldRunCloudAutoSyncForTrigger(
+      settings: settings,
+      isBackendConfigured: isConfigured,
+      source: source,
+      lastScheduleCheckAtMs: lastScheduleCheckAtMs,
+      nowMs: now,
+    )) {
+      return null;
+    }
+
+    final outcome = await syncNow(onProgress: onProgress);
+    if (source == AutoTriggerSource.schedule) {
+      await _recordCloudScheduleCheckAtMs(_nowMs());
+    }
+    return outcome;
+  }
+
   /// Runs silent multi-device snapshot sync when `autoSyncEnabled` is `true`
   /// and the active cloud backend (`WebDAV` or `S3`) is configured.
   /// Performs zero network I/O when disabled or unconfigured.
@@ -1509,67 +1788,77 @@ final class TallyBackupService {
         targetFingerprint: store.targetFingerprint,
       );
 
-      await guardDatabase(
-        () => db.transaction(() async {
-          await _clearAll22TablesInTransaction();
-          await db.delete(db.writeCommands).go();
-          await _insertAll22TablesInTransaction(parsedRows);
+      _internalRestoreDepth++;
+      try {
+        await guardDatabase(
+          () => db.transaction(() async {
+            await _clearAll22TablesInTransaction();
+            await db.delete(db.writeCommands).go();
+            await _insertAll22TablesInTransaction(parsedRows);
 
-          final activeBookId = resolveRestoredActiveBookId(
-            parsedRows.accountBooks.map((b) => (id: b.id, sort: b.sort)),
-          );
-          await db
-              .into(db.preferences)
-              .insertOnConflictUpdate(
-                PreferencesCompanion.insert(
-                  key: _prefKeyCurrentBookId,
-                  value: '$activeBookId',
-                ),
-              );
-          await db
-              .into(db.preferences)
-              .insertOnConflictUpdate(
-                PreferencesCompanion.insert(
-                  key: prefKeyCloudSyncCursor,
-                  value: jsonEncode(newCursor.toJson()),
-                ),
-              );
-          await db
-              .into(db.preferences)
-              .insert(
-                PreferencesCompanion.insert(
-                  key: prefKeyCloudSyncSettings,
-                  value: jsonEncode(settings.toJson()),
-                ),
-                mode: InsertMode.insertOrIgnore,
-              );
-        }),
-      );
+            final activeBookId = resolveRestoredActiveBookId(
+              parsedRows.accountBooks.map((b) => (id: b.id, sort: b.sort)),
+            );
+            await db
+                .into(db.preferences)
+                .insertOnConflictUpdate(
+                  PreferencesCompanion.insert(
+                    key: _prefKeyCurrentBookId,
+                    value: '$activeBookId',
+                  ),
+                );
+            await db
+                .into(db.preferences)
+                .insertOnConflictUpdate(
+                  PreferencesCompanion.insert(
+                    key: prefKeyCloudSyncCursor,
+                    value: jsonEncode(newCursor.toJson()),
+                  ),
+                );
+            await db
+                .into(db.preferences)
+                .insert(
+                  PreferencesCompanion.insert(
+                    key: prefKeyCloudSyncSettings,
+                    value: jsonEncode(settings.toJson()),
+                  ),
+                  mode: InsertMode.insertOrIgnore,
+                );
+          }),
+        );
 
-      final targetAttDir = await _attachmentsDirProvider();
-      if (await targetAttDir.exists()) {
-        await for (final child in targetAttDir.list(followLinks: false)) {
-          await child.delete(recursive: true);
+        final targetAttDir = await _attachmentsDirProvider();
+        if (await targetAttDir.exists()) {
+          await for (final child in targetAttDir.list(followLinks: false)) {
+            await child.delete(recursive: true);
+          }
         }
-      }
-      if (verifiedPulledAttachments.isNotEmpty) {
-        await targetAttDir.create(recursive: true);
-        for (final archivePath in verifiedPulledAttachments.keys) {
-          final relUnderAtt = archivePath.substring(
-            tallyAttachmentsPrefix.length,
-          );
-          final srcFile = File(
-            p.joinAll(<String>[stagedAttRoot.path, ...relUnderAtt.split('/')]),
-          );
-          final dstFile = File(
-            p.joinAll(<String>[targetAttDir.path, ...relUnderAtt.split('/')]),
-          );
-          await dstFile.parent.create(recursive: true);
-          await srcFile.copy(dstFile.path);
+        if (verifiedPulledAttachments.isNotEmpty) {
+          await targetAttDir.create(recursive: true);
+          for (final archivePath in verifiedPulledAttachments.keys) {
+            final relUnderAtt = archivePath.substring(
+              tallyAttachmentsPrefix.length,
+            );
+            final srcFile = File(
+              p.joinAll(<String>[
+                stagedAttRoot.path,
+                ...relUnderAtt.split('/'),
+              ]),
+            );
+            final dstFile = File(
+              p.joinAll(<String>[targetAttDir.path, ...relUnderAtt.split('/')]),
+            );
+            await dstFile.parent.create(recursive: true);
+            await srcFile.copy(dstFile.path);
+          }
         }
-      }
 
-      await reminderService.resyncAll();
+        await reminderService.resyncAll();
+      } finally {
+        await Future<void>.microtask(() {});
+        await Future<void>.microtask(() {});
+        _internalRestoreDepth--;
+      }
 
       return CloudSyncOutcome(
         status: CloudSyncStatus.pulled,
@@ -1916,36 +2205,45 @@ final class TallyBackupService {
       final parsedRows = _parseAndValidateAll22Tables(rawDbJson, manifest);
 
       // Stage 3: Single atomic SQLite transaction replacing all 22 tables.
-      await guardDatabase(
-        () => db.transaction(() async {
-          await _clearAll22TablesInTransaction();
-          await db.delete(db.writeCommands).go();
-          await _insertAll22TablesInTransaction(parsedRows);
+      _internalRestoreDepth++;
+      try {
+        await guardDatabase(
+          () => db.transaction(() async {
+            await _clearAll22TablesInTransaction();
+            await db.delete(db.writeCommands).go();
+            await _insertAll22TablesInTransaction(parsedRows);
 
-          final activeBookId = resolveRestoredActiveBookId(
-            parsedRows.accountBooks.map((b) => (id: b.id, sort: b.sort)),
-          );
-          await db
-              .into(db.preferences)
-              .insertOnConflictUpdate(
-                PreferencesCompanion.insert(
-                  key: _prefKeyCurrentBookId,
-                  value: '$activeBookId',
-                ),
-              );
+            final activeBookId = resolveRestoredActiveBookId(
+              parsedRows.accountBooks.map((b) => (id: b.id, sort: b.sort)),
+            );
+            await db
+                .into(db.preferences)
+                .insertOnConflictUpdate(
+                  PreferencesCompanion.insert(
+                    key: _prefKeyCurrentBookId,
+                    value: '$activeBookId',
+                  ),
+                );
 
-          beforeTransactionCommitForTest?.call();
-        }),
-      );
+            beforeTransactionCommitForTest?.call();
+          }),
+        );
 
-      // Sync verified attachments into app attachments directory after DB commit.
-      await _syncStagedAttachments(
-        stagedAttachmentsRoot: stagedAttachmentsRoot,
-        manifest: manifest,
-      );
+        // Sync verified attachments into app attachments directory after DB commit.
+        await _syncStagedAttachments(
+          stagedAttachmentsRoot: stagedAttachmentsRoot,
+          manifest: manifest,
+        );
 
-      await _recordCompletedBackupState(_nowMs());
-      await reminderService.resyncAll();
+        final restoredAt = _nowMs();
+        await _recordCompletedBackupState(restoredAt);
+        await _recordCompletedLocalBackupState(restoredAt);
+        await reminderService.resyncAll();
+      } finally {
+        await Future<void>.microtask(() {});
+        await Future<void>.microtask(() {});
+        _internalRestoreDepth--;
+      }
 
       return manifest;
     } finally {
@@ -1974,6 +2272,30 @@ final class TallyBackupService {
             .insertOnConflictUpdate(
               PreferencesCompanion.insert(
                 key: prefKeyLastBackupDataSha256,
+                value: digest,
+              ),
+            );
+      }),
+    );
+  }
+
+  Future<void> _recordCompletedLocalBackupState(int timestampMs) async {
+    final digest = await _computeCanonicalStateDigest();
+    await guardDatabase(
+      () => db.transaction(() async {
+        await db
+            .into(db.preferences)
+            .insertOnConflictUpdate(
+              PreferencesCompanion.insert(
+                key: prefKeyLocalAutoBackupLastAtMs,
+                value: '$timestampMs',
+              ),
+            );
+        await db
+            .into(db.preferences)
+            .insertOnConflictUpdate(
+              PreferencesCompanion.insert(
+                key: prefKeyLocalAutoBackupLastSha256,
                 value: digest,
               ),
             );
