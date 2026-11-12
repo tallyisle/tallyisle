@@ -1,19 +1,41 @@
+import 'package:drift/drift.dart' show OrderingTerm;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../app/providers.dart';
+import '../../core/failure.dart';
+import '../../core/money.dart';
 import '../../data/db/database.dart';
 import '../../domain/ledger/record_extra.dart';
 import '../../domain/ledger/record_relations.dart';
 import '../../domain/model/codes.dart';
-import '../../core/failure.dart';
-import '../../core/money.dart';
 import '../attachments/attachment_providers.dart';
+import '../common/catalog_icons.dart';
 import '../common/common.dart';
 import '../receipt/record_receipt_dialog.dart' show showRecordReceiptDialog;
-import 'record_editor_page.dart' show parseAmount, amountInputFormatters;
+import '../stats/tag_stats_page.dart' show TagColorDot, parseTagColor;
 import 'record_labels.dart';
+
+final _maxAmount = Money.parse('88888888888.00');
+
+final _amountInputFormatters = <TextInputFormatter>[
+  FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}')),
+];
+
+Money _parseAmount(String text) {
+  final t = text.trim();
+  if (t.isEmpty) return Money.zero();
+  final normalized = t.endsWith('.') ? t.substring(0, t.length - 1) : t;
+  final money = Money.parse(
+    normalized.startsWith('.') ? '0$normalized' : normalized,
+  );
+  if (money.units > _maxAmount.units) {
+    throw const Failure(FailureCode.validation, '金额不能超过 88888888888.00');
+  }
+  return money;
+}
 
 class RecordDetailPage extends ConsumerStatefulWidget {
   const RecordDetailPage({super.key, required this.recordId});
@@ -26,6 +48,25 @@ class _RecordDetailPageState extends ConsumerState<RecordDetailPage> {
   final ids = CommandIds();
   bool busy = false;
   String? error;
+
+  Future<List<Asset>> _loadEligibleAssets() async {
+    final cached = ref.read(assetsProvider).value;
+    final allAssets =
+        cached ??
+        await () async {
+          final db = await ref.read(databaseProvider.future);
+          return (db.select(db.assets)..orderBy([
+                (a) => OrderingTerm.asc(a.sort),
+                (a) => OrderingTerm.asc(a.id),
+              ]))
+              .get();
+        }();
+    return allAssets
+        .where(
+          (a) => a.status != AssetStatus.settled && a.type != AssetType.debt,
+        )
+        .toList();
+  }
 
   Future<void> _delete(LedgerRecord r) async {
     final ok = await confirm(
@@ -62,11 +103,8 @@ class _RecordDetailPageState extends ConsumerState<RecordDetailPage> {
   }
 
   Future<void> _addLink(LedgerRecord r, {required bool refund}) async {
-    final assets = (ref.read(assetsProvider).value ?? const <Asset>[])
-        .where(
-          (a) => a.status != AssetStatus.settled && a.type != AssetType.debt,
-        )
-        .toList();
+    final assets = await _loadEligibleAssets();
+    if (!mounted) return;
     final input = await showDialog<(Money, int)>(
       context: context,
       builder: (_) => _LinkDialog(
@@ -112,11 +150,8 @@ class _RecordDetailPageState extends ConsumerState<RecordDetailPage> {
   }
 
   Future<void> _settleAdvance(LedgerRecord r) async {
-    final assets = (ref.read(assetsProvider).value ?? const <Asset>[])
-        .where(
-          (a) => a.status != AssetStatus.settled && a.type != AssetType.debt,
-        )
-        .toList();
+    final assets = await _loadEligibleAssets();
+    if (!mounted) return;
     final input = await showDialog<(Money, int, bool)>(
       context: context,
       builder: (_) => _SettleAdvanceDialog(
@@ -154,6 +189,47 @@ class _RecordDetailPageState extends ConsumerState<RecordDetailPage> {
     } finally {
       if (mounted) setState(() => busy = false);
     }
+  }
+
+  Widget _buildTagActionChip(BuildContext context, Tag t) {
+    final tint = parseTagColor(t.color);
+    return ActionChip(
+      key: Key('detail-tag-${t.tagId}'),
+      avatar: tint != null ? TagColorDot(colorHex: t.color, size: 8) : null,
+      backgroundColor: tint?.withValues(alpha: 0.14),
+      side: tint == null
+          ? null
+          : BorderSide(color: tint.withValues(alpha: 0.45)),
+      label: Text(t.name),
+      onPressed: () => context.push('/stats/tag/${t.tagId}'),
+    );
+  }
+
+  Widget _buildAccountTrailing(List<Asset> assets, int id) {
+    final asset = id == noRef
+        ? null
+        : assets.where((a) => a.id == id).firstOrNull;
+    if (asset == null) {
+      return Text(assetName(assets, id));
+    }
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 220),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          AssetIconAvatar(
+            iconKey: asset.icon,
+            colorHex: asset.color,
+            name: asset.name,
+            assetType: asset.type,
+            subType: asset.subType,
+            size: 24,
+          ),
+          const SizedBox(width: 8),
+          Flexible(child: Text(asset.name, overflow: TextOverflow.ellipsis)),
+        ],
+      ),
+    );
   }
 
   @override
@@ -236,25 +312,90 @@ class _RecordDetailPageState extends ConsumerState<RecordDetailPage> {
               BigInt.zero,
               (s, c) => s + c.amount,
             );
+        final cat = r.recordCatId == noRef
+            ? null
+            : categories.where((c) => c.id == r.recordCatId).firstOrNull;
+        final parentCat = (cat != null && cat.parentCatId != noRef)
+            ? categories.where((c) => c.id == cat.parentCatId).firstOrNull
+            : null;
+        final catDisplayName = cat == null
+            ? null
+            : (parentCat != null
+                  ? '${parentCat.name} · ${cat.name}'
+                  : cat.name);
+        final catColor =
+            (cat?.colorFill != null && cat!.colorFill!.trim().isNotEmpty)
+            ? cat.colorFill
+            : parentCat?.colorFill;
+        final isRefund =
+            (r.type == RecordType.expense || r.type == RecordType.income) &&
+            r.moneyMinor < BigInt.zero;
+
         return ListView(
           padding: const EdgeInsets.all(24),
           children: [
-            Text(RecordType.names[r.type] ?? '账单'),
-            Text(
-              label.amount,
-              key: const Key('detail-amount'),
-              style: Theme.of(context).textTheme.displaySmall,
+            Row(
+              children: [
+                RecordTypeIconAvatar(
+                  recordType: r.type,
+                  subType: r.subType,
+                  isRefund: isRefund,
+                  categoryName: catDisplayName,
+                  categoryIcon: cat?.icon,
+                  parentCategoryIcon: parentCat?.icon,
+                  categoryColor: catColor,
+                  size: 46,
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(RecordType.names[r.type] ?? '账单'),
+                      Text(
+                        label.amount,
+                        key: const Key('detail-amount'),
+                        style: Theme.of(context).textTheme.displaySmall,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 16),
-            ListTile(title: const Text('分类/说明'), trailing: Text(label.title)),
+            ListTile(
+              title: const Text('分类/说明'),
+              trailing: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 220),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    RecordTypeIconAvatar(
+                      recordType: r.type,
+                      subType: r.subType,
+                      isRefund: isRefund,
+                      categoryName: catDisplayName,
+                      categoryIcon: cat?.icon,
+                      parentCategoryIcon: parentCat?.icon,
+                      categoryColor: catColor,
+                      size: 24,
+                    ),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text(label.title, overflow: TextOverflow.ellipsis),
+                    ),
+                  ],
+                ),
+              ),
+            ),
             if (r.type == RecordType.transfer) ...[
               ListTile(
                 title: const Text('转出'),
-                trailing: Text(assetName(assets, r.fromAssetId)),
+                trailing: _buildAccountTrailing(assets, r.fromAssetId),
               ),
               ListTile(
                 title: const Text('转入'),
-                trailing: Text(assetName(assets, r.toAssetId)),
+                trailing: _buildAccountTrailing(assets, r.toAssetId),
               ),
             ] else if (r.type == RecordType.borrowIn ||
                 r.type == RecordType.collect ||
@@ -262,11 +403,11 @@ class _RecordDetailPageState extends ConsumerState<RecordDetailPage> {
                     r.subType == RecordDirection.income)) ...[
               ListTile(
                 title: const Text('借贷项目'),
-                trailing: Text(assetName(assets, r.fromAssetId)),
+                trailing: _buildAccountTrailing(assets, r.fromAssetId),
               ),
               ListTile(
                 title: const Text('资金账户'),
-                trailing: Text(assetName(assets, r.toAssetId)),
+                trailing: _buildAccountTrailing(assets, r.toAssetId),
               ),
             ] else if (r.type == RecordType.lendOut ||
                 r.type == RecordType.repay ||
@@ -274,23 +415,21 @@ class _RecordDetailPageState extends ConsumerState<RecordDetailPage> {
                     r.subType == RecordDirection.expense)) ...[
               ListTile(
                 title: const Text('资金账户'),
-                trailing: Text(assetName(assets, r.fromAssetId)),
+                trailing: _buildAccountTrailing(assets, r.fromAssetId),
               ),
               ListTile(
                 title: const Text('借贷项目'),
-                trailing: Text(assetName(assets, r.toAssetId)),
+                trailing: _buildAccountTrailing(assets, r.toAssetId),
               ),
             ] else
               ListTile(
                 title: const Text('账户'),
-                trailing: Text(
-                  assetName(
-                    assets,
-                    r.type == RecordType.reimbursable ||
-                            r.type == RecordType.balanceAdjust
-                        ? r.fromAssetId
-                        : r.assetId,
-                  ),
+                trailing: _buildAccountTrailing(
+                  assets,
+                  r.type == RecordType.reimbursable ||
+                          r.type == RecordType.balanceAdjust
+                      ? r.fromAssetId
+                      : r.assetId,
                 ),
               ),
             ListTile(
@@ -314,7 +453,9 @@ class _RecordDetailPageState extends ConsumerState<RecordDetailPage> {
                   child: Wrap(
                     spacing: 6,
                     runSpacing: 6,
-                    children: [for (final t in tags) Chip(label: Text(t.name))],
+                    children: [
+                      for (final t in tags) _buildTagActionChip(context, t),
+                    ],
                   ),
                 ),
               ),
@@ -478,7 +619,7 @@ class _LinkDialogState extends State<_LinkDialog> {
           controller: amount,
           autofocus: true,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          inputFormatters: amountInputFormatters,
+          inputFormatters: _amountInputFormatters,
           decoration: InputDecoration(
             labelText: '金额',
             prefixText: '¥ ',
@@ -506,7 +647,7 @@ class _LinkDialogState extends State<_LinkDialog> {
         key: const Key('link-save'),
         onPressed: () {
           try {
-            final money = parseAmount(amount.text);
+            final money = _parseAmount(amount.text);
             if (money.units <= BigInt.zero) {
               setState(() => error = '金额须大于 0');
               return;
@@ -562,7 +703,7 @@ class _SettleAdvanceDialogState extends State<_SettleAdvanceDialog> {
           controller: amount,
           autofocus: true,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          inputFormatters: amountInputFormatters,
+          inputFormatters: _amountInputFormatters,
           decoration: InputDecoration(
             labelText: '实际结算金额',
             prefixText: '¥ ',
@@ -599,7 +740,7 @@ class _SettleAdvanceDialogState extends State<_SettleAdvanceDialog> {
         key: const Key('settle-save'),
         onPressed: () {
           try {
-            final money = parseAmount(amount.text);
+            final money = _parseAmount(amount.text);
             if (money.units <= BigInt.zero) {
               setState(() => error = '结算金额须大于 0');
               return;

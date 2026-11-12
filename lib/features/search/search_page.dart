@@ -8,8 +8,10 @@ import '../../data/db/database.dart';
 import '../../data/repo/search_queries.dart';
 import '../../domain/model/codes.dart';
 import '../../domain/rules/income_expense.dart';
+import '../common/catalog_icons.dart';
 import '../common/common.dart';
 import '../records/record_labels.dart';
+import '../stats/tag_stats_page.dart' show TagColorDot, parseTagColor;
 
 class SearchPage extends ConsumerStatefulWidget {
   const SearchPage({super.key});
@@ -25,6 +27,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
 
   int? _selectedType;
   final Set<int> _selectedCategoryIds = {};
+  final Set<String> _selectedTagIds = {};
   int? _selectedAssetId;
   DateTime? _startDate;
   DateTime? _endDate;
@@ -56,6 +59,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
       _maxMoneyController.clear();
       _selectedType = null;
       _selectedCategoryIds.clear();
+      _selectedTagIds.clear();
       _selectedAssetId = null;
       _startDate = null;
       _endDate = null;
@@ -67,17 +71,35 @@ class _SearchPageState extends ConsumerState<SearchPage> {
       _keywordController.text.trim().isNotEmpty ||
       _selectedType != null ||
       _selectedCategoryIds.isNotEmpty ||
+      _selectedTagIds.isNotEmpty ||
       _selectedAssetId != null ||
       _startDate != null ||
       _endDate != null ||
       _minMoneyController.text.trim().isNotEmpty ||
       _maxMoneyController.text.trim().isNotEmpty;
 
+  Set<String>? _buildEffectiveTagIds(List<Tag> allTags) {
+    if (_selectedTagIds.isEmpty) return null;
+    final expanded = <String>{..._selectedTagIds};
+    for (final selectedId in _selectedTagIds) {
+      final tag = allTags.where((t) => t.tagId == selectedId).firstOrNull;
+      if (tag != null && tag.parent == 1) {
+        for (final child in allTags) {
+          if (child.parentTagId == tag.tagId) {
+            expanded.add(child.tagId);
+          }
+        }
+      }
+    }
+    return expanded;
+  }
+
   @override
   Widget build(BuildContext context) {
     final bookId = ref.watch(currentBookIdProvider).value ?? 1;
     final categories = ref.watch(categoriesProvider(bookId)).value ?? const [];
     final assets = ref.watch(assetsProvider).value ?? const <Asset>[];
+    final allTags = ref.watch(tagsProvider).value ?? const <Tag>[];
 
     final filter = SearchFilter(
       bookId: bookId,
@@ -89,6 +111,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
           ? null
           : Set.of(_selectedCategoryIds),
       assetId: _selectedAssetId,
+      tagIds: _buildEffectiveTagIds(allTags),
       startMs: _startDate?.millisecondsSinceEpoch,
       endMs: _endDate == null
           ? null
@@ -154,7 +177,8 @@ class _SearchPageState extends ConsumerState<SearchPage> {
       ),
       body: Column(
         children: [
-          if (_filterExpanded) _buildFilterPanel(context, categories, assets),
+          if (_filterExpanded)
+            _buildFilterPanel(context, categories, assets, allTags),
           _buildSummaryBar(context, summaryAsync),
           Expanded(
             child: recordsAsync.when(
@@ -199,231 +223,298 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     BuildContext context,
     List<RecordCategory> categories,
     List<Asset> assets,
+    List<Tag> allTags,
   ) {
     final theme = Theme.of(context);
     return Material(
       elevation: 2,
       color: theme.colorScheme.surfaceContainerHighest,
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // Type row
-            Row(
-              children: [
-                Text('类型：', style: theme.textTheme.bodyMedium),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Wrap(
-                    spacing: 8,
-                    children: [
-                      ChoiceChip(
-                        label: const Text('全部'),
-                        selected: _selectedType == null,
-                        onSelected: (selected) {
-                          if (selected) setState(() => _selectedType = null);
-                        },
-                      ),
-                      ChoiceChip(
-                        label: const Text('支出'),
-                        selected: _selectedType == RecordType.expense,
-                        onSelected: (selected) {
-                          setState(
-                            () => _selectedType = selected
-                                ? RecordType.expense
-                                : null,
-                          );
-                        },
-                      ),
-                      ChoiceChip(
-                        label: const Text('收入'),
-                        selected: _selectedType == RecordType.income,
-                        onSelected: (selected) {
-                          setState(
-                            () => _selectedType = selected
-                                ? RecordType.income
-                                : null,
-                          );
-                        },
-                      ),
-                      ChoiceChip(
-                        label: const Text('转账'),
-                        selected: _selectedType == RecordType.transfer,
-                        onSelected: (selected) {
-                          setState(
-                            () => _selectedType = selected
-                                ? RecordType.transfer
-                                : null,
-                          );
-                        },
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-
-            // Time range row
-            Row(
-              children: [
-                Text('时间：', style: theme.textTheme.bodyMedium),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    icon: const Icon(Icons.date_range, size: 18),
-                    label: Text(
-                      _startDate == null && _endDate == null
-                          ? '选择日期范围'
-                          : '${_startDate == null ? '不限' : formatDate(_startDate!)} ~ ${_endDate == null ? '不限' : formatDate(_endDate!)}',
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxHeight: 280),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Type row
+              Row(
+                children: [
+                  Text('类型：', style: theme.textTheme.bodyMedium),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Wrap(
+                      spacing: 8,
+                      children: [
+                        ChoiceChip(
+                          label: const Text('全部'),
+                          selected: _selectedType == null,
+                          onSelected: (selected) {
+                            if (selected) setState(() => _selectedType = null);
+                          },
+                        ),
+                        ChoiceChip(
+                          label: const Text('支出'),
+                          selected: _selectedType == RecordType.expense,
+                          onSelected: (selected) {
+                            setState(
+                              () => _selectedType = selected
+                                  ? RecordType.expense
+                                  : null,
+                            );
+                          },
+                        ),
+                        ChoiceChip(
+                          label: const Text('收入'),
+                          selected: _selectedType == RecordType.income,
+                          onSelected: (selected) {
+                            setState(
+                              () => _selectedType = selected
+                                  ? RecordType.income
+                                  : null,
+                            );
+                          },
+                        ),
+                        ChoiceChip(
+                          label: const Text('转账'),
+                          selected: _selectedType == RecordType.transfer,
+                          onSelected: (selected) {
+                            setState(
+                              () => _selectedType = selected
+                                  ? RecordType.transfer
+                                  : null,
+                            );
+                          },
+                        ),
+                      ],
                     ),
-                    onPressed: () async {
-                      final picked = await showDateRangePicker(
-                        context: context,
-                        firstDate: DateTime(2000),
-                        lastDate: DateTime(2100),
-                        initialDateRange: _startDate != null && _endDate != null
-                            ? DateTimeRange(start: _startDate!, end: _endDate!)
-                            : null,
-                      );
-                      if (picked != null) {
-                        setState(() {
-                          _startDate = picked.start;
-                          _endDate = picked.end;
-                        });
-                      }
-                    },
                   ),
-                ),
-                if (_startDate != null || _endDate != null)
-                  IconButton(
-                    icon: const Icon(Icons.close, size: 18),
-                    tooltip: '清除日期',
-                    onPressed: () => setState(() {
-                      _startDate = null;
-                      _endDate = null;
-                    }),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 8),
-
-            // Account & Category dropdowns
-            Row(
-              children: [
-                Expanded(
-                  child: DropdownButtonFormField<int?>(
-                    initialValue: _selectedAssetId,
-                    decoration: const InputDecoration(
-                      labelText: '账户',
-                      isDense: true,
-                      contentPadding: EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 8,
-                      ),
-                    ),
-                    items: [
-                      const DropdownMenuItem(value: null, child: Text('所有账户')),
-                      for (final a in assets)
-                        DropdownMenuItem(value: a.id, child: Text(a.name)),
-                    ],
-                    onChanged: (val) => setState(() => _selectedAssetId = val),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: DropdownButtonFormField<int?>(
-                    initialValue: _selectedCategoryIds.length == 1
-                        ? _selectedCategoryIds.first
-                        : null,
-                    decoration: const InputDecoration(
-                      labelText: '分类',
-                      isDense: true,
-                      contentPadding: EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 8,
-                      ),
-                    ),
-                    items: [
-                      const DropdownMenuItem(value: null, child: Text('所有分类')),
-                      for (final c in categories)
-                        DropdownMenuItem(value: c.id, child: Text(c.name)),
-                    ],
-                    onChanged: (val) {
-                      setState(() {
-                        _selectedCategoryIds.clear();
-                        if (val != null) _selectedCategoryIds.add(val);
-                      });
-                    },
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-
-            // Money range inputs
-            Row(
-              children: [
-                Text('金额：', style: theme.textTheme.bodyMedium),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: TextField(
-                    controller: _minMoneyController,
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
-                    ),
-                    decoration: const InputDecoration(
-                      hintText: '最低金额',
-                      isDense: true,
-                      prefixText: '¥ ',
-                      contentPadding: EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 8,
-                      ),
-                      border: OutlineInputBorder(),
-                    ),
-                    onChanged: (_) => setState(() {}),
-                  ),
-                ),
-                const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 4),
-                  child: Text('~'),
-                ),
-                Expanded(
-                  child: TextField(
-                    controller: _maxMoneyController,
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
-                    ),
-                    decoration: const InputDecoration(
-                      hintText: '最高金额',
-                      isDense: true,
-                      prefixText: '¥ ',
-                      contentPadding: EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 8,
-                      ),
-                      border: OutlineInputBorder(),
-                    ),
-                    onChanged: (_) => setState(() {}),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-
-            // Reset button
-            Align(
-              alignment: Alignment.centerRight,
-              child: TextButton.icon(
-                icon: const Icon(Icons.refresh, size: 16),
-                label: const Text('重置筛选'),
-                onPressed: _resetFilters,
+                ],
               ),
-            ),
-          ],
+              const SizedBox(height: 8),
+
+              // Time range row
+              Row(
+                children: [
+                  Text('时间：', style: theme.textTheme.bodyMedium),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      icon: const Icon(Icons.date_range, size: 18),
+                      label: Text(
+                        _startDate == null && _endDate == null
+                            ? '选择日期范围'
+                            : '${_startDate == null ? '不限' : formatDate(_startDate!)} ~ ${_endDate == null ? '不限' : formatDate(_endDate!)}',
+                      ),
+                      onPressed: () async {
+                        final picked = await showDateRangePicker(
+                          context: context,
+                          firstDate: DateTime(2000),
+                          lastDate: DateTime(2100),
+                          initialDateRange:
+                              _startDate != null && _endDate != null
+                              ? DateTimeRange(
+                                  start: _startDate!,
+                                  end: _endDate!,
+                                )
+                              : null,
+                        );
+                        if (picked != null) {
+                          setState(() {
+                            _startDate = picked.start;
+                            _endDate = picked.end;
+                          });
+                        }
+                      },
+                    ),
+                  ),
+                  if (_startDate != null || _endDate != null)
+                    IconButton(
+                      icon: const Icon(Icons.close, size: 18),
+                      tooltip: '清除日期',
+                      onPressed: () => setState(() {
+                        _startDate = null;
+                        _endDate = null;
+                      }),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 8),
+
+              // Account & Category dropdowns
+              Row(
+                children: [
+                  Expanded(
+                    child: DropdownButtonFormField<int?>(
+                      initialValue: _selectedAssetId,
+                      decoration: const InputDecoration(
+                        labelText: '账户',
+                        isDense: true,
+                        contentPadding: EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 8,
+                        ),
+                      ),
+                      items: [
+                        const DropdownMenuItem(
+                          value: null,
+                          child: Text('所有账户'),
+                        ),
+                        for (final a in assets)
+                          DropdownMenuItem(value: a.id, child: Text(a.name)),
+                      ],
+                      onChanged: (val) =>
+                          setState(() => _selectedAssetId = val),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: DropdownButtonFormField<int?>(
+                      initialValue: _selectedCategoryIds.length == 1
+                          ? _selectedCategoryIds.first
+                          : null,
+                      decoration: const InputDecoration(
+                        labelText: '分类',
+                        isDense: true,
+                        contentPadding: EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 8,
+                        ),
+                      ),
+                      items: [
+                        const DropdownMenuItem(
+                          value: null,
+                          child: Text('所有分类'),
+                        ),
+                        for (final c in categories)
+                          DropdownMenuItem(value: c.id, child: Text(c.name)),
+                      ],
+                      onChanged: (val) {
+                        setState(() {
+                          _selectedCategoryIds.clear();
+                          if (val != null) _selectedCategoryIds.add(val);
+                        });
+                      },
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+
+              // Tags multi-select FilterChip row
+              if (allTags.isNotEmpty) ...[
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Text('标签：', style: theme.textTheme.bodyMedium),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: [
+                          for (final t in allTags)
+                            Builder(
+                              builder: (context) {
+                                final selected = _selectedTagIds.contains(
+                                  t.tagId,
+                                );
+                                final tint = parseTagColor(t.color);
+                                return FilterChip(
+                                  key: Key('search-tag-chip-${t.tagId}'),
+                                  visualDensity: VisualDensity.compact,
+                                  avatar: t.color != null && t.color!.isNotEmpty
+                                      ? TagColorDot(colorHex: t.color, size: 8)
+                                      : null,
+                                  selectedColor: tint?.withValues(alpha: 0.22),
+                                  label: Text(t.name),
+                                  selected: selected,
+                                  onSelected: (sel) {
+                                    setState(() {
+                                      if (sel) {
+                                        _selectedTagIds.add(t.tagId);
+                                      } else {
+                                        _selectedTagIds.remove(t.tagId);
+                                      }
+                                    });
+                                  },
+                                );
+                              },
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+              ],
+
+              // Money range inputs
+              Row(
+                children: [
+                  Text('金额：', style: theme.textTheme.bodyMedium),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: TextField(
+                      controller: _minMoneyController,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      decoration: const InputDecoration(
+                        hintText: '最低金额',
+                        isDense: true,
+                        prefixText: '¥ ',
+                        contentPadding: EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 8,
+                        ),
+                        border: OutlineInputBorder(),
+                      ),
+                      onChanged: (_) => setState(() {}),
+                    ),
+                  ),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 4),
+                    child: Text('~'),
+                  ),
+                  Expanded(
+                    child: TextField(
+                      controller: _maxMoneyController,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      decoration: const InputDecoration(
+                        hintText: '最高金额',
+                        isDense: true,
+                        prefixText: '¥ ',
+                        contentPadding: EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 8,
+                        ),
+                        border: OutlineInputBorder(),
+                      ),
+                      onChanged: (_) => setState(() {}),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+
+              // Reset button
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton.icon(
+                  key: const Key('search-reset-filters'),
+                  icon: const Icon(Icons.refresh, size: 16),
+                  label: const Text('重置筛选'),
+                  onPressed: _resetFilters,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -507,10 +598,34 @@ class _SearchPageState extends ConsumerState<SearchPage> {
         );
       }
       final label = recordLabel(r, categories, assets);
+      final cat = r.recordCatId == noRef
+          ? null
+          : categories.where((c) => c.id == r.recordCatId).firstOrNull;
+      final parentCat = (cat != null && cat.parentCatId != noRef)
+          ? categories.where((c) => c.id == cat.parentCatId).firstOrNull
+          : null;
+      final catDisplayName = cat == null
+          ? null
+          : (parentCat != null ? '${parentCat.name} · ${cat.name}' : cat.name);
+      final catColor =
+          (cat?.colorFill != null && cat!.colorFill!.trim().isNotEmpty)
+          ? cat.colorFill
+          : parentCat?.colorFill;
+      final isRefund =
+          (r.type == RecordType.expense || r.type == RecordType.income) &&
+          r.moneyMinor < BigInt.zero;
       widgets.add(
         ListTile(
           key: Key('search-record-${r.recordId}'),
-          leading: CircleAvatar(child: Text(label.title.characters.first)),
+          leading: RecordTypeIconAvatar(
+            recordType: r.type,
+            subType: r.subType,
+            isRefund: isRefund,
+            categoryName: catDisplayName,
+            categoryIcon: cat?.icon,
+            parentCategoryIcon: parentCat?.icon,
+            categoryColor: catColor,
+          ),
           title: Text(label.title),
           subtitle: label.subtitle.isEmpty ? null : Text(label.subtitle),
           trailing: Text(

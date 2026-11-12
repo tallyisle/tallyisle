@@ -22,6 +22,7 @@ final class SearchFilter {
     this.type,
     this.categoryIds,
     this.assetId,
+    this.tagIds,
     this.keyword,
     this.minMoneyMinor,
     this.maxMoneyMinor,
@@ -43,6 +44,9 @@ final class SearchFilter {
   /// Optional asset ID. Matches `asset_id`, `from_asset_id`, or `to_asset_id`.
   final int? assetId;
 
+  /// Optional set of tag IDs. Matches records carrying at least one selected tag.
+  final Set<String>? tagIds;
+
   /// Keyword to match against `remark` via `LIKE`.
   final String? keyword;
 
@@ -58,6 +62,17 @@ final class SearchFilter {
   /// Page offset.
   final int? offset;
 
+  /// Whether any non-keyword advanced filter criterion is active.
+  bool get hasAdvancedFilters =>
+      startMs != null ||
+      endMs != null ||
+      type != null ||
+      (categoryIds != null && categoryIds!.isNotEmpty) ||
+      (assetId != null && assetId != noRef) ||
+      (tagIds != null && tagIds!.isNotEmpty) ||
+      minMoneyMinor != null ||
+      maxMoneyMinor != null;
+
   SearchFilter copyWith({
     int? bookId,
     int? startMs,
@@ -70,6 +85,8 @@ final class SearchFilter {
     bool clearCategoryIds = false,
     int? assetId,
     bool clearAssetId = false,
+    Set<String>? tagIds,
+    bool clearTagIds = false,
     String? keyword,
     bool clearKeyword = false,
     BigInt? minMoneyMinor,
@@ -86,6 +103,7 @@ final class SearchFilter {
       type: clearType ? null : (type ?? this.type),
       categoryIds: clearCategoryIds ? null : (categoryIds ?? this.categoryIds),
       assetId: clearAssetId ? null : (assetId ?? this.assetId),
+      tagIds: clearTagIds ? null : (tagIds ?? this.tagIds),
       keyword: clearKeyword ? null : (keyword ?? this.keyword),
       minMoneyMinor: clearMinMoney
           ? null
@@ -109,6 +127,7 @@ final class SearchFilter {
           type == other.type &&
           _setEquals(categoryIds, other.categoryIds) &&
           assetId == other.assetId &&
+          _setEquals(tagIds, other.tagIds) &&
           keyword == other.keyword &&
           minMoneyMinor == other.minMoneyMinor &&
           maxMoneyMinor == other.maxMoneyMinor &&
@@ -121,8 +140,9 @@ final class SearchFilter {
     startMs,
     endMs,
     type,
-    categoryIds == null ? null : Object.hashAll(categoryIds!),
+    categoryIds == null ? null : Object.hashAllUnordered(categoryIds!),
     assetId,
+    tagIds == null ? null : Object.hashAllUnordered(tagIds!),
     keyword,
     minMoneyMinor,
     maxMoneyMinor,
@@ -172,6 +192,17 @@ final class SearchQueries {
                 t.fromAssetId.equals(filter.assetId!) |
                 t.toAssetId.equals(filter.assetId!));
       }
+      if (filter.tagIds != null && filter.tagIds!.isNotEmpty) {
+        predicate =
+            predicate &
+            existsQuery(
+              db.select(db.tagRecords)..where(
+                (tr) =>
+                    tr.recordId.equalsExp(t.recordId) &
+                    tr.tagId.isIn(filter.tagIds!),
+              ),
+            );
+      }
       if (filter.keyword != null && filter.keyword!.trim().isNotEmpty) {
         final escaped = escapeSqlLike(filter.keyword!.trim());
         predicate = predicate & t.remark.like('%$escaped%', escapeChar: r'\');
@@ -213,6 +244,12 @@ final class SearchQueries {
     SearchFilter filter, {
     bool paginate = true,
   }) => _buildQuery(filter, applyPagination: paginate).get();
+
+  /// Alias for [getRecords] matching `searchRecords` naming.
+  Future<List<LedgerRecord>> searchRecords(
+    SearchFilter filter, {
+    bool paginate = true,
+  }) => getRecords(filter, paginate: paginate);
 
   /// Watch all records matching [filter] (without pagination limit) for summary aggregation.
   Stream<List<LedgerRecord>> watchAllRecords(SearchFilter filter) =>

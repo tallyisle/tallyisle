@@ -57,6 +57,7 @@ import '../features/stats/annual_report_page.dart';
 import '../features/stats/asset_trend_page.dart';
 import '../features/stats/category_stats_page.dart';
 import '../features/stats/stats_page.dart';
+import '../features/stats/tag_stats_page.dart';
 import '../features/tags/tags_page.dart';
 import '../features/templates/remarks_page.dart';
 import '../features/templates/template_editor_page.dart';
@@ -100,6 +101,12 @@ GoRouter buildRouter() => GoRouter(
       builder: (_, state) => CategoryRouteDrilldownPage(
         categoryId: int.parse(state.pathParameters['id']!),
       ),
+    ),
+    GoRoute(path: '/stats/tags', builder: (_, _) => const TagRankingsPage()),
+    GoRoute(
+      path: '/stats/tag/:id',
+      builder: (_, state) =>
+          TagDetailStatsPage(tagId: state.pathParameters['id']!),
     ),
     GoRoute(
       path: '/stats/trend',
