@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
+import 'dart:ui' show AppExitResponse, PointerDeviceKind;
 
 import 'package:drift/drift.dart' show driftRuntimeOptions;
 import 'package:drift/native.dart';
@@ -12,9 +14,11 @@ import 'package:path/path.dart' as p;
 import 'package:tallyisle/app/app.dart';
 import 'package:tallyisle/app/providers.dart';
 import 'package:tallyisle/core/money.dart';
+import 'package:tallyisle/data/backup/s3_client.dart';
 import 'package:tallyisle/data/db/database.dart';
 import 'package:tallyisle/data/ledger/ledger_service.dart';
 import 'package:tallyisle/domain/model/codes.dart';
+import 'package:tallyisle/domain/rules/cloud_sync_rules.dart';
 import 'package:tallyisle/domain/rules/s3_sigv4_rules.dart';
 import 'package:tallyisle/domain/rules/tally_backup.dart';
 import 'package:tallyisle/features/backup/backup_providers.dart';
@@ -234,6 +238,42 @@ Future<void> _settle(WidgetTester tester) async {
 Future<void> _goBack(WidgetTester tester) async {
   await tester.tap(find.byType(BackButton).last);
   await _settle(tester);
+}
+
+Future<T> _pumpFuture<T>(
+  WidgetTester tester,
+  Future<T> Function() action,
+) async {
+  var done = false;
+  Object? error;
+  StackTrace? stack;
+  late T result;
+  unawaited(
+    action().then(
+      (value) {
+        result = value;
+        done = true;
+      },
+      onError: (Object e, StackTrace st) {
+        error = e;
+        stack = st;
+        done = true;
+      },
+    ),
+  );
+  for (var i = 0; i < 120 && !done; i++) {
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 20)),
+    );
+    await tester.pump(const Duration(milliseconds: 50));
+  }
+  if (!done) {
+    throw TimeoutException('_pumpFuture timed out');
+  }
+  if (error != null) {
+    Error.throwWithStackTrace(error!, stack!);
+  }
+  return result;
 }
 
 void main() {
@@ -488,7 +528,7 @@ void main() {
   );
 
   testWidgets(
-    'TallyIsleApp end-to-end legacy import & opt-in live exchange rates: MePage -> 从旧软件导入 (/migration) and 币种与汇率 (/currencies)',
+    'TallyIsleApp end-to-end third-party import hub & opt-in live exchange rates: MePage -> 第三方数据导入 (/migration) and 币种与汇率 (/currencies)',
     (tester) async {
       final prevOverrides = HttpOverrides.current;
       HttpOverrides.global = null;
@@ -560,7 +600,7 @@ void main() {
       expect(backupClientFactoryCalls, 0);
       expect(rateServer.requestedPaths, isEmpty);
 
-      // 2. Navigate MePage -> 从旧软件导入 (/migration)
+      // 2. Navigate MePage -> 第三方数据导入 (/migration)
       await tester.tap(find.text('我的'));
       await _settle(tester);
       await tester.scrollUntilVisible(
@@ -569,15 +609,17 @@ void main() {
         scrollable: find.byType(Scrollable).first,
       );
       await _settle(tester);
-      expect(find.text('从旧软件导入'), findsOneWidget);
+      expect(find.text('第三方数据导入'), findsOneWidget);
       await tester.tap(find.byKey(const Key('me-migration')));
       await _settle(tester);
 
       expect(find.byKey(const Key('migration_page')), findsOneWidget);
+      expect(find.text('第三方数据导入'), findsWidgets);
       expect(
         find.byKey(const Key('migration_unity_banner_card')),
         findsOneWidget,
       );
+      expect(find.text('一羽记账备份全量迁入'), findsOneWidget);
       expect(
         find.byKey(const Key('legacy_import_penny_button')),
         findsOneWidget,
@@ -607,6 +649,31 @@ void main() {
         find.byKey(const Key('migration_restore_lan_button')),
         findsOneWidget,
       );
+
+      await tester.dragUntilVisible(
+        find.byKey(const Key('third_party_extensible_note_card')),
+        find.byType(ListView),
+        const Offset(0, -160),
+      );
+      await _settle(tester);
+      expect(find.text('电子账单与更多记账软件导入'), findsOneWidget);
+      expect(
+        find.byKey(const Key('third_party_csv_shortcut_card')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('third_party_extensible_note_card')),
+        findsOneWidget,
+      );
+
+      // Verify shortcut navigation from 第三方数据导入 -> /import/csv and back
+      await tester.ensureVisible(find.byKey(const Key('go_csv_import_button')));
+      await _settle(tester);
+      await tester.tap(find.byKey(const Key('go_csv_import_button')));
+      await _settle(tester);
+      expect(find.byKey(const Key('csv_import_page')), findsOneWidget);
+      await _goBack(tester);
+      expect(find.byKey(const Key('migration_page')), findsOneWidget);
 
       await _goBack(tester);
 
@@ -668,6 +735,388 @@ void main() {
 
       expect(rateClientFactoryCalls, 2);
       expect(find.textContaining('1 USD = 7 CNY'), findsOneWidget);
+
+      await cleanUp();
+    },
+  );
+
+  testWidgets(
+    'TallyIsleApp bookkeeping idle-debounce: db.tableUpdates() coalesces writes and triggers local .tally backup + S3 r1 push after idle window',
+    (tester) async {
+      final prevOverrides = HttpOverrides.current;
+      HttpOverrides.global = null;
+
+      var clockMs = DateTime(2026, 11, 12, 10, 0).millisecondsSinceEpoch;
+      final db = AppDatabase(NativeDatabase.memory(), nowMs: () => clockMs);
+      final reminderScheduler = InMemoryReminderScheduler();
+      final s3Server = (await tester.runAsync(_LoopbackS3Server.start))!;
+      final tempRoot = (await tester.runAsync(
+        () => Directory.systemTemp.createTemp('enh_idle_debounce_'),
+      ))!;
+      final localBkDir = Directory(p.join(tempRoot.path, 'local_bk'));
+      final attDir = Directory(p.join(tempRoot.path, 'att'));
+
+      var closed = false;
+      Future<void> cleanUp() async {
+        if (closed) return;
+        closed = true;
+        HttpOverrides.global = prevOverrides;
+        await tester.pumpWidget(const SizedBox());
+        await _settle(tester);
+        await tester.pump(const Duration(seconds: 1));
+        await tester.runAsync(reminderScheduler.dispose);
+        await tester.runAsync(s3Server.close);
+        await tester.runAsync(db.close);
+        await tester.runAsync(() async {
+          if (await tempRoot.exists()) {
+            await tempRoot.delete(recursive: true);
+          }
+        });
+      }
+
+      addTearDown(cleanUp);
+
+      await tester.pumpWidget(
+        ProviderScope(
+          retry: (_, _) => null,
+          overrides: [
+            databaseProvider.overrideWith((ref) async => db),
+            reminderSchedulerProvider.overrideWithValue(reminderScheduler),
+            backupLocalDirectoryOverrideProvider.overrideWithValue(
+              () async => localBkDir,
+            ),
+            backupAttachmentsDirectoryOverrideProvider.overrideWithValue(
+              () async => attDir,
+            ),
+            backupHttpClientFactoryProvider.overrideWithValue(HttpClient.new),
+          ],
+          child: const TallyIsleApp(),
+        ),
+      );
+      await _settle(tester);
+
+      // Configure loopback S3 + opt-in syncOnIdle (3 min) & backupOnIdle (5 min).
+      final container = ProviderScope.containerOf(
+        tester.element(find.byType(Scaffold).first),
+      );
+      final backupService = container
+          .read(tallyBackupServiceProvider)
+          .requireValue;
+      await _pumpFuture(tester, () async {
+        await backupService.saveS3Config(
+          S3Config(
+            endpoint: s3Server.endpoint,
+            region: 'auto',
+            bucket: _LoopbackS3Server.bucket,
+            accessKeyId: _LoopbackS3Server.accessKey,
+            secretAccessKey: _LoopbackS3Server.secretKey,
+            remotePrefix: 'TallyIsle',
+          ),
+        );
+        await backupService.setAutoArchiveBackupEnabled(false);
+        await backupService.updateCloudSyncTriggers(
+          syncOnStartup: false,
+          syncOnExit: false,
+          syncOnIdle: true,
+          idleMinutes: 3,
+          syncOnSchedule: false,
+        );
+        await backupService.saveLocalAutoBackupPolicy(
+          const LocalAutoBackupPolicy(
+            backupOnIdle: true,
+            idleMinutes: 5,
+            keepCount: 10,
+          ),
+        );
+      });
+      await _settle(tester);
+
+      // Preference writes alone must NOT trigger business idle backup/sync.
+      expect(s3Server.objects['TallyIsle/sync/head.json'], isNull);
+      expect(await tester.runAsync(localBkDir.exists), isFalse);
+
+      // Insert bookkeeping asset + expense record -> emits db.tableUpdates() on business tables!
+      await _pumpFuture(tester, () async {
+        final books = await db.select(db.accountBooks).get();
+        final cats = await db.select(db.recordCategories).get();
+        final expenseCat = cats.firstWhere((c) => c.type == RecordType.expense);
+        final ledger = LedgerService(db);
+        final assetId = await ledger.createAsset(
+          commandId: 'idle-e2e-asset',
+          name: '静置测试账户',
+          type: AssetType.normal,
+          initial: Money.parse('1000.00'),
+        );
+        await ledger.saveRecord(
+          commandId: 'idle-e2e-record',
+          draft: RecordDraft(
+            bookId: books.first.id,
+            type: RecordType.expense,
+            money: Money.parse('45.80'),
+            categoryId: expenseCat.id,
+            assetId: assetId,
+            recordTime: clockMs,
+            remark: '静置防抖自动同步晚餐',
+          ),
+        );
+      });
+      await _settle(tester);
+
+      // Before idle window elapses (2 minutes < 3 min cloud & 5 min local): nothing fired yet.
+      clockMs += const Duration(minutes: 2).inMilliseconds;
+      await tester.pump(const Duration(minutes: 2));
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 30)),
+      );
+      expect(s3Server.objects['TallyIsle/sync/head.json'], isNull);
+      expect(await tester.runAsync(localBkDir.exists), isFalse);
+
+      // Advance past full 5-minute idle window: both cloud sync (3 min) and local backup (5 min) fire!
+      clockMs += const Duration(minutes: 4).inMilliseconds;
+      await tester.pump(const Duration(minutes: 4));
+      await _settle(tester);
+
+      final headBytes = s3Server.objects['TallyIsle/sync/head.json'];
+      expect(headBytes, isNotNull);
+      final head = CloudSyncHead.fromJson(
+        jsonDecode(utf8.decode(headBytes!)) as Map<String, Object?>,
+      );
+      expect(head.revision, 1);
+      expect(head.recordCount, 1);
+      expect(s3Server.objects['TallyIsle/sync/latest_db.tally'], isNotNull);
+
+      final localFiles = (await tester.runAsync(
+        () =>
+            localBkDir.list().where((e) => e.path.endsWith('.tally')).toList(),
+      ))!;
+      expect(localFiles, hasLength(1));
+
+      await cleanUp();
+    },
+  );
+
+  testWidgets(
+    'TallyIsleApp desktop onExitRequested guard saves exit local .tally backup & pushes exit cloud snapshot before returning AppExitResponse.exit',
+    (tester) async {
+      final prevOverrides = HttpOverrides.current;
+      HttpOverrides.global = null;
+
+      final clockMs = DateTime(2026, 11, 12, 18, 30).millisecondsSinceEpoch;
+      final db = AppDatabase(NativeDatabase.memory(), nowMs: () => clockMs);
+      final reminderScheduler = InMemoryReminderScheduler();
+      final s3Server = (await tester.runAsync(_LoopbackS3Server.start))!;
+      final tempRoot = (await tester.runAsync(
+        () => Directory.systemTemp.createTemp('enh_desktop_exit_'),
+      ))!;
+      final localBkDir = Directory(p.join(tempRoot.path, 'local_bk'));
+      final attDir = Directory(p.join(tempRoot.path, 'att'));
+
+      var closed = false;
+      Future<void> cleanUp() async {
+        if (closed) return;
+        closed = true;
+        HttpOverrides.global = prevOverrides;
+        await tester.pumpWidget(const SizedBox());
+        await _settle(tester);
+        await tester.pump(const Duration(seconds: 1));
+        await tester.runAsync(reminderScheduler.dispose);
+        await tester.runAsync(s3Server.close);
+        await tester.runAsync(db.close);
+        await tester.runAsync(() async {
+          if (await tempRoot.exists()) {
+            await tempRoot.delete(recursive: true);
+          }
+        });
+      }
+
+      addTearDown(cleanUp);
+
+      await tester.pumpWidget(
+        ProviderScope(
+          retry: (_, _) => null,
+          overrides: [
+            databaseProvider.overrideWith((ref) async => db),
+            reminderSchedulerProvider.overrideWithValue(reminderScheduler),
+            backupLocalDirectoryOverrideProvider.overrideWithValue(
+              () async => localBkDir,
+            ),
+            backupAttachmentsDirectoryOverrideProvider.overrideWithValue(
+              () async => attDir,
+            ),
+            backupHttpClientFactoryProvider.overrideWithValue(HttpClient.new),
+          ],
+          child: const TallyIsleApp(),
+        ),
+      );
+      await _settle(tester);
+
+      final container = ProviderScope.containerOf(
+        tester.element(find.byType(Scaffold).first),
+      );
+      final backupService = container
+          .read(tallyBackupServiceProvider)
+          .requireValue;
+      await _pumpFuture(tester, () async {
+        await backupService.saveS3Config(
+          S3Config(
+            endpoint: s3Server.endpoint,
+            region: 'auto',
+            bucket: _LoopbackS3Server.bucket,
+            accessKeyId: _LoopbackS3Server.accessKey,
+            secretAccessKey: _LoopbackS3Server.secretKey,
+            remotePrefix: 'TallyIsle',
+          ),
+        );
+        await backupService.setAutoArchiveBackupEnabled(false);
+        await backupService.updateCloudSyncTriggers(
+          syncOnStartup: false,
+          syncOnExit: true,
+          syncOnIdle: false,
+          syncOnSchedule: false,
+        );
+        await backupService.saveLocalAutoBackupPolicy(
+          const LocalAutoBackupPolicy(backupOnExit: true, keepCount: 10),
+        );
+
+        final books = await db.select(db.accountBooks).get();
+        final cats = await db.select(db.recordCategories).get();
+        final expenseCat = cats.firstWhere((c) => c.type == RecordType.expense);
+        final ledger = LedgerService(db);
+        final assetId = await ledger.createAsset(
+          commandId: 'exit-e2e-asset',
+          name: '桌面现金账户',
+          type: AssetType.normal,
+          initial: Money.parse('600.00'),
+        );
+        await ledger.saveRecord(
+          commandId: 'exit-e2e-record',
+          draft: RecordDraft(
+            bookId: books.first.id,
+            type: RecordType.expense,
+            money: Money.parse('19.90'),
+            categoryId: expenseCat.id,
+            assetId: assetId,
+            recordTime: clockMs,
+            remark: '关窗前自动备份同步测试',
+          ),
+        );
+      });
+      await _settle(tester);
+
+      expect(s3Server.objects['TallyIsle/sync/head.json'], isNull);
+      expect(await tester.runAsync(localBkDir.exists), isFalse);
+
+      // Simulate desktop window close request via WidgetsBinding.instance.handleRequestAppExit().
+      final exitResponse = await _pumpFuture(
+        tester,
+        WidgetsBinding.instance.handleRequestAppExit,
+      );
+      await _settle(tester);
+
+      expect(exitResponse, AppExitResponse.exit);
+
+      final headBytes = s3Server.objects['TallyIsle/sync/head.json'];
+      expect(headBytes, isNotNull);
+      final head = CloudSyncHead.fromJson(
+        jsonDecode(utf8.decode(headBytes!)) as Map<String, Object?>,
+      );
+      expect(head.revision, 1);
+      expect(head.recordCount, 1);
+
+      final localFiles = (await tester.runAsync(
+        () =>
+            localBkDir.list().where((e) => e.path.endsWith('.tally')).toList(),
+      ))!;
+      expect(localFiles, hasLength(1));
+
+      await cleanUp();
+    },
+  );
+
+  testWidgets(
+    'TallyIsleApp desktop widescreen (1280x800) renders centered maxWidth 960 shell without overflow and supports mouse drag scrolling',
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      final db = AppDatabase(NativeDatabase.memory());
+      final reminderScheduler = InMemoryReminderScheduler();
+      final tempRoot = (await tester.runAsync(
+        () => Directory.systemTemp.createTemp('enh_widescreen_'),
+      ))!;
+
+      var closed = false;
+      Future<void> cleanUp() async {
+        if (closed) return;
+        closed = true;
+        await tester.pumpWidget(const SizedBox());
+        await _settle(tester);
+        await tester.pump(const Duration(seconds: 1));
+        await tester.runAsync(reminderScheduler.dispose);
+        await tester.runAsync(db.close);
+        await tester.runAsync(() async {
+          if (await tempRoot.exists()) {
+            await tempRoot.delete(recursive: true);
+          }
+        });
+      }
+
+      addTearDown(cleanUp);
+
+      await tester.pumpWidget(
+        ProviderScope(
+          retry: (_, _) => null,
+          overrides: [
+            databaseProvider.overrideWith((ref) async => db),
+            reminderSchedulerProvider.overrideWithValue(reminderScheduler),
+            backupLocalDirectoryOverrideProvider.overrideWithValue(
+              () async => Directory(p.join(tempRoot.path, 'local')),
+            ),
+            backupAttachmentsDirectoryOverrideProvider.overrideWithValue(
+              () async => Directory(p.join(tempRoot.path, 'att')),
+            ),
+          ],
+          child: const TallyIsleApp(),
+        ),
+      );
+      await _settle(tester);
+      expect(tester.takeException(), isNull);
+
+      final shellFinder = find.byKey(const Key('desktop_widescreen_shell'));
+      final frameFinder = find.byKey(const Key('desktop_widescreen_frame'));
+      expect(shellFinder, findsOneWidget);
+      expect(frameFinder, findsOneWidget);
+      expect(tester.getSize(shellFinder), const Size(1280, 800));
+      expect(tester.getSize(frameFinder), const Size(960, 800));
+      expect(tester.getTopLeft(frameFinder).dx, 160.0);
+
+      for (final tabLabel in const <String>['统计', '资产', '我的']) {
+        await tester.tap(find.text(tabLabel));
+        await _settle(tester);
+        expect(tester.takeException(), isNull);
+      }
+
+      // Verify mouse drag scrolling works cleanly on MePage at 1280x800
+      final scrollable = find.byType(Scrollable).first;
+      final startOffset = tester
+          .state<ScrollableState>(scrollable)
+          .position
+          .pixels;
+      await tester.drag(
+        scrollable,
+        const Offset(0, -240),
+        kind: PointerDeviceKind.mouse,
+      );
+      await _settle(tester);
+      expect(
+        tester.state<ScrollableState>(scrollable).position.pixels,
+        greaterThan(startOffset),
+      );
+      expect(tester.takeException(), isNull);
 
       await cleanUp();
     },

@@ -1,9 +1,12 @@
 import 'dart:async';
+import 'dart:ui' show AppExitResponse, PointerDeviceKind;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../data/backup/backup_sync_scheduler.dart';
+import '../data/backup/tally_backup_service.dart';
 import '../domain/rules/app_settings_rules.dart';
 import '../domain/rules/cloud_sync_rules.dart';
 import '../features/automation/automation_providers.dart';
@@ -23,6 +26,17 @@ import 'router.dart';
 String brandName(Locale locale) =>
     locale.languageCode == 'zh' ? '帐屿' : 'TallyIsle';
 
+/// Subclasses [AppLifecycleListener] to wire [onExitRequested] for desktop
+/// window-close requests while delegating lifecycle state transitions to
+/// [_TallyIsleAppState.didChangeAppLifecycleState] (avoiding debug state-machine
+/// assertions when widget tests dispatch `paused -> resumed` directly).
+final class _AppExitLifecycleListener extends AppLifecycleListener {
+  _AppExitLifecycleListener({required super.onExitRequested});
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {}
+}
+
 class TallyIsleApp extends ConsumerStatefulWidget {
   const TallyIsleApp({super.key});
   @override
@@ -31,7 +45,22 @@ class TallyIsleApp extends ConsumerStatefulWidget {
 
 class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
     with WidgetsBindingObserver {
+  static final ScrollBehavior _appScrollBehavior =
+      const MaterialScrollBehavior().copyWith(
+        dragDevices: const <PointerDeviceKind>{
+          PointerDeviceKind.touch,
+          PointerDeviceKind.mouse,
+          PointerDeviceKind.stylus,
+          PointerDeviceKind.invertedStylus,
+          PointerDeviceKind.trackpad,
+        },
+      );
+
   late final router = buildRouter();
+  AppLifecycleListener? _lifecycleListener;
+  BackupSyncScheduler? _backupSyncScheduler;
+  TallyBackupService? _schedulerService;
+  Future<BackupSyncScheduler?>? _schedulerInitFuture;
   StreamSubscription<String>? _launchRouteSub;
   StreamSubscription<String>? _deepLinkSub;
   StreamSubscription<CapturedPaymentEvent>? _capturedEventSub;
@@ -44,6 +73,9 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _lifecycleListener = _AppExitLifecycleListener(
+      onExitRequested: _handleExitRequested,
+    );
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_disposed || !mounted) return;
       _attachLaunchRouteListener();
@@ -57,8 +89,84 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
     if (state == AppLifecycleState.resumed) {
       unawaited(_runLifecycleSync(isInitial: false));
     } else if (state == AppLifecycleState.paused) {
-      unawaited(_runSilentCloudSyncOnPause());
+      unawaited(_runSchedulerOnPause());
     }
+  }
+
+  Future<BackupSyncScheduler?> _ensureBackupSyncScheduler() {
+    if (_disposed || !mounted) return Future<BackupSyncScheduler?>.value(null);
+    return _schedulerInitFuture ??= _initOrUpdateBackupSyncScheduler()
+        .whenComplete(() {
+          _schedulerInitFuture = null;
+        });
+  }
+
+  Future<BackupSyncScheduler?> _initOrUpdateBackupSyncScheduler() async {
+    if (_disposed || !mounted) return null;
+    final service = await ref.read(tallyBackupServiceProvider.future);
+    if (_disposed || !mounted) return null;
+
+    var scheduler = _backupSyncScheduler;
+    if (scheduler == null ||
+        scheduler.isDisposed ||
+        !identical(_schedulerService, service)) {
+      await scheduler?.dispose();
+      if (_disposed || !mounted) return null;
+      _schedulerService = service;
+      scheduler = BackupSyncScheduler(
+        service: service,
+        onCloudSyncOutcome: (outcome) {
+          if (_disposed || !mounted) return;
+          _applyCloudSyncOutcome(outcome);
+          if (outcome.status == CloudSyncStatus.pulled) {
+            unawaited(_syncWidgetSnapshotSafely());
+          }
+        },
+        onLocalBackupCreated: (_) {
+          if (!_disposed && mounted) {
+            ref
+              ..invalidate(localBackupsProvider)
+              ..invalidate(lastBackupAtMsProvider);
+          }
+        },
+      );
+      _backupSyncScheduler = scheduler;
+    }
+    await scheduler.start();
+    if (_disposed || !mounted) return null;
+    return scheduler;
+  }
+
+  Future<void> _syncWidgetSnapshotSafely() async {
+    if (_disposed || !mounted) return;
+    try {
+      final widgetService = await ref.read(
+        widgetSnapshotServiceProvider.future,
+      );
+      if (!_disposed && mounted) {
+        await widgetService.syncToPlatform();
+      }
+    } catch (_) {
+      // Non-blocking widget snapshot sync.
+    }
+  }
+
+  Future<AppExitResponse> _handleExitRequested() async {
+    if (_disposed || !mounted) return AppExitResponse.exit;
+    try {
+      final scheduler =
+          _backupSyncScheduler ??
+          await _ensureBackupSyncScheduler().timeout(
+            const Duration(seconds: 5),
+            onTimeout: () => null,
+          );
+      await scheduler?.onDesktopExitRequested(
+        timeout: const Duration(seconds: 5),
+      );
+    } catch (_) {
+      // Never allow exit backup/sync failures to block desktop window close.
+    }
+    return AppExitResponse.exit;
   }
 
   void _applyCloudSyncOutcome(CloudSyncOutcome outcome) {
@@ -86,24 +194,14 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
     }
   }
 
-  Future<void> _runSilentCloudSyncOnPause() async {
-    if (_syncRunning || _disposed || !mounted) return;
+  Future<void> _runSchedulerOnPause() async {
+    if (_disposed || !mounted) return;
     try {
-      final service = await ref.read(tallyBackupServiceProvider.future);
-      if (_disposed || !mounted) return;
-      final outcome = await service.runSilentCloudSyncIfNeeded();
-      if (_disposed || !mounted || outcome == null) return;
-      _applyCloudSyncOutcome(outcome);
-      if (outcome.status == CloudSyncStatus.pulled) {
-        final widgetService = await ref.read(
-          widgetSnapshotServiceProvider.future,
-        );
-        if (!_disposed && mounted) {
-          await widgetService.syncToPlatform();
-        }
-      }
+      final scheduler = await _ensureBackupSyncScheduler();
+      if (_disposed || !mounted || scheduler == null) return;
+      await scheduler.onAppPaused();
     } catch (_) {
-      // Non-blocking background sync on pause.
+      // Non-blocking background backup/sync on pause.
     }
   }
 
@@ -264,16 +362,9 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
         }
       });
       await safeStep(() async {
-        final service = await ref.read(tallyBackupServiceProvider.future);
-        if (_disposed || !mounted) return;
-        final outcome = await service.runSilentCloudSyncIfNeeded();
-        if (_disposed || !mounted || outcome == null) return;
-        _applyCloudSyncOutcome(outcome);
-      });
-      await safeStep(() async {
-        final service = await ref.read(tallyBackupServiceProvider.future);
-        if (_disposed || !mounted) return;
-        await service.runSilentAutoBackupIfNeeded();
+        final scheduler = await _ensureBackupSyncScheduler();
+        if (_disposed || !mounted || scheduler == null) return;
+        await scheduler.onAppResumedOrFocused(isInitialStartup: isInitial);
       });
       await safeStep(() async {
         final service = await ref.read(widgetSnapshotServiceProvider.future);
@@ -289,6 +380,12 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
   void dispose() {
     _disposed = true;
     WidgetsBinding.instance.removeObserver(this);
+    _lifecycleListener?.dispose();
+    _lifecycleListener = null;
+    final scheduler = _backupSyncScheduler;
+    _backupSyncScheduler = null;
+    _schedulerService = null;
+    unawaited(scheduler?.dispose());
     unawaited(_launchRouteSub?.cancel());
     _launchRouteSub = null;
     unawaited(_deepLinkSub?.cancel());
@@ -312,6 +409,7 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
 
     return MaterialApp.router(
       onGenerateTitle: (context) => brandName(Localizations.localeOf(context)),
+      scrollBehavior: _appScrollBehavior,
       localizationsDelegates: GlobalMaterialLocalizations.delegates,
       supportedLocales: const [Locale('zh'), Locale('en')],
       locale: const Locale('zh'),
@@ -330,8 +428,24 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
         ),
         useMaterial3: true,
       ),
-      builder: (context, child) =>
-          AppLockGate(child: child ?? const SizedBox.shrink()),
+      builder: (context, child) {
+        Widget content = child ?? const SizedBox.shrink();
+        if (MediaQuery.sizeOf(context).width > 960) {
+          content = ColoredBox(
+            key: const Key('desktop_widescreen_shell'),
+            color: Theme.of(context).colorScheme.surfaceContainerLowest,
+            child: Align(
+              alignment: Alignment.topCenter,
+              child: ConstrainedBox(
+                key: const Key('desktop_widescreen_frame'),
+                constraints: const BoxConstraints(maxWidth: 960),
+                child: ClipRect(child: content),
+              ),
+            ),
+          );
+        }
+        return AppLockGate(child: content);
+      },
       routerConfig: router,
     );
   }
