@@ -325,7 +325,7 @@ enum DiyToolbarAction {
   frequentRemarks(
     'frequent_remarks',
     '常用备注',
-    '展示分类常用备注候选条并自动统计备注词频（默认关闭）',
+    '展示分类常用备注候选条并自动统计备注词频',
     defaultEnabled: false,
   );
 

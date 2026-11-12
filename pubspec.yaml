@@ -1,7 +1,7 @@
 name: tallyisle
-description: 帐屿 / TallyIsle — evidence-led Flutter rebuild, development profile.
+description: 帐屿 / TallyIsle — 本地优先、精确到分的个人记账与资产管理工具。
 publish_to: none
-version: 0.1.0+1
+version: 0.1.0-rc+1
 environment:
   sdk: '>=3.12.0 <4.0.0'
 dependencies:

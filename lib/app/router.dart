@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../domain/model/codes.dart';
 import '../features/assets/asset_detail_page.dart';
 import '../features/assets/asset_editor_page.dart';
 import '../features/assets/assets_page.dart';
@@ -63,6 +65,7 @@ import '../features/templates/template_editor_page.dart';
 import '../features/templates/templates_page.dart';
 import '../features/wishes/wish_editor_page.dart';
 import '../features/wishes/wishes_page.dart';
+import 'providers.dart';
 
 /// Semantic routes (ADR-015). Mapping to the original app's 73 routes is kept
 /// in docs/reference/ as modules are implemented.
@@ -390,26 +393,189 @@ GoRouter buildRouter() => GoRouter(
   ],
 );
 
-class _Shell extends StatelessWidget {
+class _Shell extends ConsumerWidget {
   const _Shell(this.shell);
   final StatefulNavigationShell shell;
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    body: shell,
-    bottomNavigationBar: NavigationBar(
-      selectedIndex: shell.currentIndex,
-      onDestinationSelected: (i) =>
-          shell.goBranch(i, initialLocation: i == shell.currentIndex),
-      destinations: const [
-        NavigationDestination(icon: Icon(Icons.receipt_long), label: '明细'),
-        NavigationDestination(icon: Icon(Icons.pie_chart_outline), label: '统计'),
-        NavigationDestination(
-          icon: Icon(Icons.account_balance_wallet),
-          label: '资产',
+  Widget build(BuildContext context, WidgetRef ref) {
+    ref.watch(
+      appSettingsProvider.select(
+        (asyncVal) => asyncVal.value?.defaultRecordType,
+      ),
+    );
+    final scheme = Theme.of(context).colorScheme;
+    final selectedIndex = shell.currentIndex;
+
+    void goBranch(int index) {
+      shell.goBranch(index, initialLocation: index == selectedIndex);
+    }
+
+    return Scaffold(
+      body: shell,
+      bottomNavigationBar: Material(
+        color: scheme.surfaceContainer,
+        surfaceTintColor: scheme.surfaceTint,
+        elevation: 3,
+        child: SafeArea(
+          top: false,
+          child: SizedBox(
+            key: const Key('shell-bottom-bar'),
+            height: 64,
+            child: Row(
+              children: [
+                _ShellNavSlot(
+                  slotKey: const Key('nav-slot-home'),
+                  icon: Icons.receipt_long_outlined,
+                  selectedIcon: Icons.receipt_long,
+                  label: '明细',
+                  selected: selectedIndex == 0,
+                  onTap: () => goBranch(0),
+                ),
+                _ShellNavSlot(
+                  slotKey: const Key('nav-slot-stats'),
+                  icon: Icons.pie_chart_outline,
+                  selectedIcon: Icons.pie_chart,
+                  label: '统计',
+                  selected: selectedIndex == 1,
+                  onTap: () => goBranch(1),
+                ),
+                Expanded(
+                  child: Center(
+                    child: Tooltip(
+                      message: '记一笔',
+                      child: Semantics(
+                        button: true,
+                        label: '记一笔',
+                        child: Material(
+                          color: scheme.primary,
+                          borderRadius: BorderRadius.circular(14),
+                          clipBehavior: Clip.antiAlias,
+                          child: InkWell(
+                            key: const Key('add-record'),
+                            onTap: () {
+                              final defaultType =
+                                  ref
+                                      .read(appSettingsProvider)
+                                      .value
+                                      ?.defaultRecordType ??
+                                  RecordType.expense;
+                              context.push(
+                                defaultType == RecordType.expense
+                                    ? '/record/new'
+                                    : '/record/new?type=$defaultType',
+                              );
+                            },
+                            child: SizedBox(
+                              width: 46,
+                              height: 40,
+                              child: Icon(
+                                Icons.add_rounded,
+                                color: scheme.onPrimary,
+                                size: 28,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                _ShellNavSlot(
+                  slotKey: const Key('nav-slot-assets'),
+                  icon: Icons.account_balance_wallet_outlined,
+                  selectedIcon: Icons.account_balance_wallet,
+                  label: '资产',
+                  selected: selectedIndex == 2,
+                  onTap: () => goBranch(2),
+                ),
+                _ShellNavSlot(
+                  slotKey: const Key('nav-slot-more'),
+                  icon: Icons.grid_view_outlined,
+                  selectedIcon: Icons.grid_view_rounded,
+                  label: '更多',
+                  selected: selectedIndex == 3,
+                  onTap: () => goBranch(3),
+                ),
+              ],
+            ),
+          ),
         ),
-        NavigationDestination(icon: Icon(Icons.person), label: '我的'),
-      ],
-    ),
-  );
+      ),
+    );
+  }
+}
+
+class _ShellNavSlot extends StatelessWidget {
+  const _ShellNavSlot({
+    required this.slotKey,
+    required this.icon,
+    required this.selectedIcon,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final Key slotKey;
+  final IconData icon;
+  final IconData selectedIcon;
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Expanded(
+      child: Semantics(
+        selected: selected,
+        button: true,
+        child: InkWell(
+          key: slotKey,
+          onTap: onTap,
+          child: SizedBox.expand(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 180),
+                  width: 52,
+                  height: 28,
+                  decoration: BoxDecoration(
+                    color: selected
+                        ? scheme.secondaryContainer
+                        : Colors.transparent,
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  alignment: Alignment.center,
+                  child: Icon(
+                    selected ? selectedIcon : icon,
+                    size: 22,
+                    color: selected
+                        ? scheme.onSecondaryContainer
+                        : scheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    fontSize: 12,
+                    height: 1.1,
+                    fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                    color: selected
+                        ? scheme.onSurface
+                        : scheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }

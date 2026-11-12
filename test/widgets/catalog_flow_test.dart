@@ -30,8 +30,8 @@ void main() {
 
     await settle();
 
-    // 1. Go to "我的"
-    await tester.tap(find.text('我的'));
+    // 1. Go to "更多"
+    await tester.tap(find.text('更多'));
     await settle();
     expect(find.text('账本管理'), findsOneWidget);
     expect(find.text('分类管理'), findsOneWidget);

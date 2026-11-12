@@ -188,34 +188,47 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
                 ),
               ),
             ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-              child: Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  ActionChip(
-                    key: const Key('assets-quick-debts'),
-                    avatar: const Icon(Icons.swap_horiz_outlined, size: 18),
-                    label: const Text('借贷管理'),
-                    onPressed: () => context.push('/debts'),
-                  ),
-                  ActionChip(
-                    key: const Key('assets-quick-installments'),
-                    avatar: const Icon(
-                      Icons.calendar_view_month_outlined,
-                      size: 18,
+            Container(
+              key: const Key('assets-quick-bar'),
+              margin: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+              child: Material(
+                color: theme.colorScheme.surfaceContainerLow,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  side: BorderSide(
+                    color: theme.colorScheme.outlineVariant.withValues(
+                      alpha: 0.45,
                     ),
-                    label: const Text('分期管理'),
-                    onPressed: () => context.push('/installments'),
                   ),
-                  ActionChip(
-                    key: const Key('assets-quick-deposits'),
-                    avatar: const Icon(Icons.lock_clock_outlined, size: 18),
-                    label: const Text('定期存款'),
-                    onPressed: () => context.push('/deposits'),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    vertical: 10,
+                    horizontal: 6,
                   ),
-                ],
+                  child: Row(
+                    children: [
+                      _AssetQuickEntryItem(
+                        itemKey: const Key('assets-quick-debts'),
+                        icon: Icons.swap_horiz_rounded,
+                        label: '借贷管理',
+                        onTap: () => context.push('/debts'),
+                      ),
+                      _AssetQuickEntryItem(
+                        itemKey: const Key('assets-quick-installments'),
+                        icon: Icons.calendar_view_month_rounded,
+                        label: '分期管理',
+                        onTap: () => context.push('/installments'),
+                      ),
+                      _AssetQuickEntryItem(
+                        itemKey: const Key('assets-quick-deposits'),
+                        icon: Icons.lock_clock_rounded,
+                        label: '定期存款',
+                        onTap: () => context.push('/deposits'),
+                      ),
+                    ],
+                  ),
+                ),
               ),
             ),
             if (allVisibleEmpty)
@@ -441,6 +454,63 @@ class _AssetTile extends StatelessWidget {
             : formatMinor(asset.balanceMinor),
       ),
       onTap: () => context.push('/assets/${asset.id}'),
+    );
+  }
+}
+
+class _AssetQuickEntryItem extends StatelessWidget {
+  const _AssetQuickEntryItem({
+    required this.itemKey,
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  final Key itemKey;
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Expanded(
+      child: InkWell(
+        key: itemKey,
+        borderRadius: BorderRadius.circular(10),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: scheme.primaryContainer.withValues(alpha: 0.65),
+                  shape: BoxShape.circle,
+                ),
+                alignment: Alignment.center,
+                child: Icon(icon, size: 20, color: scheme.primary),
+              ),
+              const SizedBox(height: 6),
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                    color: scheme.onSurface,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

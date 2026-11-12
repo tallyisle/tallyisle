@@ -39,7 +39,7 @@ void main() {
       await settle();
 
       // 1. Navigate to "我的" -> "标签管理" (/tags)
-      await tester.tap(find.text('我的'));
+      await tester.tap(find.text('更多'));
       await settle();
       await tester.tap(find.byKey(const Key('me-tags')));
       await settle();
@@ -474,7 +474,7 @@ void main() {
       expect(find.text('副业账本'), findsOneWidget);
 
       // Edit tag color on TagsPage and clear to default
-      await tester.tap(find.text('我的'));
+      await tester.tap(find.text('更多'));
       await settle();
       await tester.tap(find.byKey(const Key('me-tags')));
       await settle();

@@ -64,7 +64,7 @@ void main() {
     );
     await _settle(tester);
 
-    await tester.tap(find.text('我的'));
+    await tester.tap(find.text('更多'));
     await _settle(tester);
     expect(find.text('计划与提醒'), findsOneWidget);
 
@@ -90,7 +90,7 @@ void main() {
       expect(find.byKey(pageKey), findsOneWidget);
 
       await _goBack(tester);
-      expect(find.text('我的'), findsWidgets);
+      expect(find.text('更多'), findsWidgets);
     }
 
     await _disposeApp(tester);

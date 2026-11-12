@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../app/app.dart' show brandName;
+import '../../app/app.dart' show appDisplayVersion, brandName;
 import '../automation/automation_providers.dart'
     show autoBillDraftCountProvider;
 
@@ -24,7 +24,7 @@ class MePage extends ConsumerWidget {
     );
 
     return Scaffold(
-      appBar: AppBar(title: const Text('我的')),
+      appBar: AppBar(title: const Text('更多')),
       body: SingleChildScrollView(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -294,7 +294,7 @@ class MePage extends ConsumerWidget {
             const Divider(),
             const ListTile(
               leading: Icon(Icons.info_outline),
-              title: Text('开发版本'),
+              title: Text('当前版本 · $appDisplayVersion'),
               subtitle: Text(
                 '数据保存在本机，可选配置私有 WebDAV / S3 云同步与备份；已支持核心记账、资产与多币种（含可选在线汇率）、统计预算、计划提醒、数据迁移备份，以及常用工具、安全锁与桌面/自动记账联动。',
               ),
@@ -305,6 +305,7 @@ class MePage extends ConsumerWidget {
               onTap: () => showLicensePage(
                 context: context,
                 applicationName: brandName(Localizations.localeOf(context)),
+                applicationVersion: appDisplayVersion,
               ),
             ),
           ],

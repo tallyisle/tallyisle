@@ -23,6 +23,8 @@ import '../platform/auto_bill_bridge.dart';
 import 'providers.dart';
 import 'router.dart';
 
+const String appDisplayVersion = '0.1.0.rc';
+
 String brandName(Locale locale) =>
     locale.languageCode == 'zh' ? '帐屿' : 'TallyIsle';
 
@@ -408,6 +410,7 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
     };
 
     return MaterialApp.router(
+      debugShowCheckedModeBanner: false,
       onGenerateTitle: (context) => brandName(Localizations.localeOf(context)),
       scrollBehavior: _appScrollBehavior,
       localizationsDelegates: GlobalMaterialLocalizations.delegates,

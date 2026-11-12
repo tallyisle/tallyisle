@@ -11,6 +11,14 @@ void main() {
         expect(DiyToolbarAction.values, hasLength(9));
         expect(DiyToolbarAction.frequentRemarks.key, 'frequent_remarks');
         expect(DiyToolbarAction.frequentRemarks.label, '常用备注');
+        expect(
+          DiyToolbarAction.frequentRemarks.description,
+          '展示分类常用备注候选条并自动统计备注词频',
+        );
+        expect(
+          DiyToolbarAction.frequentRemarks.description.contains('默认关闭'),
+          isFalse,
+        );
         expect(DiyToolbarAction.frequentRemarks.defaultEnabled, isFalse);
 
         for (final action in DiyToolbarAction.values) {

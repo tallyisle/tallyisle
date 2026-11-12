@@ -93,7 +93,7 @@ void main() {
         await _goBack(tester);
 
         // 3. MePage -> CategoriesPage -> CategoryTransferPage
-        await tester.tap(find.text('我的'));
+        await tester.tap(find.text('更多'));
         await _settle(tester);
         await tester.tap(find.byKey(const Key('me-categories')));
         await _settle(tester);
@@ -140,7 +140,7 @@ void main() {
           await _settle(tester);
           expect(find.text(expectedTitle), findsWidgets);
           await _goBack(tester);
-          expect(find.text('我的'), findsWidgets);
+          expect(find.text('更多'), findsWidgets);
         }
 
         await closeCleanly();
@@ -416,7 +416,7 @@ void main() {
 
         // Deep link bill booked on HomePage; captured payment queued as draft in AutoBill!
         expect(find.text('快捷深链午餐'), findsOneWidget);
-        await tester.tap(find.text('我的'));
+        await tester.tap(find.text('更多'));
         await _settle(tester);
         await tester.scrollUntilVisible(
           find.byKey(const Key('me-auto-bill')),

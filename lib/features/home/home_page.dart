@@ -26,8 +26,6 @@ class _HomePageState extends ConsumerState<HomePage> {
   @override
   Widget build(BuildContext context) {
     final book = ref.watch(currentBookProvider);
-    final settings =
-        ref.watch(appSettingsProvider).value ?? AppSettings.defaults;
     return Scaffold(
       appBar: AppBar(
         title: InkWell(
@@ -61,20 +59,6 @@ class _HomePageState extends ConsumerState<HomePage> {
         ],
       ),
       body: const _HomeBody(),
-      floatingActionButton: FloatingActionButton.extended(
-        key: const Key('add-record'),
-        heroTag: 'fab-home',
-        onPressed: () {
-          final defaultType = settings.defaultRecordType;
-          context.push(
-            defaultType == RecordType.expense
-                ? '/record/new'
-                : '/record/new?type=$defaultType',
-          );
-        },
-        icon: const Icon(Icons.edit),
-        label: const Text('记一笔'),
-      ),
     );
   }
 
@@ -428,14 +412,22 @@ class _HomeAssetSummaryBanner extends StatelessWidget {
               Expanded(
                 child: Text(
                   '净资产 ¥${formatMinor(net)}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.bodyMedium?.copyWith(
                     fontWeight: FontWeight.w600,
                   ),
                 ),
               ),
-              Text(
-                '资产 ¥${formatMinor(totalAsset)} · 负债 ¥${formatMinor(totalLiability)}',
-                style: theme.textTheme.bodySmall,
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  '资产 ¥${formatMinor(totalAsset)} · 负债 ¥${formatMinor(totalLiability)}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.end,
+                  style: theme.textTheme.bodySmall,
+                ),
               ),
             ],
           ),

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../app/app.dart' show appDisplayVersion;
+
 /// Offline Help, Local-First Privacy Commitment, and `P-03` All-Free Policy
 /// page (`F-038` & `F-037` replacement, `BRAND-001`).
 class AboutHelpPage extends StatelessWidget {
@@ -49,6 +51,24 @@ class AboutHelpPage extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 3,
+                    ),
+                    decoration: BoxDecoration(
+                      color: scheme.surface.withValues(alpha: 0.7),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      '版本 $appDisplayVersion',
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        color: scheme.primary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
                   Text(
                     '本地优先、精确到分的个人记账与资产管理工具',
                     textAlign: TextAlign.center,
@@ -173,6 +193,7 @@ class AboutHelpPage extends StatelessWidget {
                 showLicensePage(
                   context: context,
                   applicationName: '帐屿 / TallyIsle',
+                  applicationVersion: appDisplayVersion,
                 );
               },
             ),

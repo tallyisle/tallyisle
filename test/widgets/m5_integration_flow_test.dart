@@ -149,7 +149,7 @@ void main() {
       await _settle(tester);
       expect(httpClientCalls, 0);
 
-      await tester.tap(find.text('我的'));
+      await tester.tap(find.text('更多'));
       await _settle(tester);
 
       await tester.scrollUntilVisible(
@@ -201,11 +201,11 @@ void main() {
         expect(find.byKey(pageKey), findsOneWidget);
 
         await _goBack(tester);
-        expect(find.text('我的'), findsWidgets);
+        expect(find.text('更多'), findsWidgets);
       }
 
       await tester.scrollUntilVisible(
-        find.text('开发版本'),
+        find.text('当前版本 · 0.1.0.rc'),
         200,
         scrollable: find.byType(Scrollable).first,
       );
@@ -397,7 +397,7 @@ void main() {
       await _settle(tester);
 
       // Step 1: Import CSV batch via MePage -> /import/csv
-      await tester.tap(find.text('我的'));
+      await tester.tap(find.text('更多'));
       await _settle(tester);
       await tester.scrollUntilVisible(
         find.byKey(const Key('me-import-csv')),

@@ -374,7 +374,7 @@ void main() {
       expect(deviceAHttpCalls, 0);
 
       // Navigate MePage -> 云同步与备份 -> 配置 S3 (/backup/s3)
-      await tester.tap(find.text('我的'));
+      await tester.tap(find.text('更多'));
       await _settle(tester);
       await tester.scrollUntilVisible(
         find.byKey(const Key('me-backup')),
@@ -460,7 +460,7 @@ void main() {
 
       // Configure S3 on Device B via MePage -> 云同步与备份 -> 配置 S3, leaving autoSyncEnabled ON (default),
       // then return to AssetsPage and trigger AppLifecycleState.resumed to verify live foreground pull!
-      await tester.tap(find.text('我的'));
+      await tester.tap(find.text('更多'));
       await _settle(tester);
       await tester.scrollUntilVisible(
         find.byKey(const Key('me-backup')),
@@ -601,7 +601,7 @@ void main() {
       expect(rateServer.requestedPaths, isEmpty);
 
       // 2. Navigate MePage -> 第三方数据导入 (/migration)
-      await tester.tap(find.text('我的'));
+      await tester.tap(find.text('更多'));
       await _settle(tester);
       await tester.scrollUntilVisible(
         find.byKey(const Key('me-migration')),
@@ -1094,7 +1094,7 @@ void main() {
       expect(tester.getSize(frameFinder), const Size(960, 800));
       expect(tester.getTopLeft(frameFinder).dx, 160.0);
 
-      for (final tabLabel in const <String>['统计', '资产', '我的']) {
+      for (final tabLabel in const <String>['统计', '资产', '更多']) {
         await tester.tap(find.text(tabLabel));
         await _settle(tester);
         expect(tester.takeException(), isNull);
