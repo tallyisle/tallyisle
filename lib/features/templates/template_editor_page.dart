@@ -55,6 +55,13 @@ class _TemplateEditorPageState extends ConsumerState<TemplateEditorPage> {
   bool _autoSave = false;
   Set<String> _selectedTagIds = <String>{};
 
+  List<AccountBook> _initialBooks = const [];
+  List<RecordCategory> _initialCategories = const [];
+  int? _initialCategoriesBookId;
+  List<Asset> _initialAssets = const [];
+  List<Tag> _initialActiveTags = const [];
+  List<Currency> _initialCurrencies = const [];
+
   bool _loading = true;
   bool _busy = false;
   String? _error;
@@ -71,10 +78,14 @@ class _TemplateEditorPageState extends ConsumerState<TemplateEditorPage> {
 
   Future<void> _load() async {
     try {
-      final defaultBookId = await ref.read(currentBookIdProvider.future);
+      final ledgerQ = await ref.read(queriesProvider.future);
+      final catalogQ = await ref.read(catalogQueriesProvider.future);
+      final defaultBookId = await ledgerQ.getCurrentBookId();
+      if (!mounted) return;
       if (_editing) {
         final svc = await ref.read(templateRemarkServiceProvider.future);
         final row = await svc.getTemplate(widget.templateId!);
+        if (!mounted) return;
         if (row == null) {
           _error = '账单模板不存在或已删除';
         } else {
@@ -108,6 +119,20 @@ class _TemplateEditorPageState extends ConsumerState<TemplateEditorPage> {
       } else {
         _bookId ??= defaultBookId;
       }
+
+      final books = await ledgerQ.getBooks();
+      final resolvedBookId = _bookId ?? defaultBookId;
+      final categories = await ledgerQ.getCategories(resolvedBookId);
+      final assets = await ledgerQ.getAssets();
+      final activeTags = await catalogQ.getActiveTags();
+      final currencies = await ledgerQ.getCurrencies();
+      if (!mounted) return;
+      _initialBooks = books;
+      _initialCategories = categories;
+      _initialCategoriesBookId = resolvedBookId;
+      _initialAssets = assets;
+      _initialActiveTags = activeTags;
+      _initialCurrencies = currencies;
     } catch (e) {
       _error = safeMessage(e);
     }
@@ -138,8 +163,9 @@ class _TemplateEditorPageState extends ConsumerState<TemplateEditorPage> {
       _error = null;
     });
     try {
-      final int resolvedBookId =
-          _bookId ?? await ref.read(currentBookIdProvider.future);
+      final ledgerQ = await ref.read(queriesProvider.future);
+      final int resolvedBookId = _bookId ?? await ledgerQ.getCurrentBookId();
+      if (!mounted) return;
       final money = parseTemplateMoneyText(_amountController.text);
       final fee = _type == RecordType.transfer
           ? parseTemplateMoneyText(_feeController.text)
@@ -186,7 +212,7 @@ class _TemplateEditorPageState extends ConsumerState<TemplateEditorPage> {
 
   @override
   Widget build(BuildContext context) {
-    final books = ref.watch(booksProvider).value ?? const <AccountBook>[];
+    final books = ref.watch(booksProvider).value ?? _initialBooks;
     final currentBookId = ref.watch(currentBookIdProvider).value;
     final effectiveBookId =
         (_bookId != null && books.any((b) => b.id == _bookId))
@@ -196,17 +222,19 @@ class _TemplateEditorPageState extends ConsumerState<TemplateEditorPage> {
     final categories = effectiveBookId == null
         ? const <RecordCategory>[]
         : (ref.watch(categoriesProvider(effectiveBookId)).value ??
-              const <RecordCategory>[]);
-    final assets = (ref.watch(assetsProvider).value ?? const <Asset>[])
+              (effectiveBookId == _initialCategoriesBookId
+                  ? _initialCategories
+                  : const <RecordCategory>[]));
+    final assets = (ref.watch(assetsProvider).value ?? _initialAssets)
         .where(
           (a) => a.status != AssetStatus.settled && a.type != AssetType.debt,
         )
         .toList();
-    final tags = (ref.watch(activeTagsProvider).value ?? const <Tag>[])
+    final tags = (ref.watch(activeTagsProvider).value ?? _initialActiveTags)
         .where((t) => t.parent != 1)
         .toList();
     final currencies =
-        [...(ref.watch(currenciesProvider).value ?? const <Currency>[])]..sort(
+        [...(ref.watch(currenciesProvider).value ?? _initialCurrencies)]..sort(
           (a, b) => a.code == b.code
               ? 0
               : a.code == baseCurrency

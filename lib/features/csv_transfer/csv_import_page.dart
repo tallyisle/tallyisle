@@ -100,8 +100,9 @@ class _CsvImportPageState extends ConsumerState<CsvImportPage> {
     });
     try {
       final service = await ref.read(csvExcelServiceProvider.future);
-      final books = await ref.read(booksProvider.future);
-      final currentBookId = ref.read(currentBookIdProvider).value;
+      final ledgerQ = await ref.read(queriesProvider.future);
+      final books = await ledgerQ.getBooks();
+      final currentBookId = await ledgerQ.getCurrentBookId();
       final targetBookId = _effectiveBookId(books, currentBookId);
 
       final preview = await service.previewImport(

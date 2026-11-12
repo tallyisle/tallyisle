@@ -98,17 +98,9 @@ class _S3ConfigPageState extends ConsumerState<S3ConfigPage> {
     try {
       final service = await ref.read(tallyBackupServiceProvider.future);
       final fresh = await service.getS3Config();
+      if (!mounted) return;
       _applyLoadedConfigIfUntouched(fresh);
-      final streamed = await ref.read(s3ConfigProvider.future);
-      _applyLoadedConfigIfUntouched(
-        fresh.isConfigured || !streamed.isConfigured ? fresh : streamed,
-      );
-    } catch (_) {
-      try {
-        final streamed = await ref.read(s3ConfigProvider.future);
-        _applyLoadedConfigIfUntouched(streamed);
-      } catch (_) {}
-    }
+    } catch (_) {}
   }
 
   @override

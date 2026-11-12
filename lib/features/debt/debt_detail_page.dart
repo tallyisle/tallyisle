@@ -99,13 +99,23 @@ class _DebtDetailPageState extends ConsumerState<DebtDetailPage> {
     }
   }
 
+  Future<List<Asset>> _loadFundingAccounts() async {
+    final ledgerQ = await ref.read(queriesProvider.future);
+    final active = await ledgerQ.getAssets(includeArchived: false);
+    return [
+      for (final a in active)
+        if (a.type != AssetType.debt) a,
+    ];
+  }
+
   Future<void> _showRepayDialog(
     DebtDetailView view, {
     bool pureInterestOnly = false,
   }) async {
-    final currentBookId = await ref.read(currentBookIdProvider.future);
-    final books = await ref.read(booksProvider.future);
-    final fundingAccounts = await ref.read(debtFundingAccountsProvider.future);
+    final ledgerQ = await ref.read(queriesProvider.future);
+    final currentBookId = await ledgerQ.getCurrentBookId();
+    final books = await ledgerQ.getBooks();
+    final fundingAccounts = await _loadFundingAccounts();
     if (!mounted) return;
 
     await showDialog<void>(
@@ -122,9 +132,10 @@ class _DebtDetailPageState extends ConsumerState<DebtDetailPage> {
   }
 
   Future<void> _showAddPrincipalDialog(DebtDetailView view) async {
-    final currentBookId = await ref.read(currentBookIdProvider.future);
-    final books = await ref.read(booksProvider.future);
-    final fundingAccounts = await ref.read(debtFundingAccountsProvider.future);
+    final ledgerQ = await ref.read(queriesProvider.future);
+    final currentBookId = await ledgerQ.getCurrentBookId();
+    final books = await ledgerQ.getBooks();
+    final fundingAccounts = await _loadFundingAccounts();
     if (!mounted) return;
 
     await showDialog<void>(
@@ -143,7 +154,7 @@ class _DebtDetailPageState extends ConsumerState<DebtDetailPage> {
     DebtDetailView view,
     LedgerRecord rec,
   ) async {
-    final fundingAccounts = await ref.read(debtFundingAccountsProvider.future);
+    final fundingAccounts = await _loadFundingAccounts();
     if (!mounted) return;
 
     await showDialog<void>(

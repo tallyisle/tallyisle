@@ -6,6 +6,7 @@ import 'package:uuid/uuid.dart';
 import '../../app/providers.dart';
 import '../../core/money.dart';
 import '../../data/db/database.dart';
+import '../../domain/rules/billing_period.dart';
 import '../../domain/rules/budget_rules.dart';
 import '../common/common.dart';
 import 'budget_providers.dart';
@@ -23,6 +24,31 @@ class BudgetPage extends ConsumerStatefulWidget {
 
 class _BudgetPageState extends ConsumerState<BudgetPage> {
   final _commandIds = CommandIds();
+
+  Future<(int bookId, String section)> _resolveBookAndSection() async {
+    final ledgerQ = await ref.read(queriesProvider.future);
+    final budgetQ = await ref.read(budgetQueriesProvider.future);
+    final bookId = await ledgerQ.getCurrentBookId();
+    final book = await ledgerQ.getBook(bookId);
+    final startDay = book?.startDay ?? 1;
+    final mode = await budgetQ.getBudgetMode(bookId);
+    if (!mounted) return (bookId, '');
+    final offset = ref.read(budgetOffsetProvider);
+    final now = DateTime.now();
+    final BillingPeriod period;
+    if (mode == BudgetMode.yearly) {
+      final currentYearPeriod = BillingPeriod.containingYear(now, startDay);
+      period = BillingPeriod.year(currentYearPeriod.year + offset, startDay);
+    } else {
+      final currentMonthPeriod = BillingPeriod.containing(now, startDay);
+      period = BillingPeriod.starting(
+        currentMonthPeriod.year,
+        currentMonthPeriod.month + offset,
+        startDay,
+      );
+    }
+    return (bookId, mode.sectionFor(period));
+  }
 
   void _showTotalBudgetDialog(
     BuildContext context, {
@@ -124,8 +150,9 @@ class _BudgetPageState extends ConsumerState<BudgetPage> {
                 try {
                   final amountMinor = Money.parse(text).storageMinor;
                   final service = await ref.read(budgetServiceProvider.future);
-                  final bookId = await ref.read(currentBookIdProvider.future);
-                  final section = await ref.read(budgetSectionProvider.future);
+                  if (!mounted) return;
+                  final (bookId, section) = await _resolveBookAndSection();
+                  if (!mounted || section.isEmpty) return;
 
                   await service.upsertTotalBudget(
                     commandId: _commandIds.forPayload([
@@ -292,8 +319,9 @@ class _BudgetPageState extends ConsumerState<BudgetPage> {
                 try {
                   final amountMinor = Money.parse(text).storageMinor;
                   final service = await ref.read(budgetServiceProvider.future);
-                  final bookId = await ref.read(currentBookIdProvider.future);
-                  final section = await ref.read(budgetSectionProvider.future);
+                  if (!mounted) return;
+                  final (bookId, section) = await _resolveBookAndSection();
+                  if (!mounted || section.isEmpty) return;
 
                   await service.upsertCategoryBudget(
                     commandId: _commandIds.forPayload([
@@ -380,23 +408,23 @@ class _BudgetPageState extends ConsumerState<BudgetPage> {
                 selected: {mode},
                 onSelectionChanged: (newSelection) async {
                   final newMode = newSelection.first;
-                  final bookId = bookIdAsync.value;
-                  if (bookId != null) {
-                    final service = await ref.read(
-                      budgetServiceProvider.future,
-                    );
-                    await service.setBudgetMode(
-                      commandId: _commandIds.forPayload([
-                        'set_mode',
-                        bookId,
-                        newMode.value,
-                        _uuid.v4(),
-                      ]),
-                      bookId: bookId,
-                      mode: newMode,
-                    );
-                    ref.read(budgetOffsetProvider.notifier).reset();
-                  }
+                  final ledgerQ = await ref.read(queriesProvider.future);
+                  final bookId =
+                      bookIdAsync.value ?? await ledgerQ.getCurrentBookId();
+                  if (!mounted) return;
+                  final service = await ref.read(budgetServiceProvider.future);
+                  await service.setBudgetMode(
+                    commandId: _commandIds.forPayload([
+                      'set_mode',
+                      bookId,
+                      newMode.value,
+                      _uuid.v4(),
+                    ]),
+                    bookId: bookId,
+                    mode: newMode,
+                  );
+                  if (!mounted) return;
+                  ref.read(budgetOffsetProvider.notifier).reset();
                 },
               ),
             ),

@@ -83,18 +83,10 @@ class _WebDavConfigPageState extends ConsumerState<WebDavConfigPage> {
     try {
       final service = await ref.read(tallyBackupServiceProvider.future);
       final fresh = await service.getWebDavConfig();
+      if (!mounted) return;
       _applyLoadedConfigIfUntouched(fresh);
-      final streamed = await ref.read(webDavConfigProvider.future);
-      _applyLoadedConfigIfUntouched(
-        fresh.isConfigured || !streamed.isConfigured ? fresh : streamed,
-      );
     } catch (_) {
-      try {
-        final streamed = await ref.read(webDavConfigProvider.future);
-        _applyLoadedConfigIfUntouched(streamed);
-      } catch (_) {
-        // Keep unconfigured defaults if provider fails before user interaction.
-      }
+      // Keep unconfigured defaults if provider fails before user interaction.
     }
   }
 

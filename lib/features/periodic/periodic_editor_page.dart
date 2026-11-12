@@ -83,6 +83,11 @@ class _PeriodicEditorPageState extends ConsumerState<PeriodicEditorPage> {
   bool _excludeExIn = false;
   Set<String> _selectedTagIds = {};
 
+  List<Asset> _initialAssets = const [];
+  List<RecordCategory> _initialCategories = const [];
+  int? _initialCategoriesBookId;
+  List<Tag> _initialActiveTags = const [];
+
   bool _loading = true;
   bool _busy = false;
   String? _error;
@@ -98,6 +103,9 @@ class _PeriodicEditorPageState extends ConsumerState<PeriodicEditorPage> {
   Future<void> _load() async {
     try {
       final db = await ref.read(databaseProvider.future);
+      final ledgerQ = await ref.read(queriesProvider.future);
+      final catalogQ = await ref.read(catalogQueriesProvider.future);
+      if (!mounted) return;
       final today = CalendarDate.fromEpochMs(db.nowMs());
       _startDate = today;
       _endDate = today.plusDays(30);
@@ -108,6 +116,7 @@ class _PeriodicEditorPageState extends ConsumerState<PeriodicEditorPage> {
       if (_editing) {
         final q = await ref.read(periodicQueriesProvider.future);
         final rule = await q.getPeriod(widget.periodId!);
+        if (!mounted) return;
         if (rule == null) {
           throw const Failure(FailureCode.conflict, '周期记账规则不存在或已删除');
         }
@@ -160,6 +169,7 @@ class _PeriodicEditorPageState extends ConsumerState<PeriodicEditorPage> {
         }
 
         final allTags = await db.select(db.tags).get();
+        if (!mounted) return;
         final byId = {for (final t in allTags) t.tagId: t.tagId};
         final byName = {for (final t in allTags) t.name: t.tagId};
         final resolved = <String>{};
@@ -169,12 +179,17 @@ class _PeriodicEditorPageState extends ConsumerState<PeriodicEditorPage> {
         }
         _selectedTagIds = resolved;
       } else {
-        _bookId = await ref.read(currentBookIdProvider.future);
+        _bookId = await ledgerQ.getCurrentBookId();
       }
 
-      await ref.read(assetsProvider.future);
-      await ref.read(categoriesProvider(_bookId!).future);
-      await ref.read(activeTagsProvider.future);
+      final assets = await ledgerQ.getAssets();
+      final categories = await ledgerQ.getCategories(_bookId!);
+      final activeTags = await catalogQ.getActiveTags();
+      if (!mounted) return;
+      _initialAssets = assets;
+      _initialCategories = categories;
+      _initialCategoriesBookId = _bookId;
+      _initialActiveTags = activeTags;
     } catch (e) {
       _error = safeMessage(e);
     }
@@ -235,8 +250,9 @@ class _PeriodicEditorPageState extends ConsumerState<PeriodicEditorPage> {
       _error = null;
     });
     try {
-      final int bookId =
-          _bookId ?? await ref.read(currentBookIdProvider.future);
+      final ledgerQ = await ref.read(queriesProvider.future);
+      final int bookId = _bookId ?? await ledgerQ.getCurrentBookId();
+      if (!mounted) return;
       final money = _parseMoney(_amountCtrl.text);
       final fee = _recordType == RecordType.transfer
           ? _parseMoney(_feeCtrl.text, allowZero: true)
@@ -450,12 +466,15 @@ class _PeriodicEditorPageState extends ConsumerState<PeriodicEditorPage> {
   Widget build(BuildContext context) {
     final bookId = _bookId ?? ref.watch(currentBookIdProvider).value ?? 1;
     final categories =
-        ref.watch(categoriesProvider(bookId)).value ?? const <RecordCategory>[];
-    final allAssets = ref.watch(assetsProvider).value ?? const <Asset>[];
+        ref.watch(categoriesProvider(bookId)).value ??
+        (bookId == _initialCategoriesBookId
+            ? _initialCategories
+            : const <RecordCategory>[]);
+    final allAssets = ref.watch(assetsProvider).value ?? _initialAssets;
     final activeAssets = allAssets
         .where((a) => a.status == AssetStatus.active)
         .toList();
-    final tags = (ref.watch(activeTagsProvider).value ?? const <Tag>[])
+    final tags = (ref.watch(activeTagsProvider).value ?? _initialActiveTags)
         .where((t) => t.parent != 1)
         .toList();
 

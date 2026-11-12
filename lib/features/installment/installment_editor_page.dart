@@ -49,6 +49,12 @@ class _InstallmentEditorPageState extends ConsumerState<InstallmentEditorPage> {
   bool _excludeExIn = false;
   Set<String> _selectedTagIds = <String>{};
 
+  List<AccountBook> _initialBooks = const [];
+  List<Asset> _initialAssets = const [];
+  List<RecordCategory> _initialCategories = const [];
+  int? _initialCategoriesBookId;
+  List<Tag> _initialTags = const [];
+
   Installment? _editingRow;
   bool _loadingEdit = false;
   bool _busy = false;
@@ -74,20 +80,24 @@ class _InstallmentEditorPageState extends ConsumerState<InstallmentEditorPage> {
 
   Future<void> _loadCreateDefaults() async {
     try {
-      final bookId = await ref.read(currentBookIdProvider.future);
-      await Future.wait<Object?>([
-        ref.read(booksProvider.future),
-        ref.read(assetsProvider.future),
-        ref.read(categoriesProvider(bookId).future),
-        ref.read(tagsProvider.future),
-      ]);
+      final ledgerQ = await ref.read(queriesProvider.future);
+      final catalogQ = await ref.read(catalogQueriesProvider.future);
+      final bookId = await ledgerQ.getCurrentBookId();
+      final books = await ledgerQ.getBooks();
+      final allAssets = await ledgerQ.getAssets();
+      final categories = await ledgerQ.getCategories(bookId);
+      final allTags = await catalogQ.getTags();
       if (!mounted) return;
-      final allAssets = ref.read(assetsProvider).value ?? const <Asset>[];
       final usable = [
         for (final a in allAssets)
           if (a.status == AssetStatus.active && a.type != AssetType.debt) a,
       ];
       setState(() {
+        _initialBooks = books;
+        _initialAssets = allAssets;
+        _initialCategories = categories;
+        _initialCategoriesBookId = bookId;
+        _initialTags = allTags;
         _bookId = bookId;
         _bookInitialized = true;
         if (usable.isNotEmpty) {
@@ -120,15 +130,20 @@ class _InstallmentEditorPageState extends ConsumerState<InstallmentEditorPage> {
         });
         return;
       }
-      await Future.wait<Object?>([
-        ref.read(booksProvider.future),
-        ref.read(assetsProvider.future),
-        ref.read(categoriesProvider(row.bookId).future),
-        ref.read(tagsProvider.future),
-      ]);
+      final ledgerQ = await ref.read(queriesProvider.future);
+      final catalogQ = await ref.read(catalogQueriesProvider.future);
+      final books = await ledgerQ.getBooks();
+      final allAssets = await ledgerQ.getAssets();
+      final categories = await ledgerQ.getCategories(row.bookId);
+      final allTags = await catalogQ.getTags();
       if (!mounted) return;
       final extra = InstallmentExtra.parse(row.exi);
       setState(() {
+        _initialBooks = books;
+        _initialAssets = allAssets;
+        _initialCategories = categories;
+        _initialCategoriesBookId = row.bookId;
+        _initialTags = allTags;
         _editingRow = row;
         _nameCtrl.text = row.name;
         _bookId = row.bookId;
@@ -279,8 +294,8 @@ class _InstallmentEditorPageState extends ConsumerState<InstallmentEditorPage> {
       _bookInitialized = true;
     }
 
-    final books = ref.watch(booksProvider).value ?? const <AccountBook>[];
-    final allAssets = ref.watch(assetsProvider).value ?? const <Asset>[];
+    final books = ref.watch(booksProvider).value ?? _initialBooks;
+    final allAssets = ref.watch(assetsProvider).value ?? _initialAssets;
     final usableAssets = [
       for (final a in allAssets)
         if (a.status == AssetStatus.active && a.type != AssetType.debt) a,
@@ -296,7 +311,9 @@ class _InstallmentEditorPageState extends ConsumerState<InstallmentEditorPage> {
 
     final allCategories =
         ref.watch(categoriesProvider(_bookId)).value ??
-        const <RecordCategory>[];
+        (_bookId == _initialCategoriesBookId
+            ? _initialCategories
+            : const <RecordCategory>[]);
     final expenseCategories = [
       for (final c in allCategories)
         if (c.type == RecordType.expense && (!c.isHide || c.id == _catId)) c,
@@ -307,7 +324,7 @@ class _InstallmentEditorPageState extends ConsumerState<InstallmentEditorPage> {
     final selectedAsset = allAssets.where((a) => a.id == _assetId).firstOrNull;
     final isCreditAsset = selectedAsset?.type == AssetType.credit;
 
-    final tags = (ref.watch(tagsProvider).value ?? const <Tag>[])
+    final tags = (ref.watch(tagsProvider).value ?? _initialTags)
         .where(
           (t) =>
               (!t.hidden || _selectedTagIds.contains(t.tagId)) && t.parent != 1,

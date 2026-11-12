@@ -58,6 +58,9 @@ class _DebtEditorPageState extends ConsumerState<DebtEditorPage> {
   late DateTime _startDate;
   DateTime? _endDate;
   bool _countedInNetWorth = true;
+  List<AccountBook> _initialBooks = const [];
+  List<Currency> _initialCurrencies = const [];
+  List<Asset> _initialFundingAccounts = const [];
   bool _loading = true;
   bool _busy = false;
   String? _error;
@@ -78,20 +81,31 @@ class _DebtEditorPageState extends ConsumerState<DebtEditorPage> {
 
   Future<void> _loadInitial() async {
     try {
-      final currentBookId = await ref.read(currentBookIdProvider.future);
-      await ref.read(booksProvider.future);
-      await ref.read(currenciesProvider.future);
-      await ref.read(debtFundingAccountsProvider.future);
+      final ledgerQ = await ref.read(queriesProvider.future);
+      final currentBookId = await ledgerQ.getCurrentBookId();
+      final books = await ledgerQ.getBooks();
+      final currencies = await ledgerQ.getCurrencies();
+      final activeAssets = await ledgerQ.getAssets(includeArchived: false);
+      final fundingAccounts = [
+        for (final a in activeAssets)
+          if (a.type != AssetType.debt) a,
+      ];
+      if (!mounted) return;
+      _initialBooks = books;
+      _initialCurrencies = currencies;
+      _initialFundingAccounts = fundingAccounts;
       if (_editing) {
-        final debt = await ref.read(
-          debtAssetStreamProvider(widget.debtId!).future,
-        );
-        if (debt == null) {
+        final debt = await ledgerQ.getAsset(widget.debtId!);
+        if (!mounted) return;
+        if (debt == null || debt.type != AssetType.debt) {
           throw const Failure(FailureCode.conflict, '借贷项目不存在或已删除');
         }
-        final bound = await ref.read(
-          debtBoundBookIdsProvider(widget.debtId!).future,
-        );
+        final allLinks = await ledgerQ.getAssetBooks();
+        if (!mounted) return;
+        final bound = [
+          for (final l in allLinks)
+            if (l.assetId == widget.debtId!) l.bookId,
+        ]..sort();
         final info = LoanInfo.parse(debt.loanInfo);
         _subType = debt.subType;
         _nameCtrl.text = debt.name;
@@ -202,10 +216,9 @@ class _DebtEditorPageState extends ConsumerState<DebtEditorPage> {
         Money? explicitFundingAmount;
         if (_fundingAssetId != noRef &&
             _fundingAmountCtrl.text.trim().isNotEmpty) {
-          final accounts = await ref.read(debtFundingAccountsProvider.future);
-          final selectedAcc = accounts
-              .where((a) => a.id == _fundingAssetId)
-              .firstOrNull;
+          final ledgerQ = await ref.read(queriesProvider.future);
+          final selectedAcc = await ledgerQ.getAsset(_fundingAssetId);
+          if (!mounted) return;
           final accCurr =
               normalizeCurrency(selectedAcc?.currency) ?? baseCurrency;
           explicitFundingAmount = parseDebtAmount(
@@ -252,11 +265,11 @@ class _DebtEditorPageState extends ConsumerState<DebtEditorPage> {
 
   @override
   Widget build(BuildContext context) {
-    final books = ref.watch(booksProvider).value ?? const <AccountBook>[];
+    final books = ref.watch(booksProvider).value ?? _initialBooks;
     final currencies =
-        ref.watch(currenciesProvider).value ?? const <Currency>[];
+        ref.watch(currenciesProvider).value ?? _initialCurrencies;
     final fundingAccounts =
-        ref.watch(debtFundingAccountsProvider).value ?? const <Asset>[];
+        ref.watch(debtFundingAccountsProvider).value ?? _initialFundingAccounts;
     final selectedFunding = fundingAccounts
         .where((a) => a.id == _fundingAssetId)
         .firstOrNull;

@@ -63,9 +63,11 @@ class _SavingsEditorPageState extends ConsumerState<SavingsEditorPage> {
 
   Future<void> _load() async {
     try {
-      final assets = await ref.read(assetsProvider.future);
-      final books = await ref.read(booksProvider.future);
-      final currencies = await ref.read(currenciesProvider.future);
+      final ledgerQ = await ref.read(queriesProvider.future);
+      final assets = await ledgerQ.getAssets();
+      final books = await ledgerQ.getBooks();
+      final currencies = await ledgerQ.getCurrencies();
+      if (!mounted) return;
       _initialAssets = assets;
       _initialBooks = books;
       _initialCurrencies = currencies;
@@ -73,6 +75,7 @@ class _SavingsEditorPageState extends ConsumerState<SavingsEditorPage> {
       if (_editing) {
         final q = await ref.read(savingsQueriesProvider.future);
         final plan = await q.getPlan(widget.planId!);
+        if (!mounted) return;
         if (plan == null) {
           throw const Failure(FailureCode.conflict, '存钱计划不存在或已删除');
         }

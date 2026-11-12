@@ -16,6 +16,16 @@ final class CatalogQueries {
           .watchSingleOrNull()
           .map((p) => int.tryParse(p?.value ?? '') ?? 1);
 
+  Future<int> getCurrentBookId() async {
+    final p = await (db.select(
+      db.preferences,
+    )..where((t) => t.key.equals('current_book_id'))).getSingleOrNull();
+    final parsed = int.tryParse(p?.value ?? '');
+    if (parsed != null) return parsed;
+    final books = await getBooks();
+    return books.isNotEmpty ? books.first.id : 1;
+  }
+
   Stream<List<AccountBook>> watchBooks() =>
       (db.select(db.accountBooks)..orderBy([
             (t) => OrderingTerm.asc(t.sort),
@@ -23,9 +33,20 @@ final class CatalogQueries {
           ]))
           .watch();
 
+  Future<List<AccountBook>> getBooks() =>
+      (db.select(db.accountBooks)..orderBy([
+            (t) => OrderingTerm.asc(t.sort),
+            (t) => OrderingTerm.asc(t.id),
+          ]))
+          .get();
+
   Stream<AccountBook?> watchBook(int id) => (db.select(
     db.accountBooks,
   )..where((t) => t.id.equals(id))).watchSingleOrNull();
+
+  Future<AccountBook?> getBook(int id) => (db.select(
+    db.accountBooks,
+  )..where((t) => t.id.equals(id))).getSingleOrNull();
 
   Future<int> countRecordsInBook(int bookId) async {
     final row = await db
@@ -50,6 +71,15 @@ final class CatalogQueries {
             ]))
           .watch();
 
+  Future<List<RecordCategory>> getCategories(int bookId) =>
+      (db.select(db.recordCategories)
+            ..where((t) => t.accountBookId.equals(bookId))
+            ..orderBy([
+              (t) => OrderingTerm.asc(t.sort),
+              (t) => OrderingTerm.asc(t.id),
+            ]))
+          .get();
+
   Stream<List<RecordCategory>> watchActiveCategories(int bookId) =>
       (db.select(db.recordCategories)
             ..where(
@@ -60,6 +90,17 @@ final class CatalogQueries {
               (t) => OrderingTerm.asc(t.id),
             ]))
           .watch();
+
+  Future<List<RecordCategory>> getActiveCategories(int bookId) =>
+      (db.select(db.recordCategories)
+            ..where(
+              (t) => t.accountBookId.equals(bookId) & t.isHide.equals(false),
+            )
+            ..orderBy([
+              (t) => OrderingTerm.asc(t.sort),
+              (t) => OrderingTerm.asc(t.id),
+            ]))
+          .get();
 
   Future<int> countRecordsInCategory(int categoryId) async {
     final cat = await (db.select(
@@ -96,6 +137,13 @@ final class CatalogQueries {
           ]))
           .watch();
 
+  Future<List<Tag>> getTags() =>
+      (db.select(db.tags)..orderBy([
+            (t) => OrderingTerm.asc(t.sort),
+            (t) => OrderingTerm.asc(t.name),
+          ]))
+          .get();
+
   Stream<List<Tag>> watchActiveTags() =>
       (db.select(db.tags)
             ..where((t) => t.hidden.equals(false))
@@ -105,6 +153,15 @@ final class CatalogQueries {
             ]))
           .watch();
 
+  Future<List<Tag>> getActiveTags() =>
+      (db.select(db.tags)
+            ..where((t) => t.hidden.equals(false))
+            ..orderBy([
+              (t) => OrderingTerm.asc(t.sort),
+              (t) => OrderingTerm.asc(t.name),
+            ]))
+          .get();
+
   Future<List<String>> getTagIdsForRecord(String recordId) async {
     final rows = await (db.select(
       db.tagRecords,
@@ -112,15 +169,24 @@ final class CatalogQueries {
     return rows.map((r) => r.tagId).toList();
   }
 
-  Stream<List<Tag>> watchTagsForRecord(String recordId) {
-    final query =
-        db.select(db.tagRecords).join([
-            innerJoin(db.tags, db.tags.tagId.equalsExp(db.tagRecords.tagId)),
-          ])
-          ..where(db.tagRecords.recordId.equals(recordId))
-          ..orderBy([OrderingTerm.asc(db.tags.sort)]);
-    return query.watch().map(
-      (rows) => rows.map((r) => r.readTable(db.tags)).toList(),
-    );
+  JoinedSelectStatement<HasResultSet, dynamic> _tagsForRecordQuery(
+    String recordId,
+  ) =>
+      db.select(db.tagRecords).join([
+          innerJoin(db.tags, db.tags.tagId.equalsExp(db.tagRecords.tagId)),
+        ])
+        ..where(db.tagRecords.recordId.equals(recordId))
+        ..orderBy([OrderingTerm.asc(db.tags.sort)]);
+
+  Stream<List<Tag>> watchTagsForRecord(String recordId) => _tagsForRecordQuery(
+    recordId,
+  ).watch().map((rows) => rows.map((r) => r.readTable(db.tags)).toList());
+
+  Future<List<Tag>> getTagsForRecord(String recordId) async {
+    final rows = await _tagsForRecordQuery(recordId).get();
+    return rows.map((r) => r.readTable(db.tags)).toList();
   }
+
+  Future<List<Tag>> getRecordTags(String recordId) =>
+      getTagsForRecord(recordId);
 }
