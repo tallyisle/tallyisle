@@ -1,5 +1,13 @@
-import 'package:flutter/material.dart';
+import 'dart:collection';
+import 'dart:convert';
+import 'dart:math' as math;
+import 'dart:ui' as ui;
 
+import 'package:file_selector/file_selector.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+import '../../core/failure.dart';
 import '../../domain/model/codes.dart';
 
 /// Harmonious Material 3-aligned color presets matching 一羽记账's soft rounded
@@ -1597,9 +1605,246 @@ final class AssetIconSpec {
   final String group;
 }
 
+/// Prefix for custom text / Emoji monogram icons stored in `asset.icon`
+/// (e.g. `'text:招行'`, `'text:💳'`).
+const String assetTextIconPrefix = 'text:';
+
+/// Prefix for general category icons reused in `asset.icon`
+/// (e.g. `'cat:coffee'`).
+const String assetCategoryIconPrefix = 'cat:';
+
+/// Maximum raw file size accepted when picking a custom local account image.
+const int maxCustomAssetImageFileBytes = 15 * 1024 * 1024;
+
+/// Square pixel dimension for center-cropped PNG account icons.
+const int customAssetIconTargetSize = 96;
+
+/// Bounded LRU capacity for decoded custom account icon images.
+const int maxCustomAssetImageCacheEntries = 128;
+
+/// Common bank, wallet, and Emoji quick-pick presets shown in the `'文字/Emoji'`
+/// tab of [showAssetVisualPicker].
+const List<String> assetMonogramPresets = <String>[
+  '招行',
+  '工行',
+  '建行',
+  '农行',
+  '中行',
+  '交行',
+  '邮储',
+  '中信',
+  '浦发',
+  '兴业',
+  '平安',
+  '广发',
+  '美团',
+  '京东',
+  '工资',
+  '💳',
+  '🏦',
+  '💰',
+  '🧧',
+];
+
+/// Trims [raw] and safely extracts at most 2 Unicode grapheme clusters via
+/// Dart's [Characters] API so multi-codepoint emojis (flags, skin tones, ZWJ
+/// sequences like `👨‍👩‍👧`, `💳`, `🏦`) never split surrogate pairs.
+String normalizeAssetCustomText(String raw) {
+  final cleaned = raw.replaceAll(RegExp(r'[\r\n\t]'), '').trim();
+  if (cleaned.isEmpty) return '';
+  return cleaned.characters.take(2).toString();
+}
+
+final RegExp _customImageDataUriPrefixPattern = RegExp(
+  r'^data:image/[a-zA-Z0-9.+-]+;base64,',
+  caseSensitive: false,
+);
+
+/// Returns `true` when [raw] has a `data:image/<ext>;base64,` header.
+bool isCustomAssetImageDataUri(String? raw) {
+  if (raw == null) return false;
+  final trimmed = raw.trim();
+  if (trimmed.isEmpty) return false;
+  return _customImageDataUriPrefixPattern.hasMatch(trimmed);
+}
+
+bool _isPngSignature(Uint8List bytes) =>
+    bytes.length >= 8 &&
+    bytes[0] == 0x89 &&
+    bytes[1] == 0x50 &&
+    bytes[2] == 0x4E &&
+    bytes[3] == 0x47 &&
+    bytes[4] == 0x0D &&
+    bytes[5] == 0x0A &&
+    bytes[6] == 0x1A &&
+    bytes[7] == 0x0A;
+
+bool _hasValidImageSignature(Uint8List bytes) {
+  if (_isPngSignature(bytes)) return true;
+  // JPEG: FF D8 FF
+  if (bytes.length >= 3 &&
+      bytes[0] == 0xFF &&
+      bytes[1] == 0xD8 &&
+      bytes[2] == 0xFF) {
+    return true;
+  }
+  // WebP: "RIFF"...."WEBP"
+  if (bytes.length >= 12 &&
+      bytes[0] == 0x52 &&
+      bytes[1] == 0x49 &&
+      bytes[2] == 0x46 &&
+      bytes[3] == 0x46 &&
+      bytes[8] == 0x57 &&
+      bytes[9] == 0x45 &&
+      bytes[10] == 0x42 &&
+      bytes[11] == 0x50) {
+    return true;
+  }
+  // GIF: "GIF8"
+  if (bytes.length >= 6 &&
+      bytes[0] == 0x47 &&
+      bytes[1] == 0x49 &&
+      bytes[2] == 0x46 &&
+      bytes[3] == 0x38) {
+    return true;
+  }
+  // BMP: "BM"
+  if (bytes.length >= 2 && bytes[0] == 0x42 && bytes[1] == 0x4D) {
+    return true;
+  }
+  return false;
+}
+
+final LinkedHashMap<String, Uint8List> _decodedImageCache =
+    LinkedHashMap<String, Uint8List>();
+
+void _cacheDecodedImage(String key, Uint8List bytes) {
+  _decodedImageCache.remove(key);
+  while (_decodedImageCache.length >= maxCustomAssetImageCacheEntries) {
+    _decodedImageCache.remove(_decodedImageCache.keys.first);
+  }
+  _decodedImageCache[key] = bytes;
+}
+
+/// Current entry count in the bounded custom asset image cache (for tests).
+@visibleForTesting
+int get debugDecodedAssetImageCacheSize => _decodedImageCache.length;
+
+/// Clears the bounded custom asset image cache (for tests).
+@visibleForTesting
+void debugClearDecodedAssetImageCache() => _decodedImageCache.clear();
+
+/// Decodes a `data:image/<format>;base64,<b64>` string into cached [Uint8List]
+/// bytes, returning `null` if malformed, empty, or missing an image header.
+Uint8List? decodeCustomAssetIconBytes(String? raw) {
+  if (raw == null) return null;
+  final trimmed = raw.trim();
+  if (!isCustomAssetImageDataUri(trimmed)) return null;
+
+  final cached = _decodedImageCache.remove(trimmed);
+  if (cached != null) {
+    _decodedImageCache[trimmed] = cached;
+    return cached;
+  }
+
+  final commaIndex = trimmed.indexOf(',');
+  if (commaIndex < 0 || commaIndex + 1 >= trimmed.length) return null;
+  final payload = trimmed
+      .substring(commaIndex + 1)
+      .replaceAll(RegExp(r'\s+'), '');
+  if (payload.isEmpty) return null;
+
+  try {
+    final decoded = base64Decode(payload);
+    if (decoded.isEmpty || !_hasValidImageSignature(decoded)) return null;
+    _cacheDecodedImage(trimmed, decoded);
+    return decoded;
+  } on FormatException {
+    return null;
+  }
+}
+
+/// Decodes [rawBytes], center-crops to a square, scales to `96×96` PNG via
+/// `dart:ui`, disposes native image handles, caches the result, and returns a
+/// `'data:image/png;base64,<base64>'` string suitable for `asset.icon`.
+Future<String> encodeCustomAssetIconImage(Uint8List rawBytes) async {
+  if (rawBytes.isEmpty) {
+    throw const Failure(FailureCode.validation, '图片文件内容为空，请选择有效的图片');
+  }
+  if (rawBytes.length > maxCustomAssetImageFileBytes) {
+    throw const Failure(FailureCode.validation, '图片文件过大，请选择 15MB 以内的图片');
+  }
+
+  ui.Codec? codec;
+  ui.Image? srcImage;
+  ui.Picture? picture;
+  ui.Image? dstImage;
+  try {
+    codec = await ui.instantiateImageCodec(rawBytes);
+    final frame = await codec.getNextFrame();
+    srcImage = frame.image;
+    final srcW = srcImage.width;
+    final srcH = srcImage.height;
+    if (srcW <= 0 || srcH <= 0) {
+      throw const Failure(FailureCode.validation, '无法识别的图片尺寸');
+    }
+
+    final cropSide = math.min(srcW, srcH).toDouble();
+    final cropLeft = (srcW - cropSide) / 2.0;
+    final cropTop = (srcH - cropSide) / 2.0;
+    final srcRect = ui.Rect.fromLTWH(cropLeft, cropTop, cropSide, cropSide);
+    final dstSize = customAssetIconTargetSize.toDouble();
+    final dstRect = ui.Rect.fromLTWH(0, 0, dstSize, dstSize);
+
+    final recorder = ui.PictureRecorder();
+    final canvas = ui.Canvas(recorder, dstRect);
+    final paint = ui.Paint()..filterQuality = ui.FilterQuality.medium;
+    canvas.drawImageRect(srcImage, srcRect, dstRect, paint);
+    picture = recorder.endRecording();
+    dstImage = await picture.toImage(
+      customAssetIconTargetSize,
+      customAssetIconTargetSize,
+    );
+    final byteData = await dstImage.toByteData(format: ui.ImageByteFormat.png);
+    if (byteData != null && byteData.lengthInBytes > 0) {
+      final pngBytes = Uint8List.fromList(
+        byteData.buffer.asUint8List(
+          byteData.offsetInBytes,
+          byteData.lengthInBytes,
+        ),
+      );
+      final encoded = 'data:image/png;base64,${base64Encode(pngBytes)}';
+      _cacheDecodedImage(encoded, pngBytes);
+      return encoded;
+    }
+
+    if (_isPngSignature(rawBytes) &&
+        srcW <= customAssetIconTargetSize &&
+        srcH <= customAssetIconTargetSize) {
+      final copy = Uint8List.fromList(rawBytes);
+      final encoded = 'data:image/png;base64,${base64Encode(copy)}';
+      _cacheDecodedImage(encoded, copy);
+      return encoded;
+    }
+    throw const Failure(FailureCode.validation, '处理图片失败，请更换其他图片重试');
+  } on Failure {
+    rethrow;
+  } catch (_) {
+    throw const Failure(
+      FailureCode.validation,
+      '无法解析所选图片，请选择有效的 PNG/JPG/WebP 图片',
+    );
+  } finally {
+    dstImage?.dispose();
+    picture?.dispose();
+    srcImage?.dispose();
+    codec?.dispose();
+  }
+}
+
 /// Curated account icons & brand-harmonious colors covering 资金账户, 信用账户, and 借贷账户.
 const List<AssetIconSpec> assetIconCatalog = <AssetIconSpec>[
-  // 资金账户 (normal / invest)
+  // 资金账户 (normal / invest) — original 10 + 14 practical financial presets
   AssetIconSpec(
     key: 'cash',
     label: '现金',
@@ -1629,6 +1874,13 @@ const List<AssetIconSpec> assetIconCatalog = <AssetIconSpec>[
     group: 'normal',
   ),
   AssetIconSpec(
+    key: 'unionpay',
+    label: '云闪付/银联',
+    icon: Icons.qr_code_scanner_rounded,
+    defaultColorHex: '#D32F2F',
+    group: 'normal',
+  ),
+  AssetIconSpec(
     key: 'wealth',
     label: '余额宝/理财',
     icon: Icons.monetization_on_rounded,
@@ -1643,10 +1895,31 @@ const List<AssetIconSpec> assetIconCatalog = <AssetIconSpec>[
     group: 'normal',
   ),
   AssetIconSpec(
+    key: 'meal_card',
+    label: '饭卡/校园卡',
+    icon: Icons.badge_rounded,
+    defaultColorHex: '#FB8C00',
+    group: 'normal',
+  ),
+  AssetIconSpec(
+    key: 'gift_card',
+    label: '购物卡/礼品卡',
+    icon: Icons.card_giftcard_rounded,
+    defaultColorHex: '#EC407A',
+    group: 'normal',
+  ),
+  AssetIconSpec(
     key: 'provident',
     label: '公积金/医保',
     icon: Icons.health_and_safety_rounded,
     defaultColorHex: '#00897B',
+    group: 'normal',
+  ),
+  AssetIconSpec(
+    key: 'medical_card',
+    label: '医保/健康户',
+    icon: Icons.medical_services_rounded,
+    defaultColorHex: '#00ACC1',
     group: 'normal',
   ),
   AssetIconSpec(
@@ -1657,6 +1930,27 @@ const List<AssetIconSpec> assetIconCatalog = <AssetIconSpec>[
     group: 'normal',
   ),
   AssetIconSpec(
+    key: 'fund',
+    label: '基金/定投',
+    icon: Icons.pie_chart_rounded,
+    defaultColorHex: '#5C6BC0',
+    group: 'normal',
+  ),
+  AssetIconSpec(
+    key: 'gold',
+    label: '黄金/贵金属',
+    icon: Icons.diamond_rounded,
+    defaultColorHex: '#F59E0B',
+    group: 'normal',
+  ),
+  AssetIconSpec(
+    key: 'insurance',
+    label: '保单/保险',
+    icon: Icons.verified_user_rounded,
+    defaultColorHex: '#00897B',
+    group: 'normal',
+  ),
+  AssetIconSpec(
     key: 'currency_exchange',
     label: '数字人民币/外币',
     icon: Icons.currency_exchange_rounded,
@@ -1664,10 +1958,59 @@ const List<AssetIconSpec> assetIconCatalog = <AssetIconSpec>[
     group: 'normal',
   ),
   AssetIconSpec(
+    key: 'paypal_intl',
+    label: 'PayPal/跨境户',
+    icon: Icons.public_rounded,
+    defaultColorHex: '#1565C0',
+    group: 'normal',
+  ),
+  AssetIconSpec(
+    key: 'crypto',
+    label: '数字资产',
+    icon: Icons.currency_bitcoin_rounded,
+    defaultColorHex: '#FB8C00',
+    group: 'normal',
+  ),
+  AssetIconSpec(
     key: 'savings',
     label: '存折/金库',
     icon: Icons.savings_rounded,
     defaultColorHex: '#26A69A',
+    group: 'normal',
+  ),
+  AssetIconSpec(
+    key: 'safe_box',
+    label: '小金库/存钱罐',
+    icon: Icons.lock_rounded,
+    defaultColorHex: '#26A69A',
+    group: 'normal',
+  ),
+  AssetIconSpec(
+    key: 'piggy_bank',
+    label: '心愿储蓄',
+    icon: Icons.volunteer_activism_rounded,
+    defaultColorHex: '#F06292',
+    group: 'normal',
+  ),
+  AssetIconSpec(
+    key: 'reimburse_acc',
+    label: '报销/垫付户',
+    icon: Icons.assignment_turned_in_rounded,
+    defaultColorHex: '#7E57C2',
+    group: 'normal',
+  ),
+  AssetIconSpec(
+    key: 'property',
+    label: '房产/固产',
+    icon: Icons.apartment_rounded,
+    defaultColorHex: '#5C6BC0',
+    group: 'normal',
+  ),
+  AssetIconSpec(
+    key: 'car_asset',
+    label: '车辆资产',
+    icon: Icons.directions_car_rounded,
+    defaultColorHex: '#42A5F5',
     group: 'normal',
   ),
   // 信用账户 (credit)
@@ -1699,6 +2042,13 @@ const List<AssetIconSpec> assetIconCatalog = <AssetIconSpec>[
     defaultColorHex: '#8E24AA',
     group: 'credit',
   ),
+  AssetIconSpec(
+    key: 'virtual_credit',
+    label: '先享后付/分期卡',
+    icon: Icons.credit_score_rounded,
+    defaultColorHex: '#AB47BC',
+    group: 'credit',
+  ),
   // 借贷账户 (borrow / lend)
   AssetIconSpec(
     key: 'borrow',
@@ -1712,6 +2062,13 @@ const List<AssetIconSpec> assetIconCatalog = <AssetIconSpec>[
     label: '借出/应收',
     icon: Icons.call_made_rounded,
     defaultColorHex: '#00897B',
+    group: 'debt',
+  ),
+  AssetIconSpec(
+    key: 'iou_note',
+    label: '押金/保证金',
+    icon: Icons.handshake_rounded,
+    defaultColorHex: '#8D6E63',
     group: 'debt',
   ),
 ];
@@ -1731,6 +2088,9 @@ AssetIconSpec? _matchAssetByKeyword(
 
   // Debt accounts match direction first unless explicit keyword overrides.
   if (assetType == AssetType.debt) {
+    if (name.contains('押金') || name.contains('保证金')) {
+      return _assetSpecByKey['iou_note'];
+    }
     if (subType == AssetType.debtLend ||
         name.contains('借出') ||
         name.contains('借给') ||
@@ -1753,6 +2113,9 @@ AssetIconSpec? _matchAssetByKeyword(
   if (name.contains('白条') || lower.contains('baitiao')) {
     return _assetSpecByKey['baitiao'];
   }
+  if (name.contains('先享后付') || name.contains('信用购')) {
+    return _assetSpecByKey['virtual_credit'];
+  }
   if (name.contains('月付') ||
       name.contains('分期') ||
       name.contains('消费贷') ||
@@ -1770,25 +2133,69 @@ AssetIconSpec? _matchAssetByKeyword(
   if (name.contains('支付宝') || lower.contains('alipay')) {
     return _assetSpecByKey['alipay'];
   }
+  if (name.contains('云闪付') ||
+      name.contains('银联') ||
+      lower.contains('unionpay')) {
+    return _assetSpecByKey['unionpay'];
+  }
+  if (lower.contains('paypal') || name.contains('跨境')) {
+    return _assetSpecByKey['paypal_intl'];
+  }
+  if (name.contains('黄金') || name.contains('积存金') || name.contains('贵金属')) {
+    return _assetSpecByKey['gold'];
+  }
+  if (name.contains('定投') || name.contains('指数基金')) {
+    return _assetSpecByKey['fund'];
+  }
   if (name.contains('股票') ||
       name.contains('基金') ||
       name.contains('证券') ||
       lower.contains('etf')) {
     return _assetSpecByKey['stock'];
   }
+  if (name.contains('保单') || name.contains('保险') || name.contains('年金')) {
+    return _assetSpecByKey['insurance'];
+  }
+  if (name.contains('医保卡') || name.contains('健康户')) {
+    return _assetSpecByKey['medical_card'];
+  }
   if (name.contains('公积金') || name.contains('社保') || name.contains('医保')) {
     return _assetSpecByKey['provident'];
+  }
+  if (name.contains('饭卡') ||
+      name.contains('校园卡') ||
+      name.contains('餐卡') ||
+      name.contains('食堂')) {
+    return _assetSpecByKey['meal_card'];
+  }
+  if (name.contains('购物卡') ||
+      name.contains('礼品卡') ||
+      lower.contains('京东e卡') ||
+      name.contains('超市卡')) {
+    return _assetSpecByKey['gift_card'];
   }
   if (name.contains('公交') ||
       name.contains('交通卡') ||
       name.contains('地铁卡') ||
       name.contains('校园') ||
-      name.contains('饭卡') ||
-      name.contains('餐卡') ||
       name.contains('会员') ||
-      name.contains('充值') ||
-      name.contains('购物卡')) {
+      name.contains('充值')) {
     return _assetSpecByKey['stored_card'];
+  }
+  if (name.contains('房产') || name.contains('不动产')) {
+    return _assetSpecByKey['property'];
+  }
+  if (name.contains('车产') || name.contains('车辆')) {
+    return _assetSpecByKey['car_asset'];
+  }
+  if (name.contains('比特币') ||
+      name.contains('以太坊') ||
+      name.contains('数字资产') ||
+      name.contains('加密') ||
+      lower.contains('btc') ||
+      lower.contains('usdt') ||
+      lower.contains('crypto')) {
+    return _assetSpecByKey['crypto'];
   }
   if (name.contains('数字人民币') ||
       lower.contains('e-cny') ||
@@ -1798,6 +2205,15 @@ AssetIconSpec? _matchAssetByKeyword(
       name.contains('日元') ||
       name.contains('欧元')) {
     return _assetSpecByKey['currency_exchange'];
+  }
+  if (name.contains('小金库') || name.contains('存钱罐') || name.contains('保险箱')) {
+    return _assetSpecByKey['safe_box'];
+  }
+  if (name.contains('心愿储蓄') || name.contains('心愿金')) {
+    return _assetSpecByKey['piggy_bank'];
+  }
+  if (name.contains('报销户') || name.contains('垫付')) {
+    return _assetSpecByKey['reimburse_acc'];
   }
   if (name.contains('存折') || name.contains('金库') || name.contains('定期')) {
     return _assetSpecByKey['savings'];
@@ -1858,7 +2274,8 @@ AssetIconSpec _fallbackAssetSpecForType(int assetType, int? subType) {
   return _assetSpecByKey['bank_card']!;
 }
 
-/// Resolved visual representation (icon + brand-harmonious color) for an asset account.
+/// Resolved visual representation (preset/general icon, custom monogram text,
+/// or custom local image + brand-harmonious color) for an asset account.
 final class AssetVisual {
   const AssetVisual({
     required this.iconKey,
@@ -1866,6 +2283,8 @@ final class AssetVisual {
     required this.icon,
     required this.color,
     required this.colorHex,
+    this.customText,
+    this.customImageBytes,
   });
 
   final String iconKey;
@@ -1873,12 +2292,17 @@ final class AssetVisual {
   final IconData icon;
   final Color color;
   final String colorHex;
+  final String? customText;
+  final Uint8List? customImageBytes;
 }
 
 /// Resolves an [AssetVisual] in priority order:
-/// 1. Explicit [iconKey] in [assetIconCatalog]
-/// 2. Smart keyword match on [name] (`微信`, `支付宝`, `花呗`, `白条`, `招行信用卡`, `现金`, etc.)
-/// 3. Fallback by [assetType] (and optional [subType] for borrow/lend debt accounts).
+/// 1. Custom uploaded image (`'data:image/<ext>;base64,...'`), falling back if corrupt
+/// 2. Custom 1–2 grapheme monogram / Emoji (`'text:<value>'`), falling back if blank
+/// 3. Explicit [iconKey] in [assetIconCatalog]
+/// 4. General icon `'cat:<key>'` (or direct semantic key in [categoryIconCatalog])
+/// 5. Smart keyword match on [name] (`微信`, `支付宝`, `花呗`, `白条`, `招行信用卡`, `现金`, etc.)
+/// 6. Fallback by [assetType] (and optional [subType] for borrow/lend debt accounts).
 AssetVisual resolveAssetVisual({
   String? iconKey,
   String? colorHex,
@@ -1887,12 +2311,98 @@ AssetVisual resolveAssetVisual({
   int? subType,
 }) {
   final trimmedKey = iconKey?.trim() ?? '';
-  final explicitSpec = trimmedKey.isEmpty ? null : _assetSpecByKey[trimmedKey];
-  final spec =
-      explicitSpec ??
+  AssetIconSpec fallbackSpec() =>
       _matchAssetByKeyword(name, assetType, subType) ??
       _fallbackAssetSpecForType(assetType, subType);
 
+  if (isCustomAssetImageDataUri(trimmedKey)) {
+    final imageBytes = decodeCustomAssetIconBytes(trimmedKey);
+    if (imageBytes != null) {
+      final fb = fallbackSpec();
+      final resolvedColor =
+          tryParseCatalogColor(colorHex) ??
+          tryParseCatalogColor(fb.defaultColorHex)!;
+      return AssetVisual(
+        iconKey: trimmedKey,
+        label: '自定义图片',
+        icon: fb.icon,
+        color: resolvedColor,
+        colorHex: formatCatalogColorHex(resolvedColor),
+        customImageBytes: imageBytes,
+      );
+    }
+  }
+
+  if (trimmedKey.startsWith(assetTextIconPrefix)) {
+    final monogram = normalizeAssetCustomText(
+      trimmedKey.substring(assetTextIconPrefix.length),
+    );
+    if (monogram.isNotEmpty) {
+      final fb = fallbackSpec();
+      final resolvedColor =
+          tryParseCatalogColor(colorHex) ??
+          tryParseCatalogColor(fb.defaultColorHex)!;
+      return AssetVisual(
+        iconKey: '$assetTextIconPrefix$monogram',
+        label: '文字「$monogram」',
+        icon: fb.icon,
+        color: resolvedColor,
+        colorHex: formatCatalogColorHex(resolvedColor),
+        customText: monogram,
+      );
+    }
+  }
+
+  final explicitSpec = trimmedKey.isEmpty ? null : _assetSpecByKey[trimmedKey];
+  if (explicitSpec != null) {
+    final resolvedColor =
+        tryParseCatalogColor(colorHex) ??
+        tryParseCatalogColor(explicitSpec.defaultColorHex)!;
+    return AssetVisual(
+      iconKey: explicitSpec.key,
+      label: explicitSpec.label,
+      icon: explicitSpec.icon,
+      color: resolvedColor,
+      colorHex: formatCatalogColorHex(resolvedColor),
+    );
+  }
+
+  if (trimmedKey.startsWith(assetCategoryIconPrefix)) {
+    final normalizedCat = _normalizeIconKey(
+      trimmedKey.substring(assetCategoryIconPrefix.length),
+    );
+    if (normalizedCat.isNotEmpty) {
+      final catSpec = _categorySpecByKey[normalizedCat]!;
+      final resolvedColor =
+          tryParseCatalogColor(colorHex) ??
+          tryParseCatalogColor(catSpec.defaultColorHex)!;
+      return AssetVisual(
+        iconKey: '$assetCategoryIconPrefix${catSpec.key}',
+        label: catSpec.label,
+        icon: catSpec.icon,
+        color: resolvedColor,
+        colorHex: formatCatalogColorHex(resolvedColor),
+      );
+    }
+  } else if (trimmedKey.isNotEmpty) {
+    final directCat =
+        _categorySpecByKey[trimmedKey] ??
+        _categorySpecByKey[trimmedKey.toLowerCase()];
+    if (directCat != null) {
+      final resolvedColor =
+          tryParseCatalogColor(colorHex) ??
+          tryParseCatalogColor(directCat.defaultColorHex)!;
+      return AssetVisual(
+        iconKey: '$assetCategoryIconPrefix${directCat.key}',
+        label: directCat.label,
+        icon: directCat.icon,
+        color: resolvedColor,
+        colorHex: formatCatalogColorHex(resolvedColor),
+      );
+    }
+  }
+
+  final spec = fallbackSpec();
   final resolvedColor =
       tryParseCatalogColor(colorHex) ??
       tryParseCatalogColor(spec.defaultColorHex)!;
@@ -1905,7 +2415,8 @@ AssetVisual resolveAssetVisual({
   );
 }
 
-/// Soft/vivid circular badge rendering an account's semantic rounded icon.
+/// Soft/vivid circular badge rendering an account's semantic rounded icon,
+/// custom 1–2 grapheme monogram/Emoji, or circular uploaded image.
 class AssetIconAvatar extends StatelessWidget {
   const AssetIconAvatar({
     super.key,
@@ -1941,6 +2452,72 @@ class AssetIconAvatar extends StatelessWidget {
         : visual.color.withValues(alpha: isDark ? 0.22 : 0.14);
     final fgColor = selected ? Colors.white : visual.color;
 
+    final imageBytes = visual.customImageBytes;
+    if (imageBytes != null) {
+      return AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          color: bgColor,
+          shape: BoxShape.circle,
+          border: selected
+              ? Border.all(color: visual.color, width: 2.0)
+              : Border.all(
+                  color: visual.color.withValues(alpha: isDark ? 0.28 : 0.18),
+                  width: 1.0,
+                ),
+        ),
+        child: ClipOval(
+          child: Image.memory(
+            imageBytes,
+            width: size,
+            height: size,
+            fit: BoxFit.cover,
+            gaplessPlayback: true,
+            errorBuilder: (context, error, stackTrace) => Center(
+              child: Icon(visual.icon, size: size * 0.52, color: fgColor),
+            ),
+          ),
+        ),
+      );
+    }
+
+    final customText = visual.customText;
+    if (customText != null && customText.isNotEmpty) {
+      final graphemeCount = customText.characters.length;
+      final fontSize = graphemeCount <= 1 ? size * 0.46 : size * 0.33;
+      return AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          color: bgColor,
+          shape: BoxShape.circle,
+          border: selected
+              ? Border.all(
+                  color: visual.color.withValues(alpha: 0.35),
+                  width: 1.5,
+                )
+              : null,
+        ),
+        alignment: Alignment.center,
+        child: Text(
+          customText,
+          maxLines: 1,
+          overflow: TextOverflow.clip,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: fgColor,
+            fontSize: fontSize,
+            fontWeight: FontWeight.w700,
+            height: 1.0,
+            letterSpacing: graphemeCount <= 1 ? null : -0.5,
+          ),
+        ),
+      );
+    }
+
     return AnimatedContainer(
       duration: const Duration(milliseconds: 160),
       width: size,
@@ -1961,8 +2538,29 @@ class AssetIconAvatar extends StatelessWidget {
   }
 }
 
+Future<Uint8List?> _defaultPickCustomAssetImageBytes() async {
+  const typeGroup = XTypeGroup(
+    label: '图片',
+    extensions: <String>['png', 'jpg', 'jpeg', 'webp', 'bmp', 'gif'],
+    mimeTypes: <String>[
+      'image/png',
+      'image/jpeg',
+      'image/webp',
+      'image/bmp',
+      'image/gif',
+    ],
+    uniformTypeIdentifiers: <String>['public.image'],
+  );
+  final file = await openFile(
+    acceptedTypeGroups: const <XTypeGroup>[typeGroup],
+  );
+  if (file == null) return null;
+  return file.readAsBytes();
+}
+
 /// Opens an interactive modal bottom sheet for choosing an asset account's
-/// icon and color swatch, prioritizing icons matching [assetType].
+/// preset/general icon, custom 1–2 grapheme text/Emoji monogram, or custom
+/// local image, paired with a 20-swatch color palette.
 Future<({String icon, String colorHex})?> showAssetVisualPicker(
   BuildContext context, {
   String? initialIcon,
@@ -1970,6 +2568,7 @@ Future<({String icon, String colorHex})?> showAssetVisualPicker(
   required int assetType,
   int? subType,
   required String previewName,
+  Future<Uint8List?> Function()? pickCustomImageBytes,
 }) {
   final initialVisual = resolveAssetVisual(
     iconKey: initialIcon,
@@ -1994,9 +2593,25 @@ Future<({String icon, String colorHex})?> showAssetVisualPicker(
       previewName: previewName.trim().isEmpty
           ? (assetType == AssetType.credit ? '信用账户预览' : '账户预览')
           : previewName.trim(),
+      pickCustomImageBytes: pickCustomImageBytes,
     ),
   );
 }
+
+enum _AssetPickerMode { preset, text, image }
+
+final TextInputFormatter _twoGraphemeInputFormatter =
+    TextInputFormatter.withFunction((oldValue, newValue) {
+      if (newValue.composing.isValid && !newValue.composing.isCollapsed) {
+        return newValue;
+      }
+      final truncated = normalizeAssetCustomText(newValue.text);
+      if (truncated == newValue.text) return newValue;
+      return TextEditingValue(
+        text: truncated,
+        selection: TextSelection.collapsed(offset: truncated.length),
+      );
+    });
 
 class _AssetVisualPickerSheet extends StatefulWidget {
   const _AssetVisualPickerSheet({
@@ -2006,6 +2621,7 @@ class _AssetVisualPickerSheet extends StatefulWidget {
     required this.assetType,
     this.subType,
     required this.previewName,
+    this.pickCustomImageBytes,
   });
 
   final String initialIconKey;
@@ -2014,6 +2630,7 @@ class _AssetVisualPickerSheet extends StatefulWidget {
   final int assetType;
   final int? subType;
   final String previewName;
+  final Future<Uint8List?> Function()? pickCustomImageBytes;
 
   @override
   State<_AssetVisualPickerSheet> createState() =>
@@ -2024,6 +2641,10 @@ class _AssetVisualPickerSheetState extends State<_AssetVisualPickerSheet> {
   late String _iconKey;
   late String _colorHex;
   late bool _userLockedColor;
+  late _AssetPickerMode _mode;
+  late String _lastPresetIconKey;
+  late final TextEditingController _customTextController;
+  bool _uploadingImage = false;
 
   @override
   void initState() {
@@ -2031,6 +2652,37 @@ class _AssetVisualPickerSheetState extends State<_AssetVisualPickerSheet> {
     _iconKey = widget.initialIconKey;
     _colorHex = widget.initialColorHex;
     _userLockedColor = widget.hasExplicitInitialColor;
+
+    final defaultPresetKey = resolveAssetVisual(
+      name: widget.previewName,
+      assetType: widget.assetType,
+      subType: widget.subType,
+    ).iconKey;
+
+    if (decodeCustomAssetIconBytes(_iconKey) != null) {
+      _mode = _AssetPickerMode.image;
+      _lastPresetIconKey = defaultPresetKey;
+      _customTextController = TextEditingController();
+    } else if (_iconKey.startsWith(assetTextIconPrefix)) {
+      final textVal = normalizeAssetCustomText(
+        _iconKey.substring(assetTextIconPrefix.length),
+      );
+      _mode = textVal.isNotEmpty
+          ? _AssetPickerMode.text
+          : _AssetPickerMode.preset;
+      _lastPresetIconKey = defaultPresetKey;
+      _customTextController = TextEditingController(text: textVal);
+    } else {
+      _mode = _AssetPickerMode.preset;
+      _lastPresetIconKey = _iconKey;
+      _customTextController = TextEditingController();
+    }
+  }
+
+  @override
+  void dispose() {
+    _customTextController.dispose();
+    super.dispose();
   }
 
   List<({String title, List<AssetIconSpec> items})> _orderedSections() {
@@ -2063,189 +2715,560 @@ class _AssetVisualPickerSheetState extends State<_AssetVisualPickerSheet> {
     ];
   }
 
+  List<String> _buildMonogramSuggestions() {
+    final result = <String>[];
+    final seen = <String>{};
+    void addCandidate(String raw) {
+      final normalized = normalizeAssetCustomText(raw);
+      if (normalized.isNotEmpty && seen.add(normalized)) {
+        result.add(normalized);
+      }
+    }
+
+    final preview = widget.previewName.trim();
+    if (preview.isNotEmpty &&
+        preview != '账户预览' &&
+        preview != '信用账户预览' &&
+        preview.characters.length >= 2) {
+      addCandidate(preview.characters.take(2).toString());
+      final stripped = preview
+          .replaceAll(RegExp(r'(储蓄卡|信用卡|借记卡|银行卡|账户|钱包|银行)$'), '')
+          .trim();
+      if (stripped.characters.length >= 2) {
+        final chars = stripped.characters.toList();
+        addCandidate(chars.sublist(chars.length - 2).join());
+      }
+    }
+
+    for (final preset in assetMonogramPresets) {
+      addCandidate(preset);
+    }
+    return result;
+  }
+
+  Future<void> _handlePickImage(BuildContext messengerCtx) async {
+    if (_uploadingImage) return;
+    setState(() => _uploadingImage = true);
+    try {
+      final picker =
+          widget.pickCustomImageBytes ?? _defaultPickCustomAssetImageBytes;
+      final rawBytes = await picker();
+      if (rawBytes == null || !mounted) return;
+      final encoded = await encodeCustomAssetIconImage(rawBytes);
+      if (!mounted) return;
+      setState(() {
+        _iconKey = encoded;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      final msg = e is Failure
+          ? e.message
+          : '无法读取或解析所选图片，请选择有效的 PNG/JPG/WebP 图片';
+      if (messengerCtx.mounted) {
+        ScaffoldMessenger.maybeOf(messengerCtx)
+          ?..hideCurrentSnackBar()
+          ..showSnackBar(SnackBar(content: Text(msg)));
+      }
+    } finally {
+      if (mounted) setState(() => _uploadingImage = false);
+    }
+  }
+
+  Widget _buildModeSelector(ThemeData theme) {
+    Widget tab({
+      required Key key,
+      required _AssetPickerMode mode,
+      required IconData icon,
+      required String label,
+    }) {
+      final selected = _mode == mode;
+      return Expanded(
+        child: InkWell(
+          key: key,
+          borderRadius: BorderRadius.circular(10),
+          onTap: () => setState(() {
+            _mode = mode;
+            if (mode == _AssetPickerMode.text) {
+              final textVal = normalizeAssetCustomText(
+                _customTextController.text,
+              );
+              if (textVal.isNotEmpty) {
+                _iconKey = '$assetTextIconPrefix$textVal';
+              }
+            }
+          }),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 140),
+            padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 6),
+            decoration: BoxDecoration(
+              color: selected
+                  ? theme.colorScheme.secondaryContainer
+                  : Colors.transparent,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  icon,
+                  size: 16,
+                  color: selected
+                      ? theme.colorScheme.onSecondaryContainer
+                      : theme.colorScheme.onSurfaceVariant,
+                ),
+                const SizedBox(width: 4),
+                Flexible(
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                      color: selected
+                          ? theme.colorScheme.onSecondaryContainer
+                          : theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+      child: Container(
+        padding: const EdgeInsets.all(3),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surfaceContainerHighest.withValues(
+            alpha: 0.6,
+          ),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: [
+            tab(
+              key: const Key('asset-picker-mode-preset'),
+              mode: _AssetPickerMode.preset,
+              icon: Icons.apps_rounded,
+              label: '图标库',
+            ),
+            tab(
+              key: const Key('asset-picker-mode-text'),
+              mode: _AssetPickerMode.text,
+              icon: Icons.text_fields_rounded,
+              label: '文字/Emoji',
+            ),
+            tab(
+              key: const Key('asset-picker-mode-image'),
+              mode: _AssetPickerMode.image,
+              icon: Icons.image_outlined,
+              label: '自定义图片',
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPresetBody(ThemeData theme) {
+    final sections = _orderedSections();
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+      children: [
+        for (final section in sections) ...[
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8, top: 4),
+            child: Text(
+              section.title,
+              style: theme.textTheme.labelLarge?.copyWith(
+                color: theme.colorScheme.primary,
+              ),
+            ),
+          ),
+          GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+              maxCrossAxisExtent: 84,
+              mainAxisSpacing: 8,
+              crossAxisSpacing: 8,
+              childAspectRatio: 0.94,
+            ),
+            itemCount: section.items.length,
+            itemBuilder: (context, idx) {
+              final spec = section.items[idx];
+              final isSelected = _iconKey == spec.key;
+              return InkWell(
+                key: Key('visual-icon-${spec.key}'),
+                borderRadius: BorderRadius.circular(12),
+                onTap: () => setState(() {
+                  _iconKey = spec.key;
+                  _lastPresetIconKey = spec.key;
+                  if (!_userLockedColor) {
+                    _colorHex = spec.defaultColorHex;
+                  }
+                }),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    AssetIconAvatar(
+                      iconKey: spec.key,
+                      colorHex: isSelected ? _colorHex : spec.defaultColorHex,
+                      name: spec.label,
+                      assetType: widget.assetType,
+                      subType: widget.subType,
+                      size: 38,
+                      selected: isSelected,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      spec.label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: isSelected
+                            ? FontWeight.w600
+                            : FontWeight.normal,
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+          const SizedBox(height: 12),
+        ],
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8, top: 4),
+          child: Text(
+            '更多通用图标',
+            style: theme.textTheme.labelLarge?.copyWith(
+              color: theme.colorScheme.primary,
+            ),
+          ),
+        ),
+        GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+            maxCrossAxisExtent: 84,
+            mainAxisSpacing: 8,
+            crossAxisSpacing: 8,
+            childAspectRatio: 0.94,
+          ),
+          itemCount: categoryIconCatalog.length,
+          itemBuilder: (context, idx) {
+            final spec = categoryIconCatalog[idx];
+            final catKey = '$assetCategoryIconPrefix${spec.key}';
+            final isSelected = _iconKey == catKey;
+            return InkWell(
+              key: Key('visual-icon-cat-${spec.key}'),
+              borderRadius: BorderRadius.circular(12),
+              onTap: () => setState(() {
+                _iconKey = catKey;
+                _lastPresetIconKey = catKey;
+                if (!_userLockedColor) {
+                  _colorHex = spec.defaultColorHex;
+                }
+              }),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  AssetIconAvatar(
+                    iconKey: catKey,
+                    colorHex: isSelected ? _colorHex : spec.defaultColorHex,
+                    name: spec.label,
+                    assetType: widget.assetType,
+                    subType: widget.subType,
+                    size: 38,
+                    selected: isSelected,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    spec.label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: isSelected
+                          ? FontWeight.w600
+                          : FontWeight.normal,
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _buildTextBody(ThemeData theme) {
+    final suggestions = _buildMonogramSuggestions();
+    final activeMonogram = _iconKey.startsWith(assetTextIconPrefix)
+        ? normalizeAssetCustomText(
+            _iconKey.substring(assetTextIconPrefix.length),
+          )
+        : '';
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+      children: [
+        TextField(
+          key: const Key('asset-picker-custom-text-input'),
+          controller: _customTextController,
+          inputFormatters: <TextInputFormatter>[_twoGraphemeInputFormatter],
+          decoration: InputDecoration(
+            labelText: '自定义文字或 Emoji（1~2 字）',
+            hintText: '输入 1~2 个字或 Emoji，如：招行、工资、💳',
+            border: const OutlineInputBorder(),
+            suffixIcon: _customTextController.text.isEmpty
+                ? null
+                : IconButton(
+                    tooltip: '清空',
+                    icon: const Icon(Icons.clear_rounded, size: 18),
+                    onPressed: () => setState(() {
+                      _customTextController.clear();
+                      _iconKey = _lastPresetIconKey;
+                    }),
+                  ),
+          ),
+          onChanged: (val) {
+            final normalized = normalizeAssetCustomText(val);
+            setState(() {
+              _iconKey = normalized.isEmpty
+                  ? _lastPresetIconKey
+                  : '$assetTextIconPrefix$normalized';
+            });
+          },
+        ),
+        const SizedBox(height: 16),
+        Text(
+          '快捷候选（点击直接应用，可配合上方 20 色调色盘）',
+          style: theme.textTheme.labelMedium?.copyWith(
+            color: theme.colorScheme.outline,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final candidate in suggestions)
+              ChoiceChip(
+                key: Key('asset-picker-text-chip-$candidate'),
+                label: Text(candidate),
+                selected: activeMonogram == candidate,
+                onSelected: (_) => setState(() {
+                  _customTextController.value = TextEditingValue(
+                    text: candidate,
+                    selection: TextSelection.collapsed(
+                      offset: candidate.length,
+                    ),
+                  );
+                  _iconKey = '$assetTextIconPrefix$candidate';
+                }),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildImageBody(ThemeData theme, BuildContext messengerCtx) {
+    final hasCustomImage = decodeCustomAssetIconBytes(_iconKey) != null;
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 20, 16, 24),
+      children: [
+        Center(
+          child: AssetIconAvatar(
+            key: const Key('asset-picker-image-preview'),
+            iconKey: _iconKey,
+            colorHex: _colorHex,
+            name: widget.previewName,
+            assetType: widget.assetType,
+            subType: widget.subType,
+            size: 72,
+            selected: hasCustomImage,
+          ),
+        ),
+        const SizedBox(height: 12),
+        Text(
+          hasCustomImage
+              ? '已应用自定义圆形图标（随本地备份与云同步自动保存）'
+              : '支持 PNG / JPG / WebP 等常见图片，自动居中裁剪为 96×96 圆形图标',
+          textAlign: TextAlign.center,
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.outline,
+          ),
+        ),
+        const SizedBox(height: 16),
+        Wrap(
+          spacing: 12,
+          runSpacing: 10,
+          alignment: WrapAlignment.center,
+          children: [
+            FilledButton.icon(
+              key: const Key('asset-picker-upload-image-btn'),
+              onPressed: _uploadingImage
+                  ? null
+                  : () => _handlePickImage(messengerCtx),
+              icon: const Icon(Icons.photo_library_outlined, size: 18),
+              label: Text(
+                _uploadingImage
+                    ? '正在处理图片…'
+                    : (hasCustomImage ? '更换图片' : '从相册 / 文件选择图片'),
+              ),
+            ),
+            if (hasCustomImage)
+              OutlinedButton.icon(
+                key: const Key('asset-picker-reset-icon-btn'),
+                onPressed: _uploadingImage
+                    ? null
+                    : () => setState(() => _iconKey = _lastPresetIconKey),
+                icon: const Icon(Icons.restart_alt_rounded, size: 18),
+                label: const Text('恢复预设图标'),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final maxHeight = MediaQuery.sizeOf(context).height * 0.82;
-    final sections = _orderedSections();
+    final maxHeight = MediaQuery.sizeOf(context).height * 0.86;
 
     return ConstrainedBox(
       constraints: BoxConstraints(maxHeight: maxHeight),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-            child: Row(
+      child: ScaffoldMessenger(
+        child: Scaffold(
+          backgroundColor: Colors.transparent,
+          body: Builder(
+            builder: (messengerCtx) => Column(
               children: [
-                AssetIconAvatar(
-                  iconKey: _iconKey,
-                  colorHex: _colorHex,
-                  name: widget.previewName,
-                  assetType: widget.assetType,
-                  subType: widget.subType,
-                  size: 42,
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+                  child: Row(
                     children: [
-                      Text(
-                        widget.previewName,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w600,
-                        ),
+                      AssetIconAvatar(
+                        iconKey: _iconKey,
+                        colorHex: _colorHex,
+                        name: widget.previewName,
+                        assetType: widget.assetType,
+                        subType: widget.subType,
+                        size: 42,
                       ),
-                      Text(
-                        '选择账户图标与配色',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.outline,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                FilledButton(
-                  key: const Key('visual-picker-confirm'),
-                  onPressed: () => Navigator.pop(context, (
-                    icon: _iconKey,
-                    colorHex: _colorHex,
-                  )),
-                  child: const Text('确定'),
-                ),
-              ],
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Wrap(
-              spacing: 10,
-              runSpacing: 8,
-              children: [
-                for (
-                  var index = 0;
-                  index < catalogColorHexPresets.length;
-                  index++
-                )
-                  Builder(
-                    builder: (context) {
-                      final hex = catalogColorHexPresets[index];
-                      final color = catalogColorPresets[index];
-                      final selected =
-                          _colorHex.toUpperCase() == hex.toUpperCase();
-                      return InkWell(
-                        key: Key('visual-color-$hex'),
-                        customBorder: const CircleBorder(),
-                        onTap: () => setState(() {
-                          _colorHex = hex;
-                          _userLockedColor = true;
-                        }),
-                        child: Container(
-                          width: 30,
-                          height: 30,
-                          decoration: BoxDecoration(
-                            color: color,
-                            shape: BoxShape.circle,
-                            border: selected
-                                ? Border.all(
-                                    color: theme.colorScheme.onSurface,
-                                    width: 2.2,
-                                  )
-                                : null,
-                          ),
-                          child: selected
-                              ? const Icon(
-                                  Icons.check,
-                                  size: 16,
-                                  color: Colors.white,
-                                )
-                              : null,
-                        ),
-                      );
-                    },
-                  ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 8),
-          const Divider(height: 1),
-          Flexible(
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-              children: [
-                for (final section in sections) ...[
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8, top: 4),
-                    child: Text(
-                      section.title,
-                      style: theme.textTheme.labelLarge?.copyWith(
-                        color: theme.colorScheme.primary,
-                      ),
-                    ),
-                  ),
-                  GridView.builder(
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    gridDelegate:
-                        const SliverGridDelegateWithMaxCrossAxisExtent(
-                          maxCrossAxisExtent: 84,
-                          mainAxisSpacing: 8,
-                          crossAxisSpacing: 8,
-                          childAspectRatio: 0.94,
-                        ),
-                    itemCount: section.items.length,
-                    itemBuilder: (context, idx) {
-                      final spec = section.items[idx];
-                      final isSelected = _iconKey == spec.key;
-                      return InkWell(
-                        key: Key('visual-icon-${spec.key}'),
-                        borderRadius: BorderRadius.circular(12),
-                        onTap: () => setState(() {
-                          _iconKey = spec.key;
-                          if (!_userLockedColor) {
-                            _colorHex = spec.defaultColorHex;
-                          }
-                        }),
+                      const SizedBox(width: 12),
+                      Expanded(
                         child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            AssetIconAvatar(
-                              iconKey: spec.key,
-                              colorHex: isSelected
-                                  ? _colorHex
-                                  : spec.defaultColorHex,
-                              name: spec.label,
-                              assetType: widget.assetType,
-                              subType: widget.subType,
-                              size: 38,
-                              selected: isSelected,
-                            ),
-                            const SizedBox(height: 4),
                             Text(
-                              spec.label,
+                              widget.previewName,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: isSelected
-                                    ? FontWeight.w600
-                                    : FontWeight.normal,
+                              style: theme.textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            Text(
+                              '选择账户图标、文字或自定义图片',
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: theme.colorScheme.outline,
                               ),
                             ),
                           ],
                         ),
-                      );
-                    },
+                      ),
+                      FilledButton(
+                        key: const Key('visual-picker-confirm'),
+                        onPressed: _uploadingImage
+                            ? null
+                            : () => Navigator.pop(context, (
+                                icon: _iconKey,
+                                colorHex: _colorHex,
+                              )),
+                        child: const Text('确定'),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 12),
-                ],
+                ),
+                _buildModeSelector(theme),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Wrap(
+                    spacing: 10,
+                    runSpacing: 8,
+                    children: [
+                      for (
+                        var index = 0;
+                        index < catalogColorHexPresets.length;
+                        index++
+                      )
+                        Builder(
+                          builder: (context) {
+                            final hex = catalogColorHexPresets[index];
+                            final color = catalogColorPresets[index];
+                            final selected =
+                                _colorHex.toUpperCase() == hex.toUpperCase();
+                            return InkWell(
+                              key: Key('visual-color-$hex'),
+                              customBorder: const CircleBorder(),
+                              onTap: () => setState(() {
+                                _colorHex = hex;
+                                _userLockedColor = true;
+                              }),
+                              child: Container(
+                                width: 30,
+                                height: 30,
+                                decoration: BoxDecoration(
+                                  color: color,
+                                  shape: BoxShape.circle,
+                                  border: selected
+                                      ? Border.all(
+                                          color: theme.colorScheme.onSurface,
+                                          width: 2.2,
+                                        )
+                                      : null,
+                                ),
+                                child: selected
+                                    ? const Icon(
+                                        Icons.check,
+                                        size: 16,
+                                        color: Colors.white,
+                                      )
+                                    : null,
+                              ),
+                            );
+                          },
+                        ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 8),
+                const Divider(height: 1),
+                Expanded(
+                  child: switch (_mode) {
+                    _AssetPickerMode.preset => _buildPresetBody(theme),
+                    _AssetPickerMode.text => _buildTextBody(theme),
+                    _AssetPickerMode.image => _buildImageBody(
+                      theme,
+                      messengerCtx,
+                    ),
+                  },
+                ),
               ],
             ),
           ),
-        ],
+        ),
       ),
     );
   }

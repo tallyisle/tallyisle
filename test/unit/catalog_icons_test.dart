@@ -1,9 +1,14 @@
+import 'dart:convert';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
+
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:tallyisle/app/providers.dart';
+import 'package:tallyisle/core/failure.dart';
 import 'package:tallyisle/core/money.dart';
 import 'package:tallyisle/data/db/database.dart';
 import 'package:tallyisle/data/db/seed.dart';
@@ -56,7 +61,40 @@ Future<void> _disposeApp(WidgetTester tester) async {
   await tester.pump(const Duration(seconds: 1));
 }
 
+Future<Uint8List> _makeTestPng({
+  required int width,
+  required int height,
+  Color outerColor = const Color(0xFF1565C0),
+  Color innerColor = const Color(0xFFFF7043),
+}) async {
+  final recorder = ui.PictureRecorder();
+  final rect = Rect.fromLTWH(0, 0, width.toDouble(), height.toDouble());
+  final canvas = Canvas(recorder, rect);
+  canvas.drawRect(rect, Paint()..color = outerColor);
+  final innerRect = Rect.fromCenter(
+    center: rect.center,
+    width: width * 0.4,
+    height: height * 0.4,
+  );
+  canvas.drawRect(innerRect, Paint()..color = innerColor);
+  final picture = recorder.endRecording();
+  final image = await picture.toImage(width, height);
+  try {
+    final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+    return Uint8List.fromList(
+      byteData!.buffer.asUint8List(
+        byteData.offsetInBytes,
+        byteData.lengthInBytes,
+      ),
+    );
+  } finally {
+    image.dispose();
+    picture.dispose();
+  }
+}
+
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
   group('Hex color parsing & Material 3 palette presets', () {
     test('provides at least 16 harmonious color presets', () {
       expect(catalogColorHexPresets.length, greaterThanOrEqualTo(16));
@@ -313,6 +351,309 @@ void main() {
       expect(custom.iconKey, 'wealth');
       expect(custom.colorHex, '#7E57C2');
     });
+
+    test(
+      'preserves all 16 original keys, adds 16 practical financial presets, and resolves cat:<key> general icons',
+      () {
+        const original16Keys = <String>[
+          'cash',
+          'bank_card',
+          'wechat_pay',
+          'alipay',
+          'wealth',
+          'stored_card',
+          'provident',
+          'stock',
+          'currency_exchange',
+          'savings',
+          'credit_card',
+          'huabei',
+          'baitiao',
+          'credit_line',
+          'borrow',
+          'lend',
+        ];
+        const expandedNewKeys = <String>[
+          'unionpay',
+          'gold',
+          'fund',
+          'insurance',
+          'meal_card',
+          'gift_card',
+          'property',
+          'car_asset',
+          'crypto',
+          'safe_box',
+          'reimburse_acc',
+          'piggy_bank',
+          'paypal_intl',
+          'medical_card',
+          'virtual_credit',
+          'iou_note',
+        ];
+
+        for (final key in <String>[...original16Keys, ...expandedNewKeys]) {
+          final v = resolveAssetVisual(
+            iconKey: key,
+            name: '测试账户',
+            assetType: AssetType.normal,
+          );
+          expect(v.iconKey, key, reason: 'Preset key $key must resolve');
+          expect(v.label, isNotEmpty);
+          expect(v.customText, isNull);
+          expect(v.customImageBytes, isNull);
+        }
+
+        // Smart keyword matches for newly added account presets:
+        expect(
+          resolveAssetVisual(name: '云闪付', assetType: AssetType.normal).iconKey,
+          'unionpay',
+        );
+        expect(
+          resolveAssetVisual(
+            name: '积存金账户',
+            assetType: AssetType.normal,
+          ).iconKey,
+          'gold',
+        );
+        expect(
+          resolveAssetVisual(
+            name: '大学校园卡',
+            assetType: AssetType.normal,
+          ).iconKey,
+          'meal_card',
+        );
+        expect(
+          resolveAssetVisual(
+            name: '超市购物卡',
+            assetType: AssetType.normal,
+          ).iconKey,
+          'gift_card',
+        );
+        expect(
+          resolveAssetVisual(
+            name: '租房押金',
+            assetType: AssetType.debt,
+            subType: AssetType.debtLend,
+          ).iconKey,
+          'iou_note',
+        );
+
+        // General category icons via 'cat:<key>' and direct fallback:
+        final catCoffee = resolveAssetVisual(
+          iconKey: 'cat:coffee',
+          colorHex: '#8D6E63',
+          name: '咖啡储值卡',
+          assetType: AssetType.normal,
+        );
+        expect(catCoffee.iconKey, 'cat:coffee');
+        expect(catCoffee.icon, Icons.coffee_rounded);
+        expect(catCoffee.colorHex, '#8D6E63');
+
+        final catCamel = resolveAssetVisual(
+          iconKey: 'cat:MenuBook',
+          name: '读书卡',
+          assetType: AssetType.normal,
+        );
+        expect(catCamel.iconKey, 'cat:menu_book');
+        expect(catCamel.icon, Icons.menu_book_rounded);
+
+        // Legacy numeric .penny asset.icon ('1') must NOT hijack keyword match to 'restaurant':
+        expect(
+          resolveAssetVisual(
+            iconKey: '1',
+            name: '支付宝',
+            assetType: AssetType.normal,
+          ).iconKey,
+          'alipay',
+        );
+      },
+    );
+
+    test(
+      'custom text/Emoji monogram (text:<1~2 graphemes>) enforces grapheme safety and color pairing',
+      () {
+        expect(normalizeAssetCustomText('招商银行'), '招商');
+        expect(normalizeAssetCustomText('  招行\n\t '), '招行');
+        expect(normalizeAssetCustomText('💳'), '💳');
+        expect(normalizeAssetCustomText('💳🏦💰'), '💳🏦');
+        // Complex multi-codepoint ZWJ family emoji stays intact as 1 grapheme:
+        expect(normalizeAssetCustomText('👨‍👩‍👧'), '👨‍👩‍👧');
+        expect(normalizeAssetCustomText('👨‍👩‍👧🏦🎉'), '👨‍👩‍👧🏦');
+        expect(normalizeAssetCustomText('🇨🇳🧧✨'), '🇨🇳🧧');
+        expect(normalizeAssetCustomText('   '), '');
+
+        final zhaohang = resolveAssetVisual(
+          iconKey: 'text:招商银行',
+          colorHex: '#E53935',
+          name: '招商银行储蓄卡',
+          assetType: AssetType.normal,
+        );
+        expect(zhaohang.iconKey, 'text:招商');
+        expect(zhaohang.customText, '招商');
+        expect(zhaohang.colorHex, '#E53935');
+        expect(zhaohang.customImageBytes, isNull);
+
+        final zwj = resolveAssetVisual(
+          iconKey: 'text:👨‍👩‍👧',
+          colorHex: '#26A69A',
+          name: '家庭备用金',
+          assetType: AssetType.normal,
+        );
+        expect(zwj.iconKey, 'text:👨‍👩‍👧');
+        expect(zwj.customText, '👨‍👩‍👧');
+
+        // Blank 'text:   ' falls back cleanly to keyword/type preset:
+        final blankText = resolveAssetVisual(
+          iconKey: 'text:   ',
+          name: '微信钱包',
+          assetType: AssetType.normal,
+        );
+        expect(blankText.iconKey, 'wechat_pay');
+        expect(blankText.customText, isNull);
+      },
+    );
+
+    test(
+      'custom local image crops/scales to 96x96 PNG, validates limits, caches boundedly, and falls back on corrupt data',
+      () async {
+        debugClearDecodedAssetImageCache();
+
+        // 1. Center-crop 160x100 rectangular PNG -> 96x96 PNG
+        final rectPng = await _makeTestPng(
+          width: 160,
+          height: 100,
+          outerColor: const Color(0xFF1565C0),
+          innerColor: const Color(0xFFFF7043),
+        );
+        final dataUri = await encodeCustomAssetIconImage(rectPng);
+        expect(dataUri, startsWith('data:image/png;base64,'));
+
+        final resolved1 = resolveAssetVisual(
+          iconKey: dataUri,
+          colorHex: '#1677FF',
+          name: '专属银行卡',
+          assetType: AssetType.normal,
+        );
+        expect(resolved1.iconKey, dataUri);
+        expect(resolved1.customImageBytes, isNotNull);
+        expect(resolved1.customText, isNull);
+        expect(resolved1.colorHex, '#1677FF');
+
+        // Verify decoded PNG dimensions are 96x96
+        final codec = await ui.instantiateImageCodec(
+          resolved1.customImageBytes!,
+        );
+        final frame = await codec.getNextFrame();
+        expect(frame.image.width, 96);
+        expect(frame.image.height, 96);
+        frame.image.dispose();
+        codec.dispose();
+
+        // 2. Bounded cache returns identical Uint8List and caps at 128 entries
+        final resolved2 = resolveAssetVisual(
+          iconKey: dataUri,
+          name: '专属银行卡',
+          assetType: AssetType.normal,
+        );
+        expect(
+          identical(resolved1.customImageBytes, resolved2.customImageBytes),
+          isTrue,
+        );
+
+        for (var i = 0; i < 140; i++) {
+          // Valid JPEG 3-byte SOI+FF header + unique index payload
+          final fakeJpeg = Uint8List.fromList(<int>[
+            0xFF,
+            0xD8,
+            0xFF,
+            0xE0,
+            i & 0xFF,
+          ]);
+          final uri = 'data:image/jpeg;base64,${base64Encode(fakeJpeg)}';
+          final v = resolveAssetVisual(
+            iconKey: uri,
+            name: '卡$i',
+            assetType: AssetType.normal,
+          );
+          expect(v.customImageBytes, isNotNull);
+        }
+        expect(
+          debugDecodedAssetImageCacheSize,
+          lessThanOrEqualTo(maxCustomAssetImageCacheEntries),
+        );
+        expect(debugDecodedAssetImageCacheSize, 128);
+
+        // Also accepts valid WebP header
+        final fakeWebp = Uint8List.fromList(<int>[
+          0x52,
+          0x49,
+          0x46,
+          0x46,
+          0x04,
+          0x00,
+          0x00,
+          0x00,
+          0x57,
+          0x45,
+          0x42,
+          0x50,
+        ]);
+        final webpVisual = resolveAssetVisual(
+          iconKey: 'data:image/webp;base64,${base64Encode(fakeWebp)}',
+          name: 'WebP卡',
+          assetType: AssetType.normal,
+        );
+        expect(webpVisual.customImageBytes, isNotNull);
+
+        // 3. Rejects empty, >15MB, and corrupt non-image bytes in encodeCustomAssetIconImage
+        await expectLater(
+          encodeCustomAssetIconImage(Uint8List(0)),
+          throwsA(
+            isA<Failure>().having(
+              (f) => f.code,
+              'code',
+              FailureCode.validation,
+            ),
+          ),
+        );
+        await expectLater(
+          encodeCustomAssetIconImage(Uint8List(15 * 1024 * 1024 + 1)),
+          throwsA(
+            isA<Failure>()
+                .having((f) => f.code, 'code', FailureCode.validation)
+                .having((f) => f.message, 'message', '图片文件过大，请选择 15MB 以内的图片'),
+          ),
+        );
+        await expectLater(
+          encodeCustomAssetIconImage(Uint8List.fromList(<int>[1, 2, 3, 4])),
+          throwsA(
+            isA<Failure>().having(
+              (f) => f.code,
+              'code',
+              FailureCode.validation,
+            ),
+          ),
+        );
+
+        // 4. Corrupt base64 / non-image base64 in resolveAssetVisual falls back gracefully
+        final corrupt1 = resolveAssetVisual(
+          iconKey: 'data:image/png;base64,!!!invalid-base64!!!',
+          name: '支付宝',
+          assetType: AssetType.normal,
+        );
+        expect(corrupt1.customImageBytes, isNull);
+        expect(corrupt1.iconKey, 'alipay');
+
+        final corrupt2 = resolveAssetVisual(
+          iconKey: 'data:image/png;base64,${base64Encode(<int>[97, 98, 99])}',
+          name: '现金',
+          assetType: AssetType.normal,
+        );
+        expect(corrupt2.customImageBytes, isNull);
+        expect(corrupt2.iconKey, 'cash');
+      },
+    );
   });
 
   group('LedgerService createAsset / updateAsset icon & color persistence', () {
