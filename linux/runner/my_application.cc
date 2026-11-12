@@ -1,6 +1,7 @@
 #include "my_application.h"
 
 #include <flutter_linux/flutter_linux.h>
+#include <string.h>
 #ifdef GDK_WINDOWING_X11
 #include <gdk/gdkx.h>
 #endif
@@ -14,6 +15,69 @@ struct _MyApplication {
 
 G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
 
+namespace {
+
+constexpr const gchar* kWindowTitle = "帐屿";
+constexpr const gchar* kRelativeLogoAssetPath =
+    "data/flutter_assets/assets/branding/tallyisle-logo-original.png";
+
+gboolean should_use_gnome_header_bar(GtkWindow* window) {
+  const gchar* kde_session = g_getenv("KDE_FULL_SESSION");
+  if (kde_session != nullptr && kde_session[0] != '\0' &&
+      g_ascii_strcasecmp(kde_session, "false") != 0 &&
+      g_strcmp0(kde_session, "0") != 0) {
+    return FALSE;
+  }
+
+  const gchar* xdg_desktop = g_getenv("XDG_CURRENT_DESKTOP");
+  if (xdg_desktop == nullptr || xdg_desktop[0] == '\0') {
+    return FALSE;
+  }
+  g_autofree gchar* xdg_lower = g_ascii_strdown(xdg_desktop, -1);
+  if (strstr(xdg_lower, "gnome") == nullptr) {
+    return FALSE;
+  }
+
+#ifdef GDK_WINDOWING_X11
+  GdkScreen* screen = gtk_window_get_screen(window);
+  if (GDK_IS_X11_SCREEN(screen)) {
+    const gchar* wm_name = gdk_x11_screen_get_window_manager_name(screen);
+    if (g_strcmp0(wm_name, "GNOME Shell") != 0) {
+      return FALSE;
+    }
+  }
+#else
+  (void)window;
+#endif
+
+  return TRUE;
+}
+
+void set_window_icon_best_effort(GtkWindow* window) {
+  g_autofree gchar* exe_path = g_file_read_link("/proc/self/exe", nullptr);
+  g_autofree gchar* exe_dir =
+      exe_path != nullptr ? g_path_get_dirname(exe_path) : nullptr;
+  g_autofree gchar* bundled_icon_path =
+      exe_dir != nullptr
+          ? g_build_filename(exe_dir, kRelativeLogoAssetPath, nullptr)
+          : nullptr;
+
+  const gchar* candidates[] = {bundled_icon_path, kRelativeLogoAssetPath};
+  for (const gchar* candidate : candidates) {
+    if (candidate == nullptr ||
+        !g_file_test(candidate, G_FILE_TEST_IS_REGULAR)) {
+      continue;
+    }
+    GError* icon_error = nullptr;
+    if (gtk_window_set_icon_from_file(window, candidate, &icon_error)) {
+      return;
+    }
+    g_clear_error(&icon_error);
+  }
+}
+
+}  // namespace
+
 // Called when first Flutter frame received.
 static void first_frame_cb(MyApplication* self, FlView* view) {
   gtk_widget_show(gtk_widget_get_toplevel(GTK_WIDGET(view)));
@@ -25,34 +89,21 @@ static void my_application_activate(GApplication* application) {
   GtkWindow* window =
       GTK_WINDOW(gtk_application_window_new(GTK_APPLICATION(application)));
 
-  // Use a header bar when running in GNOME as this is the common style used
-  // by applications and is the setup most users will be using (e.g. Ubuntu
-  // desktop).
-  // If running on X and not using GNOME then just use a traditional title bar
-  // in case the window manager does more exotic layout, e.g. tiling.
-  // If running on Wayland assume the header bar will work (may need changing
-  // if future cases occur).
-  gboolean use_header_bar = TRUE;
-#ifdef GDK_WINDOWING_X11
-  GdkScreen* screen = gtk_window_get_screen(window);
-  if (GDK_IS_X11_SCREEN(screen)) {
-    const gchar* wm_name = gdk_x11_screen_get_window_manager_name(screen);
-    if (g_strcmp0(wm_name, "GNOME Shell") != 0) {
-      use_header_bar = FALSE;
-    }
-  }
-#endif
+  // Only attach GtkHeaderBar when genuinely running on GNOME (Wayland or X11
+  // GNOME Shell). On KDE Plasma (Wayland and X11) and other window managers,
+  // let KWin / native WM draw native titlebars instead of a GNOME HeaderBar.
+  const gboolean use_header_bar = should_use_gnome_header_bar(window);
+  gtk_window_set_title(window, kWindowTitle);
   if (use_header_bar) {
     GtkHeaderBar* header_bar = GTK_HEADER_BAR(gtk_header_bar_new());
     gtk_widget_show(GTK_WIDGET(header_bar));
-    gtk_header_bar_set_title(header_bar, "TallyIsle");
+    gtk_header_bar_set_title(header_bar, kWindowTitle);
     gtk_header_bar_set_show_close_button(header_bar, TRUE);
     gtk_window_set_titlebar(window, GTK_WIDGET(header_bar));
-  } else {
-    gtk_window_set_title(window, "TallyIsle");
   }
 
-  gtk_window_set_default_size(window, 1280, 720);
+  gtk_window_set_default_size(window, 1280, 800);
+  set_window_icon_best_effort(window);
 
   g_autoptr(FlDartProject) project = fl_dart_project_new();
   fl_dart_project_set_dart_entrypoint_arguments(

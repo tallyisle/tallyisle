@@ -48,15 +48,18 @@ typedef ShareBytesHandler =
 class FileAccess {
   const FileAccess({
     MethodChannel? channel,
+    bool? isWebOverride,
     PickBytesHandler? onPickBytes,
     SaveBytesHandler? onSaveBytes,
     ShareBytesHandler? onShareBytes,
   }) : _channel = channel,
+       _isWebOverride = isWebOverride,
        _onPickBytes = onPickBytes,
        _onSaveBytes = onSaveBytes,
        _onShareBytes = onShareBytes;
 
   final MethodChannel? _channel;
+  final bool? _isWebOverride;
   final PickBytesHandler? _onPickBytes;
   final SaveBytesHandler? _onSaveBytes;
   final ShareBytesHandler? _onShareBytes;
@@ -64,8 +67,15 @@ class FileAccess {
   MethodChannel get _effectiveChannel =>
       _channel ?? const MethodChannel(fileBridgeChannelName);
 
+  bool get _isWeb => _isWebOverride ?? kIsWeb;
+
   bool get _isAndroidNative =>
-      !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+      !_isWeb && defaultTargetPlatform == TargetPlatform.android;
+
+  bool get _isIOSNative =>
+      !_isWeb && defaultTargetPlatform == TargetPlatform.iOS;
+
+  bool get _usesNativeFileChannel => _isAndroidNative || _isIOSNative;
 
   Capability get saveLocationCapability {
     if (_onSaveBytes != null) {
@@ -77,10 +87,16 @@ class FileAccess {
         'Android SAF 文件保存（ACTION_CREATE_DOCUMENT）已接入',
       );
     }
-    if (kIsWeb || defaultTargetPlatform == TargetPlatform.iOS) {
+    if (_isIOSNative) {
+      return const Capability(
+        CapabilityState.available,
+        'iOS 系统文件导出（UIActivityViewController / 存储到“文件”）已接入',
+      );
+    }
+    if (_isWeb) {
       return const Capability(
         CapabilityState.unsupported,
-        '当前平台暂无另存为位置 API，iOS 导出和 Web 下载待对应任务接入',
+        '当前 Web 环境暂不支持另存为位置 API',
       );
     }
     return const Capability(
@@ -99,6 +115,12 @@ class FileAccess {
         'Android 系统文件分享（FileProvider + ACTION_SEND）已接入',
       );
     }
+    if (_isIOSNative) {
+      return const Capability(
+        CapabilityState.available,
+        'iOS 系统文件分享（UIActivityViewController）已接入',
+      );
+    }
     return const Capability(
       CapabilityState.unsupported,
       '当前平台不支持直接系统分享，请使用另存为文件',
@@ -113,10 +135,12 @@ class FileAccess {
       // On Android SAF, file_selector maps extensions via MimeTypeMap, which
       // drops unknown extensions (.penny/.tally/.yi2a/.db) or narrows MIME
       // filters so .db (paired with .zip) and vendor-typed WeChat/Alipay .csv
-      // files become unselectable. Passing empty groups uses `*/*` on Android
-      // while preserving extension filters on desktop.
+      // files become unselectable. On iOS, file_selector_ios requires UTIs and
+      // throws ArgumentError on extension-only XTypeGroups unless empty groups
+      // (`public.data`) are passed. Desktop platforms natively filter by
+      // file extensions.
       final groups =
-          _isAndroidNative ||
+          _usesNativeFileChannel ||
               allowedExtensions == null ||
               allowedExtensions.isEmpty
           ? const <XTypeGroup>[]
@@ -146,7 +170,7 @@ class FileAccess {
         saveLocationCapability.reason,
       );
     }
-    if (_isAndroidNative) {
+    if (_usesNativeFileChannel) {
       try {
         await _effectiveChannel.invokeMethod<void>('saveBytes', {
           'suggestedName': suggestedName,
@@ -160,9 +184,9 @@ class FileAccess {
         }
         throw Failure(FailureCode.storageUnavailable, e.message ?? '文件未完成保存');
       } on MissingPluginException {
-        throw const Failure(
+        throw Failure(
           FailureCode.unsupportedCapability,
-          '当前环境未挂载 Android 原生文件保存通道',
+          _isIOSNative ? '当前环境未挂载 iOS 原生文件保存通道' : '当前环境未挂载 Android 原生文件保存通道',
         );
       } catch (_) {
         throw const Failure(FailureCode.storageUnavailable, '文件未完成保存');
@@ -210,9 +234,9 @@ class FileAccess {
       }
       throw Failure(FailureCode.storageUnavailable, e.message ?? '无法调起系统分享');
     } on MissingPluginException {
-      throw const Failure(
+      throw Failure(
         FailureCode.unsupportedCapability,
-        '当前环境未挂载 Android 原生系统分享通道',
+        _isIOSNative ? '当前环境未挂载 iOS 原生系统分享通道' : '当前环境未挂载 Android 原生系统分享通道',
       );
     } catch (_) {
       throw const Failure(FailureCode.storageUnavailable, '无法调起系统分享');
@@ -226,6 +250,8 @@ class FileAccess {
       return 'application/json';
     }
     if (lower.endsWith('.zip')) return 'application/zip';
+    if (lower.endsWith('.png')) return 'image/png';
+    if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
     return 'application/octet-stream';
   }
 }

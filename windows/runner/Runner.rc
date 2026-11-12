@@ -89,13 +89,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "dev.tallyisle" "\0"
-            VALUE "FileDescription", "TallyIsle" "\0"
+            VALUE "CompanyName", "TallyIsle" "\0"
+            VALUE "FileDescription", "帐屿 / TallyIsle" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "rebuild" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 dev.tallyisle. All rights reserved." "\0"
-            VALUE "OriginalFilename", "rebuild.exe" "\0"
-            VALUE "ProductName", "TallyIsle" "\0"
+            VALUE "InternalName", "tallyisle" "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 TallyIsle. All rights reserved." "\0"
+            VALUE "OriginalFilename", "tallyisle.exe" "\0"
+            VALUE "ProductName", "帐屿 (TallyIsle)" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END
