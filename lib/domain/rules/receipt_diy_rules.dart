@@ -333,6 +333,12 @@ enum DiyToolbarAction {
     '乘除运算',
     '开启后在记账数字键盘长按 + / − 可输入 × / ÷',
     defaultEnabled: false,
+  ),
+  autoSelectFirstCategory(
+    'auto_select_first_cat',
+    '默认选中首个分类',
+    '每次进入记一笔或切换类型时，自动选中排在第一位的分类',
+    defaultEnabled: false,
   );
 
   const DiyToolbarAction(
@@ -352,6 +358,29 @@ enum DiyToolbarAction {
     }
     return null;
   }
+}
+
+enum RecordDatePickerStyle {
+  calendar('calendar'),
+  wheel('wheel');
+
+  const RecordDatePickerStyle(this.key);
+  final String key;
+
+  static RecordDatePickerStyle fromKey(Object? raw) => raw == 'wheel'
+      ? RecordDatePickerStyle.wheel
+      : RecordDatePickerStyle.calendar;
+}
+
+enum RecordTimePickerStyle {
+  wheel('wheel'),
+  dial('dial');
+
+  const RecordTimePickerStyle(this.key);
+  final String key;
+
+  static RecordTimePickerStyle fromKey(Object? raw) =>
+      raw == 'dial' ? RecordTimePickerStyle.dial : RecordTimePickerStyle.wheel;
 }
 
 final class DiyToolbarItem {
@@ -377,15 +406,26 @@ final class DiyToolbarItem {
 
 /// Customizable order & visibility of record-editor toolbar buttons (F-036, R6).
 final class DiyToolbarConfig {
-  DiyToolbarConfig._(List<DiyToolbarItem> items)
-    : items = List<DiyToolbarItem>.unmodifiable(items);
+  DiyToolbarConfig._(
+    List<DiyToolbarItem> items, {
+    this.datePickerStyle = RecordDatePickerStyle.calendar,
+    this.timePickerStyle = RecordTimePickerStyle.wheel,
+  }) : items = List<DiyToolbarItem>.unmodifiable(items);
 
-  factory DiyToolbarConfig.defaults() => DiyToolbarConfig._([
-    for (final action in DiyToolbarAction.values)
-      DiyToolbarItem(action: action, enabled: action.defaultEnabled),
-  ]);
+  factory DiyToolbarConfig.defaults() => DiyToolbarConfig._(
+    [
+      for (final action in DiyToolbarAction.values)
+        DiyToolbarItem(action: action, enabled: action.defaultEnabled),
+    ],
+    datePickerStyle: RecordDatePickerStyle.calendar,
+    timePickerStyle: RecordTimePickerStyle.wheel,
+  );
 
-  factory DiyToolbarConfig.normalize(Iterable<DiyToolbarItem> rawItems) {
+  factory DiyToolbarConfig.normalize(
+    Iterable<DiyToolbarItem> rawItems, {
+    RecordDatePickerStyle datePickerStyle = RecordDatePickerStyle.calendar,
+    RecordTimePickerStyle timePickerStyle = RecordTimePickerStyle.wheel,
+  }) {
     final seen = <DiyToolbarAction>{};
     final normalized = <DiyToolbarItem>[];
     for (final item in rawItems) {
@@ -400,10 +440,16 @@ final class DiyToolbarConfig {
         );
       }
     }
-    return DiyToolbarConfig._(normalized);
+    return DiyToolbarConfig._(
+      normalized,
+      datePickerStyle: datePickerStyle,
+      timePickerStyle: timePickerStyle,
+    );
   }
 
   final List<DiyToolbarItem> items;
+  final RecordDatePickerStyle datePickerStyle;
+  final RecordTimePickerStyle timePickerStyle;
 
   List<DiyToolbarAction> get visibleActions => [
     for (final item in items)
@@ -413,11 +459,27 @@ final class DiyToolbarConfig {
   bool isEnabled(DiyToolbarAction action) =>
       items.firstWhere((e) => e.action == action).enabled;
 
+  DiyToolbarConfig copyWithStyles({
+    RecordDatePickerStyle? datePickerStyle,
+    RecordTimePickerStyle? timePickerStyle,
+  }) => DiyToolbarConfig._(
+    items,
+    datePickerStyle: datePickerStyle ?? this.datePickerStyle,
+    timePickerStyle: timePickerStyle ?? this.timePickerStyle,
+  );
+
   DiyToolbarConfig setEnabled(DiyToolbarAction action, bool enabled) =>
-      DiyToolbarConfig._([
-        for (final item in items)
-          if (item.action == action) item.copyWith(enabled: enabled) else item,
-      ]);
+      DiyToolbarConfig._(
+        [
+          for (final item in items)
+            if (item.action == action)
+              item.copyWith(enabled: enabled)
+            else
+              item,
+        ],
+        datePickerStyle: datePickerStyle,
+        timePickerStyle: timePickerStyle,
+      );
 
   /// Reorders items using `ReorderableListView`'s `(oldIndex, newIndex)` convention.
   DiyToolbarConfig reorderForListView(int oldIndex, int newIndex) {
@@ -442,12 +504,18 @@ final class DiyToolbarConfig {
     final next = items.toList();
     final moved = next.removeAt(fromIndex);
     next.insert(toIndex, moved);
-    return DiyToolbarConfig._(next);
+    return DiyToolbarConfig._(
+      next,
+      datePickerStyle: datePickerStyle,
+      timePickerStyle: timePickerStyle,
+    );
   }
 
   Map<String, Object> toJson() => {
     'version': 1,
     'items': [for (final item in items) item.toJson()],
+    'datePickerStyle': datePickerStyle.key,
+    'timePickerStyle': timePickerStyle.key,
   };
 
   String encode() => jsonEncode(toJson());
@@ -464,10 +532,22 @@ final class DiyToolbarConfig {
     }
     final List<Object?>? rawList = switch (decoded) {
       Map m when m['items'] is List => m['items'] as List<Object?>,
+      Map m
+          when !m.containsKey('items') &&
+              (m.containsKey('datePickerStyle') ||
+                  m.containsKey('timePickerStyle')) =>
+        const <Object?>[],
       List l => l,
       _ => null,
     };
     if (rawList == null) return DiyToolbarConfig.defaults();
+
+    final datePickerStyle = decoded is Map
+        ? RecordDatePickerStyle.fromKey(decoded['datePickerStyle'])
+        : RecordDatePickerStyle.calendar;
+    final timePickerStyle = decoded is Map
+        ? RecordTimePickerStyle.fromKey(decoded['timePickerStyle'])
+        : RecordTimePickerStyle.wheel;
 
     final parsed = <DiyToolbarItem>[];
     for (final entry in rawList) {
@@ -487,8 +567,31 @@ final class DiyToolbarConfig {
         }
       }
     }
-    return DiyToolbarConfig.normalize(parsed);
+    return DiyToolbarConfig.normalize(
+      parsed,
+      datePickerStyle: datePickerStyle,
+      timePickerStyle: timePickerStyle,
+    );
   }
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    if (other is! DiyToolbarConfig) return false;
+    if (other.datePickerStyle != datePickerStyle ||
+        other.timePickerStyle != timePickerStyle ||
+        other.items.length != items.length) {
+      return false;
+    }
+    for (var i = 0; i < items.length; i++) {
+      if (other.items[i] != items[i]) return false;
+    }
+    return true;
+  }
+
+  @override
+  int get hashCode =>
+      Object.hash(Object.hashAll(items), datePickerStyle, timePickerStyle);
 }
 
 // ---------------------------------------------------------------------------

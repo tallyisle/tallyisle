@@ -32,6 +32,7 @@ class _DiyToolbarSettingsPageState
     DiyToolbarAction.templates => Icons.bookmarks_outlined,
     DiyToolbarAction.frequentRemarks => Icons.comment_outlined,
     DiyToolbarAction.keypadMultiplyDivide => Icons.calculate_outlined,
+    DiyToolbarAction.autoSelectFirstCategory => Icons.category_outlined,
   };
 
   Future<void> _persist(DiyToolbarConfig next) async {

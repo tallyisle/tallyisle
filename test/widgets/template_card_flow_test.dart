@@ -486,23 +486,23 @@ void main() {
         find.byKey(const Key('remarks-feature-toggle')),
       );
 
-      // Default OFF in RemarksPage and 8/10 enabled in DiyToolbarSettingsPage.
+      // Default OFF in RemarksPage and 8/11 enabled in DiyToolbarSettingsPage.
       expect(remarksToggle().value, isFalse);
       expect(find.textContaining('已关闭（默认）'), findsOneWidget);
-      expect(find.text('当前启用预览（8/10）'), findsOneWidget);
+      expect(find.text('当前启用预览（8/11）'), findsOneWidget);
 
-      // Toggle ON in RemarksPage -> syncs to DiyToolbarSettingsPage (9/10)!
+      // Toggle ON in RemarksPage -> syncs to DiyToolbarSettingsPage (9/11)!
       await tester.tap(find.byKey(const Key('remarks-feature-toggle')));
       await settle(tester);
       expect(remarksToggle().value, isTrue);
       expect(find.textContaining('已开启'), findsOneWidget);
-      expect(find.text('当前启用预览（9/10）'), findsOneWidget);
+      expect(find.text('当前启用预览（9/11）'), findsOneWidget);
 
       // Reset to defaults in DiyToolbarSettingsPage -> syncs back to RemarksPage (OFF)!
       await tester.tap(find.byKey(const Key('diy-toolbar-reset-btn')));
       await settle(tester);
       expect(remarksToggle().value, isFalse);
-      expect(find.text('当前启用预览（8/10）'), findsOneWidget);
+      expect(find.text('当前启用预览（8/11）'), findsOneWidget);
 
       await closeCleanly();
     },

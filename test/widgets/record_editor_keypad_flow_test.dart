@@ -1,5 +1,5 @@
 import 'package:drift/drift.dart'
-    show BooleanExpressionOperators, driftRuntimeOptions;
+    show BooleanExpressionOperators, OrderingTerm, driftRuntimeOptions;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -1135,6 +1135,421 @@ void main() {
           );
           expect(find.text('地铁通勤'), findsOneWidget);
           expect(find.text('工作午餐'), findsNothing);
+
+          await closeCleanly();
+        },
+      );
+
+      testWidgets(
+        'editor-date-pill opens RecordDateTimeDialog with Date ⇄ Time switching, dual-style persistence across sessions, and 1-step confirm',
+        (tester) async {
+          await tester.binding.setSurfaceSize(const Size(390, 844));
+          addTearDown(() => tester.binding.setSurfaceSize(null));
+
+          final (db, closeCleanly) = _openTestDb(tester);
+          await tester.runAsync(() => db.select(db.accountBooks).get());
+
+          await tester.pumpWidget(
+            ProviderScope(
+              retry: (_, _) => null,
+              overrides: [databaseProvider.overrideWith((ref) async => db)],
+              child: const MaterialApp(
+                home: RecordEditorPage(key: ValueKey('dt-session-1')),
+              ),
+            ),
+          );
+          await _settle(tester);
+          expect(tester.takeException(), isNull);
+
+          // 1. Tap editor-date-pill -> opens RecordDateTimeDialog on Calendar Grid by default.
+          await tester.tap(find.byKey(const Key('editor-date-pill')));
+          await _settle(tester, 4);
+          expect(
+            find.byKey(const Key('datetime-calendar-grid')),
+            findsOneWidget,
+          );
+          expect(find.byKey(const Key('datetime-date-wheel')), findsNothing);
+          expect(
+            find.byKey(const Key('datetime-switch-mode-btn')),
+            findsOneWidget,
+          );
+
+          // Pick day 15 on calendar, then toggle Date style to 3-column wheel.
+          await tester.tap(find.byKey(const Key('datetime-day-15')));
+          await tester.pump();
+          await tester.tap(find.byKey(const Key('datetime-toggle-style-btn')));
+          await _settle(tester, 4);
+          expect(find.byKey(const Key('datetime-date-wheel')), findsOneWidget);
+          expect(find.byKey(const Key('datetime-calendar-grid')), findsNothing);
+
+          // 2. Switch Date -> Time via thumb-zone datetime-switch-mode-btn:
+          // opens Time 2-col wheel by default and displays YYYY-MM-15 on switch button.
+          await tester.tap(find.byKey(const Key('datetime-switch-mode-btn')));
+          await _settle(tester, 4);
+          expect(find.byKey(const Key('datetime-time-wheel')), findsOneWidget);
+          expect(find.byKey(const Key('datetime-clock-dial')), findsNothing);
+          expect(
+            find.descendant(
+              of: find.byKey(const Key('datetime-switch-mode-btn')),
+              matching: find.textContaining('-15'),
+            ),
+            findsOneWidget,
+          );
+
+          // Toggle Time style to 24h Clock Dial, then set 09:35 via inline keyboard input.
+          await tester.tap(find.byKey(const Key('datetime-toggle-style-btn')));
+          await _settle(tester, 4);
+          expect(find.byKey(const Key('datetime-clock-dial')), findsOneWidget);
+
+          await tester.tap(find.byKey(const Key('datetime-dial-input-toggle')));
+          await tester.pump();
+          await tester.enterText(
+            find.byKey(const Key('datetime-hour-input')),
+            '09',
+          );
+          await tester.enterText(
+            find.byKey(const Key('datetime-minute-input')),
+            '35',
+          );
+          await tester.pump();
+
+          // Switch Time -> Date: preserves 09:35 draft and stays on Date 3-col wheel!
+          await tester.tap(find.byKey(const Key('datetime-switch-mode-btn')));
+          await _settle(tester, 4);
+          expect(find.byKey(const Key('datetime-date-wheel')), findsOneWidget);
+          expect(
+            find.descendant(
+              of: find.byKey(const Key('datetime-switch-mode-btn')),
+              matching: find.text('09:35'),
+            ),
+            findsOneWidget,
+          );
+
+          // 3. 1-step confirm ('完成') from Date page updates editor-date-pill and keeps custom keypad active!
+          await tester.tap(find.byKey(const Key('datetime-confirm-btn')));
+          await _settle(tester);
+          expect(find.byKey(const Key('datetime-date-wheel')), findsNothing);
+          expect(
+            find.descendant(
+              of: find.byKey(const Key('editor-date-pill')),
+              matching: find.textContaining('09:35'),
+            ),
+            findsOneWidget,
+          );
+          expect(find.byKey(const Key('record-custom-keypad')), findsOneWidget);
+
+          // Save bill and verify recordTime has day 15 and 09:35!
+          await tester.tap(find.byKey(const Key('cat-餐饮')));
+          await _settle(tester, 2);
+          await _tapKeys(tester, ['4', '2']);
+          await tester.tap(find.byKey(const Key('save')));
+          await _settle(tester);
+
+          final savedRows = await tester.runAsync(
+            () => db.select(db.records).get(),
+          );
+          expect(savedRows, hasLength(1));
+          final savedDt = DateTime.fromMillisecondsSinceEpoch(
+            savedRows!.single.recordTime,
+          );
+          expect(savedDt.day, 15);
+          expect(savedDt.hour, 9);
+          expect(savedDt.minute, 35);
+
+          // 4. Verify style preferences persisted in DiyToolbarConfig AND across a fresh RecordEditorPage session!
+          await tester.pumpWidget(const SizedBox.shrink());
+          await tester.pump(const Duration(milliseconds: 200));
+          final persistedCfg = await tester.runAsync(
+            () => BillAttachmentService(db).getDiyToolbarConfig(),
+          );
+          expect(persistedCfg!.datePickerStyle, RecordDatePickerStyle.wheel);
+          expect(persistedCfg.timePickerStyle, RecordTimePickerStyle.dial);
+
+          await tester.pumpWidget(
+            ProviderScope(
+              retry: (_, _) => null,
+              overrides: [databaseProvider.overrideWith((ref) async => db)],
+              child: const MaterialApp(
+                home: RecordEditorPage(key: ValueKey('dt-session-2')),
+              ),
+            ),
+          );
+          await _settle(tester);
+
+          await tester.tap(find.byKey(const Key('editor-date-pill')));
+          await _settle(tester, 4);
+          expect(find.byKey(const Key('datetime-date-wheel')), findsOneWidget);
+          expect(find.byKey(const Key('datetime-calendar-grid')), findsNothing);
+
+          await tester.tap(find.byKey(const Key('datetime-switch-mode-btn')));
+          await _settle(tester, 4);
+          expect(find.byKey(const Key('datetime-clock-dial')), findsOneWidget);
+          expect(find.byKey(const Key('datetime-time-wheel')), findsNothing);
+
+          await tester.tap(find.byKey(const Key('datetime-cancel-btn')));
+          await _settle(tester, 2);
+
+          await closeCleanly();
+        },
+      );
+
+      testWidgets(
+        'autoSelectFirstCategory: default OFF, live toggle, open/type-switch/再记 auto-selection, subcategory expansion, and editing/initialCategory/TemplatePrefill/hidden guardrails',
+        (tester) async {
+          await tester.binding.setSurfaceSize(const Size(390, 844));
+          addTearDown(() => tester.binding.setSurfaceSize(null));
+
+          final (db, closeCleanly) = _openTestDb(tester);
+          late RecordCategory firstExpenseCat;
+          late RecordCategory firstIncomeCat;
+          late int transportCatId;
+          late int shoppingCatId;
+          late String existingShoppingRecordId;
+          late int tplWithExplicitCatId;
+          late int tplWithDeletedCatId;
+
+          await tester.runAsync(() async {
+            await db.select(db.accountBooks).get();
+            final orderedCats =
+                await (db.select(db.recordCategories)
+                      ..where(
+                        (t) =>
+                            t.accountBookId.equals(defaultBookId) &
+                            t.isHide.equals(false) &
+                            t.parentCatId.equals(noRef),
+                      )
+                      ..orderBy([
+                        (t) => OrderingTerm.asc(t.sort),
+                        (t) => OrderingTerm.asc(t.id),
+                      ]))
+                    .get();
+            firstExpenseCat = orderedCats.firstWhere(
+              (c) => c.type == RecordType.expense,
+            );
+            firstIncomeCat = orderedCats.firstWhere(
+              (c) => c.type == RecordType.income,
+            );
+            transportCatId = orderedCats.firstWhere((c) => c.name == '交通').id;
+            shoppingCatId = orderedCats.firstWhere((c) => c.name == '购物').id;
+
+            // Add a subcategory under the 1st expense category so auto-selecting it expands subcategories!
+            await CatalogService(db).createCategory(
+              commandId: 'seed-subcat-first-exp',
+              accountBookId: defaultBookId,
+              name: '招牌美式',
+              type: RecordType.expense,
+              parentCatId: firstExpenseCat.id,
+            );
+
+            // Seed an existing expense bill under '购物' for editing guardrail.
+            existingShoppingRecordId = await LedgerService(db).saveRecord(
+              commandId: 'seed-existing-shopping-bill',
+              draft: RecordDraft(
+                type: RecordType.expense,
+                money: Money.parse('88.00'),
+                bookId: defaultBookId,
+                recordTime: DateTime(2026, 6, 1, 12, 0).millisecondsSinceEpoch,
+                categoryId: shoppingCatId,
+              ),
+            );
+
+            // Seed a template with explicit '交通' category, and a template whose category is deleted.
+            final tplSvc = TemplateRemarkService(db);
+            tplWithExplicitCatId = await tplSvc.saveTemplate(
+              commandId: 'seed-tpl-explicit-cat',
+              draft: TemplateDraft(
+                type: RecordType.expense,
+                money: Money.parse('15.00'),
+                bookId: defaultBookId,
+                name: '通勤地铁',
+                categoryId: transportCatId,
+                remark: '早高峰地铁',
+              ),
+            );
+            final tempCatId = await CatalogService(db).createCategory(
+              commandId: 'seed-temp-cat-for-tpl',
+              accountBookId: defaultBookId,
+              name: '临时待删分类',
+              type: RecordType.expense,
+            );
+            tplWithDeletedCatId = await tplSvc.saveTemplate(
+              commandId: 'seed-tpl-deleted-cat',
+              draft: TemplateDraft(
+                type: RecordType.expense,
+                money: Money.parse('19.00'),
+                bookId: defaultBookId,
+                name: '无分类模板',
+                categoryId: tempCatId,
+                remark: '分类已删回退测试',
+              ),
+            );
+            await CatalogService(db).deleteCategory(
+              commandId: 'delete-temp-cat-for-tpl',
+              categoryId: tempCatId,
+            );
+          });
+
+          Finder summaryText(String label) => find.descendant(
+            of: find.byKey(const Key('editor-summary-amount-row')),
+            matching: find.text(label),
+          );
+
+          final activePage = ValueNotifier<Widget>(
+            const RecordEditorPage(key: ValueKey('auto-cat-1')),
+          );
+          addTearDown(activePage.dispose);
+
+          // 1. Default OFF: starts unselected ('请选择分类'), subcategory strip NOT expanded.
+          await tester.pumpWidget(
+            ProviderScope(
+              retry: (_, _) => null,
+              overrides: [databaseProvider.overrideWith((ref) async => db)],
+              child: ValueListenableBuilder<Widget>(
+                valueListenable: activePage,
+                builder: (_, page, _) => MaterialApp(home: page),
+              ),
+            ),
+          );
+          await _settle(tester);
+          expect(summaryText('请选择分类'), findsOneWidget);
+          expect(find.byKey(const Key('cat-招牌美式')), findsNothing);
+
+          // 2. Live toggle listener: open DiyToolbarSettingsPage via editor-diy-toolbar-btn,
+          // enable auto_select_first_cat, pop back -> immediately selects 1st expense category & expands subcategories!
+          await tester.tap(find.byKey(const Key('editor-diy-toolbar-btn')));
+          await _settle(tester);
+          await tester.drag(
+            find.byType(ReorderableListView),
+            const Offset(0, -420),
+          );
+          await _settle(tester, 4);
+          await tester.tap(
+            find.byKey(const Key('diy-switch-auto_select_first_cat')),
+          );
+          await _settle(tester);
+          await tester.tap(find.byType(BackButton));
+          await _settle(tester);
+
+          expect(summaryText(firstExpenseCat.name), findsOneWidget);
+          expect(find.byKey(const Key('cat-招牌美式')), findsOneWidget);
+
+          // 3. Fresh open with autoSelectFirstCategory ON: selects 1st expense category immediately!
+          activePage.value = const RecordEditorPage(
+            key: ValueKey('auto-cat-2'),
+          );
+          await _settle(tester);
+          expect(summaryText(firstExpenseCat.name), findsOneWidget);
+          expect(find.byKey(const Key('cat-招牌美式')), findsOneWidget);
+
+          // 4. Type switching: 收入 -> 1st income, 报销/预支 -> 1st expense, 预收 -> 1st income, 转账 -> clears, 支出 -> 1st expense!
+          await tester.tap(find.byKey(const Key('type-1')));
+          await _settle(tester, 2);
+          expect(summaryText(firstIncomeCat.name), findsOneWidget);
+
+          await tester.tap(find.byKey(const Key('type-3')));
+          await _settle(tester, 2);
+          expect(summaryText(firstExpenseCat.name), findsOneWidget);
+
+          await tester.tap(find.byKey(const Key('type-16')));
+          await _settle(tester, 2);
+          expect(summaryText(firstExpenseCat.name), findsOneWidget);
+
+          await tester.tap(find.byKey(const Key('type-9')));
+          await _settle(tester, 2);
+          expect(summaryText(firstIncomeCat.name), findsOneWidget);
+
+          await tester.tap(find.byKey(const Key('type-2')));
+          await _settle(tester, 2);
+          expect(summaryText('转出账户 → 转入账户'), findsOneWidget);
+
+          await tester.tap(find.byKey(const Key('type-0')));
+          await _settle(tester, 2);
+          expect(summaryText(firstExpenseCat.name), findsOneWidget);
+
+          // 5. Manual selection + 再记 (save-and-new): saves under '交通', then resets back to 1st expense category!
+          await tester.tap(find.byKey(const Key('cat-交通')));
+          await _settle(tester, 2);
+          expect(summaryText('交通'), findsOneWidget);
+          await _tapKeys(tester, ['2', '6']);
+          await tester.tap(find.byKey(const Key('save-and-new')));
+          await _settle(tester);
+
+          expect(summaryText(firstExpenseCat.name), findsOneWidget);
+          await tester.pump(const Duration(milliseconds: 200));
+          final transportBills = await tester.runAsync(
+            () => (db.select(
+              db.records,
+            )..where((t) => t.recordCatId.equals(transportCatId))).get(),
+          );
+          expect(transportBills, hasLength(1));
+
+          // 6. Guardrails: NEVER override editing, initialCategory, or TemplatePrefill with valid categoryId!
+          // (a) editing:
+          activePage.value = RecordEditorPage(
+            key: const ValueKey('auto-cat-edit'),
+            recordId: existingShoppingRecordId,
+          );
+          await _settle(tester);
+          expect(summaryText('购物'), findsOneWidget);
+
+          // (b) initialCategory:
+          activePage.value = RecordEditorPage(
+            key: const ValueKey('auto-cat-init-cat'),
+            initialCategory: transportCatId,
+          );
+          await _settle(tester);
+          expect(summaryText('交通'), findsOneWidget);
+
+          // (c) initialTemplateId with valid categoryId ('交通') vs dangling categoryId (falls back to firstExpenseCat):
+          activePage.value = RecordEditorPage(
+            key: const ValueKey('auto-cat-tpl-explicit'),
+            initialTemplateId: tplWithExplicitCatId,
+          );
+          await _settle(tester);
+          expect(summaryText('交通'), findsOneWidget);
+
+          activePage.value = RecordEditorPage(
+            key: const ValueKey('auto-cat-tpl-fallback'),
+            initialTemplateId: tplWithDeletedCatId,
+          );
+          await _settle(tester);
+          expect(summaryText(firstExpenseCat.name), findsOneWidget);
+
+          // (d) All expense top categories hidden -> stays safely at '请选择分类'!
+          await tester.pumpWidget(const SizedBox.shrink());
+          await _settle(tester, 2);
+          await tester.pump(const Duration(milliseconds: 200));
+          await tester.runAsync(() async {
+            final expTopCats =
+                await (db.select(db.recordCategories)..where(
+                      (t) =>
+                          t.accountBookId.equals(defaultBookId) &
+                          t.type.equals(RecordType.expense) &
+                          t.parentCatId.equals(noRef),
+                    ))
+                    .get();
+            var idx = 0;
+            for (final c in expTopCats) {
+              await CatalogService(db).setCategoryHidden(
+                commandId: 'hide-all-exp-${idx++}',
+                categoryId: c.id,
+                isHide: true,
+              );
+            }
+          });
+
+          await tester.pumpWidget(
+            ProviderScope(
+              retry: (_, _) => null,
+              overrides: [databaseProvider.overrideWith((ref) async => db)],
+              child: const MaterialApp(
+                home: RecordEditorPage(key: ValueKey('auto-cat-all-hidden')),
+              ),
+            ),
+          );
+          await _settle(tester);
+          expect(tester.takeException(), isNull);
+          expect(summaryText('请选择分类'), findsOneWidget);
 
           await closeCleanly();
         },

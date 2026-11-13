@@ -523,6 +523,7 @@ void main() {
       );
 
       // 1. Test DiyToolbarSettingsPage
+      final attService = BillAttachmentService(db);
       await tester.pumpWidget(
         ProviderScope(
           retry: (_, _) => null,
@@ -541,10 +542,24 @@ void main() {
       );
       await settle(tester);
 
-      expect(find.text('当前启用预览（8/10）'), findsOneWidget);
+      expect(find.text('当前启用预览（8/11）'), findsOneWidget);
+
+      // Seed custom date/time picker styles in ti_preference and ensure UI setEnabled & moveItem preserve them.
+      await tester.runAsync(() async {
+        final current = await attService.getDiyToolbarConfig();
+        await attService.saveDiyToolbarConfig(
+          commandId: 'w-diy-seed-styles',
+          config: current.copyWithStyles(
+            datePickerStyle: RecordDatePickerStyle.wheel,
+            timePickerStyle: RecordTimePickerStyle.dial,
+          ),
+        );
+      });
+      await settle(tester);
+
       await tester.tap(find.byKey(const Key('diy-switch-tags')));
       await settle(tester);
-      expect(find.text('当前启用预览（7/10）'), findsOneWidget);
+      expect(find.text('当前启用预览（7/11）'), findsOneWidget);
 
       await tester.scrollUntilVisible(
         find.byKey(const Key('diy-switch-frequent_remarks')),
@@ -559,7 +574,7 @@ void main() {
 
       await tester.tap(find.byKey(const Key('diy-switch-frequent_remarks')));
       await settle(tester);
-      expect(find.text('当前启用预览（8/10）'), findsOneWidget);
+      expect(find.text('当前启用预览（8/11）'), findsOneWidget);
 
       await tester.scrollUntilVisible(
         find.byKey(const Key('diy-switch-keypad_mul_div')),
@@ -574,11 +589,64 @@ void main() {
 
       await tester.tap(find.byKey(const Key('diy-switch-keypad_mul_div')));
       await settle(tester);
-      expect(find.text('当前启用预览（9/10）'), findsOneWidget);
+      expect(find.text('当前启用预览（9/11）'), findsOneWidget);
+
+      await tester.scrollUntilVisible(
+        find.byKey(const Key('diy-switch-auto_select_first_cat')),
+        160,
+        scrollable: find.byType(Scrollable).last,
+      );
+      await settle(tester);
+      expect(find.text('默认选中首个分类'), findsOneWidget);
+      expect(find.byIcon(Icons.category_outlined), findsWidgets);
+      final autoSelectCatBefore = tester.widget<Switch>(
+        find.byKey(const Key('diy-switch-auto_select_first_cat')),
+      );
+      expect(autoSelectCatBefore.value, isFalse);
+
+      await tester.tap(
+        find.byKey(const Key('diy-switch-auto_select_first_cat')),
+      );
+      await settle(tester);
+      expect(find.text('当前启用预览（10/11）'), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('diy-up-auto_select_first_cat')));
+      await settle(tester);
+
+      final persistedAfterEdits = await tester.runAsync(
+        attService.getDiyToolbarConfig,
+      );
+      expect(
+        persistedAfterEdits!.isEnabled(
+          DiyToolbarAction.autoSelectFirstCategory,
+        ),
+        isTrue,
+      );
+      expect(
+        persistedAfterEdits.items[9].action,
+        DiyToolbarAction.autoSelectFirstCategory,
+      );
+      expect(persistedAfterEdits.datePickerStyle, RecordDatePickerStyle.wheel);
+      expect(persistedAfterEdits.timePickerStyle, RecordTimePickerStyle.dial);
 
       await tester.tap(find.byKey(const Key('diy-toolbar-reset-btn')));
       await settle(tester);
-      expect(find.text('当前启用预览（8/10）'), findsOneWidget);
+      expect(find.text('当前启用预览（8/11）'), findsOneWidget);
+
+      final persistedAfterReset = await tester.runAsync(
+        attService.getDiyToolbarConfig,
+      );
+      expect(
+        persistedAfterReset!.isEnabled(
+          DiyToolbarAction.autoSelectFirstCategory,
+        ),
+        isFalse,
+      );
+      expect(
+        persistedAfterReset.datePickerStyle,
+        RecordDatePickerStyle.calendar,
+      );
+      expect(persistedAfterReset.timePickerStyle, RecordTimePickerStyle.wheel);
 
       await unmountCleanly(tester);
 

@@ -495,6 +495,13 @@ void main() {
             ),
             findsOneWidget,
           );
+          expect(
+            find.descendant(
+              of: find.byKey(const Key('amount-currency-badge')),
+              matching: find.byIcon(Icons.arrow_drop_down_rounded),
+            ),
+            findsNothing,
+          );
           expect(find.byKey(const Key('converted-summary-tap')), findsNothing);
 
           await tester.tap(find.byKey(const Key('asset')));
@@ -507,8 +514,29 @@ void main() {
           );
           expect(find.byKey(const Key('amount-currency-badge')), findsNothing);
 
-          // 5. Tapping '¥' prefix opens currency sheet -> select TRY -> shows tight [TRY ₺] + compact '≈ ¥ 100.00 入账招行卡'!
+          // 5. Display-only amount currency indicator (prevents mis-touch):
+          // tapping '¥' (amount-currency-symbol) does NOT open currency sheet;
+          // switching currency uses editor-currency-pill in the pill toolbar!
           await tester.tap(find.byKey(const Key('amount-currency-symbol')));
+          await _settle(tester, 2);
+          expect(
+            find.byKey(const Key('currency-option-follow-account')),
+            findsNothing,
+          );
+          expect(find.byKey(const Key('record-custom-keypad')), findsOneWidget);
+
+          final pillScrollable = find
+              .descendant(
+                of: find.byKey(const Key('editor-pill-toolbar')),
+                matching: find.byType(Scrollable),
+              )
+              .first;
+          await tester.scrollUntilVisible(
+            find.byKey(const Key('editor-currency-pill')),
+            160,
+            scrollable: pillScrollable,
+          );
+          await tester.tap(find.byKey(const Key('editor-currency-pill')));
           await _settle(tester, 4);
           expect(
             find.byKey(const Key('currency-option-follow-account')),
@@ -516,6 +544,21 @@ void main() {
           );
           await tester.tap(find.byKey(const Key('currency-option-TRY')));
           await _settle(tester, 4);
+
+          // Foreign badge [TRY ₺] has NO dropdown arrow and tapping it does NOT open currency sheet!
+          expect(
+            find.descendant(
+              of: find.byKey(const Key('amount-currency-badge')),
+              matching: find.byIcon(Icons.arrow_drop_down_rounded),
+            ),
+            findsNothing,
+          );
+          await tester.tap(find.byKey(const Key('amount-currency-badge')));
+          await _settle(tester, 2);
+          expect(
+            find.byKey(const Key('currency-option-follow-account')),
+            findsNothing,
+          );
 
           await _tapKeys(tester, ['5', '0', '0']);
           final badgeRect = tester.getRect(
@@ -548,8 +591,25 @@ void main() {
           await _settle(tester, 4);
           expect(find.textContaining('≈ ¥ 100.00 入账招行卡'), findsOneWidget);
 
-          // Reset to follow account via currency-option-follow-account!
-          await tester.tap(find.byKey(const Key('amount-currency-badge')));
+          // 6. Anti-lockout safety on editor-currency-pill:
+          // when DiyToolbarAction.currency is disabled while sourceCurrency != null (TRY != CNY),
+          // editor-currency-pill stays visible so user can reset to follow-account; once reset, it hides!
+          await tester.runAsync(() async {
+            final attSvc = BillAttachmentService(db);
+            final cfg = await attSvc.getDiyToolbarConfig();
+            await attSvc.saveDiyToolbarConfig(
+              commandId: 'disable-currency-action',
+              config: cfg.setEnabled(DiyToolbarAction.currency, false),
+            );
+          });
+          await _settle(tester, 4);
+          await tester.scrollUntilVisible(
+            find.byKey(const Key('editor-currency-pill')),
+            160,
+            scrollable: pillScrollable,
+          );
+          expect(find.byKey(const Key('editor-currency-pill')), findsOneWidget);
+          await tester.tap(find.byKey(const Key('editor-currency-pill')));
           await _settle(tester, 4);
           await tester.tap(
             find.byKey(const Key('currency-option-follow-account')),
@@ -560,25 +620,9 @@ void main() {
             findsOneWidget,
           );
           expect(find.byKey(const Key('converted-summary-tap')), findsNothing);
+          expect(find.byKey(const Key('editor-currency-pill')), findsNothing);
 
-          // 6. Guardrail 3: disabling DiyToolbarAction.currency blocks tapping prefix to open picker!
-          await tester.runAsync(() async {
-            final attSvc = BillAttachmentService(db);
-            final cfg = await attSvc.getDiyToolbarConfig();
-            await attSvc.saveDiyToolbarConfig(
-              commandId: 'disable-currency-action',
-              config: cfg.setEnabled(DiyToolbarAction.currency, false),
-            );
-          });
-          await _settle(tester, 4);
-          await tester.tap(find.byKey(const Key('amount-currency-symbol')));
-          await _settle(tester, 2);
-          expect(
-            find.byKey(const Key('currency-option-follow-account')),
-            findsNothing,
-          );
-
-          // 7. Guardrail 2: Transfer strictly locks currency prefix to fromAsset and disables picker tap!
+          // 7. Guardrail 2: Transfer strictly locks currency prefix to fromAsset, hides currency pill, and disables prefix tap!
           await tester.runAsync(() async {
             final attSvc = BillAttachmentService(db);
             final cfg = await attSvc.getDiyToolbarConfig();
@@ -591,6 +635,7 @@ void main() {
 
           await tester.tap(find.byKey(const Key('type-2')));
           await _settle(tester, 4);
+          expect(find.byKey(const Key('editor-currency-pill')), findsNothing);
           await tester.tap(find.byKey(const Key('from')));
           await _settle(tester, 4);
           await tester.tap(find.text('里拉钱包').last);
@@ -603,6 +648,13 @@ void main() {
           expect(
             find.byKey(const Key('amount-currency-badge')),
             findsOneWidget,
+          );
+          expect(
+            find.descendant(
+              of: find.byKey(const Key('amount-currency-badge')),
+              matching: find.byIcon(Icons.arrow_drop_down_rounded),
+            ),
+            findsNothing,
           );
           expect(find.textContaining('≈ ¥ 100.00 转入招行卡'), findsOneWidget);
           await tester.tap(find.byKey(const Key('amount-currency-badge')));

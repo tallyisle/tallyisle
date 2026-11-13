@@ -13,6 +13,7 @@ import '../../core/money.dart';
 import '../../data/db/database.dart';
 import '../../data/ledger/ledger_service.dart';
 import '../../data/repo/ledger_queries.dart';
+import '../../data/tools/template_remark_service.dart';
 import '../../domain/ledger/record_extra.dart';
 import '../../domain/ledger/record_relations.dart';
 import '../../domain/model/codes.dart';
@@ -34,6 +35,7 @@ import '../tags/tags_page.dart';
 import '../templates/template_providers.dart';
 import '../templates/templates_page.dart'
     show RemarksPage, TemplatePrefill, TemplateQuickBar, TemplatesPage;
+import 'record_datetime_dialog.dart';
 import 'record_keypad.dart';
 
 /// Original keyboard upper bound (`docs/reference/ledger-catalog.md` §5).
@@ -188,12 +190,21 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
   final ids = CommandIds();
   final imageIds = CommandIds();
   final remarkIds = CommandIds();
+  final diyStyleIds = CommandIds();
 
   int _draftNonce = 0;
+  int _diyStyleSeq = 0;
+  int _inFlightStyleSaves = 0;
+  Future<void> _diyStyleSaveChain = Future<void>.value();
+  RecordDatePickerStyle? _localDatePickerStyle;
+  RecordTimePickerStyle? _localTimePickerStyle;
   int? _resolvedBookId;
+  int? _initialCategoriesBookId;
+  List<RecordCategory> _initialCategories = const <RecordCategory>[];
   int type = RecordType.expense;
   int? categoryId;
   int? parentCatId;
+  bool _userTouchedCategory = false;
   Set<String> selectedTagIds = {};
   List<String> imageNames = const <String>[];
   BillLocationInfo? location;
@@ -300,6 +311,81 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     return firstBook?.id ?? 1;
   }
 
+  static int? _categoryTypeForRecordType(int targetType) {
+    if (targetType == RecordType.transfer) return null;
+    return (targetType == RecordType.income ||
+            targetType == RecordType.advanceIncome)
+        ? RecordType.income
+        : RecordType.expense;
+  }
+
+  static RecordCategory? _firstTopCategoryForType(
+    int targetType,
+    List<RecordCategory> cats,
+  ) {
+    final wantCatType = _categoryTypeForRecordType(targetType);
+    if (wantCatType == null) return null;
+    for (final c in cats) {
+      if (c.type == wantCatType &&
+          !c.isHide &&
+          (c.parentCatId == noRef || c.parentCatId == -1)) {
+        return c;
+      }
+    }
+    return null;
+  }
+
+  Future<DiyToolbarConfig> _resolveLatestDiyConfig(AppDatabase db) async {
+    final row = await (db.select(
+      db.preferences,
+    )..where((t) => t.key.equals(prefKeyRecordDiyToolbar))).getSingleOrNull();
+    if (row != null) {
+      return DiyToolbarConfig.decode(row.value);
+    }
+    final fromProvider = mounted
+        ? ref.read(diyToolbarConfigProvider).value
+        : null;
+    return fromProvider ?? DiyToolbarConfig.defaults();
+  }
+
+  void _persistDateTimePickerStyles({
+    required RecordDatePickerStyle datePickerStyle,
+    required RecordTimePickerStyle timePickerStyle,
+  }) {
+    if (!mounted) return;
+    final providerSnapshot = ref.read(diyToolbarConfigProvider).value;
+    final serviceFuture = ref.read(billAttachmentServiceProvider.future);
+    final seq = _diyStyleSeq++;
+    _inFlightStyleSaves++;
+    _diyStyleSaveChain = _diyStyleSaveChain.then((_) async {
+      try {
+        final service = await serviceFuture;
+        DiyToolbarConfig base;
+        try {
+          base = await service.getDiyToolbarConfig();
+        } catch (_) {
+          base = providerSnapshot ?? DiyToolbarConfig.defaults();
+        }
+        final updated = base.copyWithStyles(
+          datePickerStyle: datePickerStyle,
+          timePickerStyle: timePickerStyle,
+        );
+        await service.saveDiyToolbarConfig(
+          commandId: diyStyleIds.forPayload([
+            'editor-dt-style',
+            seq,
+            updated.toJson(),
+          ]),
+          config: updated,
+        );
+      } catch (_) {
+        // Non-blocking date/time picker style preference persistence.
+      } finally {
+        _inFlightStyleSaves--;
+      }
+    });
+  }
+
   String _currencyOf(int id) {
     if (id == noRef) return baseCurrency;
     final assets = ref.read(assetsProvider).value ?? const <Asset>[];
@@ -368,11 +454,49 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     }
   }
 
-  void _applyTemplatePrefill(TemplatePrefill prefill) {
+  void _applyTemplatePrefill(
+    TemplatePrefill prefill, {
+    RecordCategory? fallbackFirstCategory,
+    bool? autoSelectFirstOverride,
+  }) {
+    RecordCategory? resolvedFallback = fallbackFirstCategory;
+    if (prefill.categoryId == null && prefill.type != RecordType.transfer) {
+      final autoSelectEnabled =
+          autoSelectFirstOverride ??
+          (ref
+                  .read(diyToolbarConfigProvider)
+                  .value
+                  ?.isEnabled(DiyToolbarAction.autoSelectFirstCategory) ??
+              false);
+      if (autoSelectEnabled && resolvedFallback == null) {
+        final currentBookId =
+            original?.accountBookId ??
+            ref.read(currentBookIdProvider).value ??
+            _resolvedBookId;
+        final currentCats = currentBookId == null
+            ? const <RecordCategory>[]
+            : (ref.read(categoriesProvider(currentBookId)).value ??
+                  (currentBookId == _initialCategoriesBookId
+                      ? _initialCategories
+                      : const <RecordCategory>[]));
+        resolvedFallback = _firstTopCategoryForType(prefill.type, currentCats);
+      }
+    }
     setState(() {
       type = prefill.type;
-      categoryId = prefill.categoryId;
-      parentCatId = prefill.parentCategoryId;
+      if (prefill.type == RecordType.transfer) {
+        categoryId = null;
+        parentCatId = null;
+        _userTouchedCategory = false;
+      } else if (prefill.categoryId != null) {
+        categoryId = prefill.categoryId;
+        parentCatId = prefill.parentCategoryId;
+        _userTouchedCategory = true;
+      } else {
+        categoryId = resolvedFallback?.id;
+        parentCatId = resolvedFallback?.id;
+        _userTouchedCategory = false;
+      }
       _remarksShowAllScope = false;
       assetId = prefill.assetId;
       fromAssetId = prefill.fromAssetId;
@@ -673,14 +797,53 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
       final db = await ref.read(databaseProvider.future);
       if (editing) {
         await _loadExisting(db, widget.recordId!);
+        if (_resolvedBookId != null) {
+          final cats = await LedgerQueries(db).getCategories(_resolvedBookId!);
+          _initialCategoriesBookId = _resolvedBookId;
+          _initialCategories = cats;
+        }
       } else {
         _resolvedBookId = await _readCurrentBookId(db);
+        final cats = await LedgerQueries(db).getCategories(_resolvedBookId!);
+        _initialCategoriesBookId = _resolvedBookId;
+        _initialCategories = cats;
         if (widget.initialTemplateId != null) {
-          final tplSvc = await ref.read(templateRemarkServiceProvider.future);
-          final prefill = await tplSvc.buildTemplatePrefill(
-            widget.initialTemplateId!,
+          final prefill = await TemplateRemarkService(
+            db,
+          ).buildTemplatePrefill(widget.initialTemplateId!);
+          final diyConfig = await _resolveLatestDiyConfig(db);
+          final autoSelect = diyConfig.isEnabled(
+            DiyToolbarAction.autoSelectFirstCategory,
           );
-          if (mounted) _applyTemplatePrefill(prefill);
+          final fallbackCat =
+              autoSelect &&
+                  prefill.categoryId == null &&
+                  prefill.type != RecordType.transfer
+              ? _firstTopCategoryForType(prefill.type, cats)
+              : null;
+          if (mounted) {
+            _applyTemplatePrefill(
+              prefill,
+              fallbackFirstCategory: fallbackCat,
+              autoSelectFirstOverride: autoSelect,
+            );
+          }
+        } else if (widget.initialCategory == null &&
+            type != RecordType.transfer &&
+            categoryId == null &&
+            !_userTouchedCategory) {
+          final diyConfig = await _resolveLatestDiyConfig(db);
+          if (diyConfig.isEnabled(DiyToolbarAction.autoSelectFirstCategory)) {
+            final first = _firstTopCategoryForType(type, cats);
+            if (first != null &&
+                mounted &&
+                categoryId == null &&
+                !_userTouchedCategory &&
+                type != RecordType.transfer) {
+              categoryId = first.id;
+              parentCatId = first.id;
+            }
+          }
         }
       }
     } catch (e) {
@@ -870,30 +1033,16 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
         );
       }
 
-      final providerDiyConfig = ref.read(diyToolbarConfigProvider).value;
-      final bool remarksEnabled;
-      if (providerDiyConfig != null) {
-        remarksEnabled = providerDiyConfig.isEnabled(
-          DiyToolbarAction.frequentRemarks,
-        );
-      } else {
-        final diyPrefRow =
-            await (db.select(db.preferences)
-                  ..where((t) => t.key.equals(prefKeyRecordDiyToolbar)))
-                .getSingleOrNull();
-        remarksEnabled = DiyToolbarConfig.decode(
-          diyPrefRow?.value,
-        ).isEnabled(DiyToolbarAction.frequentRemarks);
-      }
+      final effectiveDiyConfig = await _resolveLatestDiyConfig(db);
+      final remarksEnabled = effectiveDiyConfig.isEnabled(
+        DiyToolbarAction.frequentRemarks,
+      );
 
       if (remarksEnabled &&
           type != RecordType.transfer &&
           draft.remark.isNotEmpty) {
         try {
-          final remarkSvc = await ref.read(
-            templateRemarkServiceProvider.future,
-          );
-          await remarkSvc.recordRemarkUsage(
+          await TemplateRemarkService(db).recordRemarkUsage(
             commandId: remarkIds.forPayload([
               'editor-remark-usage',
               _draftNonce,
@@ -924,6 +1073,22 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
       if (!mounted) return;
       if (stayAndReset) {
         if (!editing) {
+          RecordCategory? nextAutoFirstCat;
+          final resetToFirstCat =
+              type != RecordType.transfer &&
+              effectiveDiyConfig.isEnabled(
+                DiyToolbarAction.autoSelectFirstCategory,
+              );
+          if (resetToFirstCat) {
+            final currentCategories =
+                (mounted ? ref.read(categoriesProvider(bookId)).value : null) ??
+                await LedgerQueries(db).getCategories(bookId);
+            nextAutoFirstCat = _firstTopCategoryForType(
+              type,
+              currentCategories,
+            );
+          }
+          if (!mounted) return;
           setState(() {
             busy = false;
             _draftNonce++;
@@ -937,6 +1102,11 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
             location = null;
             _attachmentsExpanded = false;
             _remarksShowAllScope = false;
+            if (resetToFirstCat) {
+              categoryId = nextAutoFirstCat?.id;
+              parentCatId = nextAutoFirstCat?.id;
+              _userTouchedCategory = false;
+            }
             _panelMode = _BottomPanelMode.customKeypad;
             _savedAndResetBanner = true;
             error = null;
@@ -978,27 +1148,53 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
 
   Future<void> _pickTime() async {
     _unfocusOsKeyboardFields();
-    final date = await showDatePicker(
+    var diyConfig = ref.read(diyToolbarConfigProvider).value;
+    if (diyConfig == null) {
+      try {
+        final service = await ref.read(billAttachmentServiceProvider.future);
+        diyConfig = await service.getDiyToolbarConfig();
+      } catch (_) {
+        diyConfig = DiyToolbarConfig.defaults();
+      }
+    }
+    if (!mounted) return;
+    final effectiveDateStyle =
+        _localDatePickerStyle ?? diyConfig.datePickerStyle;
+    final effectiveTimeStyle =
+        _localTimePickerStyle ?? diyConfig.timePickerStyle;
+    final res = await showRecordDateTimeDialog(
       context: context,
-      initialDate: time,
+      initialDateTime: time,
       firstDate: DateTime(2000),
-      lastDate: DateTime(2100),
-    );
-    if (date == null || !mounted) return;
-    final clock = await showTimePicker(
-      context: context,
-      initialTime: TimeOfDay.fromDateTime(time),
+      lastDate: DateTime(2100, 12, 31),
+      initialDateWheelStyle: effectiveDateStyle == RecordDatePickerStyle.wheel,
+      initialTimeDialStyle: effectiveTimeStyle == RecordTimePickerStyle.dial,
+      onStyleChanged: ({required dateWheelStyle, required timeDialStyle}) {
+        final nextDateStyle = dateWheelStyle
+            ? RecordDatePickerStyle.wheel
+            : RecordDatePickerStyle.calendar;
+        final nextTimeStyle = timeDialStyle
+            ? RecordTimePickerStyle.dial
+            : RecordTimePickerStyle.wheel;
+        _localDatePickerStyle = nextDateStyle;
+        _localTimePickerStyle = nextTimeStyle;
+        _persistDateTimePickerStyles(
+          datePickerStyle: nextDateStyle,
+          timePickerStyle: nextTimeStyle,
+        );
+      },
     );
     if (!mounted) return;
-    setState(() {
-      time = DateTime(
-        date.year,
-        date.month,
-        date.day,
-        clock?.hour ?? time.hour,
-        clock?.minute ?? time.minute,
-      );
-    });
+    if (res != null) {
+      setState(() {
+        time = res.dateTime;
+        _savedAndResetBanner = false;
+      });
+    }
+    if (!_hasOsKeyboardFieldFocus &&
+        _panelMode != _BottomPanelMode.frequentRemarks) {
+      _activateCustomKeypad();
+    }
   }
 
   String _formatDatePillLabel(DateTime dt) {
@@ -1427,7 +1623,10 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
         _resolvedBookId;
     final categories = bookId == null
         ? const <RecordCategory>[]
-        : ref.watch(categoriesProvider(bookId)).value ?? const [];
+        : (ref.watch(categoriesProvider(bookId)).value ??
+              (bookId == _initialCategoriesBookId
+                  ? _initialCategories
+                  : const <RecordCategory>[]));
     final assets = (ref.watch(assetsProvider).value ?? const <Asset>[])
         .where(
           (a) => a.status != AssetStatus.settled && a.type != AssetType.debt,
@@ -1450,6 +1649,48 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     final diyConfig =
         ref.watch(diyToolbarConfigProvider).value ??
         DiyToolbarConfig.defaults();
+
+    ref.listen<AsyncValue<DiyToolbarConfig>>(diyToolbarConfigProvider, (
+      prev,
+      next,
+    ) {
+      if (_inFlightStyleSaves == 0 && next.hasValue) {
+        _localDatePickerStyle = null;
+        _localTimePickerStyle = null;
+      }
+      final wasEnabled =
+          prev?.value?.isEnabled(DiyToolbarAction.autoSelectFirstCategory) ??
+          false;
+      final nowEnabled =
+          next.value?.isEnabled(DiyToolbarAction.autoSelectFirstCategory) ??
+          false;
+      if (!wasEnabled &&
+          nowEnabled &&
+          !loading &&
+          !editing &&
+          type != RecordType.transfer &&
+          categoryId == null &&
+          !_userTouchedCategory) {
+        final currentBookId =
+            original?.accountBookId ??
+            ref.read(currentBookIdProvider).value ??
+            _resolvedBookId;
+        final currentCats = currentBookId == null
+            ? const <RecordCategory>[]
+            : (ref.read(categoriesProvider(currentBookId)).value ??
+                  (currentBookId == _initialCategoriesBookId
+                      ? _initialCategories
+                      : const <RecordCategory>[]));
+        final first = _firstTopCategoryForType(type, currentCats);
+        if (first != null) {
+          setState(() {
+            categoryId = first.id;
+            parentCatId = first.id;
+            _remarksShowAllScope = false;
+          });
+        }
+      }
+    });
 
     final canSubmit = !busy && !loading && (!editing || original != null);
     final canPopRoute =
@@ -1530,7 +1771,11 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       // Zone 1: Compact Type Bar (primary tabs + secondary pills)
-                      _buildTypeSwitcherBar(context),
+                      _buildTypeSwitcherBar(
+                        context,
+                        categories: categories,
+                        diyConfig: diyConfig,
+                      ),
                       // Zone 2 + Zone 3: Scrollable middle zone + unified bottom dock & slot
                       Expanded(
                         child: LayoutBuilder(
@@ -1639,7 +1884,11 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     );
   }
 
-  Widget _buildTypeSwitcherBar(BuildContext context) {
+  Widget _buildTypeSwitcherBar(
+    BuildContext context, {
+    required List<RecordCategory> categories,
+    required DiyToolbarConfig diyConfig,
+  }) {
     final cs = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final unselectedBg = isDark
@@ -1671,20 +1920,33 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
         selected: selected,
         onSelected: busy || editing
             ? null
-            : (_) => setState(() {
-                type = value;
-                categoryId = null;
-                parentCatId = null;
-                _remarksShowAllScope = false;
-                if (value == RecordType.transfer) {
-                  sourceCurrency = null;
-                  convertedEdited = false;
-                  if (_panelMode == _BottomPanelMode.frequentRemarks) {
-                    _panelMode = _BottomPanelMode.customKeypad;
+            : (_) {
+                if (type == value) return;
+                setState(() {
+                  type = value;
+                  _userTouchedCategory = false;
+                  if (value == RecordType.transfer) {
+                    categoryId = null;
+                    parentCatId = null;
+                    sourceCurrency = null;
+                    convertedEdited = false;
+                    if (_panelMode == _BottomPanelMode.frequentRemarks) {
+                      _panelMode = _BottomPanelMode.customKeypad;
+                    }
+                  } else if (diyConfig.isEnabled(
+                    DiyToolbarAction.autoSelectFirstCategory,
+                  )) {
+                    final first = _firstTopCategoryForType(value, categories);
+                    categoryId = first?.id;
+                    parentCatId = first?.id;
+                  } else {
+                    categoryId = null;
+                    parentCatId = null;
                   }
-                }
-                _autoConvert();
-              }),
+                  _remarksShowAllScope = false;
+                  _autoConvert();
+                });
+              },
       );
     }
 
@@ -1795,6 +2057,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                   selectedCategoryId: categoryId,
                   enabled: !busy,
                   onSelectCategoryId: (id) => setState(() {
+                    _userTouchedCategory = true;
                     categoryId = id;
                     _remarksShowAllScope = false;
                   }),
@@ -1808,6 +2071,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
               selectedParentId: parentCatId,
               enabled: !busy,
               onSelectCategory: (cat) => setState(() {
+                _userTouchedCategory = true;
                 parentCatId = cat.id;
                 categoryId = cat.id;
                 _remarksShowAllScope = false;
@@ -2196,14 +2460,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
         ? const Color(0xFF2E7D32)
         : (type == RecordType.transfer ? cs.primary : cs.onSurface);
 
-    final canSwitchCurrencyOnPrefix =
-        !busy &&
-        type != RecordType.transfer &&
-        currencies.length > 1 &&
-        (diyConfig.isEnabled(DiyToolbarAction.currency) ||
-            sourceCurrency != null);
-
-    Widget currencyPrefixWidget;
+    final Widget currencyPrefixWidget;
     if (sc == baseCurrency) {
       currencyPrefixWidget = Text(
         '¥',
@@ -2214,16 +2471,6 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
           color: amount.text.isEmpty ? cs.outlineVariant : amountColor,
         ),
       );
-      if (canSwitchCurrencyOnPrefix) {
-        currencyPrefixWidget = GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: () => unawaited(_openCurrencyPickerSheet(currencies)),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
-            child: currencyPrefixWidget,
-          ),
-        );
-      }
     } else {
       final sym = _symbolForCurrency(sc, currencies);
       currencyPrefixWidget = Container(
@@ -2255,24 +2502,9 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                 ),
               ),
             ],
-            if (canSwitchCurrencyOnPrefix) ...[
-              const SizedBox(width: 1),
-              Icon(
-                Icons.arrow_drop_down_rounded,
-                size: 14,
-                color: cs.onSecondaryContainer.withAlpha(190),
-              ),
-            ],
           ],
         ),
       );
-      if (canSwitchCurrencyOnPrefix) {
-        currencyPrefixWidget = GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: () => unawaited(_openCurrencyPickerSheet(currencies)),
-          child: currencyPrefixWidget,
-        );
-      }
     }
 
     Widget? conversionSummaryWidget;
@@ -3228,19 +3460,20 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
           }
 
         case DiyToolbarAction.currency:
-          if (type != RecordType.transfer &&
-              currencies.length > 1 &&
-              (item.enabled || sourceCurrency != null)) {
+          if (type != RecordType.transfer) {
             final (sc, acctCurr) = _currencies();
-            pills.add(
-              pill(
-                key: const Key('editor-currency-pill'),
-                icon: Icons.currency_exchange_rounded,
-                label: sc,
-                active: sc != acctCurr,
-                onTap: () => unawaited(_openCurrencyPickerSheet(currencies)),
-              ),
-            );
+            if ((item.enabled && currencies.length > 1) ||
+                (sourceCurrency != null && sc != acctCurr)) {
+              pills.add(
+                pill(
+                  key: const Key('editor-currency-pill'),
+                  icon: Icons.currency_exchange_rounded,
+                  label: sc,
+                  active: sc != acctCurr,
+                  onTap: () => unawaited(_openCurrencyPickerSheet(currencies)),
+                ),
+              );
+            }
           }
 
         case DiyToolbarAction.excludeExIn:
@@ -3276,6 +3509,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
         case DiyToolbarAction.templates:
         case DiyToolbarAction.frequentRemarks:
         case DiyToolbarAction.keypadMultiplyDivide:
+        case DiyToolbarAction.autoSelectFirstCategory:
           break;
       }
     }
