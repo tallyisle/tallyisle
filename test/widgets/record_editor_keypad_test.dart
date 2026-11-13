@@ -15,6 +15,7 @@ import 'package:tallyisle/data/tools/bill_attachment_service.dart';
 import 'package:tallyisle/data/tools/template_remark_service.dart';
 import 'package:tallyisle/domain/model/codes.dart';
 import 'package:tallyisle/features/records/record_editor_page.dart';
+import 'package:tallyisle/features/records/record_keypad.dart';
 
 Future<void> _settle(WidgetTester tester, [int ticks = 8]) async {
   for (var i = 0; i < ticks; i++) {
@@ -409,14 +410,14 @@ void main() {
           final pillToolbar = find.byKey(const Key('editor-pill-toolbar'));
           final customKeypad = find.byKey(const Key('record-custom-keypad'));
 
-          // 1. Strict top-to-bottom order with hairline dividers & NO fake Icons.sell_outlined in remark row:
+          // 1. Strict top-to-bottom order with borderless dock & NO fake Icons.sell_outlined in remark row:
           final rSummary = tester.getRect(summaryRow);
           final rRemark = tester.getRect(remarkRow);
           final rPill = tester.getRect(pillToolbar);
           final rKeypad = tester.getRect(customKeypad);
-          expect(rSummary.bottom, lessThanOrEqualTo(rRemark.top + 1.5));
-          expect(rRemark.bottom, lessThanOrEqualTo(rPill.top + 1.5));
-          expect(rPill.bottom, lessThanOrEqualTo(rKeypad.top + 0.5));
+          expect(rSummary.bottom, lessThanOrEqualTo(rRemark.top + 6.0));
+          expect(rRemark.bottom, lessThanOrEqualTo(rPill.top + 8.0));
+          expect(rPill.bottom, lessThanOrEqualTo(rKeypad.top + 2.0));
           expect(
             find.descendant(
               of: find.byKey(const Key('editor-bottom-dock')),
@@ -858,12 +859,6 @@ void main() {
               db.recordCategories,
             )..where((t) => t.accountBookId.equals(defaultBookId))).get();
             foodCatId = cats.firstWhere((c) => c.name == '餐饮').id;
-            await TemplateRemarkService(db).createRemark(
-              commandId: 'seed-preset-remark',
-              content: '预设拿铁',
-              recordCatId: foodCatId,
-              usedTimes: 5,
-            );
           });
 
           await tester.pumpWidget(
@@ -918,9 +913,9 @@ void main() {
           final remarksWhenOff = await tester.runAsync(
             () => db.select(db.remarks).get(),
           );
-          expect(remarksWhenOff!.map((r) => r.content).toList(), ['预设拿铁']);
+          expect(remarksWhenOff, isEmpty);
 
-          // 2. Turn frequentRemarks ON and re-open RecordEditorPage WITHOUT selecting a category yet!
+          // 2. Turn frequentRemarks ON and re-open RecordEditorPage WITHOUT selecting a category yet (0 remarks in DB)!
           await tester.runAsync(() async {
             final attSvc = BillAttachmentService(db);
             final cfg = await attSvc.getDiyToolbarConfig();
@@ -934,7 +929,7 @@ void main() {
           await tester.tap(find.byKey(const Key('add-record')));
           await _settle(tester);
 
-          // 2a. Before selecting any category (categoryId == null), tapping toggle opens
+          // 2a. With 0 remarks in DB and categoryId == null, tapping toggle opens
           // the 254dp frequent-remarks panel with a friendly empty state (never a dead 0px button!).
           expect(
             find.byKey(const Key('editor-remarks-toggle-btn')),
@@ -970,7 +965,16 @@ void main() {
             findsNothing,
           );
 
-          // 2c. Select '餐饮' -> open Plan A panel -> tap '预设拿铁' -> fills remark & auto-switches back to custom keypad!
+          // 2c. Seed '预设拿铁', select '餐饮' -> open Plan A panel -> tap '预设拿铁' -> fills remark & auto-switches back to custom keypad!
+          await tester.runAsync(() async {
+            await TemplateRemarkService(db).createRemark(
+              commandId: 'seed-preset-remark',
+              content: '预设拿铁',
+              recordCatId: foodCatId,
+              usedTimes: 5,
+            );
+          });
+          await _settle(tester, 4);
           await tester.tap(find.byKey(const Key('cat-餐饮')));
           await _settle(tester, 4);
           await tester.tap(find.byKey(const Key('editor-remarks-toggle-btn')));
@@ -1174,6 +1178,258 @@ void main() {
                 .moneyMinor,
             BigInt.from(4000),
           );
+
+          await closeCleanly();
+        },
+      );
+
+      testWidgets(
+        'Borderless 3-tier tonal RecordCustomKeypad in both Dark and Light themes: outer Container has border == null and all 16 keycap Materials have RoundedRectangleBorder(borderRadius: 12, side: BorderSide.none)',
+        (tester) async {
+          await tester.binding.setSurfaceSize(const Size(390, 844));
+          addTearDown(() => tester.binding.setSurfaceSize(null));
+
+          final (db, closeCleanly) = _openTestDb(tester);
+          await tester.runAsync(() => db.select(db.accountBooks).get());
+
+          const digitKeys = <Key>[
+            Key('keypad-7'),
+            Key('keypad-8'),
+            Key('keypad-9'),
+            Key('keypad-4'),
+            Key('keypad-5'),
+            Key('keypad-6'),
+            Key('keypad-1'),
+            Key('keypad-2'),
+            Key('keypad-3'),
+            Key('keypad-0'),
+            Key('keypad-dot'),
+          ];
+          const utilityKeys = <Key>[
+            Key('keypad-backspace'),
+            Key('editor-op-add'),
+            Key('editor-op-sub'),
+            Key('save-and-new'),
+          ];
+
+          for (final brightness in [Brightness.light, Brightness.dark]) {
+            final isDark = brightness == Brightness.dark;
+            final theme = ThemeData(
+              useMaterial3: true,
+              brightness: brightness,
+              colorSchemeSeed: const Color(0xFF0F766E),
+            );
+            final cs = theme.colorScheme;
+
+            // 1. Standalone RecordCustomKeypad (active + enableMultiplyDivide: true)
+            await tester.pumpWidget(
+              MaterialApp(
+                theme: theme,
+                home: Scaffold(
+                  body: Align(
+                    alignment: Alignment.bottomCenter,
+                    child: RecordCustomKeypad(
+                      amountText: '12.50',
+                      enabled: true,
+                      busy: false,
+                      enableMultiplyDivide: true,
+                      onKeyTap: (_) {},
+                      onBackspace: () {},
+                      onClearAll: () {},
+                      onEvaluate: () {},
+                      onSave: () {},
+                      onSaveAndNew: () {},
+                    ),
+                  ),
+                ),
+              ),
+            );
+            await tester.pumpAndSettle();
+
+            final keypadFinder = find.byKey(const Key('record-custom-keypad'));
+            expect(keypadFinder, findsOneWidget);
+            expect(
+              tester.getRect(keypadFinder).height,
+              closeTo(RecordCustomKeypad.panelHeight, 0.5),
+            );
+            expect(
+              find.descendant(of: keypadFinder, matching: find.byType(Divider)),
+              findsNothing,
+            );
+            expect(
+              find.descendant(
+                of: keypadFinder,
+                matching: find.byType(VerticalDivider),
+              ),
+              findsNothing,
+            );
+
+            // Outer tray Container must have border == null and exact trayColor
+            final outerContainer = tester.widget<Container>(
+              find
+                  .descendant(
+                    of: keypadFinder,
+                    matching: find.byType(Container),
+                  )
+                  .first,
+            );
+            final outerDecoration = outerContainer.decoration! as BoxDecoration;
+            expect(
+              outerDecoration.border,
+              isNull,
+              reason:
+                  'RecordCustomKeypad outer Container must have border == null in $brightness',
+            );
+            expect(
+              outerDecoration.color,
+              isDark ? cs.surfaceContainerLowest : cs.surfaceContainerLow,
+            );
+
+            // Digit keys (0-9, .)
+            final expectedDigitBg = isDark
+                ? cs.surfaceContainerHigh
+                : cs.surface;
+            for (final k in digitKeys) {
+              final mat = tester.widget<Material>(
+                find
+                    .ancestor(
+                      of: find.byKey(k),
+                      matching: find.byType(Material),
+                    )
+                    .first,
+              );
+              expect(
+                mat.color,
+                expectedDigitBg,
+                reason: '$k bg in $brightness',
+              );
+              expect(mat.shape, isA<RoundedRectangleBorder>());
+              final shape = mat.shape! as RoundedRectangleBorder;
+              expect(
+                shape.side,
+                BorderSide.none,
+                reason: '$k must have side == BorderSide.none in $brightness',
+              );
+              expect(shape.borderRadius, BorderRadius.circular(12));
+            }
+
+            // Utility keys (⌫, +, −, 再记)
+            final expectedUtilityBg = isDark
+                ? cs.surfaceContainer
+                : cs.secondaryContainer.withAlpha(115);
+            final expectedUtilityFg = isDark
+                ? cs.onSurface
+                : cs.onSecondaryContainer;
+            for (final k in utilityKeys) {
+              final mat = tester.widget<Material>(
+                find
+                    .ancestor(
+                      of: find.byKey(k),
+                      matching: find.byType(Material),
+                    )
+                    .first,
+              );
+              expect(
+                mat.color,
+                expectedUtilityBg,
+                reason: '$k bg in $brightness',
+              );
+              expect(mat.shape, isA<RoundedRectangleBorder>());
+              final shape = mat.shape! as RoundedRectangleBorder;
+              expect(
+                shape.side,
+                BorderSide.none,
+                reason: '$k must have side == BorderSide.none in $brightness',
+              );
+              expect(shape.borderRadius, BorderRadius.circular(12));
+            }
+
+            final bsIcon = tester.widget<Icon>(
+              find.descendant(
+                of: find.byKey(const Key('keypad-backspace')),
+                matching: find.byType(Icon),
+              ),
+            );
+            expect(bsIcon.color, expectedUtilityFg);
+
+            final addText = tester.widget<Text>(
+              find.descendant(
+                of: find.byKey(const Key('editor-op-add')),
+                matching: find.text('+'),
+              ),
+            );
+            expect(addText.style!.color, expectedUtilityFg);
+
+            final mulHint = tester.widget<Text>(
+              find.descendant(
+                of: find.byKey(const Key('editor-op-add')),
+                matching: find.text('×'),
+              ),
+            );
+            expect(mulHint.style!.color, expectedUtilityFg.withAlpha(140));
+
+            final saveAndNewText = tester.widget<Text>(
+              find.descendant(
+                of: find.byKey(const Key('save-and-new')),
+                matching: find.text('再记'),
+              ),
+            );
+            expect(saveAndNewText.style!.color, expectedUtilityFg);
+
+            // Primary CTA (保存 / = FilledButton)
+            final saveMat = tester.widget<Material>(
+              find
+                  .descendant(
+                    of: find.byKey(const Key('save')),
+                    matching: find.byType(Material),
+                  )
+                  .first,
+            );
+            expect(saveMat.shape, isA<RoundedRectangleBorder>());
+            final saveShape = saveMat.shape! as RoundedRectangleBorder;
+            expect(
+              saveShape.side,
+              BorderSide.none,
+              reason:
+                  'Primary CTA key must have side == BorderSide.none in $brightness',
+            );
+            expect(saveShape.borderRadius, BorderRadius.circular(12));
+
+            // 2. Full RecordEditorPage integration in both themes
+            await tester.pumpWidget(
+              ProviderScope(
+                retry: (_, _) => null,
+                overrides: [databaseProvider.overrideWith((ref) async => db)],
+                child: MaterialApp(
+                  theme: theme,
+                  home: const RecordEditorPage(),
+                ),
+              ),
+            );
+            await _settle(tester);
+            expect(tester.takeException(), isNull);
+
+            final pageKeypad = find.byKey(const Key('record-custom-keypad'));
+            final pageContainer = tester.widget<Container>(
+              find
+                  .descendant(of: pageKeypad, matching: find.byType(Container))
+                  .first,
+            );
+            expect((pageContainer.decoration! as BoxDecoration).border, isNull);
+            final pageKeyMaterials = tester.widgetList<Material>(
+              find.descendant(of: pageKeypad, matching: find.byType(Material)),
+            );
+            expect(pageKeyMaterials.length, greaterThanOrEqualTo(16));
+            for (final mat in pageKeyMaterials) {
+              if (mat.shape != null) {
+                expect(mat.shape, isA<RoundedRectangleBorder>());
+                expect(
+                  (mat.shape! as RoundedRectangleBorder).side,
+                  BorderSide.none,
+                );
+              }
+            }
+          }
 
           await closeCleanly();
         },

@@ -8,10 +8,12 @@ import 'package:tallyisle/app/app.dart';
 import 'package:tallyisle/app/providers.dart';
 import 'package:tallyisle/core/money.dart';
 import 'package:tallyisle/data/catalog/catalog_service.dart';
+import 'package:tallyisle/data/catalog/currency_service.dart';
 import 'package:tallyisle/data/db/database.dart';
 import 'package:tallyisle/data/db/seed.dart' show defaultBookId;
 import 'package:tallyisle/data/ledger/ledger_service.dart';
 import 'package:tallyisle/data/tools/bill_attachment_service.dart';
+import 'package:tallyisle/data/tools/template_remark_service.dart';
 import 'package:tallyisle/domain/model/codes.dart';
 import 'package:tallyisle/features/common/catalog_icons.dart';
 import 'package:tallyisle/features/records/record_editor_page.dart';
@@ -266,6 +268,7 @@ void main() {
               commandId: 'seed-tag-travel',
               name: '旅行',
             );
+            await catalog.createTag(commandId: 'seed-tag-trip', name: '出差');
           });
 
           await tester.pumpWidget(
@@ -304,14 +307,28 @@ void main() {
           await _settle(tester, 4);
           expect(find.text('日常钱包'), findsOneWidget);
 
-          // 3. Select tag via compact Tag Pill (Key('editor-tags-pill')).
+          // 3. Select tag via compact Tag Pill (Key('editor-tags-pill')):
+          //    empty shows '标签' (never '#标签'), selected shows '旅行' / '旅行 +1' without duplicate '#'.
+          expect(find.text('标签'), findsOneWidget);
+          expect(find.text('#标签'), findsNothing);
           await tester.tap(find.byKey(const Key('editor-tags-pill')));
           await _settle(tester, 4);
           await tester.tap(find.byKey(const Key('tag-旅行')));
+          await tester.tap(find.byKey(const Key('tag-出差')));
           await _settle(tester, 4);
           await tester.tap(find.text('完成'));
           await _settle(tester, 4);
-          expect(find.text('#旅行'), findsOneWidget);
+          expect(find.text('旅行 +1'), findsOneWidget);
+          expect(find.text('#旅行 +1'), findsNothing);
+
+          await tester.tap(find.byKey(const Key('editor-tags-pill')));
+          await _settle(tester, 4);
+          await tester.tap(find.byKey(const Key('tag-出差')));
+          await _settle(tester, 4);
+          await tester.tap(find.text('完成'));
+          await _settle(tester, 4);
+          expect(find.text('旅行'), findsOneWidget);
+          expect(find.text('#旅行'), findsNothing);
 
           // 4a. Test IME Done submit compatibility: enter '15+5*2' -> '= 40.00', Done -> '40.00'.
           await tester.enterText(find.byKey(const Key('amount')), '15+5*2');
@@ -757,6 +774,367 @@ void main() {
           expect(find.byType(RecordTypeIconAvatar), findsWidgets);
           expect(find.byType(AssetIconAvatar), findsOneWidget);
           expect(find.text('花呗生活号'), findsOneWidget);
+
+          await closeCleanly();
+        },
+      );
+
+      testWidgets(
+        'Issue 1 & Issue 4: single-digit CNY amount hugs ¥ tightly without reserved 0.00 gap, type bar keeps 预收 on row 1, and dock/remark/pills/remarks-panel are 100% borderless in dark & light themes',
+        (tester) async {
+          tester.view.devicePixelRatio = 1.0;
+          tester.view.physicalSize = const Size(360, 640);
+          await tester.binding.setSurfaceSize(const Size(360, 640));
+          addTearDown(() async {
+            tester.view.reset();
+            await tester.binding.setSurfaceSize(null);
+          });
+
+          final (db, closeCleanly) = _openTestDb(tester);
+          await tester.runAsync(() async {
+            await db.select(db.accountBooks).get();
+            await CurrencyService(db).saveCurrency(
+              commandId: 'seed-usd-gap-check',
+              code: 'USD',
+              name: '美元',
+              symbol: r'$',
+              price: '7.20',
+            );
+            final cats = await (db.select(
+              db.recordCategories,
+            )..where((t) => t.accountBookId.equals(defaultBookId))).get();
+            final foodCat = cats.firstWhere((c) => c.name == '餐饮');
+            await TemplateRemarkService(db).createRemark(
+              commandId: 'seed-borderless-chip-remark',
+              content: '冰美式',
+              recordCatId: foodCat.id,
+              usedTimes: 3,
+            );
+            final attSvc = BillAttachmentService(db);
+            final cfg = await attSvc.getDiyToolbarConfig();
+            await attSvc.saveDiyToolbarConfig(
+              commandId: 'enable-remarks-borderless-test',
+              config: cfg.setEnabled(DiyToolbarAction.frequentRemarks, true),
+            );
+          });
+
+          for (final brightness in [Brightness.dark, Brightness.light]) {
+            final theme = ThemeData(
+              colorScheme: ColorScheme.fromSeed(
+                seedColor: const Color(0xFF006D77),
+                brightness: brightness,
+              ),
+              useMaterial3: true,
+            );
+            final cs = theme.colorScheme;
+            final isDark = brightness == Brightness.dark;
+            final expectedTrayColor = isDark
+                ? cs.surfaceContainerLowest
+                : cs.surfaceContainerLow;
+
+            await tester.pumpWidget(
+              ProviderScope(
+                retry: (_, _) => null,
+                overrides: [databaseProvider.overrideWith((ref) async => db)],
+                child: MaterialApp(
+                  theme: theme,
+                  home: RecordEditorPage(key: ValueKey(brightness)),
+                ),
+              ),
+            );
+            await _settle(tester);
+            expect(tester.takeException(), isNull);
+
+            // 1. Empty state renders '0.00' hint; typing '6' drops hintText to null
+            //    so '¥' hugs '6' tightly ((amountRect.left - symbolRect.right) <= 6.0, width < 32.0)!
+            TextField amountField() =>
+                tester.widget<TextField>(find.byKey(const Key('amount')));
+            expect(amountField().decoration!.hintText, '0.00');
+
+            await _tapKeys(tester, ['6']);
+            expect(amountField().controller!.text, '6');
+            expect(amountField().decoration!.hintText, isNull);
+
+            final symbolRect = tester.getRect(
+              find.byKey(const Key('amount-currency-symbol')),
+            );
+            final amountRect = tester.getRect(find.byKey(const Key('amount')));
+            expect(
+              amountRect.left - symbolRect.right,
+              lessThanOrEqualTo(6.0),
+              reason: '¥ and single-digit 6 must hug tightly ($brightness)',
+            );
+            expect(
+              amountRect.left - symbolRect.right,
+              greaterThanOrEqualTo(0.0),
+            );
+            expect(
+              amountRect.width,
+              lessThan(32.0),
+              reason:
+                  'Single digit 6 must not reserve 0.00 hint width ($brightness)',
+            );
+
+            // Clearing restores '0.00' hint cleanly.
+            await _tapKeys(tester, ['BS']);
+            expect(amountField().controller!.text, isEmpty);
+            expect(amountField().decoration!.hintText, '0.00');
+
+            // 2. Single-row Type Switcher Bar: all 6 chips (including '预收' type-9)
+            //    stay on row 1 on 360x640 and use StadiumBorder + BorderSide.none!
+            final typeKeys = <Key>[
+              const Key('type-0'),
+              const Key('type-1'),
+              const Key('type-2'),
+              const Key('type-3'),
+              const Key('type-16'),
+              const Key('type-9'),
+            ];
+            final firstChipCenterY = tester
+                .getRect(find.byKey(typeKeys.first))
+                .center
+                .dy;
+            for (final tk in typeKeys) {
+              final chip = tester.widget<ChoiceChip>(find.byKey(tk));
+              expect(chip.side, BorderSide.none);
+              expect(chip.shape, const StadiumBorder());
+              expect(
+                (tester.getRect(find.byKey(tk)).center.dy - firstChipCenterY)
+                    .abs(),
+                lessThan(0.5),
+                reason: '$tk must stay on row 1 without wrapping ($brightness)',
+              );
+            }
+
+            // 3. Bottom Dock: zero Divider widgets, border == null, top radius 18,
+            //    remark container border == null, pill Materials use StadiumBorder(side: BorderSide.none).
+            final dockFinder = find.byKey(const Key('editor-bottom-dock'));
+            expect(
+              find.descendant(of: dockFinder, matching: find.byType(Divider)),
+              findsNothing,
+            );
+            final dockContainer = tester.widget<Container>(dockFinder);
+            final dockDecoration = dockContainer.decoration! as BoxDecoration;
+            expect(dockDecoration.border, isNull);
+            expect(
+              dockDecoration.color,
+              isDark ? cs.surfaceContainerLow : cs.surface,
+            );
+            expect(
+              dockDecoration.borderRadius,
+              const BorderRadius.vertical(top: Radius.circular(18)),
+            );
+
+            final remarkContainer = tester.widget<Container>(
+              find.byKey(const Key('editor-remark-row')),
+            );
+            final remarkDecoration =
+                remarkContainer.decoration! as BoxDecoration;
+            expect(remarkDecoration.border, isNull);
+
+            final pillMaterials = tester.widgetList<Material>(
+              find.descendant(
+                of: find.byKey(const Key('editor-pill-toolbar')),
+                matching: find.byType(Material),
+              ),
+            );
+            expect(pillMaterials, isNotEmpty);
+            for (final m in pillMaterials) {
+              expect(m.shape, const StadiumBorder(side: BorderSide.none));
+            }
+
+            // 4. Frequent Remarks Panel & bottom slot share trayColor with zero Border
+            //    and borderless StadiumBorder ActionChips.
+            await tester.tap(
+              find.byKey(const Key('editor-remarks-toggle-btn')),
+            );
+            await _settle(tester, 4);
+
+            final slotContainer = tester.widget<Container>(
+              find.byKey(const Key('editor-bottom-panel-slot')),
+            );
+            expect(slotContainer.color, expectedTrayColor);
+
+            final remarksPanel = tester.widget<Container>(
+              find.byKey(const Key('editor-frequent-remarks-panel')),
+            );
+            final remarksDecoration = remarksPanel.decoration! as BoxDecoration;
+            expect(remarksDecoration.border, isNull);
+            expect(remarksDecoration.color, expectedTrayColor);
+
+            final chips = tester.widgetList<ActionChip>(
+              find.descendant(
+                of: find.byKey(const Key('frequent_remark_chips')),
+                matching: find.byType(ActionChip),
+              ),
+            );
+            expect(chips, isNotEmpty);
+            for (final chip in chips) {
+              expect(chip.side, BorderSide.none);
+              expect(chip.shape, const StadiumBorder());
+              expect(
+                chip.backgroundColor,
+                isDark ? cs.surfaceContainerHigh : cs.surface,
+              );
+            }
+          }
+
+          await closeCleanly();
+        },
+      );
+
+      testWidgets(
+        'Issue 3: Frequent Remarks panel shows catId>0 remarks when categoryId==null, auto-falls back to allUnique on empty category, prioritizes category family remarks, and toggles scope via editor-remarks-scope-toggle',
+        (tester) async {
+          await tester.binding.setSurfaceSize(const Size(390, 844));
+          addTearDown(() => tester.binding.setSurfaceSize(null));
+
+          final (db, closeCleanly) = _openTestDb(tester);
+          late int foodCatId;
+          late int coffeeSubCatId;
+          late int transportCatId;
+
+          await tester.runAsync(() async {
+            await db.select(db.accountBooks).get();
+            final cats = await (db.select(
+              db.recordCategories,
+            )..where((t) => t.accountBookId.equals(defaultBookId))).get();
+            foodCatId = cats.firstWhere((c) => c.name == '餐饮').id;
+            transportCatId = cats.firstWhere((c) => c.name == '交通').id;
+
+            coffeeSubCatId = await CatalogService(db).createCategory(
+              commandId: 'seed-subcat-coffee-remarks',
+              accountBookId: defaultBookId,
+              name: '精品手冲',
+              type: RecordType.expense,
+              parentCatId: foodCatId,
+            );
+
+            final remarkSvc = TemplateRemarkService(db);
+            // Seed ONLY category-specific remarks first (no global -1 remarks yet)
+            // so selecting an unrelated category ('购物') has familyUnique.isEmpty!
+            await remarkSvc.createRemark(
+              commandId: 'seed-rem-food',
+              content: '工作午餐',
+              recordCatId: foodCatId,
+              usedTimes: 2,
+            );
+            await remarkSvc.createRemark(
+              commandId: 'seed-rem-coffee-sub',
+              content: '耶加雪菲',
+              recordCatId: coffeeSubCatId,
+              usedTimes: 5,
+            );
+            await remarkSvc.createRemark(
+              commandId: 'seed-rem-transport',
+              content: '地铁通勤',
+              recordCatId: transportCatId,
+              usedTimes: 9,
+            );
+
+            final attSvc = BillAttachmentService(db);
+            final cfg = await attSvc.getDiyToolbarConfig();
+            await attSvc.saveDiyToolbarConfig(
+              commandId: 'enable-frequent-remarks-scope-test',
+              config: cfg.setEnabled(DiyToolbarAction.frequentRemarks, true),
+            );
+          });
+
+          await tester.pumpWidget(
+            ProviderScope(
+              retry: (_, _) => null,
+              overrides: [databaseProvider.overrideWith((ref) async => db)],
+              child: const MaterialApp(home: RecordEditorPage()),
+            ),
+          );
+          await _settle(tester);
+          expect(tester.takeException(), isNull);
+
+          final panelFinder = find.byKey(
+            const Key('editor-frequent-remarks-panel'),
+          );
+
+          // (1) categoryId == null: shows allUnique across catId > 0, badge '全部'!
+          await tester.tap(find.byKey(const Key('editor-remarks-toggle-btn')));
+          await _settle(tester, 4);
+          expect(panelFinder, findsOneWidget);
+          expect(
+            find.descendant(of: panelFinder, matching: find.text('全部')),
+            findsOneWidget,
+          );
+          expect(
+            find.byKey(const Key('editor-remarks-scope-toggle')),
+            findsNothing,
+          );
+          expect(find.text('地铁通勤'), findsOneWidget);
+          expect(find.text('耶加雪菲'), findsOneWidget);
+          expect(find.text('工作午餐'), findsOneWidget);
+
+          // (2) Select an empty category ('购物'): familyUnique is empty, so it
+          //     auto-falls back to allUnique with badge '全部' (never blank)!
+          await tester.tap(find.byKey(const Key('cat-购物')));
+          await _settle(tester, 4);
+          expect(
+            find.descendant(of: panelFinder, matching: find.text('全部')),
+            findsOneWidget,
+          );
+          expect(
+            find.byKey(const Key('editor-remarks-empty-add-btn')),
+            findsNothing,
+          );
+          expect(find.text('地铁通勤'), findsOneWidget);
+          expect(find.text('耶加雪菲'), findsOneWidget);
+          expect(find.text('工作午餐'), findsOneWidget);
+
+          // (3) Select '餐饮' (which has exact '工作午餐' + child subcategory '耶加雪菲'):
+          //     prioritizes '工作午餐' ahead of '耶加雪菲', excludes '地铁通勤',
+          //     shows badge '餐饮', and renders editor-remarks-scope-toggle!
+          await tester.tap(find.byKey(const Key('cat-餐饮')));
+          await _settle(tester, 4);
+          expect(
+            find.descendant(
+              of: find.byKey(const Key('editor-remarks-scope-toggle')),
+              matching: find.text('餐饮'),
+            ),
+            findsOneWidget,
+          );
+          expect(find.text('工作午餐'), findsOneWidget);
+          expect(find.text('耶加雪菲'), findsOneWidget);
+          expect(find.text('地铁通勤'), findsNothing);
+
+          // Exact categoryId ('工作午餐', usedTimes=2) ranks BEFORE child subcategory ('耶加雪菲', usedTimes=5).
+          final lunchLeft = tester.getRect(find.text('工作午餐')).left;
+          final coffeeLeft = tester.getRect(find.text('耶加雪菲')).left;
+          expect(lunchLeft, lessThan(coffeeLeft));
+
+          // Tapping editor-remarks-scope-toggle switches scope to '全部' (revealing '地铁通勤')!
+          await tester.tap(
+            find.byKey(const Key('editor-remarks-scope-toggle')),
+          );
+          await tester.pump();
+          expect(
+            find.descendant(
+              of: find.byKey(const Key('editor-remarks-scope-toggle')),
+              matching: find.text('全部'),
+            ),
+            findsOneWidget,
+          );
+          expect(find.text('地铁通勤'), findsOneWidget);
+          expect(find.text('耶加雪菲'), findsOneWidget);
+          expect(find.text('工作午餐'), findsOneWidget);
+
+          // Selecting another category ('交通') resets _remarksShowAllScope to false so '交通' is prioritized!
+          await tester.tap(find.byKey(const Key('cat-交通')));
+          await _settle(tester, 4);
+          expect(
+            find.descendant(
+              of: find.byKey(const Key('editor-remarks-scope-toggle')),
+              matching: find.text('交通'),
+            ),
+            findsOneWidget,
+          );
+          expect(find.text('地铁通勤'), findsOneWidget);
+          expect(find.text('工作午餐'), findsNothing);
 
           await closeCleanly();
         },

@@ -79,6 +79,72 @@ enum _BottomPanelMode { customKeypad, osKeyboard, frequentRemarks }
 
 const String _followAccountCurrencySentinel = '__FOLLOW_ACCOUNT__';
 
+final class _AggregatedRemark {
+  _AggregatedRemark({
+    required this.representative,
+    required this.totalUsedTimes,
+    required this.latestId,
+    required this.hasExactCategory,
+  });
+
+  Remark representative;
+  int totalUsedTimes;
+  int latestId;
+  bool hasExactCategory;
+}
+
+List<Remark> _deduplicateAndSortRemarks(
+  Iterable<Remark> rows, {
+  int? prioritizeExactCategoryId,
+}) {
+  final byContent = <String, _AggregatedRemark>{};
+  for (final r in rows) {
+    final text = r.content.trim();
+    if (text.isEmpty) continue;
+    final isExact =
+        prioritizeExactCategoryId != null &&
+        r.recordCatId == prioritizeExactCategoryId;
+    final existing = byContent[text];
+    if (existing == null) {
+      byContent[text] = _AggregatedRemark(
+        representative: r,
+        totalUsedTimes: r.usedTimes,
+        latestId: r.id,
+        hasExactCategory: isExact,
+      );
+    } else {
+      existing.totalUsedTimes += r.usedTimes;
+      if (r.id > existing.latestId) {
+        existing.latestId = r.id;
+      }
+      final repIsExact =
+          prioritizeExactCategoryId != null &&
+          existing.representative.recordCatId == prioritizeExactCategoryId;
+      final shouldReplaceRep = isExact != repIsExact
+          ? isExact
+          : (r.usedTimes > existing.representative.usedTimes ||
+                (r.usedTimes == existing.representative.usedTimes &&
+                    r.id > existing.representative.id));
+      if (shouldReplaceRep) {
+        existing.representative = r;
+      }
+      if (isExact) {
+        existing.hasExactCategory = true;
+      }
+    }
+  }
+  final list = byContent.values.toList()
+    ..sort((a, b) {
+      if (a.hasExactCategory != b.hasExactCategory) {
+        return a.hasExactCategory ? -1 : 1;
+      }
+      final cmpUsed = b.totalUsedTimes.compareTo(a.totalUsedTimes);
+      if (cmpUsed != 0) return cmpUsed;
+      return b.latestId.compareTo(a.latestId);
+    });
+  return [for (final item in list) item.representative];
+}
+
 class RecordEditorPage extends ConsumerStatefulWidget {
   const RecordEditorPage({
     super.key,
@@ -142,6 +208,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
   bool excludeBudget = false, excludeExIn = false;
   bool _attachmentsExpanded = false;
   bool _savedAndResetBanner = false;
+  bool _remarksShowAllScope = false;
   _BottomPanelMode _panelMode = _BottomPanelMode.customKeypad;
   bool _imeWasVisible = false;
   DateTime time = DateTime.now();
@@ -306,6 +373,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
       type = prefill.type;
       categoryId = prefill.categoryId;
       parentCatId = prefill.parentCategoryId;
+      _remarksShowAllScope = false;
       assetId = prefill.assetId;
       fromAssetId = prefill.fromAssetId;
       toAssetId = prefill.toAssetId;
@@ -868,6 +936,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
             imageNames = const <String>[];
             location = null;
             _attachmentsExpanded = false;
+            _remarksShowAllScope = false;
             _panelMode = _BottomPanelMode.customKeypad;
             _savedAndResetBanner = true;
             error = null;
@@ -1519,8 +1588,8 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     final panelSlotHeight = math.min(basePanelHeight, targetSlotHeight);
     final extraImeSpacer = math.max(0.0, targetSlotHeight - panelSlotHeight);
     final trayColor = isDark
-        ? cs.surfaceContainerLow
-        : cs.surfaceContainerLowest;
+        ? cs.surfaceContainerLowest
+        : cs.surfaceContainerLow;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1572,6 +1641,10 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
 
   Widget _buildTypeSwitcherBar(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final unselectedBg = isDark
+        ? cs.surfaceContainerHigh.withAlpha(155)
+        : cs.surfaceContainerLow;
 
     ChoiceChip buildChip(int value, String label, {required bool primary}) {
       final selected = type == value;
@@ -1584,16 +1657,9 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
         materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
         padding: EdgeInsets.symmetric(horizontal: primary ? 8 : 5, vertical: 0),
         shape: const StadiumBorder(),
-        side: BorderSide(
-          color: selected
-              ? Colors.transparent
-              : cs.outlineVariant.withAlpha(primary ? 130 : 80),
-          width: 0.7,
-        ),
+        side: BorderSide.none,
         selectedColor: primary ? cs.primary : cs.secondaryContainer,
-        backgroundColor: primary
-            ? cs.surfaceContainerLow
-            : cs.surfaceContainerLowest,
+        backgroundColor: unselectedBg,
         labelStyle: TextStyle(
           fontSize: primary ? 13 : 11.5,
           fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
@@ -1609,6 +1675,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                 type = value;
                 categoryId = null;
                 parentCatId = null;
+                _remarksShowAllScope = false;
                 if (value == RecordType.transfer) {
                   sourceCurrency = null;
                   convertedEdited = false;
@@ -1621,32 +1688,22 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
       );
     }
 
-    return Container(
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
       padding: const EdgeInsets.fromLTRB(12, 4, 12, 6),
-      decoration: BoxDecoration(
-        border: Border(
-          bottom: BorderSide(
-            color: cs.outlineVariant.withAlpha(100),
-            width: 0.6,
-          ),
-        ),
-      ),
-      child: Wrap(
-        spacing: 6,
-        runSpacing: 4,
-        crossAxisAlignment: WrapCrossAlignment.center,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
           buildChip(RecordType.expense, '支出', primary: true),
+          const SizedBox(width: 6),
           buildChip(RecordType.income, '收入', primary: true),
+          const SizedBox(width: 6),
           buildChip(RecordType.transfer, '转账', primary: true),
-          Container(
-            width: 1,
-            height: 16,
-            margin: const EdgeInsets.symmetric(horizontal: 2),
-            color: cs.outlineVariant,
-          ),
+          const SizedBox(width: 10),
           buildChip(RecordType.reimbursable, '报销', primary: false),
+          const SizedBox(width: 6),
           buildChip(RecordType.advanceExpense, '预支', primary: false),
+          const SizedBox(width: 6),
           buildChip(RecordType.advanceIncome, '预收', primary: false),
         ],
       ),
@@ -1737,7 +1794,10 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                   subCategories: subCats,
                   selectedCategoryId: categoryId,
                   enabled: !busy,
-                  onSelectCategoryId: (id) => setState(() => categoryId = id),
+                  onSelectCategoryId: (id) => setState(() {
+                    categoryId = id;
+                    _remarksShowAllScope = false;
+                  }),
                 ),
               ),
             ),
@@ -1750,6 +1810,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
               onSelectCategory: (cat) => setState(() {
                 parentCatId = cat.id;
                 categoryId = cat.id;
+                _remarksShowAllScope = false;
               }),
               onManageCategories: _openCategoriesManager,
             ),
@@ -1982,6 +2043,10 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     required double bottomSafePadding,
   }) {
     final cs = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final trayColor = isDark
+        ? cs.surfaceContainerLowest
+        : cs.surfaceContainerLow;
     final (sc, ac) = _currencies();
     final pendingOp = hasPendingOperator(amount.text);
     final remarksEnabled = diyConfig.isEnabled(
@@ -2167,9 +2232,6 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
         decoration: BoxDecoration(
           color: cs.secondaryContainer,
           borderRadius: BorderRadius.circular(6),
-          border: canSwitchCurrencyOnPrefix
-              ? Border.all(color: cs.secondary.withAlpha(90), width: 0.6)
-              : null,
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -2271,26 +2333,17 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
       );
     }
 
-    final hairlineDivider = Divider(
-      height: 1,
-      thickness: 0.6,
-      indent: 12,
-      endIndent: 12,
-      color: cs.outlineVariant.withAlpha(95),
-    );
-
     return Container(
       key: const Key('editor-bottom-dock'),
+      clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
-        color: cs.surface,
-        border: Border(
-          top: BorderSide(color: cs.outlineVariant.withAlpha(130), width: 0.8),
-        ),
+        color: isDark ? cs.surfaceContainerLow : cs.surface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(18)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withAlpha(10),
-            blurRadius: 8,
-            offset: const Offset(0, -2),
+            color: Colors.black.withAlpha(isDark ? 28 : 10),
+            blurRadius: 12,
+            offset: const Offset(0, -3),
           ),
         ],
       ),
@@ -2408,7 +2461,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                   // Row 1: Category / Transfer Summary + Tight Left-Prefixed Amount Bar
                   Padding(
                     key: const Key('editor-summary-amount-row'),
-                    padding: const EdgeInsets.fromLTRB(12, 6, 12, 5),
+                    padding: const EdgeInsets.fromLTRB(14, 10, 14, 6),
                     child: LayoutBuilder(
                       builder: (context, rowConstraints) {
                         final maxAmountWidth = math.max(
@@ -2455,105 +2508,102 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                                       textBaseline: TextBaseline.alphabetic,
                                       children: [
                                         currencyPrefixWidget,
-                                        const SizedBox(width: 4),
+                                        SizedBox(
+                                          width: sc == baseCurrency ? 2 : 5,
+                                        ),
                                         Flexible(
                                           child: IntrinsicWidth(
-                                            child: ConstrainedBox(
-                                              constraints: const BoxConstraints(
-                                                minWidth: 46,
-                                              ),
-                                              child: TextField(
-                                                key: const Key('amount'),
-                                                controller: amount,
-                                                focusNode: _amountFocus,
-                                                enabled: !busy,
-                                                readOnly: false,
-                                                showCursor: true,
-                                                keyboardType:
-                                                    TextInputType.none,
-                                                textInputAction:
-                                                    TextInputAction.done,
-                                                textAlign: TextAlign.right,
-                                                inputFormatters:
-                                                    _keypadExpressionFormatters,
-                                                onTap: busy
-                                                    ? null
-                                                    : _activateCustomKeypad,
-                                                onChanged: (_) {
-                                                  ScaffoldMessenger.maybeOf(
-                                                    context,
-                                                  )?.clearSnackBars();
-                                                  setState(() {
-                                                    error = null;
-                                                    _savedAndResetBanner =
-                                                        false;
-                                                    _autoConvert();
-                                                  });
-                                                },
-                                                onSubmitted: (_) {
-                                                  if (hasPendingOperator(
-                                                    amount.text,
-                                                  )) {
-                                                    try {
-                                                      final res =
-                                                          evaluateKeypadExpression(
-                                                            amount.text,
-                                                          );
-                                                      if (res.dividedByZero) {
-                                                        _showCalcError(
-                                                          '算式无效或除数不能为 0',
+                                            child: TextField(
+                                              key: const Key('amount'),
+                                              controller: amount,
+                                              focusNode: _amountFocus,
+                                              enabled: !busy,
+                                              readOnly: false,
+                                              showCursor: true,
+                                              keyboardType: TextInputType.none,
+                                              textInputAction:
+                                                  TextInputAction.done,
+                                              textAlign: TextAlign.right,
+                                              inputFormatters:
+                                                  _keypadExpressionFormatters,
+                                              onTap: busy
+                                                  ? null
+                                                  : _activateCustomKeypad,
+                                              onChanged: (_) {
+                                                ScaffoldMessenger.maybeOf(
+                                                  context,
+                                                )?.clearSnackBars();
+                                                setState(() {
+                                                  error = null;
+                                                  _savedAndResetBanner = false;
+                                                  _autoConvert();
+                                                });
+                                              },
+                                              onSubmitted: (_) {
+                                                if (hasPendingOperator(
+                                                  amount.text,
+                                                )) {
+                                                  try {
+                                                    final res =
+                                                        evaluateKeypadExpression(
+                                                          amount.text,
                                                         );
-                                                        return;
-                                                      }
-                                                      if (res.isNegative) {
-                                                        _showCalcError(
-                                                          '计算结果不能小于 0',
-                                                        );
-                                                        return;
-                                                      }
-                                                      if (res.exceededMax) {
-                                                        _showCalcError(
-                                                          '金额不能超过 88888888888.00',
-                                                        );
-                                                        return;
-                                                      }
-                                                      final next =
-                                                          res.money.decimal;
-                                                      setState(() {
-                                                        error = null;
-                                                        _setAmountText(next);
-                                                        _autoConvert();
-                                                      });
-                                                    } on Failure catch (e) {
+                                                    if (res.dividedByZero) {
                                                       _showCalcError(
-                                                        safeMessage(e),
+                                                        '算式无效或除数不能为 0',
                                                       );
                                                       return;
                                                     }
+                                                    if (res.isNegative) {
+                                                      _showCalcError(
+                                                        '计算结果不能小于 0',
+                                                      );
+                                                      return;
+                                                    }
+                                                    if (res.exceededMax) {
+                                                      _showCalcError(
+                                                        '金额不能超过 88888888888.00',
+                                                      );
+                                                      return;
+                                                    }
+                                                    final next =
+                                                        res.money.decimal;
+                                                    setState(() {
+                                                      error = null;
+                                                      _setAmountText(next);
+                                                      _autoConvert();
+                                                    });
+                                                  } on Failure catch (e) {
+                                                    _showCalcError(
+                                                      safeMessage(e),
+                                                    );
+                                                    return;
                                                   }
-                                                },
-                                                style: TextStyle(
+                                                }
+                                              },
+                                              style: TextStyle(
+                                                fontSize: 22,
+                                                fontWeight: FontWeight.w800,
+                                                color: amountColor,
+                                                fontFeatures: const [
+                                                  FontFeature.tabularFigures(),
+                                                ],
+                                              ),
+                                              decoration: InputDecoration(
+                                                isDense: true,
+                                                hintText: amount.text.isEmpty
+                                                    ? '0.00'
+                                                    : null,
+                                                hintStyle: TextStyle(
                                                   fontSize: 22,
-                                                  fontWeight: FontWeight.w800,
-                                                  color: amountColor,
-                                                  fontFeatures: const [
-                                                    FontFeature.tabularFigures(),
-                                                  ],
+                                                  fontWeight: FontWeight.w700,
+                                                  color: cs.outlineVariant,
                                                 ),
-                                                decoration: InputDecoration(
-                                                  isDense: true,
-                                                  hintText: '0.00',
-                                                  hintStyle: TextStyle(
-                                                    fontSize: 22,
-                                                    fontWeight: FontWeight.w700,
-                                                    color: cs.outlineVariant,
-                                                  ),
-                                                  contentPadding:
-                                                      const EdgeInsets.symmetric(
-                                                        vertical: 4,
-                                                      ),
-                                                  border: InputBorder.none,
-                                                ),
+                                                contentPadding:
+                                                    const EdgeInsets.symmetric(
+                                                      vertical: 4,
+                                                    ),
+                                                border: InputBorder.none,
                                               ),
                                             ),
                                           ),
@@ -2572,12 +2622,17 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                     ),
                   ),
 
-                  hairlineDivider,
-
-                  // Row 2: Pure Remark Input Row (tags live exclusively in pill toolbar)
-                  Padding(
+                  // Row 2: Borderless Tonal Remark Input Row (tags live exclusively in pill toolbar)
+                  Container(
                     key: const Key('editor-remark-row'),
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    margin: const EdgeInsets.fromLTRB(12, 2, 12, 6),
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    decoration: BoxDecoration(
+                      color: isDark
+                          ? cs.surfaceContainerHighest.withAlpha(115)
+                          : cs.surfaceContainerLow,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
                     child: TextField(
                       key: const Key('remark'),
                       controller: remark,
@@ -2629,8 +2684,6 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                     ),
                   ),
 
-                  hairlineDivider,
-
                   // Row 3: Persistent Horizontal Scrollable Pill Toolbar (zero height jump!)
                   _buildPillToolbar(
                     context,
@@ -2646,12 +2699,14 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
 
           // Unified Bottom Panel Slot for Custom Keypad / Plan A Frequent Remarks
           if (_panelMode != _BottomPanelMode.osKeyboard)
-            SizedBox(
+            Container(
               key: const Key('editor-bottom-panel-slot'),
               height: panelSlotHeight,
+              color: trayColor,
               child: _panelMode == _BottomPanelMode.frequentRemarks
                   ? _buildFrequentRemarksPanel(
                       context,
+                      categories: categories,
                       selectedCategory: selectedCat,
                       bottomSafePadding: bottomSafePadding,
                     )
@@ -2682,29 +2737,135 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
 
   Widget _buildFrequentRemarksPanel(
     BuildContext context, {
+    required List<RecordCategory> categories,
     required RecordCategory? selectedCategory,
     required double bottomSafePadding,
   }) {
     final cs = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final queryCatId = categoryId ?? noRef;
-    final remarksAsync = ref.watch(remarksForCategoryProvider(queryCatId));
-    final scopeLabel = selectedCategory?.name ?? '通用';
+    final trayColor = isDark
+        ? cs.surfaceContainerLowest
+        : cs.surfaceContainerLow;
+    final remarksAsync = ref.watch(allRemarksProvider(null));
+    final allBookCatsMap = ref.watch(allBookCategoriesMapProvider).value;
+    final knownCategoriesById = <int, RecordCategory>{
+      for (final c in categories) c.id: c,
+      ...?allBookCatsMap,
+    };
+    final effectiveSelectedCat =
+        selectedCategory ??
+        (categoryId == null ? null : knownCategoriesById[categoryId!]);
+
+    final rows = remarksAsync.value;
+    var displayedRemarks = const <Remark>[];
+    var scopeLabel = effectiveSelectedCat?.name ?? '全部';
+    var canToggleScope = false;
+
+    if (rows != null) {
+      final allDeduped = _deduplicateAndSortRemarks(rows);
+      final allUnique = allDeduped.take(36).toList();
+
+      if (categoryId == null || effectiveSelectedCat == null) {
+        displayedRemarks = allUnique;
+        scopeLabel = '全部';
+      } else {
+        final selCat = effectiveSelectedCat;
+        final selName = selCat.name.trim();
+        final familyCatIds = <int>{categoryId!, noRef};
+        if (selCat.parentCatId != noRef && selCat.parentCatId != -1) {
+          familyCatIds.add(selCat.parentCatId);
+        }
+        for (final c in knownCategoriesById.values) {
+          if (c.parentCatId == selCat.id || c.name.trim() == selName) {
+            familyCatIds.add(c.id);
+          }
+        }
+        final familyDeduped = _deduplicateAndSortRemarks(
+          rows.where((r) => familyCatIds.contains(r.recordCatId)),
+          prioritizeExactCategoryId: categoryId,
+        );
+        final familyUnique = familyDeduped.take(36).toList();
+        canToggleScope =
+            familyUnique.isNotEmpty && allDeduped.length > familyDeduped.length;
+
+        if (familyUnique.isEmpty && allUnique.isNotEmpty) {
+          displayedRemarks = allUnique;
+          scopeLabel = '全部';
+        } else if (_remarksShowAllScope && canToggleScope) {
+          displayedRemarks = allUnique;
+          scopeLabel = '全部';
+        } else {
+          displayedRemarks = familyUnique;
+          scopeLabel = selCat.name;
+        }
+      }
+    }
+
+    final scopeBadgeBg = cs.secondaryContainer.withAlpha(isDark ? 165 : 150);
+    final Widget scopeBadgeWidget = canToggleScope
+        ? Material(
+            color: scopeBadgeBg,
+            shape: const StadiumBorder(side: BorderSide.none),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              key: const Key('editor-remarks-scope-toggle'),
+              onTap: busy
+                  ? null
+                  : () => setState(
+                      () => _remarksShowAllScope = !_remarksShowAllScope,
+                    ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Flexible(
+                      child: Text(
+                        scopeLabel,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: cs.onSecondaryContainer,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 3),
+                    Icon(
+                      Icons.swap_horiz_rounded,
+                      size: 12,
+                      color: cs.onSecondaryContainer,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          )
+        : Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2.5),
+            decoration: ShapeDecoration(
+              color: scopeBadgeBg,
+              shape: const StadiumBorder(side: BorderSide.none),
+            ),
+            child: Text(
+              scopeLabel,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+                color: cs.onSecondaryContainer,
+              ),
+            ),
+          );
 
     return TextFieldTapRegion(
       child: ExcludeFocus(
         child: Container(
           key: const Key('editor-frequent-remarks-panel'),
           padding: EdgeInsets.only(bottom: bottomSafePadding),
-          decoration: BoxDecoration(
-            color: isDark ? cs.surfaceContainerLow : cs.surfaceContainerLowest,
-            border: Border(
-              top: BorderSide(
-                color: cs.outlineVariant.withAlpha(110),
-                width: 0.6,
-              ),
-            ),
-          ),
+          decoration: BoxDecoration(color: trayColor),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -2727,25 +2888,13 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                       ),
                     ),
                     const SizedBox(width: 6),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 6,
-                        vertical: 1.5,
-                      ),
-                      decoration: BoxDecoration(
-                        color: cs.secondaryContainer.withAlpha(150),
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Text(
-                        scopeLabel,
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w500,
-                          color: cs.onSecondaryContainer,
-                        ),
+                    Flexible(
+                      fit: FlexFit.tight,
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: scopeBadgeWidget,
                       ),
                     ),
-                    const Spacer(),
                     TextButton.icon(
                       key: const Key('editor-remarks-btn'),
                       style: TextButton.styleFrom(
@@ -2784,17 +2933,8 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                       ),
                     ),
                   ),
-                  data: (rows) {
-                    final seen = <String>{};
-                    final unique = <Remark>[];
-                    for (final r in rows) {
-                      final text = r.content.trim();
-                      if (text.isNotEmpty && seen.add(text)) {
-                        unique.add(r);
-                        if (unique.length >= 30) break;
-                      }
-                    }
-                    if (unique.isEmpty) {
+                  data: (_) {
+                    if (displayedRemarks.isEmpty) {
                       return Center(
                         child: Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 24),
@@ -2834,10 +2974,15 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                         spacing: 8,
                         runSpacing: 8,
                         children: [
-                          for (final r in unique)
+                          for (final r in displayedRemarks)
                             ActionChip(
                               key: Key('remark_chip_${r.id}'),
                               visualDensity: VisualDensity.compact,
+                              side: BorderSide.none,
+                              shape: const StadiumBorder(),
+                              backgroundColor: isDark
+                                  ? cs.surfaceContainerHigh
+                                  : cs.surface,
                               avatar: remark.text.trim() == r.content.trim()
                                   ? const Icon(Icons.check, size: 15)
                                   : null,
@@ -2881,6 +3026,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     required DiyToolbarConfig diyConfig,
   }) {
     final cs = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final currentAsset = assets.where((a) => a.id == assetId).firstOrNull;
     final selectedTags = tags
         .where((t) => selectedTagIds.contains(t.tagId))
@@ -2897,14 +3043,11 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     }) {
       final bgColor = active
           ? (accentColor != null
-                ? accentColor.withValues(alpha: 0.14)
+                ? accentColor.withValues(alpha: isDark ? 0.22 : 0.14)
                 : cs.secondaryContainer)
-          : cs.surfaceContainerLow;
-      final borderColor = active
-          ? (accentColor != null
-                ? accentColor.withValues(alpha: 0.45)
-                : cs.secondary.withAlpha(110))
-          : cs.outlineVariant.withAlpha(110);
+          : (isDark
+                ? cs.surfaceContainerHighest.withAlpha(115)
+                : cs.surfaceContainerLow);
       final textColor = active
           ? (accentColor != null ? cs.onSurface : cs.onSecondaryContainer)
           : cs.onSurface;
@@ -2912,9 +3055,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
         padding: const EdgeInsets.only(right: 6),
         child: Material(
           color: bgColor,
-          shape: StadiumBorder(
-            side: BorderSide(color: borderColor, width: 0.7),
-          ),
+          shape: const StadiumBorder(side: BorderSide.none),
           clipBehavior: Clip.antiAlias,
           child: InkWell(
             key: key,
@@ -3010,12 +3151,12 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
           if (item.enabled || selectedTagIds.isNotEmpty) {
             final String tagLabel;
             if (selectedTags.isEmpty) {
-              tagLabel = '#标签';
+              tagLabel = '标签';
             } else if (selectedTags.length == 1) {
-              tagLabel = '#${selectedTags.first.name}';
+              tagLabel = selectedTags.first.name;
             } else {
               tagLabel =
-                  '#${selectedTags.first.name} +${selectedTags.length - 1}';
+                  '${selectedTags.first.name} +${selectedTags.length - 1}';
             }
             pills.add(
               pill(
@@ -3140,11 +3281,11 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     }
 
     return SizedBox(
-      height: 36,
+      height: 38,
       child: SingleChildScrollView(
         key: const Key('editor-pill-toolbar'),
         scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
+        padding: const EdgeInsets.fromLTRB(12, 2, 12, 6),
         child: Row(children: pills),
       ),
     );

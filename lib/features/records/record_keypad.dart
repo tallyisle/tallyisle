@@ -261,6 +261,16 @@ class RecordCustomKeypad extends StatelessWidget {
   static const double panelHeight =
       keyRowHeight * 4 + gridGap * 3 + 12.0; // 254dp
 
+  static const OutlinedBorder _keyShape = RoundedRectangleBorder(
+    borderRadius: BorderRadius.all(Radius.circular(12)),
+    side: BorderSide.none,
+  );
+
+  Color _trayColor(BuildContext context, ColorScheme cs) =>
+      Theme.of(context).brightness == Brightness.dark
+      ? cs.surfaceContainerLowest
+      : cs.surfaceContainerLow;
+
   Color _digitKeyColor(BuildContext context, ColorScheme cs) =>
       Theme.of(context).brightness == Brightness.dark
       ? cs.surfaceContainerHigh
@@ -268,15 +278,13 @@ class RecordCustomKeypad extends StatelessWidget {
 
   Color _utilityKeyColor(BuildContext context, ColorScheme cs) =>
       Theme.of(context).brightness == Brightness.dark
-      ? cs.surfaceContainerHighest
-      : cs.secondaryContainer.withAlpha(135);
+      ? cs.surfaceContainer
+      : cs.secondaryContainer.withAlpha(115);
 
-  BorderSide _keyBorderSide(BuildContext context, ColorScheme cs) => BorderSide(
-    color: cs.outlineVariant.withAlpha(
-      Theme.of(context).brightness == Brightness.dark ? 115 : 95,
-    ),
-    width: 0.6,
-  );
+  Color _utilityForegroundColor(BuildContext context, ColorScheme cs) =>
+      Theme.of(context).brightness == Brightness.dark
+      ? cs.onSurface
+      : cs.onSecondaryContainer;
 
   Widget _buildDigitKey(
     BuildContext context, {
@@ -291,10 +299,7 @@ class RecordCustomKeypad extends StatelessWidget {
         height: keyRowHeight,
         child: Material(
           color: _digitKeyColor(context, cs),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
-            side: _keyBorderSide(context, cs),
-          ),
+          shape: _keyShape,
           clipBehavior: Clip.antiAlias,
           child: InkWell(
             key: key,
@@ -322,6 +327,7 @@ class RecordCustomKeypad extends StatelessWidget {
 
   Widget _buildBackspaceKey(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final fgColor = _utilityForegroundColor(context, cs);
     return Expanded(
       child: Tooltip(
         message: '退格（长按清空）',
@@ -329,10 +335,7 @@ class RecordCustomKeypad extends StatelessWidget {
           height: keyRowHeight,
           child: Material(
             color: _utilityKeyColor(context, cs),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10),
-              side: _keyBorderSide(context, cs),
-            ),
+            shape: _keyShape,
             clipBehavior: Clip.antiAlias,
             child: InkWell(
               key: const Key('keypad-backspace'),
@@ -343,9 +346,7 @@ class RecordCustomKeypad extends StatelessWidget {
                 child: Icon(
                   Icons.backspace_outlined,
                   size: 20,
-                  color: busy
-                      ? cs.onSurfaceVariant.withAlpha(110)
-                      : cs.onSecondaryContainer,
+                  color: busy ? cs.onSurfaceVariant.withAlpha(110) : fgColor,
                 ),
               ),
             ),
@@ -366,6 +367,7 @@ class RecordCustomKeypad extends StatelessWidget {
     required String longPressTooltip,
   }) {
     final cs = Theme.of(context).colorScheme;
+    final fgColor = _utilityForegroundColor(context, cs);
     final allowLongPress = enableMultiplyDivide;
     return Expanded(
       child: Tooltip(
@@ -374,10 +376,7 @@ class RecordCustomKeypad extends StatelessWidget {
           height: keyRowHeight,
           child: Material(
             color: _utilityKeyColor(context, cs),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10),
-              side: _keyBorderSide(context, cs),
-            ),
+            shape: _keyShape,
             clipBehavior: Clip.antiAlias,
             child: InkWell(
               key: key,
@@ -398,7 +397,7 @@ class RecordCustomKeypad extends StatelessWidget {
                         height: 1.0,
                         color: busy
                             ? cs.onSurfaceVariant.withAlpha(110)
-                            : cs.onSecondaryContainer,
+                            : fgColor,
                       ),
                     ),
                   ),
@@ -414,7 +413,7 @@ class RecordCustomKeypad extends StatelessWidget {
                           height: 1.0,
                           color: busy
                               ? cs.onSurfaceVariant.withAlpha(75)
-                              : cs.onSecondaryContainer.withAlpha(145),
+                              : fgColor.withAlpha(140),
                         ),
                       ),
                     ),
@@ -429,16 +428,14 @@ class RecordCustomKeypad extends StatelessWidget {
 
   Widget _buildSaveAndNewKey(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final fgColor = _utilityForegroundColor(context, cs);
     final active = enabled && !busy && onSaveAndNew != null;
     return Expanded(
       child: SizedBox(
         height: keyRowHeight,
         child: Material(
           color: _utilityKeyColor(context, cs),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
-            side: _keyBorderSide(context, cs),
-          ),
+          shape: _keyShape,
           clipBehavior: Clip.antiAlias,
           child: InkWell(
             key: const Key('save-and-new'),
@@ -456,7 +453,7 @@ class RecordCustomKeypad extends StatelessWidget {
                     fontWeight: FontWeight.w600,
                     height: 1.0,
                     color: active
-                        ? cs.onSecondaryContainer
+                        ? fgColor
                         : cs.onSurfaceVariant.withAlpha(110),
                   ),
                 ),
@@ -479,9 +476,8 @@ class RecordCustomKeypad extends StatelessWidget {
         style: FilledButton.styleFrom(
           minimumSize: const Size.fromHeight(keyRowHeight),
           padding: const EdgeInsets.symmetric(horizontal: 6),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
-          ),
+          side: BorderSide.none,
+          shape: _keyShape,
           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
         ),
         onPressed: active ? (pendingOp ? onEvaluate : onSave) : null,
@@ -519,21 +515,12 @@ class RecordCustomKeypad extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return TextFieldTapRegion(
       child: ExcludeFocus(
         child: Container(
           padding: const EdgeInsets.fromLTRB(8, 6, 8, 6),
-          decoration: BoxDecoration(
-            color: isDark ? cs.surfaceContainerLow : cs.surfaceContainerLowest,
-            border: Border(
-              top: BorderSide(
-                color: cs.outlineVariant.withAlpha(110),
-                width: 0.6,
-              ),
-            ),
-          ),
+          decoration: BoxDecoration(color: _trayColor(context, cs)),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -785,15 +772,15 @@ class RecordSubcategoryStrip extends StatelessWidget {
       return const SizedBox.shrink();
     }
     final cs = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final parentVisual = resolveCategoryVisual(parentCategory!);
 
     return Container(
       margin: const EdgeInsets.only(top: 6),
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: parentVisual.color.withAlpha(18),
+        color: parentVisual.color.withAlpha(isDark ? 26 : 18),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: parentVisual.color.withAlpha(48), width: 0.8),
       ),
       child: Wrap(
         spacing: 6,
@@ -803,6 +790,10 @@ class RecordSubcategoryStrip extends StatelessWidget {
           ChoiceChip(
             key: const Key('subcat-all'),
             showCheckmark: false,
+            side: BorderSide.none,
+            shape: const StadiumBorder(),
+            backgroundColor: isDark ? cs.surfaceContainerHigh : cs.surface,
+            selectedColor: parentVisual.color.withAlpha(isDark ? 64 : 50),
             visualDensity: const VisualDensity(horizontal: -2, vertical: -3),
             materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
             label: const Text('不选二级', style: TextStyle(fontSize: 12)),
@@ -823,6 +814,11 @@ class RecordSubcategoryStrip extends StatelessWidget {
                 return ChoiceChip(
                   key: Key('cat-${sub.name}'),
                   showCheckmark: false,
+                  side: BorderSide.none,
+                  shape: const StadiumBorder(),
+                  backgroundColor: isDark
+                      ? cs.surfaceContainerHigh
+                      : cs.surface,
                   visualDensity: const VisualDensity(
                     horizontal: -2,
                     vertical: -3,
@@ -835,7 +831,7 @@ class RecordSubcategoryStrip extends StatelessWidget {
                   ),
                   label: Text(sub.name, style: const TextStyle(fontSize: 12)),
                   selected: subSelected,
-                  selectedColor: subVisual.color.withAlpha(55),
+                  selectedColor: subVisual.color.withAlpha(isDark ? 68 : 55),
                   labelStyle: TextStyle(
                     color: subSelected ? cs.onSurface : cs.onSurfaceVariant,
                     fontWeight: subSelected ? FontWeight.w600 : FontWeight.w400,
