@@ -224,11 +224,11 @@ TextEditingValue applyCustomKeypadValue(TextEditingValue current, String key) {
   );
 }
 
-/// Clean 一羽 / 钱迹 style 4×4 custom arithmetic keypad (`~254dp` before `SafeArea`
+/// Clean 一羽 / 钱迹 style 4×4 custom arithmetic keypad (`254dp` before `SafeArea`
 /// bottom inset) for `RecordEditorPage`:
 /// - Row 1: `7`, `8`, `9`, `⌫` (tap backspace, long-press clear all)
-/// - Row 2: `4`, `5`, `6`, `+` (tap `+`, long-press `×`)
-/// - Row 3: `1`, `2`, `3`, `−` (tap `-`, long-press `÷`)
+/// - Row 2: `4`, `5`, `6`, `+` (tap `+`; optional long-press `×` when [enableMultiplyDivide] is true)
+/// - Row 3: `1`, `2`, `3`, `−` (tap `-`; optional long-press `÷` when [enableMultiplyDivide] is true)
 /// - Row 4: `再记`, `0`, `.`, smart `= / 保存`
 class RecordCustomKeypad extends StatelessWidget {
   const RecordCustomKeypad({
@@ -242,6 +242,7 @@ class RecordCustomKeypad extends StatelessWidget {
     required this.onEvaluate,
     required this.onSave,
     this.onSaveAndNew,
+    this.enableMultiplyDivide = false,
   });
 
   final String amountText;
@@ -253,9 +254,29 @@ class RecordCustomKeypad extends StatelessWidget {
   final VoidCallback onEvaluate;
   final VoidCallback onSave;
   final VoidCallback? onSaveAndNew;
+  final bool enableMultiplyDivide;
 
   static const double keyRowHeight = 56.0;
   static const double gridGap = 6.0;
+  static const double panelHeight =
+      keyRowHeight * 4 + gridGap * 3 + 12.0; // 254dp
+
+  Color _digitKeyColor(BuildContext context, ColorScheme cs) =>
+      Theme.of(context).brightness == Brightness.dark
+      ? cs.surfaceContainerHigh
+      : cs.surface;
+
+  Color _utilityKeyColor(BuildContext context, ColorScheme cs) =>
+      Theme.of(context).brightness == Brightness.dark
+      ? cs.surfaceContainerHighest
+      : cs.secondaryContainer.withAlpha(135);
+
+  BorderSide _keyBorderSide(BuildContext context, ColorScheme cs) => BorderSide(
+    color: cs.outlineVariant.withAlpha(
+      Theme.of(context).brightness == Brightness.dark ? 115 : 95,
+    ),
+    width: 0.6,
+  );
 
   Widget _buildDigitKey(
     BuildContext context, {
@@ -269,13 +290,10 @@ class RecordCustomKeypad extends StatelessWidget {
       child: SizedBox(
         height: keyRowHeight,
         child: Material(
-          color: cs.surfaceContainerLow,
+          color: _digitKeyColor(context, cs),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(10),
-            side: BorderSide(
-              color: cs.outlineVariant.withAlpha(90),
-              width: 0.6,
-            ),
+            side: _keyBorderSide(context, cs),
           ),
           clipBehavior: Clip.antiAlias,
           child: InkWell(
@@ -310,13 +328,10 @@ class RecordCustomKeypad extends StatelessWidget {
         child: SizedBox(
           height: keyRowHeight,
           child: Material(
-            color: cs.surfaceContainerHigh.withAlpha(185),
+            color: _utilityKeyColor(context, cs),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(10),
-              side: BorderSide(
-                color: cs.outlineVariant.withAlpha(90),
-                width: 0.6,
-              ),
+              side: _keyBorderSide(context, cs),
             ),
             clipBehavior: Clip.antiAlias,
             child: InkWell(
@@ -327,10 +342,10 @@ class RecordCustomKeypad extends StatelessWidget {
               child: Center(
                 child: Icon(
                   Icons.backspace_outlined,
-                  size: 21,
+                  size: 20,
                   color: busy
                       ? cs.onSurfaceVariant.withAlpha(110)
-                      : cs.onSurfaceVariant,
+                      : cs.onSecondaryContainer,
                 ),
               ),
             ),
@@ -347,29 +362,30 @@ class RecordCustomKeypad extends StatelessWidget {
     required String op,
     required String longPressLabel,
     required String longPressOp,
-    required String tooltip,
+    required String baseTooltip,
+    required String longPressTooltip,
   }) {
     final cs = Theme.of(context).colorScheme;
+    final allowLongPress = enableMultiplyDivide;
     return Expanded(
       child: Tooltip(
-        message: tooltip,
+        message: allowLongPress ? longPressTooltip : baseTooltip,
         child: SizedBox(
           height: keyRowHeight,
           child: Material(
-            color: cs.secondaryContainer.withAlpha(175),
+            color: _utilityKeyColor(context, cs),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(10),
-              side: BorderSide(
-                color: cs.outlineVariant.withAlpha(100),
-                width: 0.6,
-              ),
+              side: _keyBorderSide(context, cs),
             ),
             clipBehavior: Clip.antiAlias,
             child: InkWell(
               key: key,
               canRequestFocus: false,
               onTap: busy ? null : () => onKeyTap(op),
-              onLongPress: busy ? null : () => onKeyTap(longPressOp),
+              onLongPress: !allowLongPress || busy
+                  ? null
+                  : () => onKeyTap(longPressOp),
               child: Stack(
                 fit: StackFit.expand,
                 children: [
@@ -386,21 +402,22 @@ class RecordCustomKeypad extends StatelessWidget {
                       ),
                     ),
                   ),
-                  Positioned(
-                    top: 5,
-                    right: 7,
-                    child: Text(
-                      longPressLabel,
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        height: 1.0,
-                        color: busy
-                            ? cs.onSurfaceVariant.withAlpha(75)
-                            : cs.onSecondaryContainer.withAlpha(140),
+                  if (allowLongPress)
+                    Positioned(
+                      top: 5,
+                      right: 7,
+                      child: Text(
+                        longPressLabel,
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          height: 1.0,
+                          color: busy
+                              ? cs.onSurfaceVariant.withAlpha(75)
+                              : cs.onSecondaryContainer.withAlpha(145),
+                        ),
                       ),
                     ),
-                  ),
                 ],
               ),
             ),
@@ -417,13 +434,10 @@ class RecordCustomKeypad extends StatelessWidget {
       child: SizedBox(
         height: keyRowHeight,
         child: Material(
-          color: cs.secondaryContainer.withAlpha(125),
+          color: _utilityKeyColor(context, cs),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(10),
-            side: BorderSide(
-              color: cs.outlineVariant.withAlpha(130),
-              width: 0.7,
-            ),
+            side: _keyBorderSide(context, cs),
           ),
           clipBehavior: Clip.antiAlias,
           child: InkWell(
@@ -505,13 +519,14 @@ class RecordCustomKeypad extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return TextFieldTapRegion(
       child: ExcludeFocus(
         child: Container(
           padding: const EdgeInsets.fromLTRB(8, 6, 8, 6),
           decoration: BoxDecoration(
-            color: cs.surfaceContainerLowest,
+            color: isDark ? cs.surfaceContainerLow : cs.surfaceContainerLowest,
             border: Border(
               top: BorderSide(
                 color: cs.outlineVariant.withAlpha(110),
@@ -547,7 +562,7 @@ class RecordCustomKeypad extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: gridGap),
-              // Row 2: 4, 5, 6, + (long-press ×)
+              // Row 2: 4, 5, 6, + (optional long-press ×)
               Row(
                 children: [
                   _buildDigitKey(
@@ -575,12 +590,13 @@ class RecordCustomKeypad extends StatelessWidget {
                     op: '+',
                     longPressLabel: '×',
                     longPressOp: '×',
-                    tooltip: '加（长按输入 ×）',
+                    baseTooltip: '加',
+                    longPressTooltip: '加（长按输入 ×）',
                   ),
                 ],
               ),
               const SizedBox(height: gridGap),
-              // Row 3: 1, 2, 3, − (long-press ÷)
+              // Row 3: 1, 2, 3, − (optional long-press ÷)
               Row(
                 children: [
                   _buildDigitKey(
@@ -608,7 +624,8 @@ class RecordCustomKeypad extends StatelessWidget {
                     op: '-',
                     longPressLabel: '÷',
                     longPressOp: '÷',
-                    tooltip: '减（长按输入 ÷）',
+                    baseTooltip: '减',
+                    longPressTooltip: '减（长按输入 ÷）',
                   ),
                 ],
               ),

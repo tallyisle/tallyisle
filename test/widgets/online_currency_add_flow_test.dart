@@ -537,4 +537,215 @@ void main() {
       await tearDownDb(tester, db);
     },
   );
+
+  testWidgets(
+    '5. Global searchable selector (150+ ISO 4217): searching "土耳其" filters to TRY chip, auto-fills TRY / 土耳其里拉 / ₺, auto-fetches rate, and renders overflow-free at 360x640',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(360, 640));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      final fixedMs = DateTime(2026, 11, 13, 10, 0).millisecondsSinceEpoch;
+      final db = AppDatabase(NativeDatabase.memory(), nowMs: () => fixedMs);
+      final svc = CurrencyService(db);
+
+      await tester.runAsync(() async {
+        await svc.saveOnlineRateSettings(
+          commandId: 'seed-online-try',
+          settings: OnlineRateSettings(
+            enabled: true,
+            autoSyncOnLaunch: true,
+            lastSyncedAtMs: fixedMs - 1000,
+          ),
+        );
+      });
+
+      final requestedUrls = <String>[];
+      HttpClient mockClientFactory() => _FakeHttpClient((uri) async {
+        requestedUrls.add(uri.toString());
+        return (
+          200,
+          jsonEncode({
+            'result': 'success',
+            'base_code': 'CNY',
+            'rates': {
+              'TRY': '4.75', // 1 CNY = 4.75 TRY -> 1 TRY = 0.2105 CNY
+              'KES': '17.85',
+            },
+          }),
+        );
+      });
+
+      await tester.pumpWidget(
+        ProviderScope(
+          retry: (_, _) => null,
+          overrides: [
+            databaseProvider.overrideWith((ref) async => db),
+            onlineRateHttpClientFactoryProvider.overrideWithValue(
+              mockClientFactory,
+            ),
+          ],
+          child: const MaterialApp(home: CurrenciesPage()),
+        ),
+      );
+      await settle(tester);
+
+      await tester.tap(find.byKey(const Key('add-currency')));
+      await settle(tester);
+      expect(tester.takeException(), isNull);
+
+      // Search input and popular chips are immediately available
+      final searchInput = find.byKey(const Key('currency-search-input'));
+      expect(searchInput, findsOneWidget);
+      expect(find.byKey(const Key('currency-preset-chip-USD')), findsOneWidget);
+      expect(find.byKey(const Key('currency-preset-chip-TRY')), findsOneWidget);
+
+      // Search '土耳其' -> filters chips to TRY and hides unrelated USD chip
+      await tester.enterText(searchInput, '土耳其');
+      await tester.pump();
+      expect(find.byKey(const Key('currency-preset-chip-TRY')), findsOneWidget);
+      expect(find.byKey(const Key('currency-preset-chip-USD')), findsNothing);
+
+      // Tap TRY chip -> auto-fills code, name, symbol and triggers online fetch
+      await tester.tap(find.byKey(const Key('currency-preset-chip-TRY')));
+      await settle(tester);
+
+      expect(
+        tester
+            .widget<TextField>(find.byKey(const Key('currency-code')))
+            .controller!
+            .text,
+        'TRY',
+      );
+      expect(
+        tester
+            .widget<TextField>(find.byKey(const Key('currency-name')))
+            .controller!
+            .text,
+        '土耳其里拉',
+      );
+      expect(
+        tester
+            .widget<TextField>(find.byKey(const Key('currency-symbol')))
+            .controller!
+            .text,
+        '₺',
+      );
+      expect(requestedUrls.length, 1);
+      expect(priceTextOf(tester), '0.2105');
+
+      await tester.tap(find.byKey(const Key('currency-save')));
+      await settle(tester);
+
+      expect(find.byKey(const Key('currency-TRY')), findsOneWidget);
+      expect(find.text('土耳其里拉（TRY）'), findsOneWidget);
+      expect(find.textContaining('1 TRY = 0.2105 CNY'), findsOneWidget);
+
+      final tryRow = await tester.runAsync(
+        () => (db.select(
+          db.currencies,
+        )..where((t) => t.code.equals('TRY'))).getSingle(),
+      );
+      expect(tryRow!.name, '土耳其里拉');
+      expect(tryRow.symbol, '₺');
+      expect(tryRow.rateToAnchor, '4.75');
+
+      await tearDownDb(tester, db);
+    },
+  );
+
+  testWidgets(
+    '6. Typing any 150+ ISO code (e.g. try / ZAR) directly into currency-code auto-fills Chinese name & symbol, and searching African/European currencies works offline',
+    (tester) async {
+      final fixedMs = DateTime(2026, 11, 13, 11, 0).millisecondsSinceEpoch;
+      final db = AppDatabase(NativeDatabase.memory(), nowMs: () => fixedMs);
+
+      await tester.pumpWidget(
+        ProviderScope(
+          retry: (_, _) => null,
+          overrides: [databaseProvider.overrideWith((ref) async => db)],
+          child: const MaterialApp(home: CurrenciesPage()),
+        ),
+      );
+      await settle(tester);
+
+      await tester.tap(find.byKey(const Key('add-currency')));
+      await settle(tester);
+
+      // Type lowercase 'try' directly into currency-code -> auto-fills 土耳其里拉 and ₺
+      await tester.enterText(find.byKey(const Key('currency-code')), 'try');
+      await tester.pump();
+      expect(
+        tester
+            .widget<TextField>(find.byKey(const Key('currency-name')))
+            .controller!
+            .text,
+        '土耳其里拉',
+      );
+      expect(
+        tester
+            .widget<TextField>(find.byKey(const Key('currency-symbol')))
+            .controller!
+            .text,
+        '₺',
+      );
+
+      // Switch code to 'ZAR' (non-popular global ISO currency) -> updates to 南非兰特 & R
+      await tester.enterText(find.byKey(const Key('currency-code')), 'ZAR');
+      await tester.pump();
+      expect(
+        tester
+            .widget<TextField>(find.byKey(const Key('currency-name')))
+            .controller!
+            .text,
+        '南非兰特',
+      );
+      expect(
+        tester
+            .widget<TextField>(find.byKey(const Key('currency-symbol')))
+            .controller!
+            .text,
+        'R',
+      );
+
+      // Also verify searching '肯尼亚' and picking KES chip offline + saving with manual rate
+      await tester.enterText(
+        find.byKey(const Key('currency-search-input')),
+        '肯尼亚',
+      );
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('currency-preset-chip-KES')));
+      await tester.pump();
+
+      expect(
+        tester
+            .widget<TextField>(find.byKey(const Key('currency-code')))
+            .controller!
+            .text,
+        'KES',
+      );
+      expect(
+        tester
+            .widget<TextField>(find.byKey(const Key('currency-name')))
+            .controller!
+            .text,
+        '肯尼亚先令',
+      );
+      expect(
+        tester
+            .widget<TextField>(find.byKey(const Key('currency-symbol')))
+            .controller!
+            .text,
+        'KSh',
+      );
+
+      await tester.enterText(find.byKey(const Key('currency-price')), '0.056');
+      await tester.tap(find.byKey(const Key('currency-save')));
+      await settle(tester);
+
+      expect(find.byKey(const Key('currency-KES')), findsOneWidget);
+      expect(find.text('肯尼亚先令（KES）'), findsOneWidget);
+
+      await tearDownDb(tester, db);
+    },
+  );
 }

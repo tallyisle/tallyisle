@@ -31,6 +31,7 @@ class _DiyToolbarSettingsPageState
     DiyToolbarAction.currency => Icons.currency_exchange,
     DiyToolbarAction.templates => Icons.bookmarks_outlined,
     DiyToolbarAction.frequentRemarks => Icons.comment_outlined,
+    DiyToolbarAction.keypadMultiplyDivide => Icons.calculate_outlined,
   };
 
   Future<void> _persist(DiyToolbarConfig next) async {

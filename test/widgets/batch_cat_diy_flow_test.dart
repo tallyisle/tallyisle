@@ -541,10 +541,10 @@ void main() {
       );
       await settle(tester);
 
-      expect(find.text('当前启用预览（8/9）'), findsOneWidget);
+      expect(find.text('当前启用预览（8/10）'), findsOneWidget);
       await tester.tap(find.byKey(const Key('diy-switch-tags')));
       await settle(tester);
-      expect(find.text('当前启用预览（7/9）'), findsOneWidget);
+      expect(find.text('当前启用预览（7/10）'), findsOneWidget);
 
       await tester.scrollUntilVisible(
         find.byKey(const Key('diy-switch-frequent_remarks')),
@@ -559,11 +559,26 @@ void main() {
 
       await tester.tap(find.byKey(const Key('diy-switch-frequent_remarks')));
       await settle(tester);
-      expect(find.text('当前启用预览（8/9）'), findsOneWidget);
+      expect(find.text('当前启用预览（8/10）'), findsOneWidget);
+
+      await tester.scrollUntilVisible(
+        find.byKey(const Key('diy-switch-keypad_mul_div')),
+        160,
+        scrollable: find.byType(Scrollable).last,
+      );
+      await settle(tester);
+      final mulDivSwitchBefore = tester.widget<Switch>(
+        find.byKey(const Key('diy-switch-keypad_mul_div')),
+      );
+      expect(mulDivSwitchBefore.value, isFalse);
+
+      await tester.tap(find.byKey(const Key('diy-switch-keypad_mul_div')));
+      await settle(tester);
+      expect(find.text('当前启用预览（9/10）'), findsOneWidget);
 
       await tester.tap(find.byKey(const Key('diy-toolbar-reset-btn')));
       await settle(tester);
-      expect(find.text('当前启用预览（8/9）'), findsOneWidget);
+      expect(find.text('当前启用预览（8/10）'), findsOneWidget);
 
       await unmountCleanly(tester);
 

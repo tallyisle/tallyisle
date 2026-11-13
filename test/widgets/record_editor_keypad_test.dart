@@ -14,7 +14,6 @@ import 'package:tallyisle/data/ledger/ledger_service.dart';
 import 'package:tallyisle/data/tools/bill_attachment_service.dart';
 import 'package:tallyisle/data/tools/template_remark_service.dart';
 import 'package:tallyisle/domain/model/codes.dart';
-import 'package:tallyisle/features/common/catalog_icons.dart';
 import 'package:tallyisle/features/records/record_editor_page.dart';
 
 Future<void> _settle(WidgetTester tester, [int ticks = 8]) async {
@@ -77,10 +76,10 @@ void main() {
   driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
 
   group(
-    '4x4 RecordCustomKeypad, 一羽 2-Row Bottom Dock, 3-State OS Keyboard Handoff & A2 Frequent Remarks',
+    '4x4 RecordCustomKeypad, Style A Currency Guardrails, Seamless Slot Handoff & Plan A Frequent Remarks',
     () {
       testWidgets(
-        '4x4 RecordCustomKeypad opens by default (>=52dp rows, no keypad-hide/mul/div keys), supports short-tap +/− & long-press ×/÷, backspace/clear, smart =, and shows 再记 in create & edit modes',
+        '4x4 RecordCustomKeypad defaults to +/− only (no ×/÷ hints or long-press), enables ×/÷ long-press when keypadMultiplyDivide is ON, and shows 再记 in create & edit modes',
         (tester) async {
           tester.view.devicePixelRatio = 1.0;
           tester.view.physicalSize = const Size(390, 844);
@@ -190,7 +189,55 @@ void main() {
           );
           expect(find.text('保存'), findsOneWidget);
 
-          // Operator corner hints ('×' on '+', '÷' on '−') are rendered cleanly.
+          final amountField = tester.widget<TextField>(
+            find.byKey(const Key('amount')),
+          );
+          expect(amountField.keyboardType, TextInputType.none);
+          expect(amountField.readOnly, isFalse);
+          expect(amountField.showCursor, isTrue);
+
+          // 2. Default keypadMultiplyDivide == false: NO '×'/'÷' corner labels and long-press is a no-op!
+          expect(
+            find.descendant(
+              of: find.byKey(const Key('editor-op-add')),
+              matching: find.text('×'),
+            ),
+            findsNothing,
+          );
+          expect(
+            find.descendant(
+              of: find.byKey(const Key('editor-op-sub')),
+              matching: find.text('÷'),
+            ),
+            findsNothing,
+          );
+
+          await tester.tap(find.byKey(const Key('keypad-6')));
+          await tester.pump();
+          await tester.longPress(find.byKey(const Key('editor-op-add')));
+          await tester.pump();
+          await tester.longPress(find.byKey(const Key('editor-op-sub')));
+          await tester.pump();
+          expect(amountField.controller!.text, '6');
+
+          await tester.longPress(find.byKey(const Key('keypad-backspace')));
+          await tester.pump();
+          expect(amountField.controller!.text, isEmpty);
+
+          // 3. Enable DiyToolbarAction.keypadMultiplyDivide -> corner hints appear and long-press ×/÷ works!
+          await tester.runAsync(() async {
+            final attSvc = BillAttachmentService(db);
+            final cfg = await attSvc.getDiyToolbarConfig();
+            await attSvc.saveDiyToolbarConfig(
+              commandId: 'enable-keypad-mul-div',
+              config: cfg.setEnabled(
+                DiyToolbarAction.keypadMultiplyDivide,
+                true,
+              ),
+            );
+          });
+          await _settle(tester, 4);
+
           expect(
             find.descendant(
               of: find.byKey(const Key('editor-op-add')),
@@ -206,17 +253,7 @@ void main() {
             findsOneWidget,
           );
 
-          // 2. Amount TextField uses TextInputType.none & readOnly: false.
-          final amountField = tester.widget<TextField>(
-            find.byKey(const Key('amount')),
-          );
-          expect(amountField.keyboardType, TextInputType.none);
-          expect(amountField.readOnly, isFalse);
-          expect(amountField.showCursor, isTrue);
-
-          // 3. Short-tap '+' / '−' and long-press '×' / '÷' + smart '=' BigRational evaluation:
-          // '6' -> long-press '+' ('×') -> '3.5' -> short-tap '−' ('-') -> '1' -> long-press '−' ('÷') -> '4'
-          // Left-to-right: ((6 * 3.5) - 1) / 4 = (21 - 1) / 4 = 5.00!
+          // Left-to-right: ((6 * 3.5) - 1) / 4 + 15.5 = 5.00 + 15.5 = 20.50!
           await tester.tap(find.byKey(const Key('keypad-6')));
           await tester.pump();
           await tester.longPress(find.byKey(const Key('editor-op-add')));
@@ -240,7 +277,6 @@ void main() {
           expect(find.text('= 5.00'), findsOneWidget);
           expect(find.text('='), findsOneWidget);
 
-          // Tap '+' as well: '+15.5' -> 20.50!
           await tester.tap(find.byKey(const Key('editor-op-add')));
           await tester.pump();
           await _tapKeys(tester, ['1', '5', '.', '5']);
@@ -310,7 +346,7 @@ void main() {
       );
 
       testWidgets(
-        '一羽 2-row bottom dock orders summary-amount -> remark -> pill-toolbar -> custom-keypad with zero vertical divider, hides CNY by default, and shows foreign currency code',
+        'Pure remark row (no fake tag icon), Style A tight left currency prefix (¥ vs [TRY ₺]), compact conversion override dialog, and 3 anti-conflict currency guardrails',
         (tester) async {
           tester.view.devicePixelRatio = 1.0;
           tester.view.physicalSize = const Size(390, 844);
@@ -336,11 +372,25 @@ void main() {
               parentCatId: foodCat.id,
             );
             await CurrencyService(db).saveCurrency(
-              commandId: 'seed-usd',
-              code: 'USD',
-              name: '美元',
-              symbol: r'$',
-              price: '7.20',
+              commandId: 'seed-try',
+              code: 'TRY',
+              name: '土耳其里拉',
+              symbol: '₺',
+              price: '0.20',
+            );
+            await LedgerService(db).createAsset(
+              commandId: 'seed-cny-card',
+              name: '招行卡',
+              type: AssetType.normal,
+              currency: 'CNY',
+              initial: Money.parse('1000.00'),
+            );
+            await LedgerService(db).createAsset(
+              commandId: 'seed-try-wallet',
+              name: '里拉钱包',
+              type: AssetType.normal,
+              currency: 'TRY',
+              initial: Money.parse('2000.00'),
             );
           });
 
@@ -359,22 +409,14 @@ void main() {
           final pillToolbar = find.byKey(const Key('editor-pill-toolbar'));
           final customKeypad = find.byKey(const Key('record-custom-keypad'));
 
-          expect(summaryRow, findsOneWidget);
-          expect(remarkRow, findsOneWidget);
-          expect(pillToolbar, findsOneWidget);
-          expect(customKeypad, findsOneWidget);
-
-          // 1. Strict top-to-bottom vertical order in _buildBottomDock:
+          // 1. Strict top-to-bottom order with hairline dividers & NO fake Icons.sell_outlined in remark row:
           final rSummary = tester.getRect(summaryRow);
           final rRemark = tester.getRect(remarkRow);
           final rPill = tester.getRect(pillToolbar);
           final rKeypad = tester.getRect(customKeypad);
-
-          expect(rSummary.bottom, lessThanOrEqualTo(rRemark.top + 0.5));
-          expect(rRemark.bottom, lessThanOrEqualTo(rPill.top + 0.5));
+          expect(rSummary.bottom, lessThanOrEqualTo(rRemark.top + 1.5));
+          expect(rRemark.bottom, lessThanOrEqualTo(rPill.top + 1.5));
           expect(rPill.bottom, lessThanOrEqualTo(rKeypad.top + 0.5));
-
-          // Zero vertical divider inside bottom dock!
           expect(
             find.descendant(
               of: find.byKey(const Key('editor-bottom-dock')),
@@ -382,27 +424,24 @@ void main() {
             ),
             findsNothing,
           );
-
-          // 2. Placeholder before selection -> parent category icon & name -> parent · subcategory:
-          expect(
-            find.descendant(of: summaryRow, matching: find.text('请选择分类')),
-            findsOneWidget,
-          );
-
-          await tester.tap(find.byKey(const Key('cat-餐饮')));
-          await _settle(tester, 4);
           expect(
             find.descendant(
-              of: summaryRow,
-              matching: find.byType(CategoryIconAvatar),
+              of: remarkRow,
+              matching: find.byIcon(Icons.sell_outlined),
+            ),
+            findsNothing,
+          );
+          expect(
+            find.descendant(
+              of: remarkRow,
+              matching: find.byIcon(Icons.edit_note_rounded),
             ),
             findsOneWidget,
           );
-          expect(
-            find.descendant(of: summaryRow, matching: find.text('餐饮')),
-            findsOneWidget,
-          );
 
+          // 2. Category selection & generous left width for two-level category names:
+          await tester.tap(find.byKey(const Key('cat-餐饮')));
+          await _settle(tester, 4);
           await tester.tap(find.byKey(const Key('cat-手冲咖啡')));
           await tester.pump();
           expect(
@@ -410,42 +449,174 @@ void main() {
             findsOneWidget,
           );
 
-          // 3. Default CNY: NO 'CNY' label in summary-amount-row and NO currency badge!
+          // 3. Style A default CNY: tight '¥' symbol right next to '0.00' (<= 12px gap, NO 'CNY' text, NO badge):
+          expect(
+            find.byKey(const Key('amount-currency-symbol')),
+            findsOneWidget,
+          );
           expect(find.byKey(const Key('amount-currency-badge')), findsNothing);
           expect(
             find.descendant(of: summaryRow, matching: find.text('CNY')),
             findsNothing,
           );
-
-          // 4. Switch to foreign currency 'USD' via editor-currency-pill -> 'USD' badge appears in summary-amount-row!
-          await tester.scrollUntilVisible(
-            find.byKey(const Key('editor-currency-pill')),
-            120,
-            scrollable: find
-                .descendant(of: pillToolbar, matching: find.byType(Scrollable))
-                .first,
+          final symRect = tester.getRect(
+            find.byKey(const Key('amount-currency-symbol')),
           );
-          await tester.tap(find.byKey(const Key('editor-currency-pill')));
+          final amtRect = tester.getRect(find.byKey(const Key('amount')));
+          expect(
+            (amtRect.left - symRect.right).abs(),
+            lessThanOrEqualTo(12.0),
+            reason:
+                '¥ prefix must sit tightly right next to amount without floating whitespace',
+          );
+
+          // 4. Guardrail 1 (Default follows account): selecting TRY account '里拉钱包' while sourceCurrency==null
+          // switches prefix to [TRY ₺] with NO conversion hint; switching to '招行卡' returns to '¥'!
+          await tester.tap(find.byKey(const Key('asset')));
           await _settle(tester, 4);
-          await tester.tap(find.byKey(const Key('currency-option-USD')));
+          await tester.tap(find.text('里拉钱包').last);
+          await _settle(tester, 4);
+          expect(
+            find.byKey(const Key('amount-currency-badge')),
+            findsOneWidget,
+          );
+          expect(
+            find.descendant(
+              of: find.byKey(const Key('amount-currency-badge')),
+              matching: find.text('TRY'),
+            ),
+            findsOneWidget,
+          );
+          expect(
+            find.descendant(
+              of: find.byKey(const Key('amount-currency-badge')),
+              matching: find.text('₺'),
+            ),
+            findsOneWidget,
+          );
+          expect(find.byKey(const Key('converted-summary-tap')), findsNothing);
+
+          await tester.tap(find.byKey(const Key('asset')));
+          await _settle(tester, 4);
+          await tester.tap(find.text('招行卡').last);
+          await _settle(tester, 4);
+          expect(
+            find.byKey(const Key('amount-currency-symbol')),
+            findsOneWidget,
+          );
+          expect(find.byKey(const Key('amount-currency-badge')), findsNothing);
+
+          // 5. Tapping '¥' prefix opens currency sheet -> select TRY -> shows tight [TRY ₺] + compact '≈ ¥ 100.00 入账招行卡'!
+          await tester.tap(find.byKey(const Key('amount-currency-symbol')));
+          await _settle(tester, 4);
+          expect(
+            find.byKey(const Key('currency-option-follow-account')),
+            findsOneWidget,
+          );
+          await tester.tap(find.byKey(const Key('currency-option-TRY')));
+          await _settle(tester, 4);
+
+          await _tapKeys(tester, ['5', '0', '0']);
+          final badgeRect = tester.getRect(
+            find.byKey(const Key('amount-currency-badge')),
+          );
+          final amtRect500 = tester.getRect(find.byKey(const Key('amount')));
+          expect(
+            (amtRect500.left - badgeRect.right).abs(),
+            lessThanOrEqualTo(12.0),
+          );
+          expect(
+            find.byKey(const Key('converted-summary-tap')),
+            findsOneWidget,
+          );
+          expect(find.textContaining('≈ ¥ 100.00 入账招行卡'), findsOneWidget);
+
+          // Tapping compact conversion summary opens override dialog (Key('converted') + Key('auto-convert-btn'))!
+          await tester.tap(find.byKey(const Key('converted-summary-tap')));
+          await _settle(tester, 4);
+          await tester.enterText(find.byKey(const Key('converted')), '103.50');
+          await tester.tap(find.byKey(const Key('converted-confirm-btn')));
+          await _settle(tester, 4);
+          expect(find.textContaining('≈ ¥ 103.50 入账招行卡'), findsOneWidget);
+
+          await tester.tap(find.byKey(const Key('converted-summary-tap')));
+          await _settle(tester, 4);
+          await tester.tap(find.byKey(const Key('auto-convert-btn')));
+          await tester.pump();
+          await tester.tap(find.byKey(const Key('converted-confirm-btn')));
+          await _settle(tester, 4);
+          expect(find.textContaining('≈ ¥ 100.00 入账招行卡'), findsOneWidget);
+
+          // Reset to follow account via currency-option-follow-account!
+          await tester.tap(find.byKey(const Key('amount-currency-badge')));
+          await _settle(tester, 4);
+          await tester.tap(
+            find.byKey(const Key('currency-option-follow-account')),
+          );
+          await _settle(tester, 4);
+          expect(
+            find.byKey(const Key('amount-currency-symbol')),
+            findsOneWidget,
+          );
+          expect(find.byKey(const Key('converted-summary-tap')), findsNothing);
+
+          // 6. Guardrail 3: disabling DiyToolbarAction.currency blocks tapping prefix to open picker!
+          await tester.runAsync(() async {
+            final attSvc = BillAttachmentService(db);
+            final cfg = await attSvc.getDiyToolbarConfig();
+            await attSvc.saveDiyToolbarConfig(
+              commandId: 'disable-currency-action',
+              config: cfg.setEnabled(DiyToolbarAction.currency, false),
+            );
+          });
+          await _settle(tester, 4);
+          await tester.tap(find.byKey(const Key('amount-currency-symbol')));
+          await _settle(tester, 2);
+          expect(
+            find.byKey(const Key('currency-option-follow-account')),
+            findsNothing,
+          );
+
+          // 7. Guardrail 2: Transfer strictly locks currency prefix to fromAsset and disables picker tap!
+          await tester.runAsync(() async {
+            final attSvc = BillAttachmentService(db);
+            final cfg = await attSvc.getDiyToolbarConfig();
+            await attSvc.saveDiyToolbarConfig(
+              commandId: 'reenable-currency-action',
+              config: cfg.setEnabled(DiyToolbarAction.currency, true),
+            );
+          });
+          await _settle(tester, 4);
+
+          await tester.tap(find.byKey(const Key('type-2')));
+          await _settle(tester, 4);
+          await tester.tap(find.byKey(const Key('from')));
+          await _settle(tester, 4);
+          await tester.tap(find.text('里拉钱包').last);
+          await _settle(tester, 4);
+          await tester.tap(find.byKey(const Key('to')));
+          await _settle(tester, 4);
+          await tester.tap(find.text('招行卡').last);
           await _settle(tester, 4);
 
           expect(
             find.byKey(const Key('amount-currency-badge')),
             findsOneWidget,
           );
+          expect(find.textContaining('≈ ¥ 100.00 转入招行卡'), findsOneWidget);
+          await tester.tap(find.byKey(const Key('amount-currency-badge')));
+          await _settle(tester, 2);
           expect(
-            find.descendant(of: summaryRow, matching: find.text('USD')),
-            findsOneWidget,
+            find.byKey(const Key('currency-option-follow-account')),
+            findsNothing,
           );
-          expect(find.byKey(const Key('converted')), findsOneWidget);
 
           await closeCleanly();
         },
       );
 
       testWidgets(
-        '3-state closed-loop keyboard handoff on 360x640 (viewInsets.bottom=280): State 1 custom keypad -> State 2 remark OS keyboard with zero save bar & zero overflow -> State 3 Done / Back restores custom keypad to save',
+        'Seamless keyboard handoff on 360x640 (viewInsets.bottom=280): persistent pill toolbar, zero overflow, Done & Android IME Back auto-restore custom keypad',
         (tester) async {
           tester.view.devicePixelRatio = 1.0;
           tester.view.physicalSize = const Size(360, 640);
@@ -481,8 +652,8 @@ void main() {
           await tester.pump();
 
           // State 2: tap Key('remark') + OS keyboard (viewInsets.bottom = 280):
-          // RecordCustomKeypad is gone, pill toolbar is gone, save & save-and-new are gone,
-          // and editor-bottom-dock sits cleanly above y = 360 with zero overflow!
+          // RecordCustomKeypad is gone, editor-pill-toolbar STAYS PERSISTENT,
+          // and editor-bottom-dock sits cleanly at y = 360 with zero overflow!
           await tester.tap(find.byKey(const Key('remark')));
           tester.view.viewInsets = const FakeViewPadding(
             left: 0,
@@ -494,7 +665,7 @@ void main() {
           expect(tester.takeException(), isNull);
 
           expect(find.byKey(const Key('record-custom-keypad')), findsNothing);
-          expect(find.byKey(const Key('editor-pill-toolbar')), findsNothing);
+          expect(find.byKey(const Key('editor-pill-toolbar')), findsOneWidget);
           expect(find.byKey(const Key('save')), findsNothing);
           expect(find.byKey(const Key('save-and-new')), findsNothing);
           expect(find.byKey(const Key('editor-save-btn')), findsNothing);
@@ -505,15 +676,15 @@ void main() {
           );
           expect(dockRect.bottom, closeTo(osKeyboardTop, 0.5));
           expect(
-            tester.getRect(find.byKey(const Key('editor-remark-row'))).bottom,
-            lessThanOrEqualTo(osKeyboardTop),
+            tester.getRect(find.byKey(const Key('editor-pill-toolbar'))).bottom,
+            lessThanOrEqualTo(osKeyboardTop + 0.5),
           );
 
           await tester.enterText(find.byKey(const Key('remark')), '工作午餐');
           await tester.pump();
 
           // State 3a: press OS keyboard confirm (TextInputAction.done) + viewInsets = zero:
-          // remark unfocuses, and RecordCustomKeypad + editor-pill-toolbar automatically reappear!
+          // remark unfocuses, and RecordCustomKeypad automatically reappears!
           await tester.testTextInput.receiveAction(TextInputAction.done);
           tester.view.viewInsets = FakeViewPadding.zero;
           await tester.pumpAndSettle();
@@ -529,10 +700,10 @@ void main() {
           expect(amountField.focusNode!.hasFocus, isTrue);
           expect(find.byKey(const Key('record-custom-keypad')), findsOneWidget);
           expect(find.byKey(const Key('editor-pill-toolbar')), findsOneWidget);
-          expect(find.byKey(const Key('save')), findsOneWidget);
-          expect(find.byKey(const Key('save-and-new')), findsOneWidget);
 
-          // State 3b: also verify dismissing OS keyboard via unfocus (system Back) restores RecordCustomKeypad!
+          // State 3b: simulate Android System Back / IME '⌄' hide key (viewInsets drops 280 -> 0
+          // WITHOUT calling remarkField.focusNode.unfocus() or Done!):
+          // WidgetsBindingObserver auto-restores RecordCustomKeypad instead of dropping dock to floor!
           await tester.tap(find.byKey(const Key('remark')));
           tester.view.viewInsets = const FakeViewPadding(
             left: 0,
@@ -542,11 +713,12 @@ void main() {
           );
           await tester.pumpAndSettle();
           expect(find.byKey(const Key('record-custom-keypad')), findsNothing);
+          expect(remarkField.focusNode!.hasFocus, isTrue);
 
-          remarkField.focusNode!.unfocus();
           tester.view.viewInsets = FakeViewPadding.zero;
           await tester.pumpAndSettle();
           expect(tester.takeException(), isNull);
+          expect(remarkField.focusNode!.hasFocus, isFalse);
           expect(find.byKey(const Key('record-custom-keypad')), findsOneWidget);
           expect(find.byKey(const Key('editor-pill-toolbar')), findsOneWidget);
 
@@ -580,6 +752,15 @@ void main() {
               name: '算式钱包',
               type: AssetType.normal,
               initial: Money.parse('500.00'),
+            );
+            final attSvc = BillAttachmentService(db);
+            final cfg = await attSvc.getDiyToolbarConfig();
+            await attSvc.saveDiyToolbarConfig(
+              commandId: 'enable-mul-div-smart-eq',
+              config: cfg.setEnabled(
+                DiyToolbarAction.keypadMultiplyDivide,
+                true,
+              ),
             );
           });
 
@@ -663,7 +844,7 @@ void main() {
       );
 
       testWidgets(
-        'A2 Frequent Remarks: default OFF hides toggle/chips/manage & skips usage; ON is 0px collapsed in custom keypad, expands via ▾ & auto-collapses on chip pick, and auto-floats on remark focus',
+        'Plan A Frequent Remarks Slot Panel: default OFF hides toggle; ON switches 254dp bottom slot in-place (empty state even with no category, chip tap fills remark & auto-returns to keypad, PopScope back returns to keypad, and remark focus never auto-expands inline chips)',
         (tester) async {
           await tester.binding.setSurfaceSize(const Size(390, 844));
           addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -704,8 +885,11 @@ void main() {
             find.byKey(const Key('editor-remarks-toggle-btn')),
             findsNothing,
           );
+          expect(
+            find.byKey(const Key('editor-frequent-remarks-panel')),
+            findsNothing,
+          );
           expect(find.byKey(const Key('frequent_remark_chips')), findsNothing);
-          expect(find.byKey(const Key('editor-remarks-btn')), findsNothing);
 
           TextField remarkField() =>
               tester.widget<TextField>(find.byKey(const Key('remark')));
@@ -717,13 +901,6 @@ void main() {
             find.byKey(const Key('editor-remark-clear-btn')),
             findsOneWidget,
           );
-          expect(
-            find.byKey(const Key('editor-remarks-toggle-btn')),
-            findsNothing,
-          );
-          expect(find.byKey(const Key('frequent_remark_chips')), findsNothing);
-          expect(find.byKey(const Key('editor-remarks-btn')), findsNothing);
-
           await tester.tap(find.byKey(const Key('editor-remark-clear-btn')));
           await tester.pump();
           expect(remarkField().controller!.text, isEmpty);
@@ -743,7 +920,7 @@ void main() {
           );
           expect(remarksWhenOff!.map((r) => r.content).toList(), ['预设拿铁']);
 
-          // 2. Turn frequentRemarks ON via BillAttachmentService and re-open RecordEditorPage!
+          // 2. Turn frequentRemarks ON and re-open RecordEditorPage WITHOUT selecting a category yet!
           await tester.runAsync(() async {
             final attSvc = BillAttachmentService(db);
             final cfg = await attSvc.getDiyToolbarConfig();
@@ -756,54 +933,83 @@ void main() {
 
           await tester.tap(find.byKey(const Key('add-record')));
           await _settle(tester);
-          await tester.tap(find.byKey(const Key('cat-餐饮')));
-          await _settle(tester, 4);
 
-          // 2a. In default custom-keypad state: toggle button ('▾') is visible,
-          // while frequent_remark_chips is collapsed (0 extra row height!).
-          expect(find.byKey(const Key('record-custom-keypad')), findsOneWidget);
+          // 2a. Before selecting any category (categoryId == null), tapping toggle opens
+          // the 254dp frequent-remarks panel with a friendly empty state (never a dead 0px button!).
           expect(
             find.byKey(const Key('editor-remarks-toggle-btn')),
             findsOneWidget,
           );
-          expect(find.byKey(const Key('frequent_remark_chips')), findsNothing);
-          expect(find.byKey(const Key('editor-remarks-btn')), findsNothing);
-
-          // 2b. Tapping '▾' expands frequent_remark_chips + editor-remarks-btn;
-          // tapping preset chip '预设拿铁' fills remark and auto-collapses panel while keeping custom keypad open!
+          final slotHeightBefore = tester
+              .getRect(find.byKey(const Key('editor-bottom-panel-slot')))
+              .height;
           await tester.tap(find.byKey(const Key('editor-remarks-toggle-btn')));
           await _settle(tester, 4);
+
+          expect(find.byKey(const Key('record-custom-keypad')), findsNothing);
+          expect(
+            find.byKey(const Key('editor-frequent-remarks-panel')),
+            findsOneWidget,
+          );
+          expect(
+            find.byKey(const Key('editor-remarks-empty-add-btn')),
+            findsOneWidget,
+          );
+          expect(find.byKey(const Key('editor-remarks-btn')), findsOneWidget);
+          final slotHeightInPanel = tester
+              .getRect(find.byKey(const Key('editor-bottom-panel-slot')))
+              .height;
+          expect(slotHeightInPanel, closeTo(slotHeightBefore, 0.5));
+
+          // 2b. System Back (PopScope) returns from frequent-remarks panel to custom keypad without popping page!
+          await tester.binding.handlePopRoute();
+          await tester.pump();
+          expect(find.byKey(const Key('record-custom-keypad')), findsOneWidget);
+          expect(
+            find.byKey(const Key('editor-frequent-remarks-panel')),
+            findsNothing,
+          );
+
+          // 2c. Select '餐饮' -> open Plan A panel -> tap '预设拿铁' -> fills remark & auto-switches back to custom keypad!
+          await tester.tap(find.byKey(const Key('cat-餐饮')));
+          await _settle(tester, 4);
+          await tester.tap(find.byKey(const Key('editor-remarks-toggle-btn')));
+          await _settle(tester, 4);
+          expect(
+            find.byKey(const Key('editor-frequent-remarks-panel')),
+            findsOneWidget,
+          );
           expect(
             find.byKey(const Key('frequent_remark_chips')),
             findsOneWidget,
           );
-          expect(find.byKey(const Key('editor-remarks-btn')), findsOneWidget);
           expect(find.text('预设拿铁'), findsOneWidget);
-          expect(find.byKey(const Key('record-custom-keypad')), findsOneWidget);
 
           await tester.tap(find.text('预设拿铁'));
           await tester.pump();
           expect(remarkField().controller!.text, '预设拿铁');
+          expect(
+            find.byKey(const Key('editor-frequent-remarks-panel')),
+            findsNothing,
+          );
           expect(find.byKey(const Key('frequent_remark_chips')), findsNothing);
           expect(find.byKey(const Key('record-custom-keypad')), findsOneWidget);
 
-          // 2c. Focusing Key('remark') (OS keyboard state) automatically reveals
-          // frequent_remark_chips + editor-remarks-btn without needing to tap '▾'!
+          // 2d. Focusing Key('remark') (OS keyboard state) NEVER auto-expands inline remark chips!
           await tester.tap(find.byKey(const Key('remark')));
           await _settle(tester, 4);
           expect(find.byKey(const Key('record-custom-keypad')), findsNothing);
+          expect(find.byKey(const Key('frequent_remark_chips')), findsNothing);
           expect(
-            find.byKey(const Key('frequent_remark_chips')),
-            findsOneWidget,
+            find.byKey(const Key('editor-frequent-remarks-panel')),
+            findsNothing,
           );
-          expect(find.byKey(const Key('editor-remarks-btn')), findsOneWidget);
 
-          // Type new remark & confirm via TextInputAction.done -> returns to custom keypad with panel collapsed!
+          // Type new remark & confirm via TextInputAction.done -> returns to custom keypad and records usage on save!
           await tester.enterText(find.byKey(const Key('remark')), '开启后自动统计');
           await tester.testTextInput.receiveAction(TextInputAction.done);
           await tester.pump();
           expect(find.byKey(const Key('record-custom-keypad')), findsOneWidget);
-          expect(find.byKey(const Key('frequent_remark_chips')), findsNothing);
 
           await _tapKeys(tester, ['2', '2']);
           await tester.tap(find.byKey(const Key('save')));

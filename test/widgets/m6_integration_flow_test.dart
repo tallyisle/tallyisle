@@ -351,18 +351,31 @@ void main() {
         await tester.pump();
 
         await tester.scrollUntilVisible(
-          find.byKey(const Key('discount')),
+          find.byKey(const Key('editor-discount-pill')),
           180,
-          scrollable: find.byType(Scrollable).first,
+          scrollable: find
+              .descendant(
+                of: find.byKey(const Key('editor-pill-toolbar')),
+                matching: find.byType(Scrollable),
+              )
+              .first,
         );
+        await tester.tap(find.byKey(const Key('editor-discount-pill')));
+        await _settle(tester, 4);
         await tester.enterText(find.byKey(const Key('discount')), '5.00');
-        await tester.testTextInput.receiveAction(TextInputAction.done);
-        await tester.pump();
+        await tester.tap(find.byKey(const Key('discount-confirm-btn')));
+        await _settle(tester, 4);
+        expect(find.text('优惠 ¥5.00'), findsOneWidget);
 
         await tester.scrollUntilVisible(
           find.byKey(const Key('record-location-tile')),
           180,
-          scrollable: find.byType(Scrollable).first,
+          scrollable: find
+              .descendant(
+                of: find.byKey(const Key('editor-pill-toolbar')),
+                matching: find.byType(Scrollable),
+              )
+              .first,
         );
         await tester.tap(find.byKey(const Key('record-location-tile')));
         await _settle(tester, 4);
@@ -396,8 +409,8 @@ void main() {
         await _settle(tester);
         await _goBack(tester);
 
-        // 3. Re-open RecordEditorPage on 餐饮 -> A2 frequent remarks collapsed by default,
-        // expandable via ▾ toggle (and auto-revealed on remark focus)!
+        // 3. Re-open RecordEditorPage on 餐饮 -> Plan A frequent remarks panel opens
+        // in bottom keypad slot via toggle button, and tapping chip fills remark & returns to keypad!
         await tester.tap(find.byKey(const Key('add-record')));
         await _settle(tester);
         await tester.tap(find.byKey(const Key('cat-餐饮')));
@@ -406,11 +419,21 @@ void main() {
           find.byKey(const Key('editor-remarks-toggle-btn')),
           findsOneWidget,
         );
-        expect(find.byKey(const Key('frequent_remark_chips')), findsNothing);
+        expect(
+          find.byKey(const Key('editor-frequent-remarks-panel')),
+          findsNothing,
+        );
         await tester.tap(find.byKey(const Key('editor-remarks-toggle-btn')));
         await _settle(tester, 4);
+        expect(
+          find.byKey(const Key('editor-frequent-remarks-panel')),
+          findsOneWidget,
+        );
         expect(find.byKey(const Key('frequent_remark_chips')), findsOneWidget);
         expect(find.text('星巴克拿铁'), findsOneWidget);
+        await tester.tap(find.text('星巴克拿铁'));
+        await _settle(tester, 2);
+        expect(find.byKey(const Key('record-custom-keypad')), findsOneWidget);
         await _goBack(tester);
 
         // 4. Live URL Scheme addbill + live Accessibility captured payment event via AutomationBridge.

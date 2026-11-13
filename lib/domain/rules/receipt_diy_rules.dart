@@ -327,6 +327,12 @@ enum DiyToolbarAction {
     '常用备注',
     '展示分类常用备注候选条并自动统计备注词频',
     defaultEnabled: false,
+  ),
+  keypadMultiplyDivide(
+    'keypad_mul_div',
+    '乘除运算',
+    '开启后在记账数字键盘长按 + / − 可输入 × / ÷',
+    defaultEnabled: false,
   );
 
   const DiyToolbarAction(

@@ -409,6 +409,7 @@ class _CurrencyDialogState extends ConsumerState<_CurrencyDialog> {
   int _cmdGen = 0;
   int _autoFetchRequestId = 0;
 
+  late final _searchController = TextEditingController();
   late final code = TextEditingController(text: widget.existing?.code ?? '');
   late final name = TextEditingController(text: widget.existing?.name ?? '');
   late final symbol = TextEditingController(
@@ -420,10 +421,13 @@ class _CurrencyDialogState extends ConsumerState<_CurrencyDialog> {
         : priceFromRateToAnchor(widget.existing!.rateToAnchor),
   );
 
+  String _searchQuery = '';
   FetchedExchangeRates? _cachedRates;
   Future<FetchedExchangeRates>? _inFlightFetch;
   bool _fetching = false;
   bool _saving = false;
+  bool _nameManuallyEdited = false;
+  bool _symbolManuallyEdited = false;
   bool _priceManuallyEdited = false;
   String? _fetchedForCode;
   String? _fetchedRateToAnchor;
@@ -434,6 +438,7 @@ class _CurrencyDialogState extends ConsumerState<_CurrencyDialog> {
 
   @override
   void dispose() {
+    _searchController.dispose();
     code.dispose();
     name.dispose();
     symbol.dispose();
@@ -590,14 +595,14 @@ class _CurrencyDialogState extends ConsumerState<_CurrencyDialog> {
     }
   }
 
-  void _pickPreset(String? value) {
-    final p = presetCurrencies.where((e) => e.$1 == value).firstOrNull;
-    if (p == null) return;
-    final targetCode = p.$1;
+  void _selectWorldCurrency(WorldCurrencySpec spec) {
+    final targetCode = spec.code;
     setState(() {
       code.text = targetCode;
-      name.text = p.$2;
-      symbol.text = p.$3;
+      name.text = spec.name;
+      symbol.text = spec.symbol;
+      _nameManuallyEdited = false;
+      _symbolManuallyEdited = false;
       error = null;
       _statusHelper = null;
       _priceManuallyEdited = false;
@@ -620,6 +625,8 @@ class _CurrencyDialogState extends ConsumerState<_CurrencyDialog> {
           price.text = '';
           _statusHelper = '未查询到 $targetCode 的在线汇率，请手动填写汇率';
         }
+      } else {
+        price.text = '';
       }
     });
     if (_cachedRates == null) {
@@ -627,11 +634,33 @@ class _CurrencyDialogState extends ConsumerState<_CurrencyDialog> {
     }
   }
 
+  void _pickPreset(String? value) {
+    final spec = findWorldCurrency(value);
+    if (spec != null) {
+      _selectWorldCurrency(spec);
+      return;
+    }
+    final p = presetCurrencies.where((e) => e.$1 == value).firstOrNull;
+    if (p == null) return;
+    _selectWorldCurrency(
+      WorldCurrencySpec(code: p.$1, name: p.$2, symbol: p.$3),
+    );
+  }
+
   void _onCodeChanged(String raw) {
     final c = normalizeCurrency(raw);
+    final spec = widget.existing == null ? findWorldCurrency(c) : null;
     setState(() {
       error = null;
       _statusHelper = null;
+      if (widget.existing == null) {
+        if (!_nameManuallyEdited) {
+          name.text = spec?.name ?? '';
+        }
+        if (!_symbolManuallyEdited) {
+          symbol.text = spec?.symbol ?? '';
+        }
+      }
       if (c != _fetchedForCode) {
         if (!_priceManuallyEdited && widget.existing == null) {
           price.text = '';
@@ -684,7 +713,18 @@ class _CurrencyDialogState extends ConsumerState<_CurrencyDialog> {
   }
 
   void _autoFillPresetMetadataIfNeeded(String? normalizedCode) {
-    if (normalizedCode == null || name.text.trim().isNotEmpty) return;
+    if (normalizedCode == null) return;
+    final spec = findWorldCurrency(normalizedCode);
+    if (spec != null) {
+      if (name.text.trim().isEmpty) {
+        name.text = spec.name;
+      }
+      if (symbol.text.trim().isEmpty) {
+        symbol.text = spec.symbol;
+      }
+      return;
+    }
+    if (name.text.trim().isNotEmpty) return;
     final preset = presetCurrencies
         .where((p) => p.$1 == normalizedCode)
         .firstOrNull;
@@ -884,11 +924,28 @@ class _CurrencyDialogState extends ConsumerState<_CurrencyDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final editing = widget.existing != null;
-    final presets = presetCurrencies
-        .where((p) => !widget.used.contains(p.$1))
-        .toList();
-    final displayCode = normalizeCurrency(code.text) ?? '外币';
+    final allUnused = editing
+        ? const <WorldCurrencySpec>[]
+        : searchWorldCurrencies('', excludeCodes: widget.used);
+    final isSearching = _searchQuery.trim().isNotEmpty;
+    final List<WorldCurrencySpec> chipItems;
+    if (editing) {
+      chipItems = const <WorldCurrencySpec>[];
+    } else if (isSearching) {
+      chipItems = searchWorldCurrencies(
+        _searchQuery,
+        excludeCodes: widget.used,
+      );
+    } else {
+      final popularUnused = allUnused.where((c) => c.popular).toList();
+      chipItems = popularUnused.isNotEmpty
+          ? popularUnused
+          : allUnused.take(16).toList();
+    }
+    final selectedCode = normalizeCurrency(code.text);
+    final displayCode = selectedCode ?? '外币';
     final helperText = _fetching
         ? '正在联网获取最新汇率…'
         : (!_priceManuallyEdited && _fetchedSourceLabel != null)
@@ -904,40 +961,138 @@ class _CurrencyDialogState extends ConsumerState<_CurrencyDialog> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              if (!editing && presets.isNotEmpty)
-                DropdownButtonFormField<String>(
-                  key: const Key('currency-preset'),
-                  decoration: const InputDecoration(labelText: '常用币种'),
-                  items: [
-                    for (final p in presets)
-                      DropdownMenuItem(
-                        value: p.$1,
-                        child: Text('${p.$2}（${p.$1}）'),
-                      ),
-                  ],
-                  onChanged: _saving ? null : _pickPreset,
+              if (!editing) ...[
+                TextField(
+                  key: const Key('currency-search-input'),
+                  controller: _searchController,
+                  enabled: !_saving,
+                  onChanged: (v) => setState(() => _searchQuery = v),
+                  decoration: InputDecoration(
+                    isDense: true,
+                    prefixIcon: const Icon(Icons.search, size: 18),
+                    prefixIconConstraints: const BoxConstraints(
+                      minWidth: 34,
+                      minHeight: 34,
+                    ),
+                    suffixIcon: _searchQuery.isEmpty
+                        ? null
+                        : IconButton(
+                            key: const Key('currency-search-clear'),
+                            tooltip: '清空搜索',
+                            icon: const Icon(Icons.close, size: 16),
+                            visualDensity: VisualDensity.compact,
+                            onPressed: _saving
+                                ? null
+                                : () => setState(() {
+                                    _searchController.clear();
+                                    _searchQuery = '';
+                                  }),
+                          ),
+                    hintText: '搜索全球 150+ 币种（如：土耳其 / 里拉 / TRY）',
+                  ),
                 ),
+                const SizedBox(height: 8),
+                if (chipItems.isEmpty && isSearching)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: Text(
+                      '未找到匹配的内置币种，可直接在下方填写代码与名称',
+                      key: const Key('currency-search-empty'),
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  )
+                else if (chipItems.isNotEmpty) ...[
+                  ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxHeight: isSearching ? 120 : 84,
+                    ),
+                    child: SingleChildScrollView(
+                      child: Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: [
+                          for (final p in chipItems)
+                            ChoiceChip(
+                              key: Key('currency-preset-chip-${p.code}'),
+                              label: Text('${p.name} ${p.code}'),
+                              selected: selectedCode == p.code,
+                              showCheckmark: false,
+                              visualDensity: VisualDensity.compact,
+                              materialTapTargetSize:
+                                  MaterialTapTargetSize.shrinkWrap,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                              ),
+                              labelStyle: theme.textTheme.labelSmall,
+                              onSelected: _saving
+                                  ? null
+                                  : (_) => _selectWorldCurrency(p),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                ],
+                if (allUnused.isNotEmpty)
+                  DropdownButtonFormField<String>(
+                    key: const Key('currency-preset'),
+                    isExpanded: true,
+                    menuMaxHeight: 320,
+                    decoration: const InputDecoration(
+                      labelText: '更多常用币种',
+                      isDense: true,
+                    ),
+                    items: [
+                      for (final p in allUnused)
+                        DropdownMenuItem(
+                          value: p.code,
+                          child: Text(
+                            '${p.name}（${p.code}）',
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                    ],
+                    onChanged: _saving ? null : _pickPreset,
+                  ),
+              ],
               TextField(
                 key: const Key('currency-code'),
                 controller: code,
                 enabled: !editing && !_saving,
                 textCapitalization: TextCapitalization.characters,
                 onChanged: _onCodeChanged,
-                decoration: const InputDecoration(labelText: '代码（如 USD）'),
+                decoration: const InputDecoration(
+                  labelText: '代码（如 USD / TRY）',
+                  isDense: true,
+                ),
               ),
               TextField(
                 key: const Key('currency-name'),
                 controller: name,
                 enabled: !_saving,
-                onChanged: (_) {
+                onChanged: (v) {
+                  _nameManuallyEdited = v.trim().isNotEmpty;
                   if (error != null) setState(() => error = null);
                 },
-                decoration: const InputDecoration(labelText: '名称'),
+                decoration: const InputDecoration(
+                  labelText: '名称',
+                  isDense: true,
+                ),
               ),
               TextField(
+                key: const Key('currency-symbol'),
                 controller: symbol,
                 enabled: !_saving,
-                decoration: const InputDecoration(labelText: '符号（可选）'),
+                onChanged: (v) {
+                  _symbolManuallyEdited = v.trim().isNotEmpty;
+                },
+                decoration: const InputDecoration(
+                  labelText: '符号（可选）',
+                  isDense: true,
+                ),
               ),
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -952,6 +1107,7 @@ class _CurrencyDialogState extends ConsumerState<_CurrencyDialog> {
                       ),
                       onChanged: _onPriceChanged,
                       decoration: InputDecoration(
+                        isDense: true,
                         labelText: editing ? '汇率' : '汇率（留空或点右侧可自动联网获取）',
                         prefixText: '1 $displayCode = ',
                         suffixText: 'CNY',
