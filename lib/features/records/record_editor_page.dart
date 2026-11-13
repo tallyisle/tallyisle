@@ -120,7 +120,6 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
   final _discountFocus = FocusNode();
   final _feeFocus = FocusNode();
   final _convertedFocus = FocusNode();
-  final _evalBtnFocusNode = FocusNode(canRequestFocus: false);
   final ids = CommandIds();
   final imageIds = CommandIds();
   final remarkIds = CommandIds();
@@ -143,8 +142,8 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
   bool feeFromTarget = false;
   bool excludeBudget = false, excludeExIn = false;
   bool _attachmentsExpanded = false;
+  bool _remarksExpanded = false;
   bool _savedAndResetBanner = false;
-  bool _showCustomKeypad = true;
   DateTime time = DateTime.now();
   LedgerRecord? original;
   bool loading = true, busy = false;
@@ -158,8 +157,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
       _feeFocus.hasFocus ||
       _convertedFocus.hasFocus;
 
-  bool get _isCustomKeypadOpen =>
-      _showCustomKeypad && !_hasOsKeyboardFieldFocus;
+  bool get _isCustomKeypadOpen => !_hasOsKeyboardFieldFocus;
 
   void _setAmountText(String text) {
     amount.value = TextEditingValue(
@@ -178,20 +176,12 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
   void _activateCustomKeypad() {
     if (busy) return;
     _unfocusOsKeyboardFields();
+    if (_remarksExpanded) {
+      setState(() => _remarksExpanded = false);
+    }
     if (!_amountFocus.hasFocus) {
       _amountFocus.requestFocus();
     }
-    if (!_showCustomKeypad) {
-      setState(() => _showCustomKeypad = true);
-    }
-  }
-
-  void _collapseCustomKeypad() {
-    if (busy) return;
-    if (_amountFocus.hasFocus) {
-      _amountFocus.unfocus();
-    }
-    setState(() => _showCustomKeypad = false);
   }
 
   /// Direct one-shot lookup of the active book id on [db] (`ti_preference`
@@ -274,6 +264,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
       excludeExIn = prefill.excludeExIn;
       selectedTagIds = prefill.tagIds.toSet();
       sourceCurrency = prefill.sourceCurrency;
+      _remarksExpanded = false;
       convertedEdited = false;
       _autoConvert();
     });
@@ -291,19 +282,16 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
 
   void _onAmountFocusChanged() {
     if (!mounted) return;
-    if (_amountFocus.hasFocus) {
-      _showCustomKeypad = true;
-    }
     setState(() {});
   }
 
   void _onOsKeyboardFieldFocusChanged() {
     if (!mounted) return;
-    if (_hasOsKeyboardFieldFocus) {
-      setState(() => _showCustomKeypad = false);
-    } else {
-      setState(() {});
-    }
+    setState(() {
+      if (!_remarkFocus.hasFocus) {
+        _remarksExpanded = false;
+      }
+    });
   }
 
   void _showCalcError(String message) {
@@ -311,7 +299,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
     final mq = MediaQuery.of(context);
     final usableHeight =
         mq.size.height - mq.viewInsets.bottom - mq.padding.vertical;
-    final targetMargin = _isCustomKeypadOpen ? 384.0 : 140.0;
+    final targetMargin = _isCustomKeypadOpen ? 368.0 : 110.0;
     final bottomMargin = usableHeight > targetMargin + 96 ? targetMargin : 8.0;
     ScaffoldMessenger.of(context)
       ..clearSnackBars()
@@ -333,7 +321,6 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
     setState(() {
       error = null;
       _savedAndResetBanner = false;
-      _showCustomKeypad = true;
       amount.value = nextValue;
       _autoConvert();
     });
@@ -512,7 +499,6 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
     _discountFocus.dispose();
     _feeFocus.dispose();
     _convertedFocus.dispose();
-    _evalBtnFocusNode.dispose();
     super.dispose();
   }
 
@@ -731,23 +717,39 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
       }
 
       if (!mounted) return;
-      if (stayAndReset && !editing) {
+      if (stayAndReset) {
+        if (!editing) {
+          setState(() {
+            busy = false;
+            _draftNonce++;
+            _setAmountText('');
+            converted.clear();
+            convertedEdited = false;
+            discount.clear();
+            fee.clear();
+            remark.clear();
+            imageNames = const <String>[];
+            location = null;
+            _attachmentsExpanded = false;
+            _remarksExpanded = false;
+            _savedAndResetBanner = true;
+            error = null;
+          });
+          _activateCustomKeypad();
+          return;
+        }
+
         _unfocusOsKeyboardFields();
-        setState(() {
-          _draftNonce++;
-          _setAmountText('');
-          converted.clear();
-          convertedEdited = false;
-          discount.clear();
-          fee.clear();
-          remark.clear();
-          imageNames = const <String>[];
-          location = null;
-          _attachmentsExpanded = false;
-          _savedAndResetBanner = true;
-          _showCustomKeypad = true;
-          error = null;
-        });
+        final router = GoRouter.maybeOf(context);
+        if (router != null) {
+          context.pushReplacement('/record/new');
+        } else {
+          unawaited(
+            Navigator.of(context).pushReplacement(
+              MaterialPageRoute<void>(builder: (_) => const RecordEditorPage()),
+            ),
+          );
+        }
         return;
       }
 
@@ -842,6 +844,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
   }
 
   void _openRemarksManager() {
+    _unfocusOsKeyboardFields();
     if (GoRouter.maybeOf(context) != null) {
       unawaited(
         context.push(
@@ -862,43 +865,65 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
   Widget? _buildRemarkSuffixIcon({required bool remarksEnabled}) {
     final hasText = remark.text.isNotEmpty;
     final clearBtn = hasText
-        ? IconButton(
-            key: const Key('editor-remark-clear-btn'),
-            tooltip: '清空备注',
-            visualDensity: VisualDensity.compact,
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints.tightFor(width: 26, height: 26),
-            icon: const Icon(Icons.cancel, size: 16),
-            onPressed: busy
-                ? null
-                : () => setState(() {
-                    remark.clear();
-                    _savedAndResetBanner = false;
-                  }),
+        ? TextFieldTapRegion(
+            child: ExcludeFocus(
+              child: IconButton(
+                key: const Key('editor-remark-clear-btn'),
+                tooltip: '清空备注',
+                visualDensity: VisualDensity.compact,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints.tightFor(
+                  width: 26,
+                  height: 26,
+                ),
+                icon: const Icon(Icons.cancel, size: 16),
+                onPressed: busy
+                    ? null
+                    : () => setState(() {
+                        remark.clear();
+                        _savedAndResetBanner = false;
+                      }),
+              ),
+            ),
           )
         : null;
 
-    final showRemarksBtn = remarksEnabled && type != RecordType.transfer;
-    final remarksBtn = showRemarksBtn
-        ? IconButton(
-            key: const Key('editor-remarks-btn'),
-            tooltip: '常用备注管理',
-            visualDensity: VisualDensity.compact,
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints.tightFor(width: 28, height: 28),
-            icon: const Icon(Icons.comment_outlined, size: 17),
-            onPressed: busy ? null : _openRemarksManager,
+    final showRemarksToggle = remarksEnabled && type != RecordType.transfer;
+    final remarksToggleBtn = showRemarksToggle
+        ? TextFieldTapRegion(
+            child: ExcludeFocus(
+              child: IconButton(
+                key: const Key('editor-remarks-toggle-btn'),
+                tooltip: '常用备注',
+                visualDensity: VisualDensity.compact,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints.tightFor(
+                  width: 28,
+                  height: 28,
+                ),
+                icon: Icon(
+                  _remarksExpanded
+                      ? Icons.keyboard_arrow_up_rounded
+                      : Icons.keyboard_arrow_down_rounded,
+                  size: 20,
+                ),
+                onPressed: busy
+                    ? null
+                    : () =>
+                          setState(() => _remarksExpanded = !_remarksExpanded),
+              ),
+            ),
           )
         : null;
 
-    if (clearBtn == null && remarksBtn == null) return null;
-    if (clearBtn != null && remarksBtn != null) {
+    if (clearBtn == null && remarksToggleBtn == null) return null;
+    if (clearBtn != null && remarksToggleBtn != null) {
       return Row(
         mainAxisSize: MainAxisSize.min,
-        children: [clearBtn, remarksBtn],
+        children: [clearBtn, remarksToggleBtn],
       );
     }
-    return clearBtn ?? remarksBtn;
+    return clearBtn ?? remarksToggleBtn;
   }
 
   Future<void> _openAccountPickerSheet({
@@ -1261,6 +1286,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
                                   child: _buildBottomDock(
                                     context,
                                     bookId: bookId,
+                                    categories: categories,
                                     assets: assets,
                                     tags: tags,
                                     currencies: currencies,
@@ -1320,6 +1346,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
                 type = value;
                 categoryId = null;
                 parentCatId = null;
+                _remarksExpanded = false;
               }),
       );
     }
@@ -1440,7 +1467,10 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
                   subCategories: subCats,
                   selectedCategoryId: categoryId,
                   enabled: !busy,
-                  onSelectCategoryId: (id) => setState(() => categoryId = id),
+                  onSelectCategoryId: (id) => setState(() {
+                    if (categoryId != id) _remarksExpanded = false;
+                    categoryId = id;
+                  }),
                 ),
               ),
             ),
@@ -1451,6 +1481,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
               selectedParentId: parentCatId,
               enabled: !busy,
               onSelectCategory: (cat) => setState(() {
+                if (categoryId != cat.id) _remarksExpanded = false;
                 parentCatId = cat.id;
                 categoryId = cat.id;
               }),
@@ -1632,6 +1663,9 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
                   keyboardType: const TextInputType.numberWithOptions(
                     decimal: true,
                   ),
+                  textInputAction: TextInputAction.done,
+                  onEditingComplete: _activateCustomKeypad,
+                  onSubmitted: (_) => _activateCustomKeypad(),
                   inputFormatters: amountInputFormatters,
                   style: const TextStyle(fontSize: 14),
                   decoration: InputDecoration(
@@ -1672,6 +1706,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
   Widget _buildBottomDock(
     BuildContext context, {
     required int? bookId,
+    required List<RecordCategory> categories,
     required List<Asset> assets,
     required List<Tag> tags,
     required List<Currency> currencies,
@@ -1680,6 +1715,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
   }) {
     final cs = Theme.of(context).colorScheme;
     final (sc, ac) = _currencies();
+    final showCurrencyBadge = sc != baseCurrency || sc != ac;
     final pendingOp = hasPendingOperator(amount.text);
     final isCustomKeypadOpen = _isCustomKeypadOpen;
     final remarksEnabled = diyConfig.isEnabled(
@@ -1696,6 +1732,125 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
         }
       } on Failure {
         livePreview = null;
+      }
+    }
+
+    final Widget summaryLeft;
+    if (type == RecordType.transfer) {
+      final allAssets = ref.watch(assetsProvider).value ?? assets;
+      final fromAsset = allAssets.where((a) => a.id == fromAssetId).firstOrNull;
+      final toAsset = allAssets.where((a) => a.id == toAssetId).firstOrNull;
+      final transferSummary =
+          '${fromAsset?.name ?? '转出账户'} → ${toAsset?.name ?? '转入账户'}';
+      summaryLeft = Row(
+        children: [
+          Container(
+            width: 28,
+            height: 28,
+            decoration: BoxDecoration(
+              color: cs.primary,
+              shape: BoxShape.circle,
+            ),
+            alignment: Alignment.center,
+            child: Icon(
+              Icons.swap_horiz_rounded,
+              size: 16,
+              color: cs.onPrimary,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              transferSummary,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 13.5,
+                fontWeight: FontWeight.w600,
+                color: cs.onSurface,
+              ),
+            ),
+          ),
+        ],
+      );
+    } else {
+      final selectedCat = categoryId == null
+          ? null
+          : categories.where((c) => c.id == categoryId).firstOrNull;
+      final parentCat = selectedCat == null
+          ? null
+          : (selectedCat.parentCatId == noRef || selectedCat.parentCatId == -1)
+          ? selectedCat
+          : categories
+                .where((c) => c.id == selectedCat.parentCatId)
+                .firstOrNull;
+      if (selectedCat != null) {
+        final effectiveColorHex =
+            (selectedCat.colorFill != null &&
+                selectedCat.colorFill!.trim().isNotEmpty)
+            ? selectedCat.colorFill
+            : parentCat?.colorFill;
+        final catLabel = parentCat != null && selectedCat.id != parentCat.id
+            ? '${parentCat.name} · ${selectedCat.name}'
+            : selectedCat.name;
+        summaryLeft = Row(
+          children: [
+            CategoryIconAvatar(
+              iconKey: selectedCat.icon,
+              parentIconKey: parentCat?.icon,
+              colorHex: effectiveColorHex,
+              name: selectedCat.name,
+              type: selectedCat.type,
+              size: 28,
+              selected: true,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                catLabel,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: cs.onSurface,
+                ),
+              ),
+            ),
+          ],
+        );
+      } else {
+        summaryLeft = Row(
+          children: [
+            Container(
+              width: 28,
+              height: 28,
+              decoration: BoxDecoration(
+                color: cs.surfaceContainerHighest,
+                shape: BoxShape.circle,
+              ),
+              alignment: Alignment.center,
+              child: Icon(
+                Icons.category_outlined,
+                size: 15,
+                color: cs.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                '请选择分类',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w500,
+                  color: cs.onSurfaceVariant,
+                ),
+              ),
+            ),
+          ],
+        );
       }
     }
 
@@ -1823,6 +1978,9 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
                             keyboardType: const TextInputType.numberWithOptions(
                               decimal: true,
                             ),
+                            textInputAction: TextInputAction.done,
+                            onEditingComplete: _activateCustomKeypad,
+                            onSubmitted: (_) => _activateCustomKeypad(),
                             inputFormatters: amountInputFormatters,
                             style: const TextStyle(fontSize: 13),
                             onChanged: (_) => convertedEdited = true,
@@ -1880,101 +2038,17 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
                   ),
                 ),
 
-              // Compact Horizontal Scrollable Pill Toolbar (single 36px strip)
-              _buildPillToolbar(
-                context,
-                assets: assets,
-                tags: tags,
-                currencies: currencies,
-                diyConfig: diyConfig,
-              ),
-
-              // Frequent remark chips (0px when disabled or empty)
-              if (remarksEnabled &&
-                  type != RecordType.transfer &&
-                  categoryId != null)
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  child: FrequentRemarkChips(
-                    categoryId: categoryId!,
-                    selectedRemark: remark.text,
-                    maxCount: 6,
-                    enabled: !busy,
-                    onSelectRemark: (value) =>
-                        setState(() => remark.text = value),
-                  ),
-                ),
-
-              // Remark + Live Amount Expression Bar
+              // Row 1: Category / Transfer Summary + Large Amount Bar (no vertical divider)
               Padding(
-                padding: const EdgeInsets.fromLTRB(12, 2, 12, 4),
+                key: const Key('editor-summary-amount-row'),
+                padding: const EdgeInsets.fromLTRB(12, 6, 12, 2),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
+                    Expanded(flex: 4, child: summaryLeft),
+                    const SizedBox(width: 8),
                     Expanded(
-                      flex: 5,
-                      child: TextField(
-                        key: const Key('remark'),
-                        controller: remark,
-                        focusNode: _remarkFocus,
-                        enabled: !busy,
-                        maxLength: 200,
-                        onTap: busy
-                            ? null
-                            : () {
-                                if (_showCustomKeypad) {
-                                  setState(() => _showCustomKeypad = false);
-                                }
-                              },
-                        buildCounter:
-                            (
-                              _, {
-                              required currentLength,
-                              required isFocused,
-                              required maxLength,
-                            }) => null,
-                        onChanged: (_) =>
-                            setState(() => _savedAndResetBanner = false),
-                        style: const TextStyle(fontSize: 13.5),
-                        decoration: InputDecoration(
-                          isDense: true,
-                          hintText: '点击填写备注...',
-                          hintStyle: TextStyle(
-                            fontSize: 13,
-                            color: cs.onSurfaceVariant.withAlpha(160),
-                          ),
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 4,
-                            vertical: 8,
-                          ),
-                          border: InputBorder.none,
-                          prefixIcon: Icon(
-                            Icons.edit_note_rounded,
-                            size: 19,
-                            color: cs.onSurfaceVariant,
-                          ),
-                          prefixIconConstraints: const BoxConstraints(
-                            minWidth: 26,
-                            minHeight: 26,
-                          ),
-                          suffixIcon: _buildRemarkSuffixIcon(
-                            remarksEnabled: remarksEnabled,
-                          ),
-                          suffixIconConstraints: const BoxConstraints(
-                            minWidth: 26,
-                            minHeight: 26,
-                          ),
-                        ),
-                      ),
-                    ),
-                    Container(
-                      width: 1,
-                      height: 22,
-                      margin: const EdgeInsets.symmetric(horizontal: 8),
-                      color: cs.outlineVariant.withAlpha(120),
-                    ),
-                    Expanded(
-                      flex: 5,
+                      flex: 6,
                       child: GestureDetector(
                         key: const Key('amount-tap-area'),
                         behavior: HitTestBehavior.opaque,
@@ -1987,6 +2061,8 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
                               Text(
                                 '= $livePreview',
                                 key: const Key('amount-live-preview'),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
                                   fontSize: 11,
                                   fontWeight: FontWeight.w600,
@@ -1998,15 +2074,28 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
                               ),
                             Row(
                               children: [
-                                Text(
-                                  sc,
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w600,
-                                    color: cs.onSurfaceVariant,
+                                if (showCurrencyBadge) ...[
+                                  Container(
+                                    key: const Key('amount-currency-badge'),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 6,
+                                      vertical: 2,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: cs.secondaryContainer,
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: Text(
+                                      sc,
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w700,
+                                        color: cs.onSecondaryContainer,
+                                      ),
+                                    ),
                                   ),
-                                ),
-                                const SizedBox(width: 4),
+                                  const SizedBox(width: 6),
+                                ],
                                 Expanded(
                                   child: TextField(
                                     key: const Key('amount'),
@@ -2062,10 +2151,9 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
                                           return;
                                         }
                                       }
-                                      _amountFocus.unfocus();
                                     },
                                     style: TextStyle(
-                                      fontSize: 21,
+                                      fontSize: 22,
                                       fontWeight: FontWeight.w800,
                                       color:
                                           type == RecordType.income ||
@@ -2082,7 +2170,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
                                       isDense: true,
                                       hintText: '0.00',
                                       hintStyle: TextStyle(
-                                        fontSize: 21,
+                                        fontSize: 22,
                                         fontWeight: FontWeight.w700,
                                         color: cs.outlineVariant,
                                       ),
@@ -2104,113 +2192,140 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
                 ),
               ),
 
+              // Row 2: Full-width Remark Input Row
+              Padding(
+                key: const Key('editor-remark-row'),
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: TextField(
+                  key: const Key('remark'),
+                  controller: remark,
+                  focusNode: _remarkFocus,
+                  enabled: !busy,
+                  maxLength: 200,
+                  textInputAction: TextInputAction.done,
+                  onEditingComplete: _activateCustomKeypad,
+                  onSubmitted: (_) => _activateCustomKeypad(),
+                  buildCounter:
+                      (
+                        _, {
+                        required currentLength,
+                        required isFocused,
+                        required maxLength,
+                      }) => null,
+                  onChanged: (_) =>
+                      setState(() => _savedAndResetBanner = false),
+                  style: const TextStyle(fontSize: 13.5),
+                  decoration: InputDecoration(
+                    isDense: true,
+                    hintText: '输入备注...',
+                    hintStyle: TextStyle(
+                      fontSize: 13,
+                      color: cs.onSurfaceVariant.withAlpha(160),
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 4,
+                      vertical: 8,
+                    ),
+                    border: InputBorder.none,
+                    prefixIcon: Icon(
+                      Icons.sell_outlined,
+                      size: 17,
+                      color: cs.onSurfaceVariant,
+                    ),
+                    prefixIconConstraints: const BoxConstraints(
+                      minWidth: 26,
+                      minHeight: 26,
+                    ),
+                    suffixIcon: _buildRemarkSuffixIcon(
+                      remarksEnabled: remarksEnabled,
+                    ),
+                    suffixIconConstraints: const BoxConstraints(
+                      minWidth: 26,
+                      minHeight: 26,
+                    ),
+                  ),
+                ),
+              ),
+
+              // A2 Frequent Remarks Panel (0px by default in custom-keypad mode;
+              // shown when manually expanded via ▾ or when remark is focused)
+              if (remarksEnabled &&
+                  type != RecordType.transfer &&
+                  categoryId != null &&
+                  (_remarksExpanded || _remarkFocus.hasFocus))
+                TextFieldTapRegion(
+                  child: ExcludeFocus(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 0, 8, 4),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          Expanded(
+                            child: FrequentRemarkChips(
+                              categoryId: categoryId!,
+                              selectedRemark: remark.text,
+                              maxCount: 6,
+                              enabled: !busy,
+                              onSelectRemark: (value) => setState(() {
+                                remark.value = TextEditingValue(
+                                  text: value,
+                                  selection: TextSelection.collapsed(
+                                    offset: value.length,
+                                  ),
+                                );
+                                _savedAndResetBanner = false;
+                                if (!_remarkFocus.hasFocus) {
+                                  _remarksExpanded = false;
+                                }
+                              }),
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          IconButton(
+                            key: const Key('editor-remarks-btn'),
+                            tooltip: '常用备注管理',
+                            visualDensity: VisualDensity.compact,
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints.tightFor(
+                              width: 28,
+                              height: 28,
+                            ),
+                            icon: Icon(
+                              Icons.settings_outlined,
+                              size: 17,
+                              color: cs.onSurfaceVariant,
+                            ),
+                            onPressed: busy ? null : _openRemarksManager,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+
+              // Row 3: Horizontal Scrollable Pill Toolbar (hidden only when remark has focus;
+              // kept mounted when discount inside this toolbar has focus!)
+              if (!_remarkFocus.hasFocus)
+                _buildPillToolbar(
+                  context,
+                  assets: assets,
+                  tags: tags,
+                  currencies: currencies,
+                  diyConfig: diyConfig,
+                ),
+
+              // Row 4: 4×4 Custom Keypad (no fallback button bar when OS keyboard is open!)
               if (isCustomKeypadOpen)
                 RecordCustomKeypad(
                   amountText: amount.text,
                   enabled: canSubmit,
                   busy: busy,
-                  showSaveAndNew: !editing,
                   onKeyTap: _onKeypadKey,
                   onBackspace: () => _onKeypadKey('BACKSPACE'),
                   onClearAll: () => _onKeypadKey('CLEAR'),
-                  onCollapse: _collapseCustomKeypad,
                   onEvaluate: _evaluateInPlace,
                   onSave: () => unawaited(_save(stayAndReset: false)),
-                  onSaveAndNew: editing
-                      ? null
-                      : () => unawaited(_save(stayAndReset: true)),
-                )
-              else
-                // Compact bottom action bar above OS keyboard or when collapsed
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 2, 12, 8),
-                  child: Row(
-                    children: [
-                      if (!editing) ...[
-                        Expanded(
-                          flex: 1,
-                          child: OutlinedButton(
-                            key: const Key('save-and-new'),
-                            style: OutlinedButton.styleFrom(
-                              minimumSize: const Size(0, 38),
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                              ),
-                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                            ),
-                            onPressed: canSubmit
-                                ? () => unawaited(_save(stayAndReset: true))
-                                : null,
-                            child: const Text(
-                              '再记一笔',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                      ],
-                      Expanded(
-                        flex: 2,
-                        child: pendingOp
-                            ? TextFieldTapRegion(
-                                child: Tooltip(
-                                  message: '计算结果',
-                                  child: KeyedSubtree(
-                                    key: const Key('editor-save-btn'),
-                                    child: FilledButton(
-                                      key: const Key('save'),
-                                      focusNode: _evalBtnFocusNode,
-                                      style: FilledButton.styleFrom(
-                                        minimumSize: const Size(0, 38),
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 12,
-                                        ),
-                                        tapTargetSize:
-                                            MaterialTapTargetSize.shrinkWrap,
-                                      ),
-                                      onPressed: canSubmit
-                                          ? _evaluateInPlace
-                                          : null,
-                                      child: const Text(
-                                        '=',
-                                        style: TextStyle(
-                                          fontSize: 19,
-                                          fontWeight: FontWeight.w800,
-                                          height: 1.0,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              )
-                            : KeyedSubtree(
-                                key: const Key('editor-save-btn'),
-                                child: FilledButton(
-                                  key: const Key('save'),
-                                  style: FilledButton.styleFrom(
-                                    minimumSize: const Size(0, 38),
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 16,
-                                    ),
-                                    tapTargetSize:
-                                        MaterialTapTargetSize.shrinkWrap,
-                                  ),
-                                  onPressed: canSubmit
-                                      ? () => unawaited(
-                                          _save(stayAndReset: false),
-                                        )
-                                      : null,
-                                  child: Text(
-                                    busy ? '保存中…' : '保存',
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                              ),
-                      ),
-                    ],
-                  ),
+                  onSaveAndNew: () => unawaited(_save(stayAndReset: true)),
                 ),
             ],
           ),
@@ -2431,6 +2546,9 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage> {
                                   const TextInputType.numberWithOptions(
                                     decimal: true,
                                   ),
+                              textInputAction: TextInputAction.done,
+                              onEditingComplete: _activateCustomKeypad,
+                              onSubmitted: (_) => _activateCustomKeypad(),
                               inputFormatters: amountInputFormatters,
                               onChanged: (_) =>
                                   setState(() => _savedAndResetBanner = false),

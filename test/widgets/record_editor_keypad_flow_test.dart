@@ -49,12 +49,20 @@ Future<void> _settle(WidgetTester tester, [int ticks = 8]) async {
 
 Future<void> _tapKeys(WidgetTester tester, Iterable<String> keys) async {
   for (final k in keys) {
+    if (k == '×' || k == '*') {
+      await tester.longPress(find.byKey(const Key('editor-op-add')));
+      await tester.pump();
+      continue;
+    }
+    if (k == '÷' || k == '/') {
+      await tester.longPress(find.byKey(const Key('editor-op-sub')));
+      await tester.pump();
+      continue;
+    }
     final finder = switch (k) {
       '.' => find.byKey(const Key('keypad-dot')),
       '+' => find.byKey(const Key('editor-op-add')),
       '-' || '−' => find.byKey(const Key('editor-op-sub')),
-      '×' || '*' => find.byKey(const Key('editor-op-mul')),
-      '÷' || '/' => find.byKey(const Key('editor-op-div')),
       'BS' => find.byKey(const Key('keypad-backspace')),
       _ => find.byKey(Key('keypad-$k')),
     };
@@ -67,10 +75,10 @@ void main() {
   driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
 
   group(
-    'RecordEditorPage Dual-Mode Custom Keypad & OS Keyboard Auto-Push Dock (SCR-002)',
+    'RecordEditorPage 4x4 Custom Keypad & 3-State OS Keyboard Auto-Push Dock (SCR-002)',
     () {
       testWidgets(
-        'opens with taller custom keypad (TextInputType.none) and auto-collapses custom keypad to push bottom dock above OS keyboard when typing remark or discount',
+        'opens with 4x4 custom keypad (TextInputType.none) and auto-collapses custom keypad without redundant save bar when typing remark or discount',
         (tester) async {
           tester.view.devicePixelRatio = 1.0;
           tester.view.physicalSize = const Size(800, 600);
@@ -114,10 +122,14 @@ void main() {
           );
           expect(initialDockRect.bottom, closeTo(screenHeight, 0.5));
 
-          // 2. Enter amount via custom keypad ('25.8'), then tap Key('remark') with 280px OS keyboard:
-          // custom keypad collapses immediately and bottom dock rides smoothly right above keyboard!
+          // 2. Enter amount via custom keypad ('25.8'), expand attachment strip,
+          // then tap Key('remark') with 280px / 300px OS keyboard:
+          // custom keypad & pill toolbar collapse cleanly with zero redundant save row!
           await _tapKeys(tester, ['2', '5', '.', '8']);
           expect(amountField.controller!.text, '25.8');
+
+          await tester.tap(find.byKey(const Key('editor-images-pill')));
+          await tester.pump();
 
           await tester.tap(find.byKey(const Key('remark')));
           tester.view.viewInsets = const FakeViewPadding(
@@ -130,25 +142,20 @@ void main() {
           expect(tester.takeException(), isNull);
 
           expect(find.byKey(const Key('record-custom-keypad')), findsNothing);
+          expect(find.byKey(const Key('editor-pill-toolbar')), findsNothing);
+          expect(find.byKey(const Key('save')), findsNothing);
+          expect(find.byKey(const Key('save-and-new')), findsNothing);
+
           final remarkKbDockRect = tester.getRect(
             find.byKey(const Key('editor-bottom-dock')),
           );
           expect(remarkKbDockRect.bottom, closeTo(screenHeight - 280, 0.5));
           expect(
-            tester.getRect(find.byKey(const Key('editor-pill-toolbar'))).bottom,
-            lessThanOrEqualTo(screenHeight - 280),
-          );
-          expect(
             tester.getRect(find.byKey(const Key('remark'))).bottom,
-            lessThanOrEqualTo(screenHeight - 280),
-          );
-          expect(
-            tester.getRect(find.byKey(const Key('save'))).bottom,
             lessThanOrEqualTo(screenHeight - 280),
           );
 
           // 3. Torture test: tall 300px OS keyboard on 800x600 with attachment strip expanded -> zero overflow!
-          await tester.tap(find.byKey(const Key('editor-images-pill')));
           tester.view.viewInsets = const FakeViewPadding(
             left: 0,
             top: 0,
@@ -163,15 +170,16 @@ void main() {
             lessThanOrEqualTo(screenHeight - 300),
           );
 
-          // 4. Tap CNY / amount area -> unfocuses remark, dismisses OS keyboard, re-opens custom keypad!
-          await tester.tap(find.text('CNY'));
+          // 4. Tap amount-tap-area -> unfocuses remark, dismisses OS keyboard, re-opens custom keypad & pill toolbar!
+          await tester.tap(find.byKey(const Key('amount-tap-area')));
           tester.view.viewInsets = FakeViewPadding.zero;
           await tester.pumpAndSettle();
           expect(tester.takeException(), isNull);
           expect(amountField.focusNode!.hasFocus, isTrue);
+          expect(find.byKey(const Key('editor-pill-toolbar')), findsOneWidget);
           expect(find.byKey(const Key('record-custom-keypad')), findsOneWidget);
 
-          // 5. Focusing inline secondary OS-IME input (discount) also hides custom keypad cleanly!
+          // 5. Focusing inline secondary OS-IME input (discount) hides custom keypad while keeping pill toolbar mounted!
           await tester.tap(find.byKey(const Key('discount')));
           tester.view.viewInsets = const FakeViewPadding(
             left: 0,
@@ -182,17 +190,28 @@ void main() {
           await tester.pumpAndSettle();
           expect(tester.takeException(), isNull);
           expect(find.byKey(const Key('record-custom-keypad')), findsNothing);
+          expect(find.byKey(const Key('editor-pill-toolbar')), findsOneWidget);
+          expect(
+            tester
+                .widget<TextField>(find.byKey(const Key('discount')))
+                .focusNode!
+                .hasFocus,
+            isTrue,
+          );
 
+          // Confirming discount via OS keyboard Done restores custom keypad!
+          await tester.testTextInput.receiveAction(TextInputAction.done);
           tester.view.viewInsets = FakeViewPadding.zero;
           await tester.pumpAndSettle();
           expect(tester.takeException(), isNull);
+          expect(find.byKey(const Key('record-custom-keypad')), findsOneWidget);
 
           await closeCleanly();
         },
       );
 
       testWidgets(
-        'custom keypad expression entry, IME Done submit, and 1-tap save above OS keyboard work end-to-end with category grid, subcategory strip, account pill, and tag pill',
+        'custom keypad expression entry, IME Done submit, and remark Done -> custom keypad save work end-to-end with category grid, subcategory strip, account pill, and tag pill',
         (tester) async {
           tester.view.devicePixelRatio = 1.0;
           tester.view.physicalSize = const Size(390, 844);
@@ -252,13 +271,20 @@ void main() {
           expect(tester.takeException(), isNull);
           expect(find.byKey(const Key('record-custom-keypad')), findsOneWidget);
 
-          // 1. Tap visual category grid '餐饮' -> inline subcategory strip appears.
+          // 1. Tap visual category grid '餐饮' -> inline subcategory strip appears; selecting '精品咖啡' updates summary row.
           await tester.tap(find.byKey(const Key('cat-餐饮')));
           await _settle(tester, 4);
           expect(find.byKey(const Key('subcat-all')), findsOneWidget);
           expect(find.byKey(const Key('cat-精品咖啡')), findsOneWidget);
           await tester.tap(find.byKey(const Key('cat-精品咖啡')));
           await tester.pump();
+          expect(
+            find.descendant(
+              of: find.byKey(const Key('editor-summary-amount-row')),
+              matching: find.text('餐饮 · 精品咖啡'),
+            ),
+            findsOneWidget,
+          );
 
           // 2. Select account via compact Account Pill (Key('asset')).
           await tester.tap(find.byKey(const Key('asset')));
@@ -301,7 +327,7 @@ void main() {
           expect(find.byKey(const Key('amount-live-preview')), findsNothing);
 
           // 4b. Clear via long-press backspace, enter '12.5+7.5' via custom keypad,
-          // evaluate with '=', then type remark and hit '保存' right above OS keyboard!
+          // evaluate with '=', then type remark -> Done restores custom keypad -> tap '保存'!
           await tester.longPress(find.byKey(const Key('keypad-backspace')));
           await tester.pump();
           await _tapKeys(tester, ['1', '2', '.', '5', '+', '7', '.', '5']);
@@ -320,10 +346,15 @@ void main() {
           );
           expect(find.text('保存'), findsOneWidget);
 
-          // Type remark (hides custom keypad, shows compact '保存' row) and save in 1 tap!
+          // Type remark -> hides custom keypad & save button; OS keyboard confirm ('✓') restores custom keypad!
           await tester.enterText(find.byKey(const Key('remark')), '旅途手冲');
           await tester.pump();
           expect(find.byKey(const Key('record-custom-keypad')), findsNothing);
+          expect(find.byKey(const Key('save')), findsNothing);
+
+          await tester.testTextInput.receiveAction(TextInputAction.done);
+          await tester.pump();
+          expect(find.byKey(const Key('record-custom-keypad')), findsOneWidget);
           expect(find.byKey(const Key('save')), findsOneWidget);
 
           await tester.tap(find.byKey(const Key('save')));
@@ -361,7 +392,7 @@ void main() {
       );
 
       testWidgets(
-        'save-and-new (再记一笔) books first bill with auto-evaluated expression, restores custom keypad while keeping account/category, and books second bill',
+        'save-and-new (再记) books first bill with auto-evaluated expression, restores custom keypad while keeping account/category, and books second bill',
         (tester) async {
           await tester.binding.setSurfaceSize(const Size(800, 600));
           addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -398,12 +429,17 @@ void main() {
           await tester.tap(find.text('极速现金').last);
           await _settle(tester, 4);
 
-          // Enter expression 10+2×3 (= 36.00 left-to-right!) via custom keypad + remark, then tap '再记一笔'.
+          // Enter expression 10+2×3 (= 36.00 left-to-right!) via custom keypad + remark, confirm remark, then tap '再记'.
           await _tapKeys(tester, ['1', '0', '+', '2', '×', '3']);
           expect(find.text('= 36.00'), findsOneWidget);
           await tester.enterText(find.byKey(const Key('remark')), '第一笔早餐');
           await tester.pump();
           expect(find.byKey(const Key('record-custom-keypad')), findsNothing);
+
+          await tester.testTextInput.receiveAction(TextInputAction.done);
+          await tester.pump();
+          expect(find.byKey(const Key('record-custom-keypad')), findsOneWidget);
+          expect(find.text('再记'), findsOneWidget);
 
           await tester.tap(find.byKey(const Key('save-and-new')));
           await _settle(tester);
@@ -456,7 +492,7 @@ void main() {
       );
 
       testWidgets(
-        'transfer dual-account card swaps accounts in 1 tap, hides custom keypad on fee focus, and cold-start edit hides save-and-new cleanly',
+        'transfer dual-account card swaps accounts in 1 tap, hides custom keypad on fee focus, Done restores keypad, and cold-start edit keeps 再记',
         (tester) async {
           await tester.binding.setSurfaceSize(const Size(800, 600));
           addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -528,12 +564,23 @@ void main() {
 
           await tester.tap(find.byKey(const Key('transfer-swap-btn')));
           await tester.pump();
+          expect(
+            find.descendant(
+              of: find.byKey(const Key('editor-summary-amount-row')),
+              matching: find.text('招商储蓄 → 零钱通'),
+            ),
+            findsOneWidget,
+          );
 
-          // Enter 100 via custom keypad, then enter fee 1.50 (auto-hides custom keypad!).
+          // Enter 100 via custom keypad, then enter fee 1.50 (auto-hides custom keypad!), Done restores keypad!
           await _tapKeys(tester, ['1', '0', '0']);
           await tester.enterText(find.byKey(const Key('fee')), '1.50');
           await tester.pump();
           expect(find.byKey(const Key('record-custom-keypad')), findsNothing);
+
+          await tester.testTextInput.receiveAction(TextInputAction.done);
+          await tester.pump();
+          expect(find.byKey(const Key('record-custom-keypad')), findsOneWidget);
 
           await tester.tap(find.byKey(const Key('save')));
           await _settle(tester);
@@ -553,7 +600,7 @@ void main() {
           expect(bAfter!.balanceMinor, BigInt.from(30000));
 
           // Mount cold-start edit mode directly on `createdTransferId`:
-          // custom keypad opens with '00' in place of hidden 'save-and-new'!
+          // 4x4 custom keypad opens with '再记' (Key('save-and-new')) and '保存' (Key('save'))!
           await tester.pumpWidget(
             ProviderScope(
               retry: (_, _) => null,
@@ -566,8 +613,9 @@ void main() {
           await _settle(tester);
           expect(tester.takeException(), isNull);
           expect(find.byKey(const Key('record-custom-keypad')), findsOneWidget);
-          expect(find.byKey(const Key('save-and-new')), findsNothing);
-          expect(find.byKey(const Key('keypad-00')), findsOneWidget);
+          expect(find.byKey(const Key('save-and-new')), findsOneWidget);
+          expect(find.text('再记'), findsOneWidget);
+          expect(find.byKey(const Key('keypad-00')), findsNothing);
           expect(find.byKey(const Key('save')), findsOneWidget);
           expect(
             tester

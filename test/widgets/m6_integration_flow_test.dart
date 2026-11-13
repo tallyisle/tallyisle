@@ -347,6 +347,8 @@ void main() {
         await tester.tap(find.byKey(const Key('cat-餐饮')));
         await _settle(tester, 4);
         await tester.enterText(find.byKey(const Key('remark')), '星巴克拿铁');
+        await tester.testTextInput.receiveAction(TextInputAction.done);
+        await tester.pump();
 
         await tester.scrollUntilVisible(
           find.byKey(const Key('discount')),
@@ -354,6 +356,8 @@ void main() {
           scrollable: find.byType(Scrollable).first,
         );
         await tester.enterText(find.byKey(const Key('discount')), '5.00');
+        await tester.testTextInput.receiveAction(TextInputAction.done);
+        await tester.pump();
 
         await tester.scrollUntilVisible(
           find.byKey(const Key('record-location-tile')),
@@ -392,11 +396,19 @@ void main() {
         await _settle(tester);
         await _goBack(tester);
 
-        // 3. Re-open RecordEditorPage on 餐饮 -> frequent remark chip '星巴克拿铁' auto-appears!
+        // 3. Re-open RecordEditorPage on 餐饮 -> A2 frequent remarks collapsed by default,
+        // expandable via ▾ toggle (and auto-revealed on remark focus)!
         await tester.tap(find.byKey(const Key('add-record')));
         await _settle(tester);
         await tester.tap(find.byKey(const Key('cat-餐饮')));
         await _settle(tester);
+        expect(
+          find.byKey(const Key('editor-remarks-toggle-btn')),
+          findsOneWidget,
+        );
+        expect(find.byKey(const Key('frequent_remark_chips')), findsNothing);
+        await tester.tap(find.byKey(const Key('editor-remarks-toggle-btn')));
+        await _settle(tester, 4);
         expect(find.byKey(const Key('frequent_remark_chips')), findsOneWidget);
         expect(find.text('星巴克拿铁'), findsOneWidget);
         await _goBack(tester);
