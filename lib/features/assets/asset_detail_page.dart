@@ -107,6 +107,78 @@ class _Header extends StatelessWidget {
         ? '借贷账户'
         : '资金账户';
 
+    final actionButtons = <Widget>[
+      if (credit)
+        FilledButton.icon(
+          key: const Key('credit-repay'),
+          style: FilledButton.styleFrom(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+          ),
+          icon: const Icon(Icons.payments_outlined, size: 18),
+          label: const FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text('还款', maxLines: 1, softWrap: false),
+          ),
+          onPressed: () => context.push(
+            repayRoute(
+              asset,
+              asset.balanceMinor.isNegative ? -asset.balanceMinor : BigInt.zero,
+            ),
+          ),
+        ),
+      if (asset.type != AssetType.debt)
+        OutlinedButton.icon(
+          style: OutlinedButton.styleFrom(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+          ),
+          icon: const Icon(Icons.edit_note, size: 18),
+          label: const FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text('记一笔', maxLines: 1, softWrap: false),
+          ),
+          onPressed: () => context.push('/record/new?asset=${asset.id}'),
+        ),
+      if (!credit && asset.type != AssetType.debt)
+        OutlinedButton.icon(
+          key: const Key('asset-detail-deposits'),
+          style: OutlinedButton.styleFrom(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+          ),
+          icon: const Icon(Icons.lock_clock_outlined, size: 18),
+          label: const FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text('定期存款', maxLines: 1, softWrap: false),
+          ),
+          onPressed: () => context.push('/deposits?assetId=${asset.id}'),
+        ),
+      if (credit)
+        OutlinedButton.icon(
+          key: const Key('asset-detail-installments'),
+          style: OutlinedButton.styleFrom(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+          ),
+          icon: const Icon(Icons.calendar_view_month_outlined, size: 18),
+          label: const FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text('分期管理', maxLines: 1, softWrap: false),
+          ),
+          onPressed: () => context.push('/installments'),
+        ),
+      if (asset.type == AssetType.debt)
+        OutlinedButton.icon(
+          key: const Key('asset-detail-debt'),
+          style: OutlinedButton.styleFrom(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+          ),
+          icon: const Icon(Icons.swap_horiz_outlined, size: 18),
+          label: const FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text('借贷详情', maxLines: 1, softWrap: false),
+          ),
+          onPressed: () => context.pushReplacement('/debts/${asset.id}'),
+        ),
+    ];
+
     return Card(
       margin: const EdgeInsets.all(16),
       child: Padding(
@@ -125,15 +197,30 @@ class _Header extends StatelessWidget {
                   size: 40,
                 ),
                 const SizedBox(width: 10),
-                Text(accountTypeLabel, style: theme.textTheme.labelLarge),
-                if (asset.currency != null) ...[
-                  const SizedBox(width: 8),
-                  Chip(label: Text(asset.currency!)),
-                ],
-                if (status != null) ...[
-                  const SizedBox(width: 8),
-                  Chip(label: Text(status)),
-                ],
+                Expanded(
+                  child: Wrap(
+                    spacing: 8,
+                    runSpacing: 6,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      Text(accountTypeLabel, style: theme.textTheme.labelLarge),
+                      if (asset.currency != null)
+                        Chip(
+                          visualDensity: VisualDensity.compact,
+                          materialTapTargetSize:
+                              MaterialTapTargetSize.shrinkWrap,
+                          label: Text(asset.currency!),
+                        ),
+                      if (status != null)
+                        Chip(
+                          visualDensity: VisualDensity.compact,
+                          materialTapTargetSize:
+                              MaterialTapTargetSize.shrinkWrap,
+                          label: Text(status),
+                        ),
+                    ],
+                  ),
+                ),
               ],
             ),
             const SizedBox(height: 12),
@@ -142,10 +229,16 @@ class _Header extends StatelessWidget {
               style: theme.textTheme.labelMedium,
             ),
             if (!credit)
-              Text(
-                formatMinor(asset.balanceMinor),
-                key: const Key('asset-detail-balance'),
-                style: theme.textTheme.headlineMedium,
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  formatMinor(asset.balanceMinor),
+                  key: const Key('asset-detail-balance'),
+                  maxLines: 1,
+                  softWrap: false,
+                  style: theme.textTheme.headlineMedium,
+                ),
               ),
             if (credit) ...[
               const SizedBox(height: 4),
@@ -160,57 +253,17 @@ class _Header extends StatelessWidget {
               const SizedBox(height: 8),
               Text(asset.remark!, style: theme.textTheme.bodySmall),
             ],
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                if (credit)
-                  FilledButton.icon(
-                    key: const Key('credit-repay'),
-                    icon: const Icon(Icons.payments_outlined),
-                    label: const Text('还款'),
-                    onPressed: () => context.push(
-                      repayRoute(
-                        asset,
-                        asset.balanceMinor.isNegative
-                            ? -asset.balanceMinor
-                            : BigInt.zero,
-                      ),
-                    ),
-                  ),
-                if (asset.type != AssetType.debt)
-                  OutlinedButton.icon(
-                    icon: const Icon(Icons.edit_note),
-                    label: const Text('记一笔'),
-                    onPressed: () =>
-                        context.push('/record/new?asset=${asset.id}'),
-                  ),
-                if (!credit && asset.type != AssetType.debt)
-                  OutlinedButton.icon(
-                    key: const Key('asset-detail-deposits'),
-                    icon: const Icon(Icons.lock_clock_outlined),
-                    label: const Text('定期存款'),
-                    onPressed: () =>
-                        context.push('/deposits?assetId=${asset.id}'),
-                  ),
-                if (credit)
-                  OutlinedButton.icon(
-                    key: const Key('asset-detail-installments'),
-                    icon: const Icon(Icons.calendar_view_month_outlined),
-                    label: const Text('分期管理'),
-                    onPressed: () => context.push('/installments'),
-                  ),
-                if (asset.type == AssetType.debt)
-                  OutlinedButton.icon(
-                    key: const Key('asset-detail-debt'),
-                    icon: const Icon(Icons.swap_horiz_outlined),
-                    label: const Text('借贷详情'),
-                    onPressed: () =>
-                        context.pushReplacement('/debts/${asset.id}'),
-                  ),
-              ],
-            ),
+            if (actionButtons.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  for (var i = 0; i < actionButtons.length; i++) ...[
+                    if (i > 0) const SizedBox(width: 8),
+                    Expanded(child: actionButtons[i]),
+                  ],
+                ],
+              ),
+            ],
           ],
         ),
       ),

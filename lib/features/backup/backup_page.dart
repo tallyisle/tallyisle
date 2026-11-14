@@ -630,6 +630,17 @@ class _BackupPageState extends ConsumerState<BackupPage>
     }
   }
 
+  static const ButtonStyle _compactButtonStyle = ButtonStyle(
+    padding: WidgetStatePropertyAll(
+      EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+    ),
+  );
+
+  static Widget _singleLineText(String text) => FittedBox(
+    fit: BoxFit.scaleDown,
+    child: Text(text, maxLines: 1, softWrap: false),
+  );
+
   static String _formatSize(int bytes) {
     if (bytes < 1024) return '$bytes B';
     if (bytes < 1024 * 1024) {
@@ -853,28 +864,37 @@ class _BackupPageState extends ConsumerState<BackupPage>
                             style: Theme.of(context).textTheme.titleMedium,
                           ),
                           const SizedBox(height: 8),
-                          SegmentedButton<CloudBackendType>(
-                            key: const Key('cloud_backend_selector'),
-                            showSelectedIcon: false,
-                            segments: const <ButtonSegment<CloudBackendType>>[
-                              ButtonSegment<CloudBackendType>(
-                                value: CloudBackendType.none,
-                                label: Text('未启用'),
+                          SizedBox(
+                            width: double.infinity,
+                            child: SegmentedButton<CloudBackendType>(
+                              key: const Key('cloud_backend_selector'),
+                              showSelectedIcon: false,
+                              style: const ButtonStyle(
+                                visualDensity: VisualDensity.compact,
+                                padding: WidgetStatePropertyAll(
+                                  EdgeInsets.symmetric(horizontal: 10),
+                                ),
                               ),
-                              ButtonSegment<CloudBackendType>(
-                                value: CloudBackendType.webdav,
-                                label: Text('WebDAV'),
-                              ),
-                              ButtonSegment<CloudBackendType>(
-                                value: CloudBackendType.s3,
-                                label: Text('S3 对象存储'),
-                              ),
-                            ],
-                            selected: <CloudBackendType>{activeBackend},
-                            onSelectionChanged: _busy
-                                ? null
-                                : (selected) =>
-                                      _selectCloudBackend(selected.first),
+                              segments: <ButtonSegment<CloudBackendType>>[
+                                ButtonSegment<CloudBackendType>(
+                                  value: CloudBackendType.none,
+                                  label: _singleLineText('未启用'),
+                                ),
+                                ButtonSegment<CloudBackendType>(
+                                  value: CloudBackendType.webdav,
+                                  label: _singleLineText('WebDAV'),
+                                ),
+                                ButtonSegment<CloudBackendType>(
+                                  value: CloudBackendType.s3,
+                                  label: _singleLineText('S3 存储'),
+                                ),
+                              ],
+                              selected: <CloudBackendType>{activeBackend},
+                              onSelectionChanged: _busy
+                                  ? null
+                                  : (selected) =>
+                                        _selectCloudBackend(selected.first),
+                            ),
                           ),
                           const SizedBox(height: 8),
                           Text(
@@ -887,41 +907,56 @@ class _BackupPageState extends ConsumerState<BackupPage>
                             style: Theme.of(context).textTheme.bodySmall,
                           ),
                           const SizedBox(height: 10),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
+                          Row(
                             children: [
-                              OutlinedButton.icon(
-                                key: const Key('open_webdav_config_button'),
-                                onPressed: _busy
-                                    ? null
-                                    : () => _openWebDavConfig(davConfig),
-                                icon: const Icon(Icons.settings_outlined),
-                                label: Text(
-                                  davConfig.isConfigured
-                                      ? 'WebDAV 配置'
-                                      : '配置 WebDAV',
+                              Expanded(
+                                child: OutlinedButton.icon(
+                                  key: const Key('open_webdav_config_button'),
+                                  style: _compactButtonStyle,
+                                  onPressed: _busy
+                                      ? null
+                                      : () => _openWebDavConfig(davConfig),
+                                  icon: const Icon(
+                                    Icons.settings_outlined,
+                                    size: 18,
+                                  ),
+                                  label: _singleLineText(
+                                    davConfig.isConfigured
+                                        ? 'WebDAV 配置'
+                                        : '配置 WebDAV',
+                                  ),
                                 ),
                               ),
-                              OutlinedButton.icon(
-                                key: const Key('open_s3_config_button'),
-                                onPressed: _busy
-                                    ? null
-                                    : () => _openS3Config(s3Config),
-                                icon: const Icon(Icons.cloud_outlined),
-                                label: Text(
-                                  s3Config.isConfigured ? 'S3 配置' : '配置 S3',
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: OutlinedButton.icon(
+                                  key: const Key('open_s3_config_button'),
+                                  style: _compactButtonStyle,
+                                  onPressed: _busy
+                                      ? null
+                                      : () => _openS3Config(s3Config),
+                                  icon: const Icon(
+                                    Icons.cloud_outlined,
+                                    size: 18,
+                                  ),
+                                  label: _singleLineText(
+                                    s3Config.isConfigured ? 'S3 配置' : '配置 S3',
+                                  ),
                                 ),
-                              ),
-                              FilledButton.icon(
-                                key: const Key('cloud_sync_now_button'),
-                                onPressed: !_busy && isActiveCloudReady
-                                    ? _handleSyncNow
-                                    : null,
-                                icon: const Icon(Icons.sync),
-                                label: const Text('立即多端同步'),
                               ),
                             ],
+                          ),
+                          const SizedBox(height: 8),
+                          SizedBox(
+                            width: double.infinity,
+                            child: FilledButton.icon(
+                              key: const Key('cloud_sync_now_button'),
+                              onPressed: !_busy && isActiveCloudReady
+                                  ? _handleSyncNow
+                                  : null,
+                              icon: const Icon(Icons.sync, size: 18),
+                              label: _singleLineText('立即多端同步'),
+                            ),
                           ),
                           const Divider(height: 20),
                           SwitchListTile(
@@ -1115,41 +1150,67 @@ class _BackupPageState extends ConsumerState<BackupPage>
                             style: Theme.of(context).textTheme.bodySmall,
                           ),
                           const SizedBox(height: 12),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
+                          Row(
                             children: [
-                              FilledButton.icon(
-                                key: const Key('local_backup_create_button'),
-                                onPressed: _busy
-                                    ? null
-                                    : _handleCreateLocalBackup,
-                                icon: const Icon(Icons.archive_outlined),
-                                label: const Text('生成本地备份'),
+                              Expanded(
+                                child: FilledButton.icon(
+                                  key: const Key('local_backup_create_button'),
+                                  style: _compactButtonStyle,
+                                  onPressed: _busy
+                                      ? null
+                                      : _handleCreateLocalBackup,
+                                  icon: const Icon(
+                                    Icons.archive_outlined,
+                                    size: 18,
+                                  ),
+                                  label: _singleLineText('生成本地备份'),
+                                ),
                               ),
-                              OutlinedButton.icon(
-                                key: const Key('local_backup_export_button'),
-                                onPressed: !_busy && canSaveExternal
-                                    ? _handleExportSaveAs
-                                    : null,
-                                icon: const Icon(Icons.save_alt),
-                                label: const Text('另存为文件'),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: OutlinedButton.icon(
+                                  key: const Key('local_backup_import_button'),
+                                  style: _compactButtonStyle,
+                                  onPressed: _busy
+                                      ? null
+                                      : _handleImportAndRestore,
+                                  icon: const Icon(
+                                    Icons.folder_open_outlined,
+                                    size: 18,
+                                  ),
+                                  label: _singleLineText('从文件恢复'),
+                                ),
                               ),
-                              OutlinedButton.icon(
-                                key: const Key('local_backup_share_button'),
-                                onPressed: !_busy && canShareExternal
-                                    ? _handleShareBackup
-                                    : null,
-                                icon: const Icon(Icons.share_outlined),
-                                label: const Text('系统分享'),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: OutlinedButton.icon(
+                                  key: const Key('local_backup_export_button'),
+                                  style: _compactButtonStyle,
+                                  onPressed: !_busy && canSaveExternal
+                                      ? _handleExportSaveAs
+                                      : null,
+                                  icon: const Icon(Icons.save_alt, size: 18),
+                                  label: _singleLineText('另存为文件'),
+                                ),
                               ),
-                              OutlinedButton.icon(
-                                key: const Key('local_backup_import_button'),
-                                onPressed: _busy
-                                    ? null
-                                    : _handleImportAndRestore,
-                                icon: const Icon(Icons.folder_open_outlined),
-                                label: const Text('从文件恢复'),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: OutlinedButton.icon(
+                                  key: const Key('local_backup_share_button'),
+                                  style: _compactButtonStyle,
+                                  onPressed: !_busy && canShareExternal
+                                      ? _handleShareBackup
+                                      : null,
+                                  icon: const Icon(
+                                    Icons.share_outlined,
+                                    size: 18,
+                                  ),
+                                  label: _singleLineText('系统分享'),
+                                ),
                               ),
                             ],
                           ),
@@ -1413,6 +1474,7 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                   ).textTheme.titleMedium,
                                 ),
                               ),
+                              const SizedBox(width: 8),
                               Chip(
                                 key: const Key('webdav_status_badge'),
                                 label: Text(activeBadgeText),
@@ -1426,31 +1488,52 @@ class _BackupPageState extends ConsumerState<BackupPage>
                             style: Theme.of(context).textTheme.bodySmall,
                           ),
                           const SizedBox(height: 12),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: [
-                              FilledButton.icon(
+                          if (!isActiveCloudReady)
+                            SizedBox(
+                              width: double.infinity,
+                              child: FilledButton.icon(
                                 key: const Key('webdav_backup_now_button'),
-                                onPressed: !_busy && isActiveCloudReady
-                                    ? () => _handleCloudBackupUpload(
-                                        activeBackend,
-                                      )
-                                    : null,
-                                icon: const Icon(Icons.cloud_upload_outlined),
-                                label: const Text('立即云端备份'),
-                              ),
-                              if (isActiveCloudReady)
-                                OutlinedButton.icon(
-                                  key: const Key('webdav_refresh_button'),
-                                  onPressed: _busy
-                                      ? null
-                                      : _refreshAfterBackupChange,
-                                  icon: const Icon(Icons.refresh),
-                                  label: const Text('刷新列表'),
+                                onPressed: null,
+                                icon: const Icon(
+                                  Icons.cloud_upload_outlined,
+                                  size: 18,
                                 ),
-                            ],
-                          ),
+                                label: _singleLineText('立即云端备份'),
+                              ),
+                            )
+                          else
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: FilledButton.icon(
+                                    key: const Key('webdav_backup_now_button'),
+                                    style: _compactButtonStyle,
+                                    onPressed: _busy
+                                        ? null
+                                        : () => _handleCloudBackupUpload(
+                                            activeBackend,
+                                          ),
+                                    icon: const Icon(
+                                      Icons.cloud_upload_outlined,
+                                      size: 18,
+                                    ),
+                                    label: _singleLineText('立即云端备份'),
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: OutlinedButton.icon(
+                                    key: const Key('webdav_refresh_button'),
+                                    style: _compactButtonStyle,
+                                    onPressed: _busy
+                                        ? null
+                                        : _refreshAfterBackupChange,
+                                    icon: const Icon(Icons.refresh, size: 18),
+                                    label: _singleLineText('刷新列表'),
+                                  ),
+                                ),
+                              ],
+                            ),
                           if (isActiveCloudReady) ...[
                             const SizedBox(height: 8),
                             SwitchListTile(

@@ -192,26 +192,37 @@ class _WishSummaryBanner extends StatelessWidget {
         child: Row(
           children: [
             Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '待实现（${summary.unrealizedCount} 项）',
-                    key: const Key('wish_summary_unrealized_count'),
-                    style: theme.textTheme.labelMedium?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
+              child: Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '待实现（${summary.unrealizedCount} 项）',
+                      key: const Key('wish_summary_unrealized_count'),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '¥${formatMinor(summary.unrealizedTotalMinor)}',
-                    key: const Key('wish_summary_unrealized_total'),
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                      color: theme.colorScheme.primary,
+                    const SizedBox(height: 4),
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        '¥${formatMinor(summary.unrealizedTotalMinor)}',
+                        key: const Key('wish_summary_unrealized_total'),
+                        maxLines: 1,
+                        softWrap: false,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          color: theme.colorScheme.primary,
+                        ),
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
             Container(
@@ -227,16 +238,24 @@ class _WishSummaryBanner extends StatelessWidget {
                   Text(
                     '已实现（${summary.realizedCount} 项）',
                     key: const Key('wish_summary_realized_count'),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.labelMedium?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant,
                     ),
                   ),
                   const SizedBox(height: 4),
-                  Text(
-                    '¥${formatMinor(summary.realizedTotalMinor)}',
-                    key: const Key('wish_summary_realized_total'),
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      '¥${formatMinor(summary.realizedTotalMinor)}',
+                      key: const Key('wish_summary_realized_total'),
+                      maxLines: 1,
+                      softWrap: false,
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ),
                 ],
@@ -424,11 +443,20 @@ class _WishCard extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  Text(
-                    '¥${formatMinor(wish.valueMinor)}',
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                      color: wish.isRealized ? cs.onSurface : cs.primary,
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 112),
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerRight,
+                      child: Text(
+                        '¥${formatMinor(wish.valueMinor)}',
+                        maxLines: 1,
+                        softWrap: false,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          color: wish.isRealized ? cs.onSurface : cs.primary,
+                        ),
+                      ),
                     ),
                   ),
                 ],
@@ -437,29 +465,41 @@ class _WishCard extends StatelessWidget {
               Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
-                  TextButton.icon(
-                    key: Key(
-                      wish.isRealized
-                          ? 'reopen_wish_${wish.id}'
-                          : 'realize_wish_${wish.id}',
+                  Flexible(
+                    child: TextButton.icon(
+                      key: Key(
+                        wish.isRealized
+                            ? 'reopen_wish_${wish.id}'
+                            : 'realize_wish_${wish.id}',
+                      ),
+                      style: TextButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                      ),
+                      onPressed: onToggleRealized,
+                      icon: Icon(
+                        wish.isRealized
+                            ? Icons.replay_outlined
+                            : Icons.check_circle_outline,
+                        size: 18,
+                      ),
+                      label: Text(
+                        wish.isRealized ? '重新开启' : '实现',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
-                    onPressed: onToggleRealized,
-                    icon: Icon(
-                      wish.isRealized
-                          ? Icons.replay_outlined
-                          : Icons.check_circle_outline,
-                      size: 18,
-                    ),
-                    label: Text(wish.isRealized ? '重新开启' : '实现'),
                   ),
                   IconButton(
                     key: Key('edit_wish_${wish.id}'),
+                    visualDensity: VisualDensity.compact,
                     tooltip: '编辑',
                     onPressed: onTap,
                     icon: const Icon(Icons.edit_outlined, size: 20),
                   ),
                   IconButton(
                     key: Key('delete_wish_${wish.id}'),
+                    visualDensity: VisualDensity.compact,
                     tooltip: '删除',
                     onPressed: onDelete,
                     icon: const Icon(Icons.delete_outline, size: 20),

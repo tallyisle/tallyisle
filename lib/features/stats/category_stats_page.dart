@@ -67,28 +67,45 @@ class _CategoryStatsPageState extends ConsumerState<CategoryStatsPage> {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         children: [
           // 1. Dimension Switch: Expense / Income
-          SegmentedButton<StatDimension>(
-            key: const Key('stat-dimension-switch'),
-            segments: const [
-              ButtonSegment(
-                value: StatDimension.expense,
-                label: Text('支出'),
-                icon: Icon(Icons.arrow_upward),
+          SizedBox(
+            width: double.infinity,
+            child: SegmentedButton<StatDimension>(
+              key: const Key('stat-dimension-switch'),
+              showSelectedIcon: false,
+              style: const ButtonStyle(
+                visualDensity: VisualDensity.compact,
+                padding: WidgetStatePropertyAll(
+                  EdgeInsets.symmetric(horizontal: 12),
+                ),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
-              ButtonSegment(
-                value: StatDimension.income,
-                label: Text('收入'),
-                icon: Icon(Icons.arrow_downward),
-              ),
-            ],
-            selected: {dimension},
-            onSelectionChanged: (set) {
-              if (set.isNotEmpty) {
-                ref
-                    .read(categoryStatsDimensionProvider.notifier)
-                    .setDimension(set.first);
-              }
-            },
+              segments: const [
+                ButtonSegment(
+                  value: StatDimension.expense,
+                  label: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text('支出', maxLines: 1, softWrap: false),
+                  ),
+                  icon: Icon(Icons.arrow_upward, size: 18),
+                ),
+                ButtonSegment(
+                  value: StatDimension.income,
+                  label: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text('收入', maxLines: 1, softWrap: false),
+                  ),
+                  icon: Icon(Icons.arrow_downward, size: 18),
+                ),
+              ],
+              selected: {dimension},
+              onSelectionChanged: (set) {
+                if (set.isNotEmpty) {
+                  ref
+                      .read(categoryStatsDimensionProvider.notifier)
+                      .setDimension(set.first);
+                }
+              },
+            ),
           ),
           const SizedBox(height: 12),
 
@@ -183,8 +200,10 @@ class _PeriodNavigationBar extends ConsumerWidget {
     return Column(
       children: [
         // Granularity Tabs
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
+        Wrap(
+          spacing: 8,
+          runSpacing: 4,
+          alignment: WrapAlignment.center,
           children: [
             ChoiceChip(
               key: const Key('period-kind-month'),
@@ -199,7 +218,6 @@ class _PeriodNavigationBar extends ConsumerWidget {
                 }
               },
             ),
-            const SizedBox(width: 8),
             ChoiceChip(
               key: const Key('period-kind-year'),
               label: const Text('按年'),
@@ -213,7 +231,6 @@ class _PeriodNavigationBar extends ConsumerWidget {
                 }
               },
             ),
-            const SizedBox(width: 8),
             ChoiceChip(
               key: const Key('period-kind-custom'),
               label: const Text('自定义'),
@@ -259,30 +276,45 @@ class _PeriodNavigationBar extends ConsumerWidget {
                       ref.read(categoryStatsOffsetProvider.notifier).previous();
                     },
             ),
-            InkWell(
-              onTap: rangeKind == StatRangeKind.custom
-                  ? () async {
-                      final now = DateTime.now();
-                      final picked = await showDateRangePicker(
-                        context: context,
-                        firstDate: DateTime(2000),
-                        lastDate: DateTime(2100),
-                        initialDateRange: DateTimeRange(
-                          start: now.subtract(const Duration(days: 30)),
-                          end: now,
+            Expanded(
+              child: Center(
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(6),
+                  onTap: rangeKind == StatRangeKind.custom
+                      ? () async {
+                          final now = DateTime.now();
+                          final picked = await showDateRangePicker(
+                            context: context,
+                            firstDate: DateTime(2000),
+                            lastDate: DateTime(2100),
+                            initialDateRange: DateTimeRange(
+                              start: now.subtract(const Duration(days: 30)),
+                              end: now,
+                            ),
+                          );
+                          if (picked != null) {
+                            ref
+                                .read(categoryStatsCustomRangeProvider.notifier)
+                                .setRange(picked.start, picked.end);
+                          }
+                        }
+                      : null,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 4,
+                    ),
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        label,
+                        maxLines: 1,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
                         ),
-                      );
-                      if (picked != null) {
-                        ref
-                            .read(categoryStatsCustomRangeProvider.notifier)
-                            .setRange(picked.start, picked.end);
-                      }
-                    }
-                  : null,
-              child: Text(
-                label,
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -312,6 +344,7 @@ class _HeaderSummaryCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
     final isExpense = result.dimension == StatDimension.expense;
 
     final String growthText;
@@ -320,13 +353,13 @@ class _HeaderSummaryCard extends StatelessWidget {
       final bp = result.growthBasisPoints!;
       if (bp > 0) {
         growthText = '+${(bp / 100.0).toStringAsFixed(1)}%';
-        growthColor = Colors.redAccent;
+        growthColor = isDark ? Colors.red.shade300 : Colors.red.shade700;
       } else if (bp < 0) {
         growthText = '${(bp / 100.0).toStringAsFixed(1)}%';
-        growthColor = Colors.green;
+        growthColor = isDark ? Colors.green.shade300 : Colors.green.shade700;
       } else {
         growthText = '0.0%';
-        growthColor = Colors.grey;
+        growthColor = theme.colorScheme.onSurfaceVariant;
       }
     } else {
       growthText = '--';
@@ -342,91 +375,150 @@ class _HeaderSummaryCard extends StatelessWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      isExpense ? '总支出' : '总收入',
-                      style: theme.textTheme.labelMedium?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        isExpense ? '总支出' : '总收入',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.labelMedium?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '¥${formatMinor(result.headerTotalMinor)}',
-                      key: const Key('header-total-amount'),
-                      style: theme.textTheme.headlineMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                        color: isExpense
-                            ? theme.colorScheme.error
-                            : theme.colorScheme.primary,
+                      const SizedBox(height: 4),
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          '¥${formatMinor(result.headerTotalMinor)}',
+                          key: const Key('header-total-amount'),
+                          maxLines: 1,
+                          style: theme.textTheme.headlineMedium?.copyWith(
+                            fontWeight: FontWeight.bold,
+                            color: isExpense
+                                ? theme.colorScheme.error
+                                : theme.colorScheme.primary,
+                          ),
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(
-                      '环比变化',
-                      style: theme.textTheme.labelMedium?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
+                const SizedBox(width: 12),
+                Flexible(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text(
+                        '环比变化',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.labelMedium?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      growthText,
-                      key: const Key('header-growth-text'),
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                        color: growthColor,
+                      const SizedBox(height: 4),
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerRight,
+                        child: Text(
+                          growthText,
+                          key: const Key('header-growth-text'),
+                          maxLines: 1,
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.bold,
+                            color: growthColor,
+                          ),
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ],
             ),
             const Divider(height: 24),
             Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
-                Column(
-                  children: [
-                    Text('日均金额', style: theme.textTheme.bodySmall),
-                    const SizedBox(height: 2),
-                    Text(
-                      '¥${formatMinor(result.dailyAverageMinor)}',
-                      key: const Key('header-daily-average'),
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w600,
+                Expanded(
+                  child: Column(
+                    children: [
+                      Text(
+                        '日均金额',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
                       ),
-                    ),
-                  ],
+                      const SizedBox(height: 2),
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          '¥${formatMinor(result.dailyAverageMinor)}',
+                          key: const Key('header-daily-average'),
+                          maxLines: 1,
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-                Column(
-                  children: [
-                    Text('交易笔数', style: theme.textTheme.bodySmall),
-                    const SizedBox(height: 2),
-                    Text(
-                      '${result.headerCount} 笔',
-                      key: const Key('header-total-count'),
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w600,
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    children: [
+                      Text(
+                        '交易笔数',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
                       ),
-                    ),
-                  ],
+                      const SizedBox(height: 2),
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          '${result.headerCount} 笔',
+                          key: const Key('header-total-count'),
+                          maxLines: 1,
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-                Column(
-                  children: [
-                    Text('已过天数', style: theme.textTheme.bodySmall),
-                    const SizedBox(height: 2),
-                    Text(
-                      '${result.elapsedDays} 天',
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w600,
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    children: [
+                      Text(
+                        '已过天数',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
                       ),
-                    ),
-                  ],
+                      const SizedBox(height: 2),
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          '${result.elapsedDays} 天',
+                          maxLines: 1,
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
@@ -474,29 +566,39 @@ class _TrendChartCardState extends State<_TrendChartCard> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(
-                  '收支趋势',
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
+                Flexible(
+                  child: Text(
+                    '收支趋势',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
-                if (widget.smoothing != OutlierSmoothing.none)
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 2,
-                    ),
-                    decoration: BoxDecoration(
-                      color: theme.colorScheme.primaryContainer,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Text(
-                      'IQR 平滑已开启',
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: theme.colorScheme.onPrimaryContainer,
+                if (widget.smoothing != OutlierSmoothing.none) ...[
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.primaryContainer,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        'IQR 平滑已开启',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: theme.colorScheme.onPrimaryContainer,
+                        ),
                       ),
                     ),
                   ),
+                ],
               ],
             ),
             const SizedBox(height: 12),
@@ -637,8 +739,11 @@ class _TrendChartPainter extends CustomPainter {
 
     // Draw dots and outlier markers
     final dotPaint = Paint()..color = chartColor;
+    final outlierColor = theme.brightness == Brightness.dark
+        ? Colors.amber.shade400
+        : Colors.amber.shade800;
     final outlierDotPaint = Paint()
-      ..color = Colors.amber.shade800
+      ..color = outlierColor
       ..style = PaintingStyle.fill;
 
     for (var i = 0; i < n; i++) {
@@ -649,7 +754,7 @@ class _TrendChartPainter extends CustomPainter {
           p,
           7.0,
           Paint()
-            ..color = Colors.amber.shade800
+            ..color = outlierColor
             ..style = PaintingStyle.stroke
             ..strokeWidth = 2,
         );
@@ -744,7 +849,8 @@ class _TrendChartPainter extends CustomPainter {
   bool shouldRepaint(covariant _TrendChartPainter oldDelegate) {
     return oldDelegate.buckets != buckets ||
         oldDelegate.hoveredIndex != hoveredIndex ||
-        oldDelegate.chartColor != chartColor;
+        oldDelegate.chartColor != chartColor ||
+        oldDelegate.theme.brightness != theme.brightness;
   }
 }
 
@@ -777,20 +883,42 @@ class _CategoryRankingsCard extends ConsumerWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(
-                  '分类排行榜',
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
+                Flexible(
+                  child: Text(
+                    '分类排行榜',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
+                const SizedBox(width: 8),
                 SegmentedButton<bool>(
                   key: const Key('category-view-mode-switch'),
+                  showSelectedIcon: false,
                   style: const ButtonStyle(
                     visualDensity: VisualDensity.compact,
+                    padding: WidgetStatePropertyAll(
+                      EdgeInsets.symmetric(horizontal: 10),
+                    ),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   ),
                   segments: const [
-                    ButtonSegment(value: false, label: Text('一级汇总')),
-                    ButtonSegment(value: true, label: Text('二级平铺')),
+                    ButtonSegment(
+                      value: false,
+                      label: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text('一级汇总', maxLines: 1, softWrap: false),
+                      ),
+                    ),
+                    ButtonSegment(
+                      value: true,
+                      label: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text('二级平铺', maxLines: 1, softWrap: false),
+                      ),
+                    ),
                   ],
                   selected: {isFlatten},
                   onSelectionChanged: (set) {
@@ -1008,14 +1136,24 @@ class _CategoryRowWidgetState extends State<_CategoryRowWidget> {
                   ),
                 ),
 
+                const SizedBox(width: 8),
+
                 // Amount and Ratio
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    Text(
-                      '¥${formatMinor(row.moneyMinor)}',
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 120),
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerRight,
+                        child: Text(
+                          '¥${formatMinor(row.moneyMinor)}',
+                          maxLines: 1,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
                       ),
                     ),
                     const SizedBox(height: 2),
@@ -1115,21 +1253,33 @@ class _CategoryRowWidgetState extends State<_CategoryRowWidget> {
                                 ],
                               ),
                             ),
-                            Row(
-                              children: [
-                                Text(
-                                  '¥${formatMinor(child.moneyMinor)}',
-                                  style: theme.textTheme.bodySmall,
+                            const SizedBox(width: 8),
+                            ConstrainedBox(
+                              constraints: const BoxConstraints(maxWidth: 136),
+                              child: FittedBox(
+                                fit: BoxFit.scaleDown,
+                                alignment: Alignment.centerRight,
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      '¥${formatMinor(child.moneyMinor)}',
+                                      maxLines: 1,
+                                      style: theme.textTheme.bodySmall,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      child.ratioText,
+                                      maxLines: 1,
+                                      style: theme.textTheme.bodySmall
+                                          ?.copyWith(
+                                            color: theme.colorScheme.primary,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                    ),
+                                  ],
                                 ),
-                                const SizedBox(width: 12),
-                                Text(
-                                  child.ratioText,
-                                  style: theme.textTheme.bodySmall?.copyWith(
-                                    color: theme.colorScheme.primary,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                              ],
+                              ),
                             ),
                           ],
                         ),
@@ -1173,7 +1323,8 @@ class _UncategorizedRowWidget extends StatelessWidget {
           children: [
             CircleAvatar(
               radius: 16,
-              backgroundColor: theme.colorScheme.outlineVariant,
+              backgroundColor: theme.colorScheme.surfaceContainerHighest,
+              foregroundColor: theme.colorScheme.onSurfaceVariant,
               child: const Icon(Icons.help_outline, size: 16),
             ),
             const SizedBox(width: 12),
@@ -1183,10 +1334,14 @@ class _UncategorizedRowWidget extends StatelessWidget {
                 children: [
                   Row(
                     children: [
-                      Text(
-                        uncategorized.name,
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
+                      Flexible(
+                        child: Text(
+                          uncategorized.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                       ),
                       const SizedBox(width: 4),
@@ -1203,6 +1358,7 @@ class _UncategorizedRowWidget extends StatelessWidget {
                           '兜底闭合',
                           style: theme.textTheme.labelSmall?.copyWith(
                             fontSize: 9,
+                            color: theme.colorScheme.onSecondaryContainer,
                           ),
                         ),
                       ),
@@ -1217,25 +1373,46 @@ class _UncategorizedRowWidget extends StatelessWidget {
                 ],
               ),
             ),
+            const SizedBox(width: 8),
             Column(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                Text(
-                  '¥${formatMinor(uncategorized.moneyMinor)}',
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 120),
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerRight,
+                    child: Text(
+                      '¥${formatMinor(uncategorized.moneyMinor)}',
+                      maxLines: 1,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                   ),
                 ),
-                Text(
-                  '头卡占比 ${uncategorized.ratioText}',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.primary,
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 120),
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerRight,
+                    child: Text(
+                      '头卡占比 ${uncategorized.ratioText}',
+                      maxLines: 1,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.primary,
+                      ),
+                    ),
                   ),
                 ),
               ],
             ),
             const SizedBox(width: 4),
-            const Icon(Icons.chevron_right, size: 18),
+            Icon(
+              Icons.chevron_right,
+              size: 18,
+              color: theme.colorScheme.outline,
+            ),
           ],
         ),
       ),
@@ -1554,33 +1731,59 @@ class _CategoryDrilldownPageState extends State<CategoryDrilldownPage> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('该分类总额', style: theme.textTheme.bodySmall),
-                        const SizedBox(height: 4),
                         Text(
-                          '¥${formatMinor(totalAmount)}',
-                          style: theme.textTheme.headlineSmall?.copyWith(
-                            fontWeight: FontWeight.bold,
-                            color:
-                                widget.result.dimension == StatDimension.expense
-                                ? theme.colorScheme.error
-                                : theme.colorScheme.primary,
+                          '该分类总额',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            '¥${formatMinor(totalAmount)}',
+                            maxLines: 1,
+                            style: theme.textTheme.headlineSmall?.copyWith(
+                              fontWeight: FontWeight.bold,
+                              color:
+                                  widget.result.dimension ==
+                                      StatDimension.expense
+                                  ? theme.colorScheme.error
+                                  : theme.colorScheme.primary,
+                            ),
                           ),
                         ),
                       ],
                     ),
                   ),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Text('占比 $ratioText', style: theme.textTheme.bodyMedium),
-                      const SizedBox(height: 4),
-                      Text(
-                        '$count 笔账单',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
+                  const SizedBox(width: 12),
+                  Flexible(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: Alignment.centerRight,
+                          child: Text(
+                            '占比 $ratioText',
+                            maxLines: 1,
+                            style: theme.textTheme.bodyMedium,
+                          ),
                         ),
-                      ),
-                    ],
+                        const SizedBox(height: 4),
+                        Text(
+                          '$count 笔账单',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),
@@ -1648,10 +1851,22 @@ class _CategoryDrilldownPageState extends State<CategoryDrilldownPage> {
                                     ],
                                   ),
                                 ),
-                                Text(
-                                  '¥${formatMinor(child.moneyMinor)} (${child.ratioText})',
-                                  style: theme.textTheme.bodySmall?.copyWith(
-                                    fontWeight: FontWeight.bold,
+                                const SizedBox(width: 8),
+                                ConstrainedBox(
+                                  constraints: const BoxConstraints(
+                                    maxWidth: 140,
+                                  ),
+                                  child: FittedBox(
+                                    fit: BoxFit.scaleDown,
+                                    alignment: Alignment.centerRight,
+                                    child: Text(
+                                      '¥${formatMinor(child.moneyMinor)} (${child.ratioText})',
+                                      maxLines: 1,
+                                      style: theme.textTheme.bodySmall
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                    ),
                                   ),
                                 ),
                               ],
@@ -1673,17 +1888,39 @@ class _CategoryDrilldownPageState extends State<CategoryDrilldownPage> {
               Expanded(
                 child: Text(
                   '包含账单明细 ($count 笔)',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.bold,
                   ),
                 ),
               ),
+              const SizedBox(width: 8),
               SegmentedButton<bool>(
                 key: const Key('drilldown-sort-switch'),
-                style: const ButtonStyle(visualDensity: VisualDensity.compact),
+                showSelectedIcon: false,
+                style: const ButtonStyle(
+                  visualDensity: VisualDensity.compact,
+                  padding: WidgetStatePropertyAll(
+                    EdgeInsets.symmetric(horizontal: 10),
+                  ),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
                 segments: const [
-                  ButtonSegment(value: false, label: Text('按时间')),
-                  ButtonSegment(value: true, label: Text('按金额')),
+                  ButtonSegment(
+                    value: false,
+                    label: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text('按时间', maxLines: 1, softWrap: false),
+                    ),
+                  ),
+                  ButtonSegment(
+                    value: true,
+                    label: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text('按金额', maxLines: 1, softWrap: false),
+                    ),
+                  ),
                 ],
                 selected: {_sortByAmount},
                 onSelectionChanged: (set) {
@@ -1745,20 +1982,33 @@ class _CategoryDrilldownPageState extends State<CategoryDrilldownPage> {
                         bill.remark.isNotEmpty
                             ? bill.remark
                             : widget.categoryName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                       subtitle: Text(
                         formatDateTime(
                           DateTime.fromMillisecondsSinceEpoch(bill.recordTime),
                         ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
-                      trailing: Text(
-                        '¥${formatMinor(bill.netMinor)}',
-                        style: theme.textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.bold,
-                          color:
-                              widget.result.dimension == StatDimension.expense
-                              ? theme.colorScheme.error
-                              : theme.colorScheme.primary,
+                      trailing: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 120),
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: Alignment.centerRight,
+                          child: Text(
+                            '¥${formatMinor(bill.netMinor)}',
+                            maxLines: 1,
+                            style: theme.textTheme.titleSmall?.copyWith(
+                              fontWeight: FontWeight.bold,
+                              color:
+                                  widget.result.dimension ==
+                                      StatDimension.expense
+                                  ? theme.colorScheme.error
+                                  : theme.colorScheme.primary,
+                            ),
+                          ),
                         ),
                       ),
                       onTap: () {
@@ -1795,7 +2045,9 @@ class CategoryStatsOverviewCard extends ConsumerWidget {
     final catById = <int, RecordCategory>{for (final c in categories) c.id: c};
 
     return Card(
-      elevation: 2,
+      elevation: 1,
+      margin: EdgeInsets.zero,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: resultAsync.when(
@@ -1810,15 +2062,26 @@ class CategoryStatsOverviewCard extends ConsumerWidget {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text(
-                      '当月分类排行 Top 5',
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
+                    Flexible(
+                      child: Text(
+                        '当月分类排行 Top 5',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
+                    const SizedBox(width: 8),
                     TextButton(
+                      style: TextButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
                       onPressed: onOpenDetail,
                       child: const Row(
+                        mainAxisSize: MainAxisSize.min,
                         children: [
                           Text('查看完整分析'),
                           Icon(Icons.chevron_right, size: 16),
@@ -1879,16 +2142,27 @@ class CategoryStatsOverviewCard extends ConsumerWidget {
                                     Expanded(
                                       child: Text(
                                         row.name,
+                                        maxLines: 1,
                                         overflow: TextOverflow.ellipsis,
                                       ),
                                     ),
                                     const SizedBox(width: 8),
-                                    Text(
-                                      '¥${formatMinor(row.moneyMinor)} (${row.ratioText})',
-                                      style: theme.textTheme.bodySmall
-                                          ?.copyWith(
-                                            fontWeight: FontWeight.w600,
-                                          ),
+                                    ConstrainedBox(
+                                      constraints: const BoxConstraints(
+                                        maxWidth: 148,
+                                      ),
+                                      child: FittedBox(
+                                        fit: BoxFit.scaleDown,
+                                        alignment: Alignment.centerRight,
+                                        child: Text(
+                                          '¥${formatMinor(row.moneyMinor)} (${row.ratioText})',
+                                          maxLines: 1,
+                                          style: theme.textTheme.bodySmall
+                                              ?.copyWith(
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                        ),
+                                      ),
                                     ),
                                   ],
                                 ),
@@ -1900,6 +2174,9 @@ class CategoryStatsOverviewCard extends ConsumerWidget {
                                         .clamp(0.01, 1.0),
                                     minHeight: 4,
                                     color: visual.color,
+                                    backgroundColor: theme
+                                        .colorScheme
+                                        .surfaceContainerHighest,
                                   ),
                                 ),
                               ],

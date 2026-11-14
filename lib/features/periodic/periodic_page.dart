@@ -193,6 +193,8 @@ class _PeriodicPageState extends ConsumerState<PeriodicPage>
     final allAssets = ref.watch(assetsProvider).value ?? const <Asset>[];
     final books = ref.watch(booksProvider).value ?? const <AccountBook>[];
 
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
     final counts = countsAsync.value;
     final skippedCount = _lastCatchUp?.skippedCount ?? 0;
 
@@ -219,35 +221,62 @@ class _PeriodicPageState extends ConsumerState<PeriodicPage>
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-            child: SegmentedButton<int>(
-              key: const Key('periodic_state_tabs'),
-              segments: [
-                ButtonSegment<int>(
-                  value: PeriodState.active,
-                  label: Text(
-                    counts == null ? '进行中' : '进行中 (${counts.active})',
-                    key: const Key('periodic_tab_0'),
+            child: SizedBox(
+              width: double.infinity,
+              child: SegmentedButton<int>(
+                key: const Key('periodic_state_tabs'),
+                showSelectedIcon: false,
+                style: const ButtonStyle(
+                  visualDensity: VisualDensity.compact,
+                  padding: WidgetStatePropertyAll(
+                    EdgeInsets.symmetric(horizontal: 8),
                   ),
                 ),
-                ButtonSegment<int>(
-                  value: PeriodState.ended,
-                  label: Text(
-                    counts == null ? '已结束' : '已结束 (${counts.ended})',
-                    key: const Key('periodic_tab_1'),
+                segments: [
+                  ButtonSegment<int>(
+                    value: PeriodState.active,
+                    label: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        counts == null ? '进行中' : '进行中 (${counts.active})',
+                        key: const Key('periodic_tab_0'),
+                        maxLines: 1,
+                        softWrap: false,
+                      ),
+                    ),
                   ),
-                ),
-                ButtonSegment<int>(
-                  value: PeriodState.paused,
-                  label: Text(
-                    counts == null ? '已停用' : '已停用 (${counts.paused})',
-                    key: const Key('periodic_tab_2'),
+                  ButtonSegment<int>(
+                    value: PeriodState.ended,
+                    label: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        counts == null ? '已结束' : '已结束 (${counts.ended})',
+                        key: const Key('periodic_tab_1'),
+                        maxLines: 1,
+                        softWrap: false,
+                      ),
+                    ),
                   ),
-                ),
-              ],
-              selected: {selectedTab},
-              onSelectionChanged: (selection) {
-                ref.read(periodicTabProvider.notifier).select(selection.first);
-              },
+                  ButtonSegment<int>(
+                    value: PeriodState.paused,
+                    label: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        counts == null ? '已停用' : '已停用 (${counts.paused})',
+                        key: const Key('periodic_tab_2'),
+                        maxLines: 1,
+                        softWrap: false,
+                      ),
+                    ),
+                  ),
+                ],
+                selected: {selectedTab},
+                onSelectionChanged: (selection) {
+                  ref
+                      .read(periodicTabProvider.notifier)
+                      .select(selection.first);
+                },
+              ),
             ),
           ),
           if (skippedCount > 0)
@@ -257,15 +286,19 @@ class _PeriodicPageState extends ConsumerState<PeriodicPage>
               margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               decoration: BoxDecoration(
-                color: Colors.amber.withAlpha(40),
+                color: Colors.amber.withValues(alpha: isDark ? 0.16 : 0.16),
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.amber),
+                border: Border.all(
+                  color: isDark ? Colors.amber.shade300 : Colors.amber,
+                ),
               ),
               child: Row(
                 children: [
-                  const Icon(
+                  Icon(
                     Icons.warning_amber_rounded,
-                    color: Colors.orange,
+                    color: isDark
+                        ? Colors.amber.shade300
+                        : Colors.orange.shade800,
                     size: 20,
                   ),
                   const SizedBox(width: 8),
@@ -298,7 +331,9 @@ class _PeriodicPageState extends ConsumerState<PeriodicPage>
                         Center(
                           child: Text(
                             emptyText,
-                            style: const TextStyle(color: Colors.grey),
+                            style: TextStyle(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
                           ),
                         ),
                       ],
@@ -338,6 +373,7 @@ class _PeriodicPageState extends ConsumerState<PeriodicPage>
     required List<Asset> assets,
     required List<AccountBook> books,
   }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final String title;
     final String accountSummary;
     final String amountText;
@@ -353,12 +389,12 @@ class _PeriodicPageState extends ConsumerState<PeriodicPage>
       title = categoryName(categories, rule.catId);
       accountSummary = assetName(assets, rule.assetId);
       amountText = '+¥${formatMinor(rule.moneyMinor)}';
-      amountColor = Colors.green[700];
+      amountColor = isDark ? Colors.green.shade300 : Colors.green[700];
     } else {
       title = categoryName(categories, rule.catId);
       accountSummary = assetName(assets, rule.assetId);
       amountText = '-¥${formatMinor(rule.moneyMinor)}';
-      amountColor = Colors.red[700];
+      amountColor = isDark ? Colors.red.shade300 : Colors.red[700];
     }
 
     final cycleText = formatPeriodCycleSummary(
@@ -525,10 +561,14 @@ class PeriodicHistoryPage extends ConsumerWidget {
               ),
               Expanded(
                 child: records.isEmpty
-                    ? const Center(
+                    ? Center(
                         child: Text(
                           '暂无已生成的周期账单',
-                          style: TextStyle(color: Colors.grey),
+                          style: TextStyle(
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.onSurfaceVariant,
+                          ),
                         ),
                       )
                     : ListView.separated(

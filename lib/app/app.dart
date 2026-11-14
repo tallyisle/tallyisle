@@ -409,6 +409,16 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
       AppThemeModePreference.dark => ThemeMode.dark,
     };
 
+    const segmentedButtonTheme = SegmentedButtonThemeData(
+      style: ButtonStyle(
+        visualDensity: VisualDensity.compact,
+        padding: WidgetStatePropertyAll(
+          EdgeInsets.symmetric(horizontal: 10, vertical: 0),
+        ),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
+    );
+
     return MaterialApp.router(
       debugShowCheckedModeBanner: false,
       onGenerateTitle: (context) => brandName(Localizations.localeOf(context)),
@@ -422,6 +432,7 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
           seedColor: seedColor,
           brightness: Brightness.light,
         ),
+        segmentedButtonTheme: segmentedButtonTheme,
         useMaterial3: true,
       ),
       darkTheme: ThemeData(
@@ -429,6 +440,7 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
           seedColor: seedColor,
           brightness: Brightness.dark,
         ),
+        segmentedButtonTheme: segmentedButtonTheme,
         useMaterial3: true,
       ),
       builder: (context, child) {

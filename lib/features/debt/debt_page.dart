@@ -84,7 +84,14 @@ class DebtPage extends ConsumerWidget {
                   child: ChoiceChip(
                     key: const Key('debt_tab_active'),
                     label: Center(
-                      child: Text('进行中 (${view.activeItems.length})'),
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          '进行中 (${view.activeItems.length})',
+                          maxLines: 1,
+                          softWrap: false,
+                        ),
+                      ),
                     ),
                     selected: selectedStatus == AssetStatus.active,
                     onSelected: (_) => ref
@@ -97,7 +104,14 @@ class DebtPage extends ConsumerWidget {
                   child: ChoiceChip(
                     key: const Key('debt_tab_settled'),
                     label: Center(
-                      child: Text('已结清 (${view.settledItems.length})'),
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          '已结清 (${view.settledItems.length})',
+                          maxLines: 1,
+                          softWrap: false,
+                        ),
+                      ),
                     ),
                     selected: selectedStatus == AssetStatus.settled,
                     onSelected: (_) => ref
@@ -155,12 +169,24 @@ class _SummaryCell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Column(
-      children: [
-        Text(label, style: theme.textTheme.labelMedium),
-        const SizedBox(height: 4),
-        Text(value, key: valueKey, style: theme.textTheme.titleMedium),
-      ],
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: Column(
+        children: [
+          Text(label, style: theme.textTheme.labelMedium),
+          const SizedBox(height: 4),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              value,
+              key: valueKey,
+              maxLines: 1,
+              softWrap: false,
+              style: theme.textTheme.titleMedium,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

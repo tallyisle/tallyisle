@@ -148,7 +148,7 @@ class _AppLockGateState extends ConsumerState<AppLockGate>
     builder: (dialogContext) => AlertDialog(
       title: const Text('忘记安全锁密码？'),
       content: const Text(
-        '帐屿采用纯本地无账号隐私架构（P-03），您的密码仅以加盐迭代哈希形式保存在本机，没有任何云端后门可跳过验证。\n\n'
+        '帐屿采用纯本地无账号隐私架构，您的密码仅以加盐迭代哈希形式保存在本机，没有任何云端后门可跳过验证。\n\n'
         '若确实遗忘密码且未开启生物识别，可在系统设置中清除应用数据后，重新导入您此前保存的 .tally 本地备份或 WebDAV 备份恢复账本。',
       ),
       actions: [
@@ -306,8 +306,8 @@ class _LockOverlayScreen extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: 16),
-                  SizedBox(
-                    height: 40,
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(minHeight: 40),
                     child: Center(
                       child: effectiveMessage == null
                           ? const SizedBox.shrink()

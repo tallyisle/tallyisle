@@ -327,13 +327,26 @@ class _MetricColumn extends StatelessWidget {
   final TextStyle? style;
 
   @override
-  Widget build(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      Text(label, style: Theme.of(context).textTheme.bodySmall),
-      const SizedBox(height: 6),
-      Text(valueText, key: valueKey, style: style),
-    ],
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(right: 6),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: Theme.of(context).textTheme.bodySmall),
+        const SizedBox(height: 6),
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: Text(
+            valueText,
+            key: valueKey,
+            maxLines: 1,
+            softWrap: false,
+            style: style,
+          ),
+        ),
+      ],
+    ),
   );
 }
 
@@ -436,12 +449,14 @@ class _DepositEntryCard extends StatelessWidget {
                   ),
                   IconButton(
                     key: Key('deposit_edit_${entry.asset.id}_${entry.index}'),
+                    visualDensity: VisualDensity.compact,
                     tooltip: '编辑',
                     icon: const Icon(Icons.edit_outlined, size: 20),
                     onPressed: onEdit,
                   ),
                   IconButton(
                     key: Key('deposit_delete_${entry.asset.id}_${entry.index}'),
+                    visualDensity: VisualDensity.compact,
                     tooltip: '删除',
                     icon: const Icon(Icons.delete_outline, size: 20),
                     onPressed: onDelete,
@@ -450,24 +465,40 @@ class _DepositEntryCard extends StatelessWidget {
               ),
               const SizedBox(height: 6),
               Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(
-                    '本金 $currPrefix${formatMinor(item.moneyMinor)}',
-                    style: theme.textTheme.bodyLarge?.copyWith(
-                      fontWeight: FontWeight.bold,
+                  Expanded(
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        '本金 $currPrefix${formatMinor(item.moneyMinor)}',
+                        maxLines: 1,
+                        softWrap: false,
+                        style: theme.textTheme.bodyLarge?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                     ),
                   ),
-                  ActionChip(
-                    key: Key(
-                      'deposit_income_chip_${entry.asset.id}_${entry.index}',
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: ActionChip(
+                      key: Key(
+                        'deposit_income_chip_${entry.asset.id}_${entry.index}',
+                      ),
+                      visualDensity: VisualDensity.compact,
+                      label: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          item.isSettled
+                              ? '已结收益 $currPrefix${formatMinor(item.expectedIncomeMinor)}'
+                              : '预期收益 $currPrefix${formatMinor(item.expectedIncomeMinor)}',
+                          maxLines: 1,
+                          softWrap: false,
+                        ),
+                      ),
+                      onPressed: item.isSettled ? onTapIncomeChip : null,
                     ),
-                    label: Text(
-                      item.isSettled
-                          ? '已结收益 $currPrefix${formatMinor(item.expectedIncomeMinor)}'
-                          : '预期收益 $currPrefix${formatMinor(item.expectedIncomeMinor)}',
-                    ),
-                    onPressed: item.isSettled ? onTapIncomeChip : null,
                   ),
                 ],
               ),

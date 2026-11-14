@@ -108,15 +108,18 @@ class _DiyToolbarSettingsPageState
                 ),
               ),
             ),
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
               child: Text(
                 '长按拖拽或点击上下箭头调整顺序，开关控制是否在记一笔页面展示：',
-                style: TextStyle(fontSize: 12),
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
               ),
             ),
             Expanded(
               child: ReorderableListView.builder(
+                buildDefaultDragHandles: false,
                 padding: const EdgeInsets.only(bottom: 24),
                 itemCount: config.items.length,
                 onReorderItem: (oldIndex, newIndex) {
@@ -126,42 +129,60 @@ class _DiyToolbarSettingsPageState
                 itemBuilder: (context, index) {
                   final item = config.items[index];
                   final action = item.action;
-                  return ListTile(
+                  return ReorderableDelayedDragStartListener(
                     key: ValueKey('diy-row-${action.key}'),
-                    leading: Icon(_iconFor(action)),
-                    title: Text(action.label),
-                    subtitle: Text(action.description),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        IconButton(
-                          key: Key('diy-up-${action.key}'),
-                          tooltip: '上移',
-                          icon: const Icon(Icons.arrow_upward, size: 18),
-                          onPressed: _busy || index == 0
-                              ? null
-                              : () =>
-                                    _persist(config.moveItem(index, index - 1)),
-                        ),
-                        IconButton(
-                          key: Key('diy-down-${action.key}'),
-                          tooltip: '下移',
-                          icon: const Icon(Icons.arrow_downward, size: 18),
-                          onPressed: _busy || index == config.items.length - 1
-                              ? null
-                              : () =>
-                                    _persist(config.moveItem(index, index + 1)),
-                        ),
-                        Switch(
-                          key: Key('diy-switch-${action.key}'),
-                          value: item.enabled,
-                          onChanged: _busy
-                              ? null
-                              : (enabled) => _persist(
-                                  config.setEnabled(action, enabled),
-                                ),
-                        ),
-                      ],
+                    index: index,
+                    enabled: !_busy,
+                    child: ListTile(
+                      contentPadding: const EdgeInsets.only(
+                        left: 16,
+                        right: 10,
+                      ),
+                      leading: Icon(_iconFor(action)),
+                      title: Text(action.label),
+                      subtitle: Text(action.description),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            key: Key('diy-up-${action.key}'),
+                            tooltip: '上移',
+                            visualDensity: VisualDensity.compact,
+                            style: IconButton.styleFrom(
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
+                            icon: const Icon(Icons.arrow_upward, size: 18),
+                            onPressed: _busy || index == 0
+                                ? null
+                                : () => _persist(
+                                    config.moveItem(index, index - 1),
+                                  ),
+                          ),
+                          IconButton(
+                            key: Key('diy-down-${action.key}'),
+                            tooltip: '下移',
+                            visualDensity: VisualDensity.compact,
+                            style: IconButton.styleFrom(
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
+                            icon: const Icon(Icons.arrow_downward, size: 18),
+                            onPressed: _busy || index == config.items.length - 1
+                                ? null
+                                : () => _persist(
+                                    config.moveItem(index, index + 1),
+                                  ),
+                          ),
+                          Switch(
+                            key: Key('diy-switch-${action.key}'),
+                            value: item.enabled,
+                            onChanged: _busy
+                                ? null
+                                : (enabled) => _persist(
+                                    config.setEnabled(action, enabled),
+                                  ),
+                          ),
+                        ],
+                      ),
                     ),
                   );
                 },

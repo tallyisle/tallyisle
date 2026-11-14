@@ -47,7 +47,13 @@ class _StatsPageState extends ConsumerState<StatsPage> {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(book.value?.name ?? '统计'),
+              Flexible(
+                child: Text(
+                  book.value?.name ?? '统计',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
               const Icon(Icons.arrow_drop_down),
             ],
           ),
@@ -75,11 +81,11 @@ class _StatsPageState extends ConsumerState<StatsPage> {
       ),
       body: ListView(
         key: const Key('stats-hub-list'),
-        padding: const EdgeInsets.only(top: 4, bottom: 32),
+        padding: const EdgeInsets.only(top: 6, bottom: 32),
         children: [
           AnnualReportOverviewCard(onTap: () => context.push('/stats/annual')),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
             child: CategoryStatsOverviewCard(
               key: const Key('stats-category-overview-card'),
               onOpenDetail: () => context.push('/stats/category'),
@@ -88,7 +94,7 @@ class _StatsPageState extends ConsumerState<StatsPage> {
             ),
           ),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
             child: _TagStatsOverviewCard(
               key: const Key('stats-tag-overview-card'),
               onOpenAll: () => context.push('/stats/tags'),
@@ -100,7 +106,7 @@ class _StatsPageState extends ConsumerState<StatsPage> {
             onTap: () => context.push('/budget'),
           ),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
             child: AssetTrendOverviewCard(
               onTap: () => context.push('/stats/trend'),
             ),
@@ -186,17 +192,23 @@ class _TagStatsOverviewCard extends ConsumerWidget {
     final rankingsAsync = ref.watch(statsHubTagRankingsProvider);
 
     return Card(
-      elevation: 2,
+      elevation: 1,
+      margin: EdgeInsets.zero,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: rankingsAsync.when(
           loading: () => Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                '标签统计',
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.bold,
+              Flexible(
+                child: Text(
+                  '标签统计',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ),
               const SizedBox(
@@ -224,6 +236,8 @@ class _TagStatsOverviewCard extends ConsumerWidget {
                   Expanded(
                     child: Text(
                       isExpense ? '当期暂无标签支出' : '当期暂无标签收入',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: theme.colorScheme.onSurfaceVariant,
                       ),
@@ -233,6 +247,8 @@ class _TagStatsOverviewCard extends ConsumerWidget {
                     key: const Key('stats-tag-all-rankings-btn'),
                     style: TextButton.styleFrom(
                       visualDensity: VisualDensity.compact,
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     ),
                     onPressed: onOpenAll,
                     child: const Row(
@@ -253,16 +269,22 @@ class _TagStatsOverviewCard extends ConsumerWidget {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text(
-                      '标签统计 Top 5',
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
+                    Flexible(
+                      child: Text(
+                        '标签统计 Top 5',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
                     TextButton(
                       key: const Key('stats-tag-all-rankings-btn'),
                       style: TextButton.styleFrom(
                         visualDensity: VisualDensity.compact,
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                       ),
                       onPressed: onOpenAll,
                       child: const Row(
@@ -291,13 +313,25 @@ class _TagStatsOverviewCard extends ConsumerWidget {
                               Expanded(
                                 child: Text(
                                   '#${item.name} (${item.count} 笔)',
+                                  maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                 ),
                               ),
-                              Text(
-                                '¥${formatMinor(item.moneyMinor)} (${item.ratioText})',
-                                style: theme.textTheme.bodySmall?.copyWith(
-                                  fontWeight: FontWeight.w600,
+                              const SizedBox(width: 8),
+                              ConstrainedBox(
+                                constraints: const BoxConstraints(
+                                  maxWidth: 150,
+                                ),
+                                child: FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  alignment: Alignment.centerRight,
+                                  child: Text(
+                                    '¥${formatMinor(item.moneyMinor)} (${item.ratioText})',
+                                    maxLines: 1,
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
                                 ),
                               ),
                             ],
@@ -311,6 +345,8 @@ class _TagStatsOverviewCard extends ConsumerWidget {
                                 1.0,
                               ),
                               minHeight: 4,
+                              backgroundColor:
+                                  theme.colorScheme.surfaceContainerHighest,
                               color:
                                   parseTagColor(item.color) ??
                                   (isExpense

@@ -228,22 +228,52 @@ class _CsvExportPageState extends ConsumerState<CsvExportPage> {
                           Expanded(
                             child: OutlinedButton.icon(
                               key: const Key('export_start_date_button'),
+                              style: const ButtonStyle(
+                                padding: WidgetStatePropertyAll(
+                                  EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 10,
+                                  ),
+                                ),
+                              ),
                               onPressed: _busy
                                   ? null
                                   : () => _pickDate(isStart: true),
                               icon: const Icon(Icons.calendar_today, size: 16),
-                              label: Text('起：${formatDate(_startDate)}'),
+                              label: FittedBox(
+                                fit: BoxFit.scaleDown,
+                                child: Text(
+                                  '起：${formatDate(_startDate)}',
+                                  maxLines: 1,
+                                  softWrap: false,
+                                ),
+                              ),
                             ),
                           ),
-                          const SizedBox(width: 12),
+                          const SizedBox(width: 8),
                           Expanded(
                             child: OutlinedButton.icon(
                               key: const Key('export_end_date_button'),
+                              style: const ButtonStyle(
+                                padding: WidgetStatePropertyAll(
+                                  EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 10,
+                                  ),
+                                ),
+                              ),
                               onPressed: _busy
                                   ? null
                                   : () => _pickDate(isStart: false),
                               icon: const Icon(Icons.event, size: 16),
-                              label: Text('止：${formatDate(_endDate)}'),
+                              label: FittedBox(
+                                fit: BoxFit.scaleDown,
+                                child: Text(
+                                  '止：${formatDate(_endDate)}',
+                                  maxLines: 1,
+                                  softWrap: false,
+                                ),
+                              ),
                             ),
                           ),
                         ],
@@ -264,23 +294,48 @@ class _CsvExportPageState extends ConsumerState<CsvExportPage> {
                     const SizedBox(height: 12),
                     Text('文件编码', style: Theme.of(context).textTheme.labelLarge),
                     const SizedBox(height: 8),
-                    SegmentedButton<bool>(
-                      key: const Key('export_encoding_selector'),
-                      segments: const [
-                        ButtonSegment<bool>(
-                          value: true,
-                          label: Text('UTF-8（推荐）'),
+                    SizedBox(
+                      width: double.infinity,
+                      child: SegmentedButton<bool>(
+                        key: const Key('export_encoding_selector'),
+                        showSelectedIcon: false,
+                        style: const ButtonStyle(
+                          visualDensity: VisualDensity.compact,
+                          padding: WidgetStatePropertyAll(
+                            EdgeInsets.symmetric(horizontal: 10),
+                          ),
                         ),
-                        ButtonSegment<bool>(
-                          value: false,
-                          label: Text('GBK（旧版兼容）'),
-                        ),
-                      ],
-                      selected: {_utf8WithBom},
-                      onSelectionChanged: _busy
-                          ? null
-                          : (selection) =>
-                                setState(() => _utf8WithBom = selection.first),
+                        segments: const [
+                          ButtonSegment<bool>(
+                            value: true,
+                            label: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Text(
+                                'UTF-8（推荐）',
+                                maxLines: 1,
+                                softWrap: false,
+                              ),
+                            ),
+                          ),
+                          ButtonSegment<bool>(
+                            value: false,
+                            label: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Text(
+                                'GBK（旧版兼容）',
+                                maxLines: 1,
+                                softWrap: false,
+                              ),
+                            ),
+                          ),
+                        ],
+                        selected: {_utf8WithBom},
+                        onSelectionChanged: _busy
+                            ? null
+                            : (selection) => setState(
+                                () => _utf8WithBom = selection.first,
+                              ),
+                      ),
                     ),
                     const SizedBox(height: 12),
                     Text(

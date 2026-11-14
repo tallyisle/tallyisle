@@ -251,21 +251,42 @@ class _OcrBillPageState extends ConsumerState<OcrBillPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Wrap(
-                    spacing: 12,
-                    runSpacing: 8,
+                  Row(
                     children: [
-                      FilledButton.icon(
-                        key: const Key('ocr_pick_image_button'),
-                        onPressed: _recognizing ? null : _pickAndRecognizeImage,
-                        icon: const Icon(Icons.image_search),
-                        label: Text(_recognizing ? '识别中…' : '选择账单图片识别'),
+                      Expanded(
+                        child: FilledButton.icon(
+                          key: const Key('ocr_pick_image_button'),
+                          style: FilledButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 10),
+                          ),
+                          onPressed: _recognizing
+                              ? null
+                              : _pickAndRecognizeImage,
+                          icon: const Icon(Icons.image_search, size: 18),
+                          label: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text(
+                              _recognizing ? '识别中…' : '选择账单图片识别',
+                              maxLines: 1,
+                              softWrap: false,
+                            ),
+                          ),
+                        ),
                       ),
-                      OutlinedButton.icon(
-                        key: const Key('ocr_parse_text_button'),
-                        onPressed: _recognizing ? null : _parseTextLocally,
-                        icon: const Icon(Icons.notes),
-                        label: const Text('解析下方文本'),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          key: const Key('ocr_parse_text_button'),
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 10),
+                          ),
+                          onPressed: _recognizing ? null : _parseTextLocally,
+                          icon: const Icon(Icons.notes, size: 18),
+                          label: const FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text('解析下方文本', maxLines: 1, softWrap: false),
+                          ),
+                        ),
                       ),
                     ],
                   ),
@@ -321,17 +342,35 @@ class _OcrBillPageState extends ConsumerState<OcrBillPage> {
                 Expanded(
                   child: Text(
                     '识别结果核对（已选 $selectedCount / ${_candidates.length} 笔）',
-                    style: theme.textTheme.titleMedium?.copyWith(
+                    style: theme.textTheme.titleSmall?.copyWith(
                       fontWeight: FontWeight.bold,
                     ),
                   ),
                 ),
-                FilledButton(
-                  key: const Key('ocr_confirm_batch_button'),
-                  onPressed: _confirming || selectedCount == 0
-                      ? null
-                      : _confirmBatch,
-                  child: Text(_confirming ? '入账中…' : '批量确认入账 ($selectedCount)'),
+                const SizedBox(width: 8),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 168),
+                  child: FilledButton(
+                    key: const Key('ocr_confirm_batch_button'),
+                    style: FilledButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
+                    ),
+                    onPressed: _confirming || selectedCount == 0
+                        ? null
+                        : _confirmBatch,
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        _confirming ? '入账中…' : '批量确认入账 ($selectedCount)',
+                        maxLines: 1,
+                        softWrap: false,
+                      ),
+                    ),
+                  ),
                 ),
               ],
             ),
@@ -411,7 +450,10 @@ class _OcrProviderStatusCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 4,
+                    crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
                       Text(
                         provider.label,
@@ -419,7 +461,6 @@ class _OcrProviderStatusCard extends StatelessWidget {
                           fontWeight: FontWeight.bold,
                         ),
                       ),
-                      const SizedBox(width: 8),
                       Container(
                         key: const Key('ocr_provider_status_badge'),
                         padding: const EdgeInsets.symmetric(
@@ -456,6 +497,10 @@ class _OcrProviderStatusCard extends StatelessWidget {
             ),
             TextButton(
               key: const Key('ocr_config_button'),
+              style: TextButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+              ),
               onPressed: onConfigure,
               child: Text(configured ? '修改配置' : '配置接口'),
             ),
@@ -640,11 +685,14 @@ class _CandidateReviewCard extends StatelessWidget {
               children: [
                 Checkbox(
                   key: Key('ocr_candidate_check_${candidate.index}'),
+                  visualDensity: VisualDensity.compact,
                   value: candidate.selected,
                   onChanged: (v) =>
                       onChanged(candidate.copyWith(selected: v ?? false)),
                 ),
                 ActionChip(
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
                   label: Text(
                     candidate.type == RecordType.income ? '收入' : '支出',
                   ),
@@ -672,6 +720,7 @@ class _CandidateReviewCard extends StatelessWidget {
                     ),
                   ),
                 ),
+                const SizedBox(width: 6),
                 Text(
                   '¥${candidate.money.decimal}',
                   style: theme.textTheme.titleMedium?.copyWith(
@@ -680,6 +729,7 @@ class _CandidateReviewCard extends StatelessWidget {
                 ),
                 IconButton(
                   key: Key('ocr_candidate_edit_${candidate.index}'),
+                  visualDensity: VisualDensity.compact,
                   tooltip: '修改金额与备注',
                   onPressed: onEditDetail,
                   icon: const Icon(Icons.edit_outlined, size: 20),

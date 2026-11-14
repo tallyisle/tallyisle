@@ -81,16 +81,7 @@ class AboutHelpPage extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 16),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-            child: Text(
-              '隐私与免费承诺',
-              style: theme.textTheme.titleSmall?.copyWith(
-                color: scheme.primary,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
+          const _AboutSectionHeader(title: '隐私与免费承诺'),
           const Card(
             child: Column(
               children: [
@@ -98,7 +89,7 @@ class AboutHelpPage extends StatelessWidget {
                   leading: Icon(Icons.shield_outlined),
                   title: Text('纯本地离线存储'),
                   subtitle: Text(
-                    '所有账本、流水、资产、预算、心愿、备忘与安全锁配置均保存在设备本地 SQLite 数据库中，不连接云端服务器，不收集任何遥测或隐私数据。',
+                    '所有账本、流水、资产、预算、心愿、备忘与安全锁配置默认保存在设备本地数据库中，不接入任何官方服务器，不收集任何遥测或隐私数据；云同步与在线汇率仅在您主动开启并配置自有服务时按需连接。',
                   ),
                 ),
                 Divider(height: 1),
@@ -106,7 +97,7 @@ class AboutHelpPage extends StatelessWidget {
                   leading: Icon(Icons.verified_outlined),
                   title: Text('全功能永久免费 · 无会员门控'),
                   subtitle: Text(
-                    '无需注册或登录账号，无广告、无订阅付费墙。多账本、多币种、信用卡账期、定期存款计息、预算结转、存钱计划、数据体检及备份导出等全部功能完整开放。',
+                    '无需注册或登录账号，无广告、无订阅付费墙。多账本、多币种、信用账户账期、定期存款计息、预算结转、存钱计划、数据体检及备份导出等全部功能完整开放。',
                   ),
                 ),
                 Divider(height: 1),
@@ -114,23 +105,14 @@ class AboutHelpPage extends StatelessWidget {
                   leading: Icon(Icons.calculate_outlined),
                   title: Text('整数精确记账'),
                   subtitle: Text(
-                    '全链路采用整数最小货币单位（Money / BigInt）存储与运算，杜绝浮点数舍入误差，支持数据体检随时核对全库账目。',
+                    '全链路采用整数最小货币单位精确存储与运算，杜绝浮点数舍入误差，支持数据体检随时核对全库账目。',
                   ),
                 ),
               ],
             ),
           ),
           const SizedBox(height: 16),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-            child: Text(
-              '常见问题解答',
-              style: theme.textTheme.titleSmall?.copyWith(
-                color: scheme.primary,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
+          const _AboutSectionHeader(title: '常见问题解答'),
           const Card(
             clipBehavior: Clip.antiAlias,
             child: Column(
@@ -141,7 +123,7 @@ class AboutHelpPage extends StatelessWidget {
                   childrenPadding: EdgeInsets.fromLTRB(16, 0, 16, 16),
                   children: [
                     Text(
-                      '信用卡账户的授信额度（init_money）仅表示固定信用总额度，绝不作为期初余额计入欠款。余额为负数表示当前待还欠款，正数表示溢缴款，可用额度 = 授信额度 + 当前余额。',
+                      '信用卡账户的授信额度仅表示固定信用总额度，绝不作为期初余额计入欠款。余额为负数表示当前待还欠款，正数表示溢缴款，可用额度 = 授信额度 + 当前余额。',
                     ),
                   ],
                 ),
@@ -199,6 +181,29 @@ class AboutHelpPage extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _AboutSectionHeader extends StatelessWidget {
+  const _AboutSectionHeader({required this.title});
+
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+      child: Text(
+        title,
+        style: theme.textTheme.labelMedium?.copyWith(
+          color: scheme.onSurfaceVariant,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 0.3,
+        ),
       ),
     );
   }

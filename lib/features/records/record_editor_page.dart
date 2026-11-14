@@ -2244,8 +2244,8 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
         Row(
           children: [
             Expanded(
-              child: SizedBox(
-                height: 42,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(minHeight: 42),
                 child: TextField(
                   key: const Key('fee'),
                   controller: fee,
@@ -2457,7 +2457,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
 
     final amountColor =
         type == RecordType.income || type == RecordType.advanceIncome
-        ? const Color(0xFF2E7D32)
+        ? (isDark ? const Color(0xFF81C784) : const Color(0xFF2E7D32))
         : (type == RecordType.transfer ? cs.primary : cs.onSurface);
 
     final Widget currencyPrefixWidget;
@@ -3514,8 +3514,8 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
       }
     }
 
-    return SizedBox(
-      height: 38,
+    return ConstrainedBox(
+      constraints: const BoxConstraints(minHeight: 38),
       child: SingleChildScrollView(
         key: const Key('editor-pill-toolbar'),
         scrollDirection: Axis.horizontal,

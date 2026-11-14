@@ -300,18 +300,27 @@ class _AttachmentImageBox extends ConsumerWidget {
       ),
       error: (_, _) => ColoredBox(
         color: cs.errorContainer,
-        child: const Center(child: Icon(Icons.broken_image_outlined)),
+        child: Center(
+          child: Icon(Icons.broken_image_outlined, color: cs.onErrorContainer),
+        ),
       ),
       data: (Uint8List? bytes) {
         if (bytes == null) {
           return ColoredBox(
             color: cs.surfaceContainerHighest,
-            child: const Column(
+            child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(Icons.broken_image_outlined, size: 22),
-                SizedBox(height: 2),
-                Text('图片缺失', style: TextStyle(fontSize: 10)),
+                Icon(
+                  Icons.broken_image_outlined,
+                  size: 22,
+                  color: cs.onSurfaceVariant,
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  '图片缺失',
+                  style: TextStyle(fontSize: 10, color: cs.onSurfaceVariant),
+                ),
               ],
             ),
           );
@@ -326,13 +335,20 @@ class _AttachmentImageBox extends ConsumerWidget {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Icon(Icons.image_outlined, size: 22),
+                  Icon(
+                    Icons.image_outlined,
+                    size: 22,
+                    color: cs.onSecondaryContainer,
+                  ),
                   const SizedBox(height: 2),
                   Text(
                     fileName,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 9),
+                    style: TextStyle(
+                      fontSize: 9,
+                      color: cs.onSecondaryContainer,
+                    ),
                   ),
                 ],
               ),
@@ -514,8 +530,13 @@ class _BillImagesPageState extends ConsumerState<BillImagesPage> {
                         key: const Key('bill-images-scan-summary'),
                       ),
                     ),
+                    const SizedBox(width: 8),
                     TextButton(
                       key: const Key('bill-images-cleanup-btn'),
+                      style: TextButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                      ),
                       onPressed: _busy || scan.orphanCount == 0
                           ? null
                           : () => _runOrphanCleanup(scan),
@@ -573,8 +594,8 @@ class _BillImagesPageState extends ConsumerState<BillImagesPage> {
                         physics: const NeverScrollableScrollPhysics(),
                         itemCount: entries.length,
                         gridDelegate:
-                            const SliverGridDelegateWithFixedCrossAxisCount(
-                              crossAxisCount: 3,
+                            const SliverGridDelegateWithMaxCrossAxisExtent(
+                              maxCrossAxisExtent: 150,
                               mainAxisSpacing: 8,
                               crossAxisSpacing: 8,
                             ),

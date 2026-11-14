@@ -316,29 +316,56 @@ class _AssetEditorPageState extends ConsumerState<AssetEditorPage> {
                   padding: const EdgeInsets.all(16),
                   children: [
                     if (!editing)
-                      SegmentedButton<int>(
-                        segments: const [
-                          ButtonSegment(
-                            value: AssetType.normal,
-                            label: Text('普通账户'),
-                            icon: Icon(Icons.account_balance_wallet_outlined),
+                      SizedBox(
+                        width: double.infinity,
+                        child: SegmentedButton<int>(
+                          showSelectedIcon: false,
+                          style: const ButtonStyle(
+                            visualDensity: VisualDensity.compact,
+                            padding: WidgetStatePropertyAll(
+                              EdgeInsets.symmetric(horizontal: 10),
+                            ),
                           ),
-                          ButtonSegment(
-                            value: AssetType.credit,
-                            label: Text('信用账户'),
-                            icon: Icon(Icons.credit_card),
-                          ),
-                        ],
-                        selected: {type},
-                        onSelectionChanged: busy
-                            ? null
-                            : (s) => setState(() {
-                                type = s.first;
-                                if (!_userPickedVisual) {
-                                  selectedIcon = null;
-                                  selectedColor = null;
-                                }
-                              }),
+                          segments: const [
+                            ButtonSegment(
+                              value: AssetType.normal,
+                              label: FittedBox(
+                                fit: BoxFit.scaleDown,
+                                child: Text(
+                                  '普通账户',
+                                  maxLines: 1,
+                                  softWrap: false,
+                                ),
+                              ),
+                              icon: Icon(
+                                Icons.account_balance_wallet_outlined,
+                                size: 18,
+                              ),
+                            ),
+                            ButtonSegment(
+                              value: AssetType.credit,
+                              label: FittedBox(
+                                fit: BoxFit.scaleDown,
+                                child: Text(
+                                  '信用账户',
+                                  maxLines: 1,
+                                  softWrap: false,
+                                ),
+                              ),
+                              icon: Icon(Icons.credit_card, size: 18),
+                            ),
+                          ],
+                          selected: {type},
+                          onSelectionChanged: busy
+                              ? null
+                              : (s) => setState(() {
+                                  type = s.first;
+                                  if (!_userPickedVisual) {
+                                    selectedIcon = null;
+                                    selectedColor = null;
+                                  }
+                                }),
+                        ),
                       ),
                     const SizedBox(height: 12),
                     TextField(
@@ -441,6 +468,7 @@ class _AssetEditorPageState extends ConsumerState<AssetEditorPage> {
                       const SizedBox(height: 12),
                       DropdownButtonFormField<int>(
                         key: const Key('bill-day'),
+                        isExpanded: true,
                         initialValue: billDay,
                         decoration: const InputDecoration(labelText: '账单日'),
                         items: _dayItems(),
@@ -456,15 +484,45 @@ class _AssetEditorPageState extends ConsumerState<AssetEditorPage> {
                             ? null
                             : (v) => setState(() => billDayCounted = v),
                       ),
-                      SegmentedButton<bool>(
-                        segments: const [
-                          ButtonSegment(value: false, label: Text('固定还款日')),
-                          ButtonSegment(value: true, label: Text('账单日后 N 天')),
-                        ],
-                        selected: {repaymentAfter},
-                        onSelectionChanged: busy
-                            ? null
-                            : (s) => setState(() => repaymentAfter = s.first),
+                      SizedBox(
+                        width: double.infinity,
+                        child: SegmentedButton<bool>(
+                          showSelectedIcon: false,
+                          style: const ButtonStyle(
+                            visualDensity: VisualDensity.compact,
+                            padding: WidgetStatePropertyAll(
+                              EdgeInsets.symmetric(horizontal: 10),
+                            ),
+                          ),
+                          segments: const [
+                            ButtonSegment(
+                              value: false,
+                              label: FittedBox(
+                                fit: BoxFit.scaleDown,
+                                child: Text(
+                                  '固定还款日',
+                                  maxLines: 1,
+                                  softWrap: false,
+                                ),
+                              ),
+                            ),
+                            ButtonSegment(
+                              value: true,
+                              label: FittedBox(
+                                fit: BoxFit.scaleDown,
+                                child: Text(
+                                  '账单日后 N 天',
+                                  maxLines: 1,
+                                  softWrap: false,
+                                ),
+                              ),
+                            ),
+                          ],
+                          selected: {repaymentAfter},
+                          onSelectionChanged: busy
+                              ? null
+                              : (s) => setState(() => repaymentAfter = s.first),
+                        ),
                       ),
                       const SizedBox(height: 8),
                       if (repaymentAfter)
@@ -481,6 +539,7 @@ class _AssetEditorPageState extends ConsumerState<AssetEditorPage> {
                       else
                         DropdownButtonFormField<int>(
                           key: const Key('repay-day'),
+                          isExpanded: true,
                           initialValue: repaymentDay,
                           decoration: const InputDecoration(labelText: '还款日'),
                           items: _dayItems(),
@@ -490,6 +549,7 @@ class _AssetEditorPageState extends ConsumerState<AssetEditorPage> {
                         ),
                       const SizedBox(height: 12),
                       DropdownButtonFormField<int>(
+                        isExpanded: true,
                         initialValue: assets.any((a) => a.id == repayAssetId)
                             ? repayAssetId
                             : noRef,
@@ -499,10 +559,21 @@ class _AssetEditorPageState extends ConsumerState<AssetEditorPage> {
                         items: [
                           const DropdownMenuItem(
                             value: noRef,
-                            child: Text('不设置'),
+                            child: Text(
+                              '不设置',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
                           for (final a in assets)
-                            DropdownMenuItem(value: a.id, child: Text(a.name)),
+                            DropdownMenuItem(
+                              value: a.id,
+                              child: Text(
+                                a.name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
                         ],
                         onChanged: busy
                             ? null
@@ -513,18 +584,27 @@ class _AssetEditorPageState extends ConsumerState<AssetEditorPage> {
                     ],
                     const SizedBox(height: 12),
                     DropdownButtonFormField<String>(
+                      isExpanded: true,
                       initialValue: currency ?? '',
                       decoration: const InputDecoration(labelText: '币种'),
                       items: [
                         const DropdownMenuItem(
                           value: '',
-                          child: Text('本位币（人民币）'),
+                          child: Text(
+                            '本位币（人民币）',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
                         for (final c in currencies)
                           if (c.code != 'CNY')
                             DropdownMenuItem(
                               value: c.code,
-                              child: Text('${c.name}（${c.code}）'),
+                              child: Text(
+                                '${c.name}（${c.code}）',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
                             ),
                       ],
                       onChanged: busy

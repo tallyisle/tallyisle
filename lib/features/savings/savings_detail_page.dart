@@ -742,7 +742,11 @@ class _DetailHeaderCard extends StatelessWidget {
                   ),
                   child: Text(
                     isArchived ? '已归档' : '进行中',
-                    style: theme.textTheme.labelSmall,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: isArchived
+                          ? theme.colorScheme.onSecondaryContainer
+                          : theme.colorScheme.onPrimaryContainer,
+                    ),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -757,11 +761,17 @@ class _DetailHeaderCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 12),
-            Text(
-              '$symbol${formatMinor(plan.savedMoneyMinor)}',
-              key: const Key('savings_detail_saved_text'),
-              style: theme.textTheme.headlineMedium?.copyWith(
-                fontWeight: FontWeight.bold,
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(
+                '$symbol${formatMinor(plan.savedMoneyMinor)}',
+                key: const Key('savings_detail_saved_text'),
+                maxLines: 1,
+                softWrap: false,
+                style: theme.textTheme.headlineMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ),
             const SizedBox(height: 4),
@@ -816,6 +826,8 @@ class _ScheduleSlotTile extends StatelessWidget {
       key: Key('savings_slot_${slot.slotIndex}'),
       margin: const EdgeInsets.only(bottom: 8),
       child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+        horizontalTitleGap: 10,
         leading: CircleAvatar(
           radius: 16,
           backgroundColor: merged.isSaved
@@ -829,21 +841,37 @@ class _ScheduleSlotTile extends StatelessWidget {
                 : Theme.of(context).colorScheme.onSurfaceVariant,
           ),
         ),
-        title: Text(
-          '第${slot.periodNumber}期 · $symbol${formatMinor(displayMinor)}',
+        title: FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: Text(
+            '第${slot.periodNumber}期 · $symbol${formatMinor(displayMinor)}',
+            maxLines: 1,
+            softWrap: false,
+          ),
         ),
         subtitle: Text(
           '${slot.date.dateKey} · 累计 $symbol${formatMinor(slot.plannedCumulativeMinor)}'
           '${rec != null && rec.remark.isNotEmpty ? ' · ${rec.remark}' : ''}',
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
         ),
         trailing: merged.isSaved
             ? TextButton(
                 key: Key('cancel_slot_deposit_${slot.slotIndex}'),
+                style: TextButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                ),
                 onPressed: onCancel,
                 child: const Text('取消存入'),
               )
             : FilledButton.tonal(
                 key: Key('checkin_slot_button_${slot.slotIndex}'),
+                style: FilledButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                ),
                 onPressed: onCheckIn,
                 child: const Text('打卡'),
               ),

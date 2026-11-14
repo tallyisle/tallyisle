@@ -226,11 +226,17 @@ class _ActiveSummaryCard extends StatelessWidget {
             children: [
               Text('你已经存下了', style: theme.textTheme.bodyMedium),
               const SizedBox(height: 6),
-              Text(
-                '¥${formatMinor(summary.totalSavedBaseMinor)}',
-                key: const Key('savings_total_saved_text'),
-                style: theme.textTheme.headlineMedium?.copyWith(
-                  fontWeight: FontWeight.bold,
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  '¥${formatMinor(summary.totalSavedBaseMinor)}',
+                  key: const Key('savings_total_saved_text'),
+                  maxLines: 1,
+                  softWrap: false,
+                  style: theme.textTheme.headlineMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ),
               if (summary.missingRates.isNotEmpty) ...[
@@ -363,12 +369,20 @@ class _SavingsPlanCard extends StatelessWidget {
               ),
               const SizedBox(height: 8),
               Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(
-                    '已存 $symbol${formatMinor(plan.savedMoneyMinor)} / 目标 $symbol${formatMinor(plan.planMoneyMinor)}',
-                    style: theme.textTheme.bodyMedium,
+                  Expanded(
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        '已存 $symbol${formatMinor(plan.savedMoneyMinor)} / 目标 $symbol${formatMinor(plan.planMoneyMinor)}',
+                        maxLines: 1,
+                        softWrap: false,
+                        style: theme.textTheme.bodyMedium,
+                      ),
+                    ),
                   ),
+                  const SizedBox(width: 8),
                   Text(
                     percentText,
                     style: theme.textTheme.bodyMedium?.copyWith(

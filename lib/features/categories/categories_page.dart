@@ -213,13 +213,13 @@ class _CategoriesPageState extends ConsumerState<CategoriesPage>
                   const SizedBox(height: 12),
                   DropdownButtonFormField<int>(
                     key: const Key('target-category-dropdown'),
+                    isExpanded: true,
                     initialValue: selectedTarget,
                     items: [
                       for (final cand in candidates)
                         DropdownMenuItem(
                           value: cand.id,
                           child: Row(
-                            mainAxisSize: MainAxisSize.min,
                             children: [
                               if (cand.parentCatId != -1)
                                 const SizedBox(width: 12),
@@ -231,7 +231,13 @@ class _CategoriesPageState extends ConsumerState<CategoriesPage>
                                 size: 22,
                               ),
                               const SizedBox(width: 8),
-                              Text(cand.name),
+                              Flexible(
+                                child: Text(
+                                  cand.name,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
                             ],
                           ),
                         ),
@@ -348,12 +354,14 @@ class _CategoriesPageState extends ConsumerState<CategoriesPage>
       return const Center(child: Text('暂无分类'));
     }
 
+    final theme = Theme.of(context);
     return ListView(
       padding: const EdgeInsets.only(bottom: 96),
       children: [
         for (final top in topLevels) ...[
           ListTile(
             key: Key('category-${top.name}'),
+            contentPadding: const EdgeInsets.only(left: 16, right: 8),
             leading: CategoryIconAvatar(
               iconKey: top.icon,
               colorHex: top.colorFill,
@@ -377,9 +385,12 @@ class _CategoriesPageState extends ConsumerState<CategoriesPage>
                 ),
                 if (top.isHide) ...[
                   const SizedBox(width: 8),
-                  const Text(
+                  Text(
                     '(已隐藏)',
-                    style: TextStyle(fontSize: 12, color: Colors.grey),
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
                   ),
                 ],
               ],
@@ -389,6 +400,7 @@ class _CategoriesPageState extends ConsumerState<CategoriesPage>
               children: [
                 IconButton(
                   key: Key('add-subcat-${top.id}'),
+                  visualDensity: VisualDensity.compact,
                   icon: const Icon(Icons.add_circle_outline),
                   tooltip: '添加子分类',
                   onPressed: () => _addCategory(
@@ -400,6 +412,7 @@ class _CategoriesPageState extends ConsumerState<CategoriesPage>
                 ),
                 IconButton(
                   key: Key('hide-cat-${top.id}'),
+                  visualDensity: VisualDensity.compact,
                   icon: Icon(
                     top.isHide
                         ? Icons.visibility_outlined
@@ -410,6 +423,7 @@ class _CategoriesPageState extends ConsumerState<CategoriesPage>
                 ),
                 PopupMenuButton<String>(
                   key: Key('cat-menu-${top.id}'),
+                  padding: const EdgeInsets.all(4),
                   onSelected: (val) {
                     if (val == 'edit') {
                       _editCategory(top);
@@ -431,6 +445,7 @@ class _CategoriesPageState extends ConsumerState<CategoriesPage>
               padding: const EdgeInsets.only(left: 28),
               child: ListTile(
                 key: Key('category-${sub.name}'),
+                contentPadding: const EdgeInsets.only(left: 16, right: 8),
                 leading: CategoryIconAvatar(
                   iconKey: sub.icon,
                   parentIconKey: top.icon,
@@ -442,18 +457,27 @@ class _CategoriesPageState extends ConsumerState<CategoriesPage>
                 ),
                 title: Text(
                   sub.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     decoration: sub.isHide ? TextDecoration.lineThrough : null,
                   ),
                 ),
                 subtitle: sub.isHide
-                    ? const Text('已隐藏', style: TextStyle(fontSize: 12))
+                    ? Text(
+                        '已隐藏',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      )
                     : null,
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     IconButton(
                       key: Key('hide-cat-${sub.id}'),
+                      visualDensity: VisualDensity.compact,
                       icon: Icon(
                         sub.isHide
                             ? Icons.visibility_outlined
@@ -464,6 +488,7 @@ class _CategoriesPageState extends ConsumerState<CategoriesPage>
                     ),
                     PopupMenuButton<String>(
                       key: Key('cat-menu-${sub.id}'),
+                      padding: const EdgeInsets.all(4),
                       onSelected: (val) {
                         if (val == 'edit') {
                           _editCategory(sub, parentCategory: top);

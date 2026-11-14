@@ -285,29 +285,48 @@ class _CurrenciesPageState extends ConsumerState<CurrenciesPage> {
             ),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
-              child: Wrap(
-                spacing: 8,
-                runSpacing: 8,
+              child: Row(
                 children: [
-                  FilledButton.icon(
-                    key: const Key('online-rate-sync-now'),
-                    onPressed: _syncing ? null : _syncNow,
-                    icon: _syncing
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.sync, size: 18),
-                    label: Text(_syncing ? '同步中…' : '立即同步汇率'),
+                  Expanded(
+                    child: FilledButton.icon(
+                      key: const Key('online-rate-sync-now'),
+                      onPressed: _syncing ? null : _syncNow,
+                      style: FilledButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                      ),
+                      icon: _syncing
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.sync, size: 18),
+                      label: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          _syncing ? '同步中…' : '立即同步汇率',
+                          maxLines: 1,
+                          softWrap: false,
+                        ),
+                      ),
+                    ),
                   ),
-                  OutlinedButton.icon(
-                    key: const Key('online-rate-source-btn'),
-                    onPressed: _syncing
-                        ? null
-                        : () => _configureCustomSource(settings),
-                    icon: const Icon(Icons.tune, size: 18),
-                    label: const Text('自定义汇率源'),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      key: const Key('online-rate-source-btn'),
+                      onPressed: _syncing
+                          ? null
+                          : () => _configureCustomSource(settings),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                      ),
+                      icon: const Icon(Icons.tune, size: 18),
+                      label: const FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text('自定义汇率源', maxLines: 1, softWrap: false),
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -1006,7 +1025,7 @@ class _CurrencyDialogState extends ConsumerState<_CurrencyDialog> {
                 else if (chipItems.isNotEmpty) ...[
                   ConstrainedBox(
                     constraints: BoxConstraints(
-                      maxHeight: isSearching ? 120 : 84,
+                      maxHeight: isSearching ? 112 : 72,
                     ),
                     child: SingleChildScrollView(
                       child: Wrap(
@@ -1094,56 +1113,51 @@ class _CurrencyDialogState extends ConsumerState<_CurrencyDialog> {
                   isDense: true,
                 ),
               ),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: TextField(
-                      key: const Key('currency-price'),
-                      controller: price,
-                      enabled: !_saving,
-                      keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true,
-                      ),
-                      onChanged: _onPriceChanged,
-                      decoration: InputDecoration(
-                        isDense: true,
-                        labelText: editing ? '汇率' : '汇率（留空或点右侧可自动联网获取）',
-                        prefixText: '1 $displayCode = ',
-                        suffixText: 'CNY',
-                        helperText: helperText,
-                        helperMaxLines: 2,
-                        errorText: error,
-                        errorMaxLines: 2,
-                      ),
-                    ),
+              TextField(
+                key: const Key('currency-price'),
+                controller: price,
+                enabled: !_saving,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                onChanged: _onPriceChanged,
+                decoration: InputDecoration(
+                  isDense: true,
+                  labelText: editing ? '汇率' : '汇率（留空或点下方可自动联网获取）',
+                  prefixText: '1 $displayCode = ',
+                  suffixText: 'CNY',
+                  helperText: helperText,
+                  helperMaxLines: 2,
+                  errorText: error,
+                  errorMaxLines: 2,
+                ),
+              ),
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                key: const Key('currency-fetch-online-btn'),
+                onPressed: (_fetching || _saving)
+                    ? null
+                    : _onFetchOnlinePressed,
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
                   ),
-                  const SizedBox(width: 8),
-                  Padding(
-                    padding: const EdgeInsets.only(top: 10),
-                    child: OutlinedButton.icon(
-                      key: const Key('currency-fetch-online-btn'),
-                      onPressed: (_fetching || _saving)
-                          ? null
-                          : _onFetchOnlinePressed,
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 8,
-                        ),
-                        visualDensity: VisualDensity.compact,
-                      ),
-                      icon: _fetching
-                          ? const SizedBox(
-                              width: 14,
-                              height: 14,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.cloud_download_outlined, size: 16),
-                      label: const Text('联网获取'),
-                    ),
-                  ),
-                ],
+                  minimumSize: const Size(0, 34),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  visualDensity: VisualDensity.compact,
+                ),
+                icon: _fetching
+                    ? const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.cloud_download_outlined, size: 16),
+                label: const FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text('联网获取', maxLines: 1, softWrap: false),
+                ),
               ),
             ],
           ),

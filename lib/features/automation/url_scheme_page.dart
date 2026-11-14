@@ -115,10 +115,12 @@ class _UrlSchemePageState extends ConsumerState<UrlSchemePage> {
                     children: [
                       Icon(Icons.link, color: theme.colorScheme.primary),
                       const SizedBox(width: 8),
-                      Text(
-                        '双协议兼容支持',
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
+                      Expanded(
+                        child: Text(
+                          '双协议兼容支持',
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                       ),
                     ],
@@ -160,19 +162,39 @@ class _UrlSchemePageState extends ConsumerState<UrlSchemePage> {
                   const SizedBox(height: 12),
                   Row(
                     children: [
-                      FilledButton.icon(
-                        key: const Key('url_scheme_execute_button'),
-                        onPressed: _executing ? null : _executeTestUri,
-                        icon: const Icon(Icons.play_arrow),
-                        label: Text(_executing ? '执行中…' : '立即执行'),
+                      Expanded(
+                        child: FilledButton.icon(
+                          key: const Key('url_scheme_execute_button'),
+                          style: FilledButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 10),
+                          ),
+                          onPressed: _executing ? null : _executeTestUri,
+                          icon: const Icon(Icons.play_arrow, size: 18),
+                          label: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text(
+                              _executing ? '执行中…' : '立即执行',
+                              maxLines: 1,
+                              softWrap: false,
+                            ),
+                          ),
+                        ),
                       ),
-                      const SizedBox(width: 12),
-                      OutlinedButton.icon(
-                        key: const Key('url_scheme_copy_current_button'),
-                        onPressed: () =>
-                            _copyText(_uriController.text.trim(), '当前调试'),
-                        icon: const Icon(Icons.copy, size: 18),
-                        label: const Text('复制链接'),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          key: const Key('url_scheme_copy_current_button'),
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 10),
+                          ),
+                          onPressed: () =>
+                              _copyText(_uriController.text.trim(), '当前调试'),
+                          icon: const Icon(Icons.copy, size: 18),
+                          label: const FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text('复制链接', maxLines: 1, softWrap: false),
+                          ),
+                        ),
                       ),
                     ],
                   ),
@@ -331,24 +353,36 @@ class _TemplateCard extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Wrap(
-              spacing: 8,
-              runSpacing: 4,
+              spacing: 6,
+              runSpacing: 6,
               children: [
                 ActionChip(
                   key: Key('url_template_fill_$index'),
-                  avatar: const Icon(Icons.bolt_outlined, size: 16),
+                  visualDensity: VisualDensity.compact,
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  labelStyle: theme.textTheme.labelSmall,
+                  avatar: const Icon(Icons.bolt_outlined, size: 15),
                   label: const Text('填入调试'),
                   onPressed: () => onFill(template.tallyIsleUri),
                 ),
                 ActionChip(
                   key: Key('url_template_copy_primary_$index'),
-                  avatar: const Icon(Icons.copy, size: 16),
+                  visualDensity: VisualDensity.compact,
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  labelStyle: theme.textTheme.labelSmall,
+                  avatar: const Icon(Icons.copy, size: 15),
                   label: const Text('复制 tallyisle://'),
                   onPressed: () => onCopy(template.tallyIsleUri, '主协议'),
                 ),
                 ActionChip(
                   key: Key('url_template_copy_legacy_$index'),
-                  avatar: const Icon(Icons.history, size: 16),
+                  visualDensity: VisualDensity.compact,
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  labelStyle: theme.textTheme.labelSmall,
+                  avatar: const Icon(Icons.history, size: 15),
                   label: const Text('复制 yyjz://'),
                   onPressed: () => onCopy(template.legacyUri, '兼容协议'),
                 ),

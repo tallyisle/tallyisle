@@ -523,14 +523,36 @@ class _FixedDepositEditorPageState
                           const SizedBox(width: 12),
                           SegmentedButton<int>(
                             key: const Key('deposit_period_unit_selector'),
+                            showSelectedIcon: false,
+                            style: const ButtonStyle(
+                              visualDensity: VisualDensity.compact,
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              padding: WidgetStatePropertyAll(
+                                EdgeInsets.symmetric(horizontal: 10),
+                              ),
+                            ),
                             segments: const [
                               ButtonSegment(
                                 value: DepositPeriodUnit.month,
-                                label: Text('按月'),
+                                label: FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  child: Text(
+                                    '按月',
+                                    maxLines: 1,
+                                    softWrap: false,
+                                  ),
+                                ),
                               ),
                               ButtonSegment(
                                 value: DepositPeriodUnit.year,
-                                label: Text('按年'),
+                                label: FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  child: Text(
+                                    '按年',
+                                    maxLines: 1,
+                                    softWrap: false,
+                                  ),
+                                ),
                               ),
                             ],
                             selected: {_periodUnit},

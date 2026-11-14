@@ -241,6 +241,7 @@ class _TagsPageState extends ConsumerState<TagsPage> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final tagsAsync = ref.watch(tagsProvider);
     final counts =
         ref.watch(tagRecordCountsProvider).value ?? const <String, int>{};
@@ -281,12 +282,13 @@ class _TagsPageState extends ConsumerState<TagsPage> {
                   final grpCount = counts[grp.tagId] ?? 0;
                   return ListTile(
                     key: Key('tag-${grp.name}'),
+                    contentPadding: const EdgeInsets.only(left: 16, right: 8),
                     onTap: () => _openTagStats(grp),
                     leading: Icon(
                       grp.hidden
                           ? Icons.visibility_off_outlined
                           : Icons.folder_special_outlined,
-                      color: grp.hidden ? Colors.grey : grpColor,
+                      color: grp.hidden ? theme.colorScheme.outline : grpColor,
                     ),
                     title: Wrap(
                       spacing: 6,
@@ -317,19 +319,26 @@ class _TagsPageState extends ConsumerState<TagsPage> {
                             vertical: 1,
                           ),
                           decoration: BoxDecoration(
-                            color: Colors.blueGrey.shade100,
+                            color: theme.colorScheme.secondaryContainer,
                             borderRadius: BorderRadius.circular(4),
                           ),
-                          child: const Text(
+                          child: Text(
                             '标签组',
-                            style: TextStyle(fontSize: 11),
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w500,
+                              color: theme.colorScheme.onSecondaryContainer,
+                            ),
                           ),
                         ),
                         _buildBillCountBadge(context, grp.tagId, grpCount),
                         if (grp.hidden)
-                          const Text(
+                          Text(
                             '(已隐藏)',
-                            style: TextStyle(fontSize: 12, color: Colors.grey),
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
                           ),
                       ],
                     ),
@@ -338,12 +347,14 @@ class _TagsPageState extends ConsumerState<TagsPage> {
                       children: [
                         IconButton(
                           key: Key('add-subtag-${grp.tagId}'),
+                          visualDensity: VisualDensity.compact,
                           icon: const Icon(Icons.add_circle_outline),
                           tooltip: '添加子标签',
                           onPressed: () => _addTag(parentTagId: grp.tagId),
                         ),
                         IconButton(
                           key: Key('hide-tag-${grp.tagId}'),
+                          visualDensity: VisualDensity.compact,
                           icon: Icon(
                             grp.hidden
                                 ? Icons.visibility_outlined
@@ -354,6 +365,7 @@ class _TagsPageState extends ConsumerState<TagsPage> {
                         ),
                         PopupMenuButton<String>(
                           key: Key('tag-menu-${grp.tagId}'),
+                          padding: const EdgeInsets.all(4),
                           onSelected: (val) {
                             if (val == 'stats') {
                               _openTagStats(grp);
@@ -386,15 +398,21 @@ class _TagsPageState extends ConsumerState<TagsPage> {
                     final childColor = parseTagColor(child.color);
                     final childCount = counts[child.tagId] ?? 0;
                     return Padding(
-                      padding: const EdgeInsets.only(left: 32),
+                      padding: const EdgeInsets.only(left: 28),
                       child: ListTile(
                         key: Key('tag-${child.name}'),
+                        contentPadding: const EdgeInsets.only(
+                          left: 16,
+                          right: 8,
+                        ),
                         onTap: () => _openTagStats(child),
                         leading: Icon(
                           child.hidden
                               ? Icons.visibility_off_outlined
                               : Icons.label,
-                          color: child.hidden ? Colors.grey : childColor,
+                          color: child.hidden
+                              ? theme.colorScheme.outline
+                              : childColor,
                         ),
                         title: Wrap(
                           spacing: 6,
@@ -421,6 +439,7 @@ class _TagsPageState extends ConsumerState<TagsPage> {
                           children: [
                             IconButton(
                               key: Key('hide-tag-${child.tagId}'),
+                              visualDensity: VisualDensity.compact,
                               icon: Icon(
                                 child.hidden
                                     ? Icons.visibility_outlined
@@ -431,6 +450,7 @@ class _TagsPageState extends ConsumerState<TagsPage> {
                             ),
                             PopupMenuButton<String>(
                               key: Key('tag-menu-${child.tagId}'),
+                              padding: const EdgeInsets.all(4),
                               onSelected: (val) {
                                 if (val == 'stats') {
                                   _openTagStats(child);
@@ -463,14 +483,14 @@ class _TagsPageState extends ConsumerState<TagsPage> {
             // Standalone tags
             if (standalone.isNotEmpty) ...[
               if (groups.isNotEmpty)
-                const Padding(
-                  padding: EdgeInsets.fromLTRB(16, 16, 16, 4),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
                   child: Text(
                     '独立标签',
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.bold,
-                      color: Colors.grey,
+                      color: theme.colorScheme.onSurfaceVariant,
                     ),
                   ),
                 ),
@@ -481,6 +501,7 @@ class _TagsPageState extends ConsumerState<TagsPage> {
                     final stCount = counts[st.tagId] ?? 0;
                     return ListTile(
                       key: Key('tag-${st.name}'),
+                      contentPadding: const EdgeInsets.only(left: 16, right: 8),
                       onTap: () => _openTagStats(st),
                       leading: Icon(
                         st.hidden
@@ -488,7 +509,7 @@ class _TagsPageState extends ConsumerState<TagsPage> {
                             : (stColor != null
                                   ? Icons.label
                                   : Icons.label_outline),
-                        color: st.hidden ? Colors.grey : stColor,
+                        color: st.hidden ? theme.colorScheme.outline : stColor,
                       ),
                       title: Wrap(
                         spacing: 6,
@@ -511,6 +532,7 @@ class _TagsPageState extends ConsumerState<TagsPage> {
                         children: [
                           IconButton(
                             key: Key('hide-tag-${st.tagId}'),
+                            visualDensity: VisualDensity.compact,
                             icon: Icon(
                               st.hidden
                                   ? Icons.visibility_outlined
@@ -521,6 +543,7 @@ class _TagsPageState extends ConsumerState<TagsPage> {
                           ),
                           PopupMenuButton<String>(
                             key: Key('tag-menu-${st.tagId}'),
+                            padding: const EdgeInsets.all(4),
                             onSelected: (val) {
                               if (val == 'stats') {
                                 _openTagStats(st);
@@ -606,7 +629,16 @@ class _TagColorPicker extends StatelessWidget {
                     width: 1.5,
                   ),
                 ),
-                child: const Text('默认', style: TextStyle(fontSize: 12)),
+                child: Text(
+                  '默认',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color:
+                        normalizedSelected == null || normalizedSelected.isEmpty
+                        ? theme.colorScheme.onSecondaryContainer
+                        : theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
               ),
             ),
             for (final hex in kTagColorSwatches)
@@ -614,6 +646,11 @@ class _TagColorPicker extends StatelessWidget {
                 builder: (context) {
                   final c = parseTagColor(hex)!;
                   final isSelected = normalizedSelected == hex.toUpperCase();
+                  final checkColor =
+                      ThemeData.estimateBrightnessForColor(c) ==
+                          Brightness.light
+                      ? Colors.black87
+                      : Colors.white;
                   return InkWell(
                     key: Key('tag-color-$hex'),
                     customBorder: const CircleBorder(),
@@ -632,11 +669,7 @@ class _TagColorPicker extends StatelessWidget {
                             : null,
                       ),
                       child: isSelected
-                          ? const Icon(
-                              Icons.check,
-                              size: 16,
-                              color: Colors.white,
-                            )
+                          ? Icon(Icons.check, size: 16, color: checkColor)
                           : null,
                     ),
                   );

@@ -103,7 +103,6 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   Widget build(BuildContext context) {
     final settingsAsync = ref.watch(appSettingsProvider);
     final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
 
     return Scaffold(
       appBar: AppBar(title: const Text('系统与首页设置')),
@@ -118,7 +117,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
           return ListView(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
             children: [
-              _SectionHeader(title: '首页与记账偏好', color: scheme.primary),
+              const _SectionHeader(title: '首页与记账偏好'),
               Card(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -126,9 +125,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                     SwitchListTile(
                       key: const Key('setting_show_balance_change_switch'),
                       title: const Text('首页显示余额调整记录'),
-                      subtitle: const Text(
-                        '开启后，账户余额变更（type=4）将在首页流水列表中展示；不计入收支统计',
-                      ),
+                      subtitle: const Text('在首页收支流水中显示「账户余额变更」调整记录；不计入收支统计'),
                       value: settings.showBalanceChangeRecordOnHome,
                       onChanged: _busy
                           ? null
@@ -168,39 +165,70 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                     Padding(
                       padding: const EdgeInsets.all(16),
                       child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
                           Text('“记一笔”默认类型', style: theme.textTheme.titleSmall),
                           const SizedBox(height: 8),
-                          SegmentedButton<int>(
-                            key: const Key(
-                              'setting_default_record_type_segmented',
-                            ),
-                            segments: const [
-                              ButtonSegment<int>(
-                                value: RecordType.expense,
-                                label: Text('支出'),
-                                icon: Icon(Icons.remove_circle_outline),
+                          SizedBox(
+                            width: double.infinity,
+                            child: SegmentedButton<int>(
+                              key: const Key(
+                                'setting_default_record_type_segmented',
                               ),
-                              ButtonSegment<int>(
-                                value: RecordType.income,
-                                label: Text('收入'),
-                                icon: Icon(Icons.add_circle_outline),
-                              ),
-                              ButtonSegment<int>(
-                                value: RecordType.transfer,
-                                label: Text('转账'),
-                                icon: Icon(Icons.swap_horiz),
-                              ),
-                            ],
-                            selected: <int>{settings.defaultRecordType},
-                            onSelectionChanged: _busy
-                                ? null
-                                : (selected) => _updateSettings(
-                                    settings.copyWith(
-                                      defaultRecordType: selected.first,
+                              showSelectedIcon: false,
+                              segments: const [
+                                ButtonSegment<int>(
+                                  value: RecordType.expense,
+                                  label: FittedBox(
+                                    fit: BoxFit.scaleDown,
+                                    child: Text(
+                                      '支出',
+                                      maxLines: 1,
+                                      softWrap: false,
                                     ),
                                   ),
+                                  icon: Icon(
+                                    Icons.remove_circle_outline,
+                                    size: 18,
+                                  ),
+                                ),
+                                ButtonSegment<int>(
+                                  value: RecordType.income,
+                                  label: FittedBox(
+                                    fit: BoxFit.scaleDown,
+                                    child: Text(
+                                      '收入',
+                                      maxLines: 1,
+                                      softWrap: false,
+                                    ),
+                                  ),
+                                  icon: Icon(
+                                    Icons.add_circle_outline,
+                                    size: 18,
+                                  ),
+                                ),
+                                ButtonSegment<int>(
+                                  value: RecordType.transfer,
+                                  label: FittedBox(
+                                    fit: BoxFit.scaleDown,
+                                    child: Text(
+                                      '转账',
+                                      maxLines: 1,
+                                      softWrap: false,
+                                    ),
+                                  ),
+                                  icon: Icon(Icons.swap_horiz, size: 18),
+                                ),
+                              ],
+                              selected: <int>{settings.defaultRecordType},
+                              onSelectionChanged: _busy
+                                  ? null
+                                  : (selected) => _updateSettings(
+                                      settings.copyWith(
+                                        defaultRecordType: selected.first,
+                                      ),
+                                    ),
+                            ),
                           ),
                         ],
                       ),
@@ -209,30 +237,43 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                 ),
               ),
               const SizedBox(height: 16),
-              _SectionHeader(title: '外观与主题（全免费开放）', color: scheme.primary),
+              const _SectionHeader(title: '外观与主题'),
               Card(
                 child: Padding(
                   padding: const EdgeInsets.all(16),
                   child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       Text('深浅色模式', style: theme.textTheme.titleSmall),
                       const SizedBox(height: 8),
-                      SegmentedButton<AppThemeModePreference>(
-                        key: const Key('setting_theme_mode_segmented'),
-                        segments: [
-                          for (final mode in AppThemeModePreference.values)
-                            ButtonSegment<AppThemeModePreference>(
-                              value: mode,
-                              label: Text(mode.label),
-                            ),
-                        ],
-                        selected: <AppThemeModePreference>{settings.themeMode},
-                        onSelectionChanged: _busy
-                            ? null
-                            : (selected) => _updateSettings(
-                                settings.copyWith(themeMode: selected.first),
+                      SizedBox(
+                        width: double.infinity,
+                        child: SegmentedButton<AppThemeModePreference>(
+                          key: const Key('setting_theme_mode_segmented'),
+                          showSelectedIcon: false,
+                          segments: [
+                            for (final mode in AppThemeModePreference.values)
+                              ButtonSegment<AppThemeModePreference>(
+                                value: mode,
+                                label: FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  child: Text(
+                                    mode.label,
+                                    maxLines: 1,
+                                    softWrap: false,
+                                  ),
+                                ),
                               ),
+                          ],
+                          selected: <AppThemeModePreference>{
+                            settings.themeMode,
+                          },
+                          onSelectionChanged: _busy
+                              ? null
+                              : (selected) => _updateSettings(
+                                  settings.copyWith(themeMode: selected.first),
+                                ),
+                        ),
                       ),
                       const SizedBox(height: 16),
                       Text('品牌与主题色板', style: theme.textTheme.titleSmall),
@@ -277,7 +318,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                 ),
               ),
               const SizedBox(height: 16),
-              _SectionHeader(title: '安全、数据体检与更多', color: scheme.primary),
+              const _SectionHeader(title: '安全、数据体检与更多'),
               Card(
                 child: Column(
                   children: [
@@ -354,22 +395,26 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
 }
 
 class _SectionHeader extends StatelessWidget {
-  const _SectionHeader({required this.title, required this.color});
+  const _SectionHeader({required this.title});
 
   final String title;
-  final Color color;
 
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
-    child: Text(
-      title,
-      style: Theme.of(context).textTheme.titleSmall?.copyWith(
-        color: color,
-        fontWeight: FontWeight.w700,
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+      child: Text(
+        title,
+        style: theme.textTheme.labelMedium?.copyWith(
+          color: scheme.onSurfaceVariant,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 0.3,
+        ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 class _CustomThemeHexDialog extends StatefulWidget {

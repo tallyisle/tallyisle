@@ -38,7 +38,13 @@ class _HomePageState extends ConsumerState<HomePage> {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(book.value?.name ?? '帐屿'),
+                Flexible(
+                  child: Text(
+                    book.value?.name ?? '帐屿',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
                 const Icon(Icons.arrow_drop_down),
               ],
             ),
@@ -343,7 +349,9 @@ class _HomeRecordTile extends ConsumerWidget {
         label.amount,
         style: TextStyle(
           color: record.type == RecordType.income
-              ? Colors.green.shade700
+              ? (theme.brightness == Brightness.dark
+                    ? Colors.green.shade300
+                    : Colors.green.shade700)
               : null,
           fontWeight: FontWeight.w600,
         ),
@@ -361,12 +369,24 @@ class _SummaryCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     Widget cell(String label, BigInt v, Key key) => Expanded(
-      child: Column(
-        children: [
-          Text(label, style: theme.textTheme.labelMedium),
-          const SizedBox(height: 4),
-          Text(formatMinor(v), key: key, style: theme.textTheme.titleMedium),
-        ],
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6),
+        child: Column(
+          children: [
+            Text(label, style: theme.textTheme.labelMedium),
+            const SizedBox(height: 4),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                formatMinor(v),
+                key: key,
+                maxLines: 1,
+                softWrap: false,
+                style: theme.textTheme.titleMedium,
+              ),
+            ),
+          ],
+        ),
       ),
     );
     return Card(

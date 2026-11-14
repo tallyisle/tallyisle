@@ -50,7 +50,7 @@ class _DataHealthPageState extends ConsumerState<DataHealthPage> {
               Text('• 清理指向缺失记录或标签的孤立关联：${report.orphanTagRepairs.length} 项'),
             const SizedBox(height: 12),
             Text(
-              '承诺：绝不修改或删除任何账单流水记录，绝不改动信用卡（type=6）余额或授信额度。',
+              '承诺：绝不修改或删除任何账单流水记录，绝不改动信用账户余额或授信额度。',
               style: Theme.of(dialogContext).textTheme.bodySmall?.copyWith(
                 color: Theme.of(dialogContext).colorScheme.onSurfaceVariant,
               ),
@@ -240,7 +240,7 @@ class _DataHealthPageState extends ConsumerState<DataHealthPage> {
                       const SizedBox(width: 10),
                       Expanded(
                         child: Text(
-                          '核对口径（ADR-012）：普通/储蓄/投资账户核对 期初金额 + 流水变动；借贷账户重算本金与结清状态；信用卡账户（type=6）的授信额度（init_money）绝不计入余额，建卡期初欠款仅作提示、绝不自动覆盖。',
+                          '核对口径：普通/储蓄/投资账户核对「期初金额 + 流水变动」；借贷账户重算本金与结清状态；信用账户的授信额度绝不计入余额，建卡期初欠款仅作提示、绝不自动覆盖。',
                           style: theme.textTheme.bodySmall?.copyWith(
                             color: scheme.onSurfaceVariant,
                           ),
@@ -251,16 +251,10 @@ class _DataHealthPageState extends ConsumerState<DataHealthPage> {
                 ),
               ),
               const SizedBox(height: 12),
-              Wrap(
-                spacing: 12,
-                runSpacing: 8,
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  OutlinedButton.icon(
-                    onPressed: _repairing ? null : _recheck,
-                    icon: const Icon(Icons.refresh),
-                    label: const Text('重新体检'),
-                  ),
-                  if (report.repairableCount > 0)
+                  if (report.repairableCount > 0) ...[
                     FilledButton.icon(
                       key: const Key('data_health_repair_button'),
                       onPressed: _repairing
@@ -273,8 +267,25 @@ class _DataHealthPageState extends ConsumerState<DataHealthPage> {
                               child: CircularProgressIndicator(strokeWidth: 2),
                             )
                           : const Icon(Icons.build_circle_outlined),
-                      label: Text('一键修复可自动校准项 (${report.repairableCount})'),
+                      label: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          '一键修复可自动校准项 (${report.repairableCount})',
+                          maxLines: 1,
+                          softWrap: false,
+                        ),
+                      ),
                     ),
+                    const SizedBox(height: 8),
+                  ],
+                  OutlinedButton.icon(
+                    onPressed: _repairing ? null : _recheck,
+                    icon: const Icon(Icons.refresh),
+                    label: const FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text('重新体检', maxLines: 1, softWrap: false),
+                    ),
+                  ),
                 ],
               ),
               const SizedBox(height: 16),
@@ -334,22 +345,32 @@ class _MetricTile extends StatelessWidget {
     return Card(
       margin: EdgeInsets.zero,
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 6),
         child: Column(
           children: [
-            Text(
-              value,
-              style: theme.textTheme.titleLarge?.copyWith(
-                fontWeight: FontWeight.w700,
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                value,
+                maxLines: 1,
+                softWrap: false,
+                style: theme.textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
               ),
             ),
             const SizedBox(height: 2),
-            Text(
-              label,
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                label,
+                maxLines: 1,
+                softWrap: false,
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+                textAlign: TextAlign.center,
               ),
-              textAlign: TextAlign.center,
             ),
           ],
         ),

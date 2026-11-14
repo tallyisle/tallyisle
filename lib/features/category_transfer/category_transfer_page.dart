@@ -292,9 +292,27 @@ class _CategoryTransferPageState extends ConsumerState<CategoryTransferPage>
         bottom: TabBar(
           controller: _tabController,
           tabs: const [
-            Tab(key: Key('cat-transfer-tab-json'), text: '本地导入导出'),
-            Tab(key: Key('cat-transfer-tab-copy'), text: '跨账本复制'),
-            Tab(key: Key('cat-transfer-tab-migrate'), text: '分类迁移'),
+            Tab(
+              key: Key('cat-transfer-tab-json'),
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text('本地导入导出', maxLines: 1, softWrap: false),
+              ),
+            ),
+            Tab(
+              key: Key('cat-transfer-tab-copy'),
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text('跨账本复制', maxLines: 1, softWrap: false),
+              ),
+            ),
+            Tab(
+              key: Key('cat-transfer-tab-migrate'),
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text('分类迁移', maxLines: 1, softWrap: false),
+              ),
+            ),
           ],
         ),
       ),
@@ -443,6 +461,8 @@ class _CategoryTransferPageState extends ConsumerState<CategoryTransferPage>
             shareCap.state == CapabilityState.available
                 ? '系统分享分类方案 JSON'
                 : '系统分享（${shareCap.reason}）',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
           ),
         ),
         const Divider(height: 32),
@@ -456,7 +476,11 @@ class _CategoryTransferPageState extends ConsumerState<CategoryTransferPage>
               ? null
               : () => _pickAndImport(selectedBookId, selectedBook.name),
           icon: const Icon(Icons.upload_file_outlined),
-          label: Text('选择 JSON 文件导入到「${selectedBook.name}」'),
+          label: Text(
+            '选择 JSON 文件导入到「${selectedBook.name}」',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
         ),
       ],
     );
@@ -628,19 +652,41 @@ class _CategoryTransferPageState extends ConsumerState<CategoryTransferPage>
               }),
             ),
             const SizedBox(height: 12),
-            SegmentedButton<int>(
-              segments: const [
-                ButtonSegment(value: 0, label: Text('支出分类')),
-                ButtonSegment(value: 1, label: Text('收入分类')),
-              ],
-              selected: {_migrateType},
-              onSelectionChanged: _busy
-                  ? null
-                  : (sel) => setState(() {
-                      _migrateType = sel.first;
-                      _migrateSourceCatId = null;
-                      _migrateTargetCatId = null;
-                    }),
+            SizedBox(
+              width: double.infinity,
+              child: SegmentedButton<int>(
+                showSelectedIcon: false,
+                style: const ButtonStyle(
+                  visualDensity: VisualDensity.compact,
+                  padding: WidgetStatePropertyAll(
+                    EdgeInsets.symmetric(horizontal: 10),
+                  ),
+                ),
+                segments: const [
+                  ButtonSegment(
+                    value: 0,
+                    label: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text('支出分类', maxLines: 1, softWrap: false),
+                    ),
+                  ),
+                  ButtonSegment(
+                    value: 1,
+                    label: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text('收入分类', maxLines: 1, softWrap: false),
+                    ),
+                  ),
+                ],
+                selected: {_migrateType},
+                onSelectionChanged: _busy
+                    ? null
+                    : (sel) => setState(() {
+                        _migrateType = sel.first;
+                        _migrateSourceCatId = null;
+                        _migrateTargetCatId = null;
+                      }),
+              ),
             ),
             const SizedBox(height: 16),
             if (typedCats.length < 2)

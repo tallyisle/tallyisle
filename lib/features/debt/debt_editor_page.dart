@@ -300,24 +300,48 @@ class _DebtEditorPageState extends ConsumerState<DebtEditorPage> {
                   padding: const EdgeInsets.all(16),
                   children: [
                     if (!_editing)
-                      SegmentedButton<int>(
-                        key: const Key('debt_direction_selector'),
-                        segments: const [
-                          ButtonSegment(
-                            value: AssetType.debtLend,
-                            label: Text('借出（应收）'),
-                            icon: Icon(Icons.call_made),
+                      SizedBox(
+                        width: double.infinity,
+                        child: SegmentedButton<int>(
+                          key: const Key('debt_direction_selector'),
+                          showSelectedIcon: false,
+                          style: const ButtonStyle(
+                            visualDensity: VisualDensity.compact,
+                            padding: WidgetStatePropertyAll(
+                              EdgeInsets.symmetric(horizontal: 10),
+                            ),
                           ),
-                          ButtonSegment(
-                            value: AssetType.debtBorrow,
-                            label: Text('借入（应付）'),
-                            icon: Icon(Icons.call_received),
-                          ),
-                        ],
-                        selected: {_subType},
-                        onSelectionChanged: _busy
-                            ? null
-                            : (s) => setState(() => _subType = s.first),
+                          segments: const [
+                            ButtonSegment(
+                              value: AssetType.debtLend,
+                              label: FittedBox(
+                                fit: BoxFit.scaleDown,
+                                child: Text(
+                                  '借出（应收）',
+                                  maxLines: 1,
+                                  softWrap: false,
+                                ),
+                              ),
+                              icon: Icon(Icons.call_made, size: 18),
+                            ),
+                            ButtonSegment(
+                              value: AssetType.debtBorrow,
+                              label: FittedBox(
+                                fit: BoxFit.scaleDown,
+                                child: Text(
+                                  '借入（应付）',
+                                  maxLines: 1,
+                                  softWrap: false,
+                                ),
+                              ),
+                              icon: Icon(Icons.call_received, size: 18),
+                            ),
+                          ],
+                          selected: {_subType},
+                          onSelectionChanged: _busy
+                              ? null
+                              : (s) => setState(() => _subType = s.first),
+                        ),
                       )
                     else
                       ListTile(

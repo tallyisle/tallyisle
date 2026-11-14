@@ -76,16 +76,24 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
     final theme = Theme.of(context);
     String show(BigInt v) => hidden ? '***' : formatMinor(v);
     Widget cell(String label, BigInt? v, Key key) => Expanded(
-      child: Column(
-        children: [
-          Text(label, style: theme.textTheme.labelMedium),
-          const SizedBox(height: 4),
-          Text(
-            v == null ? '' : show(v),
-            key: key,
-            style: theme.textTheme.titleMedium,
-          ),
-        ],
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6),
+        child: Column(
+          children: [
+            Text(label, style: theme.textTheme.labelMedium),
+            const SizedBox(height: 4),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                v == null ? '' : show(v),
+                key: key,
+                maxLines: 1,
+                softWrap: false,
+                style: theme.textTheme.titleMedium,
+              ),
+            ),
+          ],
+        ),
       ),
     );
 
@@ -233,32 +241,65 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
             ),
             if (allVisibleEmpty)
               Padding(
-                padding: const EdgeInsets.all(32),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 32,
+                ),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     const Text('还没有账户，点右下角添加'),
                     const SizedBox(height: 16),
-                    Wrap(
-                      spacing: 12,
-                      runSpacing: 8,
-                      alignment: WrapAlignment.center,
+                    Row(
                       children: [
-                        OutlinedButton.icon(
-                          key: const Key('empty-add-normal-asset'),
-                          onPressed: () => context.push('/assets/new'),
-                          icon: const Icon(
-                            Icons.account_balance_wallet_outlined,
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            key: const Key('empty-add-normal-asset'),
+                            onPressed: () => context.push('/assets/new'),
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                              ),
+                            ),
+                            icon: const Icon(
+                              Icons.account_balance_wallet_outlined,
+                              size: 18,
+                            ),
+                            label: const FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Text(
+                                '新建资金账户',
+                                maxLines: 1,
+                                softWrap: false,
+                              ),
+                            ),
                           ),
-                          label: const Text('新建资金账户'),
                         ),
-                        OutlinedButton.icon(
-                          key: const Key('empty-add-credit-asset'),
-                          onPressed: () => context.push(
-                            '/assets/new?type=${AssetType.credit}',
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            key: const Key('empty-add-credit-asset'),
+                            onPressed: () => context.push(
+                              '/assets/new?type=${AssetType.credit}',
+                            ),
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                              ),
+                            ),
+                            icon: const Icon(
+                              Icons.credit_card_outlined,
+                              size: 18,
+                            ),
+                            label: const FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Text(
+                                '新建信用账户',
+                                maxLines: 1,
+                                softWrap: false,
+                              ),
+                            ),
                           ),
-                          icon: const Icon(Icons.credit_card_outlined),
-                          label: const Text('新建信用账户'),
                         ),
                       ],
                     ),

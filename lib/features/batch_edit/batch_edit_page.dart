@@ -276,7 +276,11 @@ class _BatchEditPageState extends ConsumerState<BatchEditPage> {
                                 for (final b in books)
                                   DropdownMenuItem(
                                     value: b.id,
-                                    child: Text(b.name),
+                                    child: Text(
+                                      b.name,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
                                   ),
                               ],
                               onChanged: _busy
@@ -292,9 +296,13 @@ class _BatchEditPageState extends ConsumerState<BatchEditPage> {
                           ),
                         ),
                       ),
-                      const SizedBox(width: 8),
+                      const SizedBox(width: 6),
                       TextButton(
                         key: const Key('batch-select-all'),
+                        style: TextButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                        ),
                         onPressed: _busy || visibleRecords.isEmpty
                             ? null
                             : () => setState(() {
@@ -306,6 +314,10 @@ class _BatchEditPageState extends ConsumerState<BatchEditPage> {
                       ),
                       TextButton(
                         key: const Key('batch-invert-select'),
+                        style: TextButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                        ),
                         onPressed: _busy || visibleRecords.isEmpty
                             ? null
                             : () => setState(() {
@@ -398,8 +410,8 @@ class _BatchEditPageState extends ConsumerState<BatchEditPage> {
                     top: false,
                     child: Padding(
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 12,
+                        horizontal: 12,
+                        vertical: 10,
                       ),
                       child: Row(
                         children: [
@@ -407,20 +419,42 @@ class _BatchEditPageState extends ConsumerState<BatchEditPage> {
                             child: Text(
                               '已选 ${selectedInBook.length} 笔',
                               key: const Key('batch-selected-count'),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                               style: Theme.of(context).textTheme.titleSmall,
                             ),
                           ),
+                          const SizedBox(width: 8),
                           OutlinedButton.icon(
                             key: const Key('batch-delete-btn'),
+                            style: OutlinedButton.styleFrom(
+                              visualDensity: VisualDensity.compact,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 8,
+                              ),
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
                             onPressed: _busy || selectedInBook.isEmpty
                                 ? null
                                 : () => _confirmBatchDelete(selectedInBook),
-                            icon: const Icon(Icons.delete_outline),
-                            label: const Text('批量删除'),
+                            icon: const Icon(Icons.delete_outline, size: 18),
+                            label: const FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Text('批量删除', maxLines: 1, softWrap: false),
+                            ),
                           ),
-                          const SizedBox(width: 12),
+                          const SizedBox(width: 8),
                           FilledButton.icon(
                             key: const Key('batch-open-edit-btn'),
+                            style: FilledButton.styleFrom(
+                              visualDensity: VisualDensity.compact,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 8,
+                              ),
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
                             onPressed: _busy || selectedInBook.isEmpty
                                 ? null
                                 : () => _openBatchEditSheet(
@@ -430,8 +464,11 @@ class _BatchEditPageState extends ConsumerState<BatchEditPage> {
                                     tags: tags,
                                     selectedRecords: selectedInBook,
                                   ),
-                            icon: const Icon(Icons.edit_note),
-                            label: const Text('批量修改'),
+                            icon: const Icon(Icons.edit_note, size: 18),
+                            label: const FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Text('批量修改', maxLines: 1, softWrap: false),
+                            ),
                           ),
                         ],
                       ),
@@ -852,11 +889,38 @@ class _TriStateBoolRow extends StatelessWidget {
       key: rowKey,
       children: [
         Expanded(child: Text(label)),
+        const SizedBox(width: 8),
         SegmentedButton<int>(
+          showSelectedIcon: false,
+          style: const ButtonStyle(
+            visualDensity: VisualDensity.compact,
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            padding: WidgetStatePropertyAll(
+              EdgeInsets.symmetric(horizontal: 10),
+            ),
+          ),
           segments: const [
-            ButtonSegment(value: -1, label: Text('不改')),
-            ButtonSegment(value: 1, label: Text('开启')),
-            ButtonSegment(value: 0, label: Text('关闭')),
+            ButtonSegment(
+              value: -1,
+              label: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text('不改', maxLines: 1, softWrap: false),
+              ),
+            ),
+            ButtonSegment(
+              value: 1,
+              label: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text('开启', maxLines: 1, softWrap: false),
+              ),
+            ),
+            ButtonSegment(
+              value: 0,
+              label: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text('关闭', maxLines: 1, softWrap: false),
+              ),
+            ),
           ],
           selected: {code},
           onSelectionChanged: (sel) {

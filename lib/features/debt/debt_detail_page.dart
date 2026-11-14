@@ -303,10 +303,16 @@ class _DebtDetailPageState extends ConsumerState<DebtDetailPage> {
                       style: theme.textTheme.labelMedium,
                     ),
                     const SizedBox(height: 4),
-                    Text(
-                      formatMinor(m.remainingPrincipalMinor),
-                      key: const Key('debt_remaining_principal'),
-                      style: theme.textTheme.headlineMedium,
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        formatMinor(m.remainingPrincipalMinor),
+                        key: const Key('debt_remaining_principal'),
+                        maxLines: 1,
+                        softWrap: false,
+                        style: theme.textTheme.headlineMedium,
+                      ),
                     ),
                     const SizedBox(height: 16),
                     Row(
@@ -396,40 +402,86 @@ class _DebtDetailPageState extends ConsumerState<DebtDetailPage> {
               ),
             ),
             const SizedBox(height: 12),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                if (!settled) ...[
-                  FilledButton.icon(
-                    key: const Key('debt_action_repay'),
-                    icon: const Icon(Icons.payments_outlined),
-                    label: Text(isBorrow ? '还款' : '收款'),
-                    onPressed: () => _showRepayDialog(view),
+            if (!settled) ...[
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  key: const Key('debt_action_repay'),
+                  icon: const Icon(Icons.payments_outlined, size: 18),
+                  label: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      isBorrow ? '还款' : '收款',
+                      maxLines: 1,
+                      softWrap: false,
+                    ),
                   ),
-                  OutlinedButton.icon(
-                    key: const Key('debt_action_add_principal'),
-                    icon: const Icon(Icons.add_circle_outline),
-                    label: Text(isBorrow ? '追加借入' : '追加借出'),
-                    onPressed: () => _showAddPrincipalDialog(view),
+                  onPressed: () => _showRepayDialog(view),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      key: const Key('debt_action_add_principal'),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                      ),
+                      icon: const Icon(Icons.add_circle_outline, size: 18),
+                      label: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          isBorrow ? '追加借入' : '追加借出',
+                          maxLines: 1,
+                          softWrap: false,
+                        ),
+                      ),
+                      onPressed: () => _showAddPrincipalDialog(view),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      key: const Key('debt_action_interest_only'),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                      ),
+                      icon: const Icon(Icons.percent, size: 18),
+                      label: const FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text('记纯利息', maxLines: 1, softWrap: false),
+                      ),
+                      onPressed: () =>
+                          _showRepayDialog(view, pureInterestOnly: true),
+                    ),
                   ),
                 ],
-                OutlinedButton.icon(
+              ),
+            ] else
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
                   key: const Key('debt_action_interest_only'),
-                  icon: const Icon(Icons.percent),
-                  label: const Text('记纯利息'),
+                  icon: const Icon(Icons.percent, size: 18),
+                  label: const FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text('记纯利息', maxLines: 1, softWrap: false),
+                  ),
                   onPressed: () =>
                       _showRepayDialog(view, pureInterestOnly: true),
                 ),
-              ],
-            ),
+              ),
             const SizedBox(height: 16),
             Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(
-                  '关联流水 (${view.records.length})',
-                  style: theme.textTheme.titleSmall,
+                Expanded(
+                  child: Text(
+                    '关联流水 (${view.records.length})',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.titleSmall,
+                  ),
                 ),
                 TextButton.icon(
                   key: const Key('debt_group_mode_toggle'),
@@ -546,13 +598,26 @@ class _MetricColumn extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label, style: theme.textTheme.labelSmall),
-        const SizedBox(height: 2),
-        Text(value, key: valueKey, style: theme.textTheme.titleMedium),
-      ],
+    return Padding(
+      padding: const EdgeInsets.only(right: 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: theme.textTheme.labelSmall),
+          const SizedBox(height: 2),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              value,
+              key: valueKey,
+              maxLines: 1,
+              softWrap: false,
+              style: theme.textTheme.titleMedium,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

@@ -339,10 +339,22 @@ class _AccessibilityStatusCard extends StatelessWidget {
     final theme = Theme.of(context);
     final status =
         statusAsync.value ?? const AccessibilityBridgeStatus.unsupported();
-    final Color badgeColor = switch (status.statusLabel) {
-      accessibilityEnabledLabel => theme.colorScheme.primaryContainer,
-      accessibilityDisabledLabel => theme.colorScheme.tertiaryContainer,
-      _ => theme.colorScheme.surfaceContainerHighest,
+    final (
+      Color badgeColor,
+      Color badgeTextColor,
+    ) = switch (status.statusLabel) {
+      accessibilityEnabledLabel => (
+        theme.colorScheme.primaryContainer,
+        theme.colorScheme.onPrimaryContainer,
+      ),
+      accessibilityDisabledLabel => (
+        theme.colorScheme.tertiaryContainer,
+        theme.colorScheme.onTertiaryContainer,
+      ),
+      _ => (
+        theme.colorScheme.surfaceContainerHighest,
+        theme.colorScheme.onSurfaceVariant,
+      ),
     };
 
     return Card(
@@ -357,7 +369,10 @@ class _AccessibilityStatusCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 4,
+                    crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
                       Text(
                         '无障碍支付识别',
@@ -365,7 +380,6 @@ class _AccessibilityStatusCard extends StatelessWidget {
                           fontWeight: FontWeight.bold,
                         ),
                       ),
-                      const SizedBox(width: 8),
                       Container(
                         key: const Key('auto_bill_status_badge'),
                         padding: const EdgeInsets.symmetric(
@@ -379,6 +393,7 @@ class _AccessibilityStatusCard extends StatelessWidget {
                         child: Text(
                           status.statusLabel,
                           style: theme.textTheme.labelSmall?.copyWith(
+                            color: badgeTextColor,
                             fontWeight: FontWeight.w600,
                           ),
                         ),
@@ -398,6 +413,10 @@ class _AccessibilityStatusCard extends StatelessWidget {
             if (status.supported)
               TextButton(
                 key: const Key('auto_bill_open_settings_button'),
+                style: TextButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                ),
                 onPressed: onOpenSettings,
                 child: Text(status.enabled ? '设置' : '去开启'),
               ),
@@ -439,23 +458,42 @@ class _DraftsTabView extends StatelessWidget {
       return ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          Row(
-            children: [
-              FilledButton.icon(
-                key: const Key('auto_bill_paste_parse_button'),
-                onPressed: onPasteParse,
-                icon: const Icon(Icons.content_paste_go, size: 18),
-                label: const Text('粘贴支付文本识别'),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              key: const Key('auto_bill_paste_parse_button'),
+              onPressed: onPasteParse,
+              icon: const Icon(Icons.content_paste_go, size: 18),
+              label: const FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text('粘贴支付文本识别', maxLines: 1, softWrap: false),
               ),
-              const Spacer(),
-              if (drafts.isNotEmpty)
+            ),
+          ),
+          if (drafts.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '待处理（${drafts.length}）',
+                    style: theme.textTheme.labelLarge?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
                 TextButton(
                   key: const Key('auto_bill_clear_drafts_button'),
+                  style: TextButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                  ),
                   onPressed: onClearAll,
                   child: const Text('清空草稿'),
                 ),
-            ],
-          ),
+              ],
+            ),
+          ],
           const SizedBox(height: 12),
           if (drafts.isEmpty)
             Padding(
@@ -482,16 +520,24 @@ class _DraftsTabView extends StatelessWidget {
                     children: [
                       Row(
                         children: [
-                          Chip(
-                            label: Text(draft.displayApp),
-                            visualDensity: VisualDensity.compact,
+                          Expanded(
+                            child: Wrap(
+                              spacing: 8,
+                              runSpacing: 4,
+                              crossAxisAlignment: WrapCrossAlignment.center,
+                              children: [
+                                Chip(
+                                  label: Text(draft.displayApp),
+                                  visualDensity: VisualDensity.compact,
+                                ),
+                                Text(
+                                  RecordType.names[draft.recordType] ?? '支出',
+                                  style: theme.textTheme.labelMedium,
+                                ),
+                              ],
+                            ),
                           ),
                           const SizedBox(width: 8),
-                          Text(
-                            RecordType.names[draft.recordType] ?? '支出',
-                            style: theme.textTheme.labelMedium,
-                          ),
-                          const Spacer(),
                           Text(
                             '¥${draft.money.decimal}',
                             style: theme.textTheme.titleMedium?.copyWith(
@@ -531,26 +577,52 @@ class _DraftsTabView extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(height: 8),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.end,
-                        children: [
-                          TextButton(
-                            key: Key('auto_bill_delete_draft_${draft.id}'),
-                            onPressed: () => onDelete(draft),
-                            child: const Text('忽略'),
-                          ),
-                          TextButton(
-                            key: Key('auto_bill_edit_confirm_${draft.id}'),
-                            onPressed: () => onEditConfirm(draft),
-                            child: const Text('编辑入账'),
-                          ),
-                          const SizedBox(width: 4),
-                          FilledButton.tonal(
-                            key: Key('auto_bill_quick_confirm_${draft.id}'),
-                            onPressed: () => onQuickConfirm(draft),
-                            child: const Text('确认入账'),
-                          ),
-                        ],
+                      SizedBox(
+                        width: double.infinity,
+                        child: Wrap(
+                          alignment: WrapAlignment.end,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          spacing: 4,
+                          runSpacing: 4,
+                          children: [
+                            TextButton(
+                              key: Key('auto_bill_delete_draft_${draft.id}'),
+                              style: TextButton.styleFrom(
+                                visualDensity: VisualDensity.compact,
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                ),
+                              ),
+                              onPressed: () => onDelete(draft),
+                              child: const Text('忽略'),
+                            ),
+                            TextButton(
+                              key: Key('auto_bill_edit_confirm_${draft.id}'),
+                              style: TextButton.styleFrom(
+                                visualDensity: VisualDensity.compact,
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                ),
+                              ),
+                              onPressed: () => onEditConfirm(draft),
+                              child: const Text('编辑入账'),
+                            ),
+                            FilledButton.tonal(
+                              key: Key('auto_bill_quick_confirm_${draft.id}'),
+                              style: FilledButton.styleFrom(
+                                visualDensity: VisualDensity.compact,
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                ),
+                              ),
+                              onPressed: () => onQuickConfirm(draft),
+                              child: const Text('确认入账'),
+                            ),
+                          ],
+                        ),
                       ),
                     ],
                   ),
@@ -591,13 +663,16 @@ class _RulesTabView extends StatelessWidget {
       return ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          Align(
-            alignment: Alignment.centerLeft,
+          SizedBox(
+            width: double.infinity,
             child: FilledButton.icon(
               key: const Key('auto_bill_add_rule_button'),
               onPressed: onAddRule,
               icon: const Icon(Icons.add, size: 18),
-              label: const Text('新增映射规则'),
+              label: const FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text('新增映射规则', maxLines: 1, softWrap: false),
+              ),
             ),
           ),
           const SizedBox(height: 12),
@@ -640,12 +715,14 @@ class _RulesTabView extends StatelessWidget {
                     children: [
                       IconButton(
                         key: Key('auto_bill_edit_rule_${rule.id}'),
+                        visualDensity: VisualDensity.compact,
                         tooltip: '编辑规则',
                         onPressed: () => onEditRule(rule),
                         icon: const Icon(Icons.edit_outlined),
                       ),
                       IconButton(
                         key: Key('auto_bill_delete_rule_${rule.id}'),
+                        visualDensity: VisualDensity.compact,
                         tooltip: '删除规则',
                         onPressed: () => onDeleteRule(rule),
                         icon: const Icon(Icons.delete_outline),
@@ -860,15 +937,42 @@ class _ConfirmDraftDialogState extends ConsumerState<_ConfirmDraftDialog> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              SegmentedButton<int>(
-                segments: const [
-                  ButtonSegment(value: RecordType.expense, label: Text('支出')),
-                  ButtonSegment(value: RecordType.income, label: Text('收入')),
-                  ButtonSegment(value: RecordType.transfer, label: Text('转账')),
-                ],
-                selected: {_recordType},
-                onSelectionChanged: (s) =>
-                    setState(() => _recordType = s.first),
+              SizedBox(
+                width: double.infinity,
+                child: SegmentedButton<int>(
+                  showSelectedIcon: false,
+                  style: const ButtonStyle(
+                    padding: WidgetStatePropertyAll(
+                      EdgeInsets.symmetric(horizontal: 8),
+                    ),
+                  ),
+                  segments: const [
+                    ButtonSegment(
+                      value: RecordType.expense,
+                      label: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text('支出', maxLines: 1, softWrap: false),
+                      ),
+                    ),
+                    ButtonSegment(
+                      value: RecordType.income,
+                      label: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text('收入', maxLines: 1, softWrap: false),
+                      ),
+                    ),
+                    ButtonSegment(
+                      value: RecordType.transfer,
+                      label: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text('转账', maxLines: 1, softWrap: false),
+                      ),
+                    ),
+                  ],
+                  selected: {_recordType},
+                  onSelectionChanged: (s) =>
+                      setState(() => _recordType = s.first),
+                ),
               ),
               const SizedBox(height: 12),
               TextField(
@@ -1116,14 +1220,35 @@ class _RuleEditorDialogState extends ConsumerState<_RuleEditorDialog> {
                 ),
               ),
               const SizedBox(height: 12),
-              SegmentedButton<int>(
-                segments: const [
-                  ButtonSegment(value: RecordType.expense, label: Text('支出')),
-                  ButtonSegment(value: RecordType.income, label: Text('收入')),
-                ],
-                selected: {_recordType ?? RecordType.expense},
-                onSelectionChanged: (s) =>
-                    setState(() => _recordType = s.first),
+              SizedBox(
+                width: double.infinity,
+                child: SegmentedButton<int>(
+                  showSelectedIcon: false,
+                  style: const ButtonStyle(
+                    padding: WidgetStatePropertyAll(
+                      EdgeInsets.symmetric(horizontal: 8),
+                    ),
+                  ),
+                  segments: const [
+                    ButtonSegment(
+                      value: RecordType.expense,
+                      label: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text('支出', maxLines: 1, softWrap: false),
+                      ),
+                    ),
+                    ButtonSegment(
+                      value: RecordType.income,
+                      label: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text('收入', maxLines: 1, softWrap: false),
+                      ),
+                    ),
+                  ],
+                  selected: {_recordType ?? RecordType.expense},
+                  onSelectionChanged: (s) =>
+                      setState(() => _recordType = s.first),
+                ),
               ),
               const SizedBox(height: 12),
               InputDecorator(

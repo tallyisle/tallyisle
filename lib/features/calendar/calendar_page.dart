@@ -111,28 +111,34 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
   Widget _buildMonthSwitcher(BuildContext context, CalendarMonth month) {
     final offsetNotifier = ref.read(calendarMonthOffsetProvider.notifier);
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
       child: Row(
         children: [
           IconButton(
             key: const Key('calendar-prev-month'),
             tooltip: '上个月',
+            visualDensity: VisualDensity.compact,
             icon: const Icon(Icons.chevron_left),
             onPressed: offsetNotifier.previous,
           ),
           Expanded(
             child: Center(
-              child: Text(
-                '${month.year}年${month.month}月',
-                style: Theme.of(
-                  context,
-                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  '${month.year}年${month.month}月',
+                  maxLines: 1,
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+                ),
               ),
             ),
           ),
           IconButton(
             key: const Key('calendar-next-month'),
             tooltip: '下个月',
+            visualDensity: VisualDensity.compact,
             icon: const Icon(Icons.chevron_right),
             onPressed: offsetNotifier.next,
           ),
@@ -146,46 +152,78 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
     AsyncValue<IncomeExpense> summaryAsync,
   ) {
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
+    final expenseColor = isDark ? Colors.red.shade300 : Colors.red.shade700;
+    final incomeColor = isDark ? Colors.green.shade300 : Colors.green.shade700;
     final summary = summaryAsync.value ?? IncomeExpense.zero;
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
+        color: scheme.surfaceContainerHighest.withValues(alpha: 0.4),
         borderRadius: BorderRadius.circular(8),
       ),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceAround,
         children: [
-          _summaryItem(
-            '结余',
-            formatMinor(summary.balance),
-            theme.textTheme.bodyMedium?.color,
+          Expanded(
+            child: _summaryItem(
+              context,
+              '结余',
+              formatMinor(summary.balance),
+              scheme.onSurface,
+            ),
           ),
-          _summaryItem('支出', formatMinor(summary.expense), Colors.red.shade700),
-          _summaryItem(
-            '收入',
-            formatMinor(summary.income),
-            Colors.green.shade700,
+          const SizedBox(width: 8),
+          Expanded(
+            child: _summaryItem(
+              context,
+              '支出',
+              formatMinor(summary.expense),
+              expenseColor,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: _summaryItem(
+              context,
+              '收入',
+              formatMinor(summary.income),
+              incomeColor,
+            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _summaryItem(String label, String value, Color? color) {
+  Widget _summaryItem(
+    BuildContext context,
+    String label,
+    String value,
+    Color? color,
+  ) {
+    final mutedColor = Theme.of(context).colorScheme.onSurfaceVariant;
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text(label, style: const TextStyle(fontSize: 11, color: Colors.grey)),
-        const SizedBox(height: 2),
         Text(
-          '¥$value',
-          style: TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.bold,
-            color: color,
+          label,
+          maxLines: 1,
+          style: TextStyle(fontSize: 11, color: mutedColor),
+        ),
+        const SizedBox(height: 2),
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(
+            '¥$value',
+            maxLines: 1,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.bold,
+              color: color,
+            ),
           ),
         ),
       ],
@@ -193,9 +231,15 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
   }
 
   Widget _buildWeekdayHeader(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
+    final weekendColor = isDark
+        ? Colors.orange.shade300
+        : Colors.orange.shade800;
     const weekdays = ['一', '二', '三', '四', '五', '六', '日'];
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       child: Row(
         children: [
           for (var i = 0; i < 7; i++)
@@ -203,12 +247,11 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
               child: Center(
                 child: Text(
                   weekdays[i],
+                  maxLines: 1,
                   style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
-                    color: i >= 5
-                        ? Colors.orange.shade800
-                        : Colors.grey.shade700,
+                    color: i >= 5 ? weekendColor : scheme.onSurfaceVariant,
                   ),
                 ),
               ),
@@ -226,14 +269,27 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
     int selectedDay,
   ) {
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
+    final expenseColor = isDark ? Colors.red.shade300 : Colors.red.shade700;
+    final incomeColor = isDark ? Colors.green.shade300 : Colors.green.shade700;
     final now = DateTime.now();
     final isCurrentMonth = now.year == month.year && now.month == month.month;
 
     // ISO 8601: Monday=1 .. Sunday=7. Leading blanks count:
     final leadingBlanks = (month.firstWeekday - 1) % 7;
     final totalCells = leadingBlanks + month.daysInMonth;
+    final rowCount = ((totalCells + 6) ~/ 7).clamp(4, 6);
     final viewportHeight = MediaQuery.sizeOf(context).height;
-    final cellHeight = viewportHeight < 700 ? 44.0 : 54.0;
+    final textScale = MediaQuery.textScalerOf(
+      context,
+    ).scale(1.0).clamp(1.0, 1.35);
+    final baseCellHeight = viewportHeight < 700 ? 46.0 : 54.0;
+    final maxGridHeight = (viewportHeight - 285.0).clamp(192.0, 390.0);
+    final cellHeight = (baseCellHeight * textScale).clamp(
+      42.0,
+      maxGridHeight / rowCount,
+    );
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -255,6 +311,12 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
           final isToday = isCurrentMonth && day == now.day;
           final hasRepayBadge = repaymentDays.contains(day);
           final summary = dailyMap[day];
+          final cellExpenseColor = isSelected
+              ? (isDark ? Colors.red.shade200 : Colors.red.shade900)
+              : expenseColor;
+          final cellIncomeColor = isSelected
+              ? (isDark ? Colors.green.shade200 : Colors.green.shade900)
+              : incomeColor;
 
           return InkWell(
             key: Key('calendar-cell-$day'),
@@ -264,18 +326,14 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
               margin: const EdgeInsets.all(2),
               decoration: BoxDecoration(
                 color: isSelected
-                    ? theme.colorScheme.primaryContainer
-                    : (isToday
-                          ? theme.colorScheme.primary.withValues(alpha: 0.08)
-                          : null),
+                    ? scheme.primaryContainer
+                    : (isToday ? scheme.primary.withValues(alpha: 0.08) : null),
                 borderRadius: BorderRadius.circular(8),
                 border: isSelected
-                    ? Border.all(color: theme.colorScheme.primary, width: 1.5)
+                    ? Border.all(color: scheme.primary, width: 1.5)
                     : (isToday
                           ? Border.all(
-                              color: theme.colorScheme.primary.withValues(
-                                alpha: 0.5,
-                              ),
+                              color: scheme.primary.withValues(alpha: 0.5),
                             )
                           : null),
               ),
@@ -292,14 +350,15 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
                           vertical: 0.5,
                         ),
                         decoration: BoxDecoration(
-                          color: Colors.red.shade600,
+                          color: scheme.error,
                           borderRadius: BorderRadius.circular(3),
                         ),
-                        child: const Text(
+                        child: Text(
                           '还',
                           style: TextStyle(
-                            color: Colors.white,
+                            color: scheme.onError,
                             fontSize: 8,
+                            height: 1.1,
                             fontWeight: FontWeight.bold,
                           ),
                         ),
@@ -309,52 +368,77 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
                   Padding(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 2,
-                      vertical: 2,
+                      vertical: 1,
                     ),
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        Text(
-                          '$day',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: isToday || isSelected
-                                ? FontWeight.bold
-                                : FontWeight.normal,
-                            color: isSelected
-                                ? theme.colorScheme.onPrimaryContainer
-                                : null,
+                        Flexible(
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text(
+                              '$day',
+                              textAlign: TextAlign.center,
+                              maxLines: 1,
+                              style: TextStyle(
+                                fontSize: 12,
+                                height: 1.15,
+                                fontWeight: isToday || isSelected
+                                    ? FontWeight.bold
+                                    : FontWeight.normal,
+                                color: isSelected
+                                    ? scheme.onPrimaryContainer
+                                    : null,
+                              ),
+                            ),
                           ),
                         ),
                         const SizedBox(height: 1),
                         // Detailed view: expense
                         if (summary != null &&
                             summary.incomeExpense.expense != BigInt.zero)
-                          Text(
-                            '-${formatMinor(summary.incomeExpense.expense)}',
-                            textAlign: TextAlign.center,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: 9,
-                              color: Colors.red.shade700,
-                              fontWeight: FontWeight.w500,
+                          Flexible(
+                            child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: ConstrainedBox(
+                                constraints: const BoxConstraints(maxWidth: 64),
+                                child: Text(
+                                  '-${formatMinor(summary.incomeExpense.expense)}',
+                                  textAlign: TextAlign.center,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 9,
+                                    height: 1.1,
+                                    color: cellExpenseColor,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ),
                             ),
                           )
                         // Detailed view: income
                         else if (summary != null &&
                             summary.incomeExpense.income != BigInt.zero)
-                          Text(
-                            '+${formatMinor(summary.incomeExpense.income)}',
-                            textAlign: TextAlign.center,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: 9,
-                              color: Colors.green.shade700,
-                              fontWeight: FontWeight.w500,
+                          Flexible(
+                            child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: ConstrainedBox(
+                                constraints: const BoxConstraints(maxWidth: 64),
+                                child: Text(
+                                  '+${formatMinor(summary.incomeExpense.income)}',
+                                  textAlign: TextAlign.center,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 9,
+                                    height: 1.1,
+                                    color: cellIncomeColor,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ),
                             ),
                           )
                         // Records present but amounts net to 0 (e.g. transfers, excludeExIn)
@@ -364,7 +448,11 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
                               width: 4,
                               height: 4,
                               decoration: BoxDecoration(
-                                color: Colors.grey.shade400,
+                                color: isSelected
+                                    ? scheme.onPrimaryContainer.withValues(
+                                        alpha: 0.7,
+                                      )
+                                    : scheme.outline,
                                 shape: BoxShape.circle,
                               ),
                             ),
@@ -388,37 +476,65 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
     int selectedDay,
   ) {
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final expenseColor = isDark ? Colors.red.shade300 : Colors.red.shade700;
+    final incomeColor = isDark ? Colors.green.shade300 : Colors.green.shade700;
     final dayDt = DateTime(month.year, month.month, selectedDay);
     const weekdays = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
     final weekdayName = weekdays[(dayDt.weekday - 1) % 7];
 
     final summary =
         summariesAsync.value?[selectedDay]?.incomeExpense ?? IncomeExpense.zero;
+    final hasDaySummary =
+        summary.expense != BigInt.zero || summary.income != BigInt.zero;
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
       child: Row(
         children: [
-          Text(
-            '${month.month}月$selectedDay日 $weekdayName',
-            style: theme.textTheme.titleSmall?.copyWith(
-              fontWeight: FontWeight.bold,
+          Flexible(
+            flex: hasDaySummary ? 0 : 1,
+            child: Text(
+              '${month.month}月$selectedDay日 $weekdayName',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.bold,
+              ),
             ),
           ),
-          const Spacer(),
-          if (summary.expense != BigInt.zero) ...[
-            Text(
-              '支出 ¥${formatMinor(summary.expense)}',
-              style: TextStyle(fontSize: 12, color: Colors.red.shade700),
-            ),
+          if (hasDaySummary) ...[
             const SizedBox(width: 8),
-          ],
-          if (summary.income != BigInt.zero)
-            Text(
-              '收入 ¥${formatMinor(summary.income)}',
-              style: TextStyle(fontSize: 12, color: Colors.green.shade700),
+            Expanded(
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (summary.expense != BigInt.zero)
+                        Text(
+                          '支出 ¥${formatMinor(summary.expense)}',
+                          maxLines: 1,
+                          style: TextStyle(fontSize: 12, color: expenseColor),
+                        ),
+                      if (summary.expense != BigInt.zero &&
+                          summary.income != BigInt.zero)
+                        const SizedBox(width: 8),
+                      if (summary.income != BigInt.zero)
+                        Text(
+                          '收入 ¥${formatMinor(summary.income)}',
+                          maxLines: 1,
+                          style: TextStyle(fontSize: 12, color: incomeColor),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
             ),
+          ],
         ],
       ),
     );
@@ -431,6 +547,8 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
     List<RecordCategory> categories,
     List<Asset> assets,
   ) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final incomeColor = isDark ? Colors.green.shade300 : Colors.green.shade700;
     return summariesAsync.when(
       data: (dailyMap) {
         final records = dailyMap[selectedDay]?.records ?? const [];
@@ -469,14 +587,22 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
                 parentCategoryIcon: parentCat?.icon,
                 categoryColor: catColor,
               ),
-              title: Text(label.title),
-              subtitle: label.subtitle.isEmpty ? null : Text(label.subtitle),
+              title: Text(
+                label.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              subtitle: label.subtitle.isEmpty
+                  ? null
+                  : Text(
+                      label.subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
               trailing: Text(
                 label.amount,
                 style: TextStyle(
-                  color: r.type == RecordType.income
-                      ? Colors.green.shade700
-                      : null,
+                  color: r.type == RecordType.income ? incomeColor : null,
                   fontWeight: FontWeight.w600,
                 ),
               ),

@@ -488,11 +488,21 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
                           '独立内存暂存校验并自动过滤软删除墓碑，在单事务内原子替换 20 张账务业务表，完整保留本机便签与自定义汇率。',
                         ),
                         const SizedBox(height: 12),
-                        FilledButton.icon(
-                          key: const Key('legacy_import_penny_button'),
-                          onPressed: _busy ? null : _pickAndImportPenny,
-                          icon: const Icon(Icons.archive_outlined),
-                          label: const Text('选择 .penny / .yy 备份文件'),
+                        SizedBox(
+                          width: double.infinity,
+                          child: FilledButton.icon(
+                            key: const Key('legacy_import_penny_button'),
+                            onPressed: _busy ? null : _pickAndImportPenny,
+                            icon: const Icon(Icons.archive_outlined, size: 18),
+                            label: const FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Text(
+                                '选择 .penny / .yy 备份文件',
+                                maxLines: 1,
+                                softWrap: false,
+                              ),
+                            ),
+                          ),
                         ),
                       ],
                     ),
@@ -518,13 +528,24 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
                           '本机已有的便签、自定义汇率与自动记账规则将完整保留。',
                         ),
                         const SizedBox(height: 12),
-                        KeyedSubtree(
+                        SizedBox(
                           key: const Key('migration_import_yi2a_button'),
+                          width: double.infinity,
                           child: FilledButton.tonalIcon(
                             key: const Key('import_yi2a_button'),
                             onPressed: _busy ? null : _pickAndImportYi2a,
-                            icon: const Icon(Icons.file_open_outlined),
-                            label: const Text('选择 .yi2a 迁移文件'),
+                            icon: const Icon(
+                              Icons.file_open_outlined,
+                              size: 18,
+                            ),
+                            label: const FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Text(
+                                '选择 .yi2a 迁移文件',
+                                maxLines: 1,
+                                softWrap: false,
+                              ),
+                            ),
                           ),
                         ),
                       ],
@@ -551,13 +572,24 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
                           '及裸 SQLite .db 数据库恢复。',
                         ),
                         const SizedBox(height: 12),
-                        KeyedSubtree(
+                        SizedBox(
                           key: const Key('migration_restore_lan_button'),
+                          width: double.infinity,
                           child: FilledButton.tonalIcon(
                             key: const Key('restore_lan_backup_button'),
                             onPressed: _busy ? null : _pickAndRestoreLanBackup,
-                            icon: const Icon(Icons.folder_zip_outlined),
-                            label: const Text('选择局域网备份 (.zip / .db)'),
+                            icon: const Icon(
+                              Icons.folder_zip_outlined,
+                              size: 18,
+                            ),
+                            label: const FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Text(
+                                '选择局域网备份 (.zip / .db)',
+                                maxLines: 1,
+                                softWrap: false,
+                              ),
+                            ),
                           ),
                         ),
                       ],
@@ -591,21 +623,60 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
                           '采用增量方式并入所选账本（不清空现有数据），并支持按导入批次查看明细或一键撤回。',
                         ),
                         const SizedBox(height: 12),
-                        Wrap(
-                          spacing: 10,
-                          runSpacing: 8,
+                        Row(
                           children: [
-                            FilledButton.tonalIcon(
-                              key: const Key('go_csv_import_button'),
-                              onPressed: _busy ? null : _openCsvImport,
-                              icon: const Icon(Icons.upload_file_outlined),
-                              label: const Text('前往表格账单导入'),
+                            Expanded(
+                              child: FilledButton.tonalIcon(
+                                key: const Key('go_csv_import_button'),
+                                style: const ButtonStyle(
+                                  padding: WidgetStatePropertyAll(
+                                    EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                      vertical: 10,
+                                    ),
+                                  ),
+                                ),
+                                onPressed: _busy ? null : _openCsvImport,
+                                icon: const Icon(
+                                  Icons.upload_file_outlined,
+                                  size: 18,
+                                ),
+                                label: const FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  child: Text(
+                                    '前往表格账单导入',
+                                    maxLines: 1,
+                                    softWrap: false,
+                                  ),
+                                ),
+                              ),
                             ),
-                            OutlinedButton.icon(
-                              key: const Key('go_import_batches_button'),
-                              onPressed: _busy ? null : _openImportBatches,
-                              icon: const Icon(Icons.history_edu_outlined),
-                              label: const Text('导入批次管理'),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: OutlinedButton.icon(
+                                key: const Key('go_import_batches_button'),
+                                style: const ButtonStyle(
+                                  padding: WidgetStatePropertyAll(
+                                    EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                      vertical: 10,
+                                    ),
+                                  ),
+                                ),
+                                onPressed: _busy ? null : _openImportBatches,
+                                icon: const Icon(
+                                  Icons.history_edu_outlined,
+                                  size: 18,
+                                ),
+                                label: const FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  child: Text(
+                                    '导入批次管理',
+                                    maxLines: 1,
+                                    softWrap: false,
+                                  ),
+                                ),
+                              ),
                             ),
                           ],
                         ),
@@ -674,17 +745,18 @@ class _MigrationSectionHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final headerColor = theme.colorScheme.onSurfaceVariant;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4),
       child: Row(
         children: [
-          Icon(icon, size: 18, color: theme.colorScheme.primary),
+          Icon(icon, size: 18, color: headerColor),
           const SizedBox(width: 6),
           Expanded(
             child: Text(
               title,
               style: theme.textTheme.titleSmall?.copyWith(
-                color: theme.colorScheme.primary,
+                color: headerColor,
                 fontWeight: FontWeight.w600,
               ),
             ),
@@ -704,8 +776,8 @@ class _PennyConfirmDialog extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final tombstoneText = preview.filteredTombstoneCount > 0
-        ? '已过滤 ${preview.filteredTombstoneCount} 条（sstatus=4 软删记录不落库）'
-        : '0 条（自动过滤 sstatus=4 软删墓碑）';
+        ? '已过滤 ${preview.filteredTombstoneCount} 条（已删除记录不落库）'
+        : '0 条（自动过滤已删除记录）';
 
     return AlertDialog(
       title: const Text('原版 Android 备份导入预览'),
@@ -737,7 +809,7 @@ class _PennyConfirmDialog extends StatelessWidget {
               child: Text(
                 '覆盖警告：确认恢复将以备份内容在单一数据库事务内替换本地 20 张账务业务表'
                 '（账本、账户、分类、账单、预算、分期、周期、存钱计划等）；'
-                '本机已有的便签（note）与自定义汇率（currency）将完整保留，不会被清空。',
+                '本机已有的便签与自定义汇率将完整保留，不会被清空。',
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.colorScheme.onErrorContainer,
                 ),

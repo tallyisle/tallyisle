@@ -54,8 +54,15 @@ class _AssetFlowSectionState extends ConsumerState<AssetFlowSection> {
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           child: Row(
             children: [
-              Text('明细 · $totalCount 笔', style: theme.textTheme.titleMedium),
-              const Spacer(),
+              Expanded(
+                child: Text(
+                  '明细 · $totalCount 笔',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleMedium,
+                ),
+              ),
+              const SizedBox(width: 8),
               Text('对账模式', style: theme.textTheme.bodyMedium),
               const SizedBox(width: 8),
               Switch(
@@ -71,11 +78,16 @@ class _AssetFlowSectionState extends ConsumerState<AssetFlowSection> {
           return SliverMainAxisGroup(
             slivers: [
               SliverToBoxAdapter(child: buildHeader()),
-              const SliverToBoxAdapter(
+              SliverToBoxAdapter(
                 child: Padding(
-                  padding: EdgeInsets.all(32),
+                  padding: const EdgeInsets.all(32),
                   child: Center(
-                    child: Text('暂无账单明细', style: TextStyle(color: Colors.grey)),
+                    child: Text(
+                      '暂无账单明细',
+                      style: TextStyle(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
                   ),
                 ),
               ),
@@ -104,11 +116,21 @@ class _AssetFlowSectionState extends ConsumerState<AssetFlowSection> {
                         fontWeight: FontWeight.bold,
                       ),
                     ),
-                    const Spacer(),
-                    Text(
-                      '流入 ${formatMinor(group.inflow)}  流出 ${formatMinor(group.outflow)}',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.outline,
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Align(
+                        alignment: Alignment.centerRight,
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text(
+                            '流入 ${formatMinor(group.inflow)}  流出 ${formatMinor(group.outflow)}',
+                            maxLines: 1,
+                            softWrap: false,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ),
                       ),
                     ),
                   ],

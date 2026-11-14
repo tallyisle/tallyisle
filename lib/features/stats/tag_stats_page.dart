@@ -79,26 +79,45 @@ class TagRankingsPage extends ConsumerWidget {
           const SizedBox(height: 12),
 
           // 2. Bucket Switch (支出 | 收入)
-          SegmentedButton<StatBucket>(
-            key: const Key('tag-rankings-bucket-switch'),
-            segments: const [
-              ButtonSegment(
-                value: StatBucket.expense,
-                label: Text('支出'),
-                icon: Icon(Icons.arrow_upward),
+          SizedBox(
+            width: double.infinity,
+            child: SegmentedButton<StatBucket>(
+              key: const Key('tag-rankings-bucket-switch'),
+              showSelectedIcon: false,
+              style: const ButtonStyle(
+                visualDensity: VisualDensity.compact,
+                padding: WidgetStatePropertyAll(
+                  EdgeInsets.symmetric(horizontal: 12),
+                ),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
-              ButtonSegment(
-                value: StatBucket.income,
-                label: Text('收入'),
-                icon: Icon(Icons.arrow_downward),
-              ),
-            ],
-            selected: {bucket},
-            onSelectionChanged: (s) {
-              if (s.isNotEmpty) {
-                ref.read(tagRankingsBucketProvider.notifier).setBucket(s.first);
-              }
-            },
+              segments: const [
+                ButtonSegment(
+                  value: StatBucket.expense,
+                  label: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text('支出', maxLines: 1, softWrap: false),
+                  ),
+                  icon: Icon(Icons.arrow_upward, size: 18),
+                ),
+                ButtonSegment(
+                  value: StatBucket.income,
+                  label: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text('收入', maxLines: 1, softWrap: false),
+                  ),
+                  icon: Icon(Icons.arrow_downward, size: 18),
+                ),
+              ],
+              selected: {bucket},
+              onSelectionChanged: (s) {
+                if (s.isNotEmpty) {
+                  ref
+                      .read(tagRankingsBucketProvider.notifier)
+                      .setBucket(s.first);
+                }
+              },
+            ),
           ),
           const SizedBox(height: 12),
 
@@ -125,44 +144,64 @@ class TagRankingsPage extends ConsumerWidget {
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                isExpense ? '标签总支出（去重）' : '标签总收入（去重）',
-                                style: theme.textTheme.labelMedium?.copyWith(
-                                  color: theme.colorScheme.onSurfaceVariant,
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  isExpense ? '标签总支出（去重）' : '标签总收入（去重）',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.labelMedium?.copyWith(
+                                    color: theme.colorScheme.onSurfaceVariant,
+                                  ),
                                 ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                '¥${formatMinor(rankings.totalMinor)}',
-                                key: const Key('tag-rankings-total-amount'),
-                                style: theme.textTheme.headlineSmall?.copyWith(
-                                  fontWeight: FontWeight.bold,
-                                  color: accentColor,
+                                const SizedBox(height: 4),
+                                FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  alignment: Alignment.centerLeft,
+                                  child: Text(
+                                    '¥${formatMinor(rankings.totalMinor)}',
+                                    key: const Key('tag-rankings-total-amount'),
+                                    maxLines: 1,
+                                    style: theme.textTheme.headlineSmall
+                                        ?.copyWith(
+                                          fontWeight: FontWeight.bold,
+                                          color: accentColor,
+                                        ),
+                                  ),
                                 ),
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.end,
-                            children: [
-                              Text(
-                                '${rankings.totalBillCount} 笔关联账单',
-                                key: const Key('tag-rankings-total-count'),
-                                style: theme.textTheme.titleSmall?.copyWith(
-                                  fontWeight: FontWeight.w600,
+                          const SizedBox(width: 12),
+                          Flexible(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                                FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  alignment: Alignment.centerRight,
+                                  child: Text(
+                                    '${rankings.totalBillCount} 笔关联账单',
+                                    key: const Key('tag-rankings-total-count'),
+                                    maxLines: 1,
+                                    style: theme.textTheme.titleSmall?.copyWith(
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
                                 ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                '${rankings.items.length} 个活跃标签',
-                                style: theme.textTheme.bodySmall?.copyWith(
-                                  color: theme.colorScheme.onSurfaceVariant,
+                                const SizedBox(height: 4),
+                                Text(
+                                  '${rankings.items.length} 个活跃标签',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: theme.colorScheme.onSurfaceVariant,
+                                  ),
                                 ),
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
                         ],
                       ),
@@ -176,20 +215,50 @@ class TagRankingsPage extends ConsumerWidget {
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Text(
-                            '标签排行榜',
-                            style: theme.textTheme.titleMedium?.copyWith(
-                              fontWeight: FontWeight.bold,
+                          Flexible(
+                            child: Text(
+                              '标签排行榜',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.bold,
+                              ),
                             ),
                           ),
+                          const SizedBox(width: 8),
                           SegmentedButton<bool>(
                             key: const Key('tag-rankings-rollup-switch'),
+                            showSelectedIcon: false,
                             style: const ButtonStyle(
                               visualDensity: VisualDensity.compact,
+                              padding: WidgetStatePropertyAll(
+                                EdgeInsets.symmetric(horizontal: 10),
+                              ),
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                             ),
                             segments: const [
-                              ButtonSegment(value: false, label: Text('按标签')),
-                              ButtonSegment(value: true, label: Text('按标签组')),
+                              ButtonSegment(
+                                value: false,
+                                label: FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  child: Text(
+                                    '按标签',
+                                    maxLines: 1,
+                                    softWrap: false,
+                                  ),
+                                ),
+                              ),
+                              ButtonSegment(
+                                value: true,
+                                label: FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  child: Text(
+                                    '按标签组',
+                                    maxLines: 1,
+                                    softWrap: false,
+                                  ),
+                                ),
+                              ),
                             ],
                             selected: {rollup},
                             onSelectionChanged: (s) {
@@ -351,10 +420,18 @@ class _TagRankingRow extends StatelessWidget {
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    Text(
-                      '¥${formatMinor(item.moneyMinor)}',
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 128),
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerRight,
+                        child: Text(
+                          '¥${formatMinor(item.moneyMinor)}',
+                          maxLines: 1,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
                       ),
                     ),
                     Text(
@@ -380,7 +457,7 @@ class _TagRankingRow extends StatelessWidget {
                 value: (item.ratioBasisPoints / 10000.0).clamp(0.01, 1.0),
                 minHeight: 5,
                 color: barColor,
-                backgroundColor: barColor.withValues(alpha: 0.14),
+                backgroundColor: theme.colorScheme.surfaceContainerHighest,
               ),
             ),
           ],
@@ -442,6 +519,10 @@ class _TagDetailStatsPageState extends ConsumerState<TagDetailStatsPage> {
         error: (e, _) => ErrorView(e),
         data: (data) {
           final stats = data.stats;
+          final isDark = theme.brightness == Brightness.dark;
+          final semanticIncomeColor = isDark
+              ? Colors.green.shade300
+              : Colors.green.shade700;
           final effectiveCatBucket = _userPickedCatBucket
               ? _catBucket
               : (stats.totalExpense == BigInt.zero &&
@@ -464,21 +545,25 @@ class _TagDetailStatsPageState extends ConsumerState<TagDetailStatsPage> {
                   padding: const EdgeInsets.only(bottom: 8),
                   child: Row(
                     children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 4,
-                        ),
-                        decoration: BoxDecoration(
-                          color: theme.colorScheme.secondaryContainer,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Text(
-                          '标签组 · 含 ${stats.childTags.length} 个子标签',
-                          key: const Key('tag-detail-group-badge'),
-                          style: theme.textTheme.labelMedium?.copyWith(
-                            color: theme.colorScheme.onSecondaryContainer,
-                            fontWeight: FontWeight.w600,
+                      Flexible(
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: theme.colorScheme.secondaryContainer,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(
+                            '标签组 · 含 ${stats.childTags.length} 个子标签',
+                            key: const Key('tag-detail-group-badge'),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.labelMedium?.copyWith(
+                              color: theme.colorScheme.onSecondaryContainer,
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
                         ),
                       ),
@@ -499,7 +584,17 @@ class _TagDetailStatsPageState extends ConsumerState<TagDetailStatsPage> {
                         colorHex: stats.parentTag!.color,
                         size: 8,
                       ),
-                      label: Text('所属标签组：#${stats.parentTag!.name}'),
+                      label: ConstrainedBox(
+                        constraints: BoxConstraints(
+                          maxWidth: (MediaQuery.sizeOf(context).width - 96)
+                              .clamp(140.0, 320.0),
+                        ),
+                        child: Text(
+                          '所属标签组：#${stats.parentTag!.name}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
                       onPressed: () =>
                           context.push('/stats/tag/${stats.parentTag!.tagId}'),
                     ),
@@ -538,12 +633,13 @@ class _TagDetailStatsPageState extends ConsumerState<TagDetailStatsPage> {
                               valueColor: theme.colorScheme.error,
                             ),
                           ),
+                          const SizedBox(width: 12),
                           Expanded(
                             child: _MetricTile(
                               label: '总收入',
                               value: '¥${formatMinor(stats.totalIncome)}',
                               valueKey: const Key('tag-detail-total-income'),
-                              valueColor: Colors.green.shade700,
+                              valueColor: semanticIncomeColor,
                             ),
                           ),
                         ],
@@ -559,6 +655,7 @@ class _TagDetailStatsPageState extends ConsumerState<TagDetailStatsPage> {
                               valueKey: const Key('tag-detail-net-balance'),
                             ),
                           ),
+                          const SizedBox(width: 12),
                           Expanded(
                             child: _MetricTile(
                               label: '关联账单数',
@@ -630,26 +727,55 @@ class _TagDetailStatsPageState extends ConsumerState<TagDetailStatsPage> {
                         Row(
                           children: [
                             Expanded(
-                              child: Text(
-                                '分类构成',
-                                style: theme.textTheme.titleSmall?.copyWith(
-                                  fontWeight: FontWeight.bold,
+                              child: Align(
+                                alignment: Alignment.centerLeft,
+                                child: FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  alignment: Alignment.centerLeft,
+                                  child: Text(
+                                    '分类构成',
+                                    maxLines: 1,
+                                    softWrap: false,
+                                    style: theme.textTheme.titleSmall?.copyWith(
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
                                 ),
                               ),
                             ),
+                            const SizedBox(width: 8),
                             SegmentedButton<StatBucket>(
                               key: const Key('tag-detail-cat-bucket-switch'),
+                              showSelectedIcon: false,
                               style: const ButtonStyle(
                                 visualDensity: VisualDensity.compact,
+                                padding: WidgetStatePropertyAll(
+                                  EdgeInsets.symmetric(horizontal: 8),
+                                ),
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                               ),
                               segments: const [
                                 ButtonSegment(
                                   value: StatBucket.expense,
-                                  label: Text('支出构成'),
+                                  label: FittedBox(
+                                    fit: BoxFit.scaleDown,
+                                    child: Text(
+                                      '支出构成',
+                                      maxLines: 1,
+                                      softWrap: false,
+                                    ),
+                                  ),
                                 ),
                                 ButtonSegment(
                                   value: StatBucket.income,
-                                  label: Text('收入构成'),
+                                  label: FittedBox(
+                                    fit: BoxFit.scaleDown,
+                                    child: Text(
+                                      '收入构成',
+                                      maxLines: 1,
+                                      softWrap: false,
+                                    ),
+                                  ),
                                 ),
                               ],
                               selected: {effectiveCatBucket},
@@ -662,9 +788,18 @@ class _TagDetailStatsPageState extends ConsumerState<TagDetailStatsPage> {
                                 }
                               },
                             ),
+                            const SizedBox(width: 4),
                             IconButton(
                               key: const Key('tag-detail-cat-expand-btn'),
                               visualDensity: VisualDensity.compact,
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(
+                                minWidth: 32,
+                                minHeight: 32,
+                              ),
+                              style: IconButton.styleFrom(
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              ),
                               icon: Icon(
                                 _categoryExpanded
                                     ? Icons.expand_less
@@ -752,12 +887,26 @@ class _TagDetailStatsPageState extends ConsumerState<TagDetailStatsPage> {
                                               ),
                                             ),
                                             const SizedBox(width: 8),
-                                            Text(
-                                              '¥${formatMinor(cat.moneyMinor)} (${cat.ratioText})',
-                                              style: theme.textTheme.bodySmall
-                                                  ?.copyWith(
-                                                    fontWeight: FontWeight.w600,
-                                                  ),
+                                            ConstrainedBox(
+                                              constraints: const BoxConstraints(
+                                                maxWidth: 140,
+                                              ),
+                                              child: FittedBox(
+                                                fit: BoxFit.scaleDown,
+                                                alignment:
+                                                    Alignment.centerRight,
+                                                child: Text(
+                                                  '¥${formatMinor(cat.moneyMinor)} (${cat.ratioText})',
+                                                  maxLines: 1,
+                                                  style: theme
+                                                      .textTheme
+                                                      .bodySmall
+                                                      ?.copyWith(
+                                                        fontWeight:
+                                                            FontWeight.w600,
+                                                      ),
+                                                ),
+                                              ),
                                             ),
                                           ],
                                         ),
@@ -772,8 +921,9 @@ class _TagDetailStatsPageState extends ConsumerState<TagDetailStatsPage> {
                                                     .clamp(0.01, 1.0),
                                             minHeight: 4,
                                             color: visual.color,
-                                            backgroundColor: visual.color
-                                                .withValues(alpha: 0.14),
+                                            backgroundColor: theme
+                                                .colorScheme
+                                                .surfaceContainerHighest,
                                           ),
                                         ),
                                       ],
@@ -794,6 +944,8 @@ class _TagDetailStatsPageState extends ConsumerState<TagDetailStatsPage> {
                 padding: const EdgeInsets.symmetric(vertical: 4),
                 child: Text(
                   '关联账单明细 (${data.matchingRecords.length} 笔)',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.bold,
                   ),
@@ -834,6 +986,8 @@ class _TagDetailStatsPageState extends ConsumerState<TagDetailStatsPage> {
     TagDetailViewData data,
   ) {
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final incomeColor = isDark ? Colors.green.shade300 : Colors.green.shade700;
     final widgets = <Widget>[];
     String? currentDay;
 
@@ -848,7 +1002,7 @@ class _TagDetailStatsPageState extends ConsumerState<TagDetailStatsPage> {
             child: Text(
               dayKey,
               style: theme.textTheme.labelLarge?.copyWith(
-                color: theme.colorScheme.primary,
+                color: theme.colorScheme.onSurfaceVariant,
                 fontWeight: FontWeight.w600,
               ),
             ),
@@ -898,17 +1052,31 @@ class _TagDetailStatsPageState extends ConsumerState<TagDetailStatsPage> {
               parentCategoryIcon: parentCat?.icon,
               categoryColor: catColor,
             ),
-            title: Text(label.title),
+            title: Text(
+              label.title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
             subtitle: subtitleParts.isEmpty
                 ? null
-                : Text(subtitleParts.join(' · ')),
-            trailing: Text(
-              label.amount,
-              style: TextStyle(
-                color: r.type == RecordType.income
-                    ? Colors.green.shade700
-                    : null,
-                fontWeight: FontWeight.w600,
+                : Text(
+                    subtitleParts.join(' · '),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+            trailing: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 120),
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerRight,
+                child: Text(
+                  label.amount,
+                  maxLines: 1,
+                  style: TextStyle(
+                    color: r.type == RecordType.income ? incomeColor : null,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
               ),
             ),
             onTap: () => context.push('/record/${r.recordId}'),
@@ -945,8 +1113,10 @@ class _TagPeriodSelectorBar extends StatelessWidget {
 
     return Column(
       children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
+        Wrap(
+          spacing: 8,
+          runSpacing: 4,
+          alignment: WrapAlignment.center,
           children: [
             ChoiceChip(
               key: Key('$keyPrefix-mode-all'),
@@ -956,7 +1126,6 @@ class _TagPeriodSelectorBar extends StatelessWidget {
                 if (sel) onModeChanged(TagStatsPeriodMode.all);
               },
             ),
-            const SizedBox(width: 8),
             ChoiceChip(
               key: Key('$keyPrefix-mode-month'),
               label: const Text('按月'),
@@ -965,7 +1134,6 @@ class _TagPeriodSelectorBar extends StatelessWidget {
                 if (sel) onModeChanged(TagStatsPeriodMode.month);
               },
             ),
-            const SizedBox(width: 8),
             ChoiceChip(
               key: Key('$keyPrefix-mode-year'),
               label: const Text('按年'),
@@ -987,11 +1155,19 @@ class _TagPeriodSelectorBar extends StatelessWidget {
                 icon: const Icon(Icons.chevron_left),
                 onPressed: onPrevious,
               ),
-              Text(
-                label,
-                key: Key('$keyPrefix-period-label'),
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.bold,
+              Expanded(
+                child: Center(
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      label,
+                      key: Key('$keyPrefix-period-label'),
+                      maxLines: 1,
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
                 ),
               ),
               IconButton(
@@ -1029,17 +1205,24 @@ class _MetricTile extends StatelessWidget {
       children: [
         Text(
           label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
           style: theme.textTheme.labelMedium?.copyWith(
             color: theme.colorScheme.onSurfaceVariant,
           ),
         ),
         const SizedBox(height: 4),
-        Text(
-          value,
-          key: valueKey,
-          style: theme.textTheme.titleMedium?.copyWith(
-            fontWeight: FontWeight.bold,
-            color: valueColor,
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: Text(
+            value,
+            key: valueKey,
+            maxLines: 1,
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.bold,
+              color: valueColor,
+            ),
           ),
         ),
       ],
@@ -1055,6 +1238,7 @@ class _ChildTagBreakdownChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final tint = parseTagColor(item.color);
     final amountParts = <String>[];
     if (item.expenseMinor > BigInt.zero) {
@@ -1068,11 +1252,23 @@ class _ChildTagBreakdownChip extends StatelessWidget {
     return ActionChip(
       key: Key('tag-detail-child-${item.tagId}'),
       avatar: TagColorDot(colorHex: item.color, size: 8),
-      backgroundColor: tint?.withValues(alpha: 0.12),
+      backgroundColor: tint?.withValues(alpha: isDark ? 0.20 : 0.12),
       side: tint == null
           ? null
-          : BorderSide(color: tint.withValues(alpha: 0.4)),
-      label: Text('#${item.name} · ${item.billCount} 笔 · $amountLabel'),
+          : BorderSide(color: tint.withValues(alpha: 0.45)),
+      label: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: (MediaQuery.sizeOf(context).width - 104).clamp(
+            140.0,
+            320.0,
+          ),
+        ),
+        child: Text(
+          '#${item.name} · ${item.billCount} 笔 · $amountLabel',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+      ),
       onPressed: onTap,
     );
   }

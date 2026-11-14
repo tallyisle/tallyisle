@@ -876,7 +876,13 @@ class _PreviewRow extends StatelessWidget {
               '$label · ${formatDate(DateTime.fromMillisecondsSinceEpoch(item.plannedDateMs))}',
             ),
           ),
-          Text('¥${formatMinor(item.totalMinor)}$feePart'),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              '¥${formatMinor(item.totalMinor)}$feePart',
+              textAlign: TextAlign.end,
+            ),
+          ),
         ],
       ),
     );

@@ -213,7 +213,7 @@ class _RecordDetailPageState extends ConsumerState<RecordDetailPage> {
       return Text(assetName(assets, id));
     }
     return ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: 220),
+      constraints: const BoxConstraints(maxWidth: 180),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -352,10 +352,16 @@ class _RecordDetailPageState extends ConsumerState<RecordDetailPage> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(RecordType.names[r.type] ?? '账单'),
-                      Text(
-                        label.amount,
-                        key: const Key('detail-amount'),
-                        style: Theme.of(context).textTheme.displaySmall,
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          label.amount,
+                          key: const Key('detail-amount'),
+                          maxLines: 1,
+                          softWrap: false,
+                          style: Theme.of(context).textTheme.displaySmall,
+                        ),
                       ),
                     ],
                   ),
@@ -366,7 +372,7 @@ class _RecordDetailPageState extends ConsumerState<RecordDetailPage> {
             ListTile(
               title: const Text('分类/说明'),
               trailing: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 220),
+                constraints: const BoxConstraints(maxWidth: 180),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -441,9 +447,9 @@ class _RecordDetailPageState extends ConsumerState<RecordDetailPage> {
               ),
             ),
             if (isAdvance)
-              ListTile(
-                title: const Text('状态'),
-                trailing: Text(advanceSettled ? '已结算' : '待结算（暂不计入收支与余额）'),
+              _DetailRow(
+                label: '状态',
+                value: advanceSettled ? '已结算' : '待结算（暂不计入收支与余额）',
               ),
             if (tags.isNotEmpty)
               ListTile(
@@ -543,25 +549,31 @@ class _RecordDetailPageState extends ConsumerState<RecordDetailPage> {
                 child: const Text('这是转账手续费，查看所属转账'),
               )
             else ...[
-              if (isAdvance && !advanceSettled)
+              if (isAdvance && !advanceSettled) ...[
                 FilledButton.tonal(
                   key: const Key('settle-advance'),
                   onPressed: busy ? null : () => _settleAdvance(r),
                   child: const Text('结算转为正式账单'),
                 ),
-              if (refundable)
+                const SizedBox(height: 10),
+              ],
+              if (refundable) ...[
                 OutlinedButton(
                   key: const Key('add-refund'),
                   onPressed: busy ? null : () => _addLink(r, refund: true),
                   child: const Text('退款'),
                 ),
-              if (r.type == RecordType.reimbursable)
+                const SizedBox(height: 10),
+              ],
+              if (r.type == RecordType.reimbursable) ...[
                 OutlinedButton(
                   key: const Key('add-reimbursement'),
                   onPressed: busy ? null : () => _addLink(r, refund: false),
                   child: const Text('登记报销款'),
                 ),
-              if (editable)
+                const SizedBox(height: 10),
+              ],
+              if (editable) ...[
                 FilledButton(
                   key: const Key('edit'),
                   onPressed: busy
@@ -569,6 +581,8 @@ class _RecordDetailPageState extends ConsumerState<RecordDetailPage> {
                       : () => context.push('/record/${r.recordId}/edit'),
                   child: const Text('编辑'),
                 ),
+                const SizedBox(height: 10),
+              ],
               TextButton(
                 key: const Key('delete'),
                 onPressed: busy ? null : () => _delete(r),
@@ -578,6 +592,39 @@ class _RecordDetailPageState extends ConsumerState<RecordDetailPage> {
           ],
         );
       }),
+    );
+  }
+}
+
+class _DetailRow extends StatelessWidget {
+  const _DetailRow({required this.label, required this.value});
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ConstrainedBox(
+            constraints: const BoxConstraints(minWidth: 56),
+            child: Text(label, style: theme.textTheme.bodyLarge),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              value,
+              textAlign: TextAlign.end,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -627,12 +674,19 @@ class _LinkDialogState extends State<_LinkDialog> {
           ),
         ),
         DropdownButtonFormField<int>(
+          isExpanded: true,
           initialValue: assetId,
           decoration: const InputDecoration(labelText: '入账账户'),
           items: [
-            const DropdownMenuItem(value: noRef, child: Text('不选账户')),
+            const DropdownMenuItem(
+              value: noRef,
+              child: Text('不选账户', overflow: TextOverflow.ellipsis),
+            ),
             for (final a in widget.assets)
-              DropdownMenuItem(value: a.id, child: Text(a.name)),
+              DropdownMenuItem(
+                value: a.id,
+                child: Text(a.name, overflow: TextOverflow.ellipsis),
+              ),
           ],
           onChanged: (v) => setState(() => assetId = v ?? noRef),
         ),
@@ -711,14 +765,21 @@ class _SettleAdvanceDialogState extends State<_SettleAdvanceDialog> {
           ),
         ),
         DropdownButtonFormField<int>(
+          isExpanded: true,
           initialValue: assetId,
           decoration: InputDecoration(
             labelText: widget.isIncome ? '收款账户' : '扣款账户',
           ),
           items: [
-            const DropdownMenuItem(value: noRef, child: Text('不选账户')),
+            const DropdownMenuItem(
+              value: noRef,
+              child: Text('不选账户', overflow: TextOverflow.ellipsis),
+            ),
             for (final a in widget.assets)
-              DropdownMenuItem(value: a.id, child: Text(a.name)),
+              DropdownMenuItem(
+                value: a.id,
+                child: Text(a.name, overflow: TextOverflow.ellipsis),
+              ),
           ],
           onChanged: (v) => setState(() => assetId = v ?? noRef),
         ),

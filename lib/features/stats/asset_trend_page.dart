@@ -172,7 +172,7 @@ class _AssetTrendPageState extends ConsumerState<AssetTrendPage> {
     ];
 
     return SizedBox(
-      height: 40,
+      height: 44,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         itemCount: years.length,
@@ -209,20 +209,51 @@ class _AssetTrendPageState extends ConsumerState<AssetTrendPage> {
     BuildContext context,
     AssetTrendPerspective current,
   ) {
-    return Center(
+    return SizedBox(
+      width: double.infinity,
       child: SegmentedButton<AssetTrendPerspective>(
+        showSelectedIcon: false,
+        style: const ButtonStyle(
+          visualDensity: VisualDensity.compact,
+          padding: WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: 12)),
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        ),
         segments: const [
           ButtonSegment(
             value: AssetTrendPerspective.netWorth,
-            label: Text('净资产', key: Key('trend-perspective-netWorth')),
+            label: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                '净资产',
+                key: Key('trend-perspective-netWorth'),
+                maxLines: 1,
+                softWrap: false,
+              ),
+            ),
           ),
           ButtonSegment(
             value: AssetTrendPerspective.totalAsset,
-            label: Text('总资产', key: Key('trend-perspective-totalAsset')),
+            label: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                '总资产',
+                key: Key('trend-perspective-totalAsset'),
+                maxLines: 1,
+                softWrap: false,
+              ),
+            ),
           ),
           ButtonSegment(
             value: AssetTrendPerspective.totalLiability,
-            label: Text('总负债', key: Key('trend-perspective-totalLiability')),
+            label: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                '总负债',
+                key: Key('trend-perspective-totalLiability'),
+                maxLines: 1,
+                softWrap: false,
+              ),
+            ),
           ),
         ],
         selected: {current},
@@ -243,19 +274,50 @@ class _AssetTrendPageState extends ConsumerState<AssetTrendPage> {
     TrendAccount account,
     bool useOriginal,
   ) {
+    final theme = Theme.of(context);
     final originalSymbol = currencySymbolOf(account.currency);
     return Card(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text(
-              '显示币种：${useOriginal ? "$originalSymbol (${account.currency})" : "¥ (折算本币)"}',
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    '显示币种',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    useOriginal
+                        ? '$originalSymbol (${account.currency})'
+                        : '¥ (折算本币)',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
             ),
+            const SizedBox(width: 8),
             Row(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                const Text('折算本币'),
+                Text(
+                  '原币 ($originalSymbol)',
+                  maxLines: 1,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(width: 4),
                 Switch(
                   key: const Key('trend-currency-switch'),
                   value: useOriginal,
@@ -265,7 +327,6 @@ class _AssetTrendPageState extends ConsumerState<AssetTrendPage> {
                         .setUseOriginalCurrency(val);
                   },
                 ),
-                Text('原币 ($originalSymbol)'),
               ],
             ),
           ],
@@ -308,16 +369,41 @@ class _AssetTrendPageState extends ConsumerState<AssetTrendPage> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(
-                  '资产状况',
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
+                Flexible(
+                  child: Text(
+                    '资产状况',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
+                const SizedBox(width: 8),
                 SegmentedButton<bool>(
+                  showSelectedIcon: false,
+                  style: const ButtonStyle(
+                    visualDensity: VisualDensity.compact,
+                    padding: WidgetStatePropertyAll(
+                      EdgeInsets.symmetric(horizontal: 10),
+                    ),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
                   segments: const [
-                    ButtonSegment(value: false, label: Text('资产')),
-                    ButtonSegment(value: true, label: Text('负债')),
+                    ButtonSegment(
+                      value: false,
+                      label: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text('资产', maxLines: 1, softWrap: false),
+                      ),
+                    ),
+                    ButtonSegment(
+                      value: true,
+                      label: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text('负债', maxLines: 1, softWrap: false),
+                      ),
+                    ),
                   ],
                   selected: {isLiab},
                   onSelectionChanged: (set) {
@@ -338,6 +424,7 @@ class _AssetTrendPageState extends ConsumerState<AssetTrendPage> {
                     totalMinor: totalMinor,
                     totalLabel: totalLabel,
                     textColor: theme.colorScheme.onSurface,
+                    trackColor: theme.colorScheme.surfaceContainerHighest,
                   ),
                 ),
               ),
@@ -374,21 +461,31 @@ class _AssetTrendPageState extends ConsumerState<AssetTrendPage> {
                       Expanded(
                         child: Text(
                           item.name,
+                          maxLines: 1,
                           style: theme.textTheme.bodyMedium,
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
+                      const SizedBox(width: 8),
                       Text(
                         '$pct%',
                         style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.outline,
+                          color: theme.colorScheme.onSurfaceVariant,
                         ),
                       ),
-                      const SizedBox(width: 12),
-                      Text(
-                        '¥${Money.minor(item.amountMinor).decimal}',
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
+                      const SizedBox(width: 10),
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 128),
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: Alignment.centerRight,
+                          child: Text(
+                            '¥${Money.minor(item.amountMinor).decimal}',
+                            maxLines: 1,
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
                         ),
                       ),
                     ],
@@ -427,10 +524,14 @@ class _AssetTrendPageState extends ConsumerState<AssetTrendPage> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(
-                  cardTitle,
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
+                Flexible(
+                  child: Text(
+                    cardTitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
                 if (_selectedChartIndex != null &&
@@ -500,6 +601,9 @@ class _AssetTrendPageState extends ConsumerState<AssetTrendPage> {
 
   Widget _buildFlowTableCard(BuildContext context, AssetTrendResult result) {
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final inflowColor = isDark ? Colors.green.shade300 : Colors.green.shade700;
+    final outflowColor = isDark ? Colors.red.shade300 : Colors.red.shade700;
     final rows = result.tableRows;
 
     return Card(
@@ -541,54 +645,78 @@ class _AssetTrendPageState extends ConsumerState<AssetTrendPage> {
 
                   return Row(
                     children: [
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Text(
-                                row.yearMonth,
-                                style: theme.textTheme.bodyMedium?.copyWith(
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                              if (row.isCarriedForward)
-                                Padding(
-                                  padding: const EdgeInsets.only(left: 4),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Flexible(
                                   child: Text(
-                                    '(结转)',
-                                    style: theme.textTheme.bodySmall?.copyWith(
-                                      color: theme.colorScheme.outline,
+                                    row.yearMonth,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: theme.textTheme.bodyMedium?.copyWith(
+                                      fontWeight: FontWeight.bold,
                                     ),
                                   ),
                                 ),
-                            ],
-                          ),
-                          const SizedBox(height: 4),
-                          Row(
-                            children: [
-                              Text(
-                                '流入：${result.currencySymbol}$inflowStr',
-                                style: theme.textTheme.bodySmall?.copyWith(
-                                  color: Colors.green.shade700,
-                                ),
+                                if (row.isCarriedForward)
+                                  Padding(
+                                    padding: const EdgeInsets.only(left: 4),
+                                    child: Text(
+                                      '(结转)',
+                                      style: theme.textTheme.bodySmall
+                                          ?.copyWith(
+                                            color: theme
+                                                .colorScheme
+                                                .onSurfaceVariant,
+                                          ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                            const SizedBox(height: 4),
+                            FittedBox(
+                              fit: BoxFit.scaleDown,
+                              alignment: Alignment.centerLeft,
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    '流入：${result.currencySymbol}$inflowStr',
+                                    maxLines: 1,
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      color: inflowColor,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    '流出：${result.currencySymbol}$outflowStr',
+                                    maxLines: 1,
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      color: outflowColor,
+                                    ),
+                                  ),
+                                ],
                               ),
-                              const SizedBox(width: 8),
-                              Text(
-                                '流出：${result.currencySymbol}$outflowStr',
-                                style: theme.textTheme.bodySmall?.copyWith(
-                                  color: Colors.red.shade700,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
+                            ),
+                          ],
+                        ),
                       ),
-                      const Spacer(),
-                      Text(
-                        formattedBal,
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
+                      const SizedBox(width: 8),
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 136),
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: Alignment.centerRight,
+                          child: Text(
+                            formattedBal,
+                            maxLines: 1,
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
                         ),
                       ),
                     ],
@@ -622,6 +750,8 @@ class _AssetTrendPageState extends ConsumerState<AssetTrendPage> {
           maxChildSize: 0.9,
           minChildSize: 0.4,
           builder: (context, scrollController) {
+            final sheetTheme = Theme.of(context);
+            final sheetIsDark = sheetTheme.brightness == Brightness.dark;
             return ListView(
               controller: scrollController,
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -631,7 +761,7 @@ class _AssetTrendPageState extends ConsumerState<AssetTrendPage> {
                     width: 40,
                     height: 4,
                     decoration: BoxDecoration(
-                      color: Colors.grey.shade400,
+                      color: sheetTheme.colorScheme.outlineVariant,
                       borderRadius: BorderRadius.circular(2),
                     ),
                   ),
@@ -778,9 +908,13 @@ class _AssetTrendPageState extends ConsumerState<AssetTrendPage> {
                     ),
                     title: Text(a.name),
                     subtitle: a.status == AssetStatus.hidden
-                        ? const Text(
+                        ? Text(
                             '已隐藏',
-                            style: TextStyle(color: Colors.orange),
+                            style: TextStyle(
+                              color: sheetIsDark
+                                  ? Colors.orange.shade300
+                                  : Colors.orange.shade800,
+                            ),
                           )
                         : (a.currency != null ? Text(a.currency!) : null),
                     trailing: Text(
@@ -815,6 +949,7 @@ class _DonutChartPainter extends CustomPainter {
     required this.totalMinor,
     required this.totalLabel,
     required this.textColor,
+    required this.trackColor,
   });
 
   final List<AssetDistributionItem> items;
@@ -822,6 +957,7 @@ class _DonutChartPainter extends CustomPainter {
   final BigInt totalMinor;
   final String totalLabel;
   final Color textColor;
+  final Color trackColor;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -832,7 +968,7 @@ class _DonutChartPainter extends CustomPainter {
     final basePaint = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = strokeWidth
-      ..color = Colors.grey.withValues(alpha: 0.2);
+      ..color = trackColor;
 
     canvas.drawCircle(center, radius, basePaint);
 
@@ -1170,6 +1306,9 @@ class AssetTrendOverviewCard extends ConsumerWidget {
 
     return Card(
       key: const Key('trend-overview-card'),
+      elevation: 1,
+      margin: EdgeInsets.zero,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
@@ -1183,34 +1322,48 @@ class AssetTrendOverviewCard extends ConsumerWidget {
                   children: [
                     Text(
                       '总净资产',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.labelMedium?.copyWith(
-                        color: theme.colorScheme.outline,
+                        color: theme.colorScheme.onSurfaceVariant,
                       ),
                     ),
                     const SizedBox(height: 4),
-                    Text(
-                      '¥${Money.minor(netWorth).decimal}',
-                      style: theme.textTheme.headlineSmall?.copyWith(
-                        fontWeight: FontWeight.bold,
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        '¥${Money.minor(netWorth).decimal}',
+                        maxLines: 1,
+                        style: theme.textTheme.headlineSmall?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
                     const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        Text(
-                          '总资产 ¥${Money.minor(totalAsset).decimal}',
-                          style: theme.textTheme.bodySmall,
-                        ),
-                        if (totalLiability > BigInt.zero) ...[
-                          const SizedBox(width: 12),
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
                           Text(
-                            '总负债 ¥${Money.minor(totalLiability).decimal}',
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: theme.colorScheme.error,
-                            ),
+                            '总资产 ¥${Money.minor(totalAsset).decimal}',
+                            maxLines: 1,
+                            style: theme.textTheme.bodySmall,
                           ),
+                          if (totalLiability > BigInt.zero) ...[
+                            const SizedBox(width: 12),
+                            Text(
+                              '总负债 ¥${Money.minor(totalLiability).decimal}',
+                              maxLines: 1,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: theme.colorScheme.error,
+                              ),
+                            ),
+                          ],
                         ],
-                      ],
+                      ),
                     ),
                   ],
                 ),

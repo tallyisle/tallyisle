@@ -215,56 +215,73 @@ class _BankCardEditorPageState extends ConsumerState<BankCardEditorPage> {
                         ),
                       ),
                       const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          Container(
-                            key: const Key('editor_luhn_badge'),
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 4,
-                            ),
-                            decoration: BoxDecoration(
-                              color: luhn.passesLuhn
-                                  ? Colors.green.withValues(alpha: 0.14)
-                                  : Theme.of(
-                                      context,
-                                    ).colorScheme.surfaceContainerHighest,
-                              borderRadius: BorderRadius.circular(999),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  luhn.passesLuhn
-                                      ? Icons.verified_outlined
-                                      : Icons.info_outline,
-                                  size: 16,
-                                  color: luhn.passesLuhn
-                                      ? Colors.green.shade700
-                                      : Theme.of(
-                                          context,
-                                        ).colorScheme.onSurfaceVariant,
+                      Builder(
+                        builder: (context) {
+                          final theme = Theme.of(context);
+                          final isDark = theme.brightness == Brightness.dark;
+                          final luhnBgColor = luhn.passesLuhn
+                              ? (isDark
+                                    ? Colors.green.shade900.withValues(
+                                        alpha: 0.45,
+                                      )
+                                    : Colors.green.withValues(alpha: 0.14))
+                              : theme.colorScheme.surfaceContainerHighest;
+                          final luhnFgColor = luhn.passesLuhn
+                              ? (isDark
+                                    ? Colors.green.shade300
+                                    : Colors.green.shade700)
+                              : theme.colorScheme.onSurfaceVariant;
+                          return Row(
+                            children: [
+                              Flexible(
+                                child: Container(
+                                  key: const Key('editor_luhn_badge'),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 4,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: luhnBgColor,
+                                    borderRadius: BorderRadius.circular(999),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        luhn.passesLuhn
+                                            ? Icons.verified_outlined
+                                            : Icons.info_outline,
+                                        size: 16,
+                                        color: luhnFgColor,
+                                      ),
+                                      const SizedBox(width: 4),
+                                      Flexible(
+                                        child: Text(
+                                          luhn.badgeLabel,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: theme.textTheme.labelSmall
+                                              ?.copyWith(color: luhnFgColor),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                                const SizedBox(width: 4),
-                                Text(
-                                  luhn.badgeLabel,
-                                  style: Theme.of(context).textTheme.labelSmall,
+                              ),
+                              if (groupedPreview.isNotEmpty) ...[
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Text(
+                                    groupedPreview,
+                                    key: const Key('editor_grouped_preview'),
+                                    overflow: TextOverflow.ellipsis,
+                                    style: theme.textTheme.bodySmall,
+                                  ),
                                 ),
                               ],
-                            ),
-                          ),
-                          if (groupedPreview.isNotEmpty) ...[
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Text(
-                                groupedPreview,
-                                key: const Key('editor_grouped_preview'),
-                                overflow: TextOverflow.ellipsis,
-                                style: Theme.of(context).textTheme.bodySmall,
-                              ),
-                            ),
-                          ],
-                        ],
+                            ],
+                          );
+                        },
                       ),
                       const SizedBox(height: 16),
                       TextField(

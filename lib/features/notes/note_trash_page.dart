@@ -196,18 +196,42 @@ class _TrashedNoteCard extends StatelessWidget {
                     ),
                   ),
                 ),
+                const SizedBox(width: 6),
                 TextButton.icon(
                   key: Key('restore_note_${note.id}'),
+                  style: TextButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
                   onPressed: onRestore,
-                  icon: const Icon(Icons.restore_from_trash_outlined, size: 18),
-                  label: const Text('恢复'),
+                  icon: const Icon(Icons.restore_from_trash_outlined, size: 16),
+                  label: const FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text('恢复', maxLines: 1, softWrap: false),
+                  ),
                 ),
+                const SizedBox(width: 2),
                 TextButton.icon(
                   key: Key('delete_note_permanently_${note.id}'),
                   onPressed: onDeletePermanently,
-                  style: TextButton.styleFrom(foregroundColor: cs.error),
-                  icon: const Icon(Icons.delete_forever_outlined, size: 18),
-                  label: const Text('彻底删除'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: cs.error,
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  icon: const Icon(Icons.delete_forever_outlined, size: 16),
+                  label: const FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text('彻底删除', maxLines: 1, softWrap: false),
+                  ),
                 ),
               ],
             ),

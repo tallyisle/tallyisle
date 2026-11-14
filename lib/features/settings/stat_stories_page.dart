@@ -198,20 +198,28 @@ class _StatStoriesPageState extends ConsumerState<StatStoriesPage> {
                           children: [
                             Row(
                               children: [
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                    vertical: 2,
+                                ConstrainedBox(
+                                  constraints: const BoxConstraints(
+                                    maxWidth: 112,
                                   ),
-                                  decoration: BoxDecoration(
-                                    color: scheme.primaryContainer,
-                                    borderRadius: BorderRadius.circular(999),
-                                  ),
-                                  child: Text(
-                                    bookLabel,
-                                    style: theme.textTheme.labelSmall?.copyWith(
-                                      color: scheme.onPrimaryContainer,
-                                      fontWeight: FontWeight.w600,
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                      vertical: 2,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: scheme.primaryContainer,
+                                      borderRadius: BorderRadius.circular(999),
+                                    ),
+                                    child: Text(
+                                      bookLabel,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: theme.textTheme.labelSmall
+                                          ?.copyWith(
+                                            color: scheme.onPrimaryContainer,
+                                            fontWeight: FontWeight.w600,
+                                          ),
                                     ),
                                   ),
                                 ),
@@ -228,6 +236,7 @@ class _StatStoriesPageState extends ConsumerState<StatStoriesPage> {
                                 IconButton(
                                   key: Key('stat_story_edit_${item.id}'),
                                   tooltip: '编辑',
+                                  visualDensity: VisualDensity.compact,
                                   icon: const Icon(
                                     Icons.edit_outlined,
                                     size: 20,
@@ -238,6 +247,7 @@ class _StatStoriesPageState extends ConsumerState<StatStoriesPage> {
                                 IconButton(
                                   key: Key('stat_story_delete_${item.id}'),
                                   tooltip: '删除',
+                                  visualDensity: VisualDensity.compact,
                                   icon: const Icon(
                                     Icons.delete_outline,
                                     size: 20,
@@ -461,10 +471,22 @@ class _StatStoryEditorDialogState
                   Expanded(
                     child: OutlinedButton.icon(
                       key: const Key('stat_story_pick_sdate_button'),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 0,
+                        ),
+                        visualDensity: VisualDensity.compact,
+                      ),
                       onPressed: _busy ? null : _pickStartDate,
-                      icon: const Icon(Icons.calendar_today_outlined, size: 16),
-                      label: Text(
-                        '起 ${_formatDateMs(_startOfDayMs(_startDate))}',
+                      icon: const Icon(Icons.calendar_today_outlined, size: 15),
+                      label: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          '起 ${_formatDateMs(_startOfDayMs(_startDate))}',
+                          maxLines: 1,
+                          softWrap: false,
+                        ),
                       ),
                     ),
                   ),
@@ -472,9 +494,23 @@ class _StatStoryEditorDialogState
                   Expanded(
                     child: OutlinedButton.icon(
                       key: const Key('stat_story_pick_edate_button'),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 0,
+                        ),
+                        visualDensity: VisualDensity.compact,
+                      ),
                       onPressed: _busy ? null : _pickEndDate,
-                      icon: const Icon(Icons.event_outlined, size: 16),
-                      label: Text('止 ${_formatDateMs(_endOfDayMs(_endDate))}'),
+                      icon: const Icon(Icons.event_outlined, size: 15),
+                      label: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          '止 ${_formatDateMs(_endOfDayMs(_endDate))}',
+                          maxLines: 1,
+                          softWrap: false,
+                        ),
+                      ),
                     ),
                   ),
                 ],
@@ -493,9 +529,15 @@ class _StatStoryEditorDialogState
               const SizedBox(height: 10),
               OutlinedButton.icon(
                 key: const Key('stat_story_generate_button'),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                ),
                 onPressed: _busy ? null : _generateNarrative,
                 icon: const Icon(Icons.auto_awesome_outlined, size: 18),
-                label: const Text('根据本期账单自动生成摘要'),
+                label: const FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text('根据本期账单自动生成摘要', maxLines: 1, softWrap: false),
+                ),
               ),
               const SizedBox(height: 10),
               TextField(

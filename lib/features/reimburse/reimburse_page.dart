@@ -500,31 +500,47 @@ class _SummaryDashboardCard extends StatelessWidget {
                   fontWeight: FontWeight.w600,
                 ),
               ),
-              const Spacer(),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                decoration: BoxDecoration(
-                  color: cs.surface.withValues(alpha: 0.7),
-                  borderRadius: BorderRadius.circular(999),
-                ),
-                child: Text(
-                  view.allBooksScope ? '全部账本' : view.currentBookName,
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: cs.onSurfaceVariant,
-                    fontWeight: FontWeight.w600,
+              const SizedBox(width: 8),
+              Flexible(
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: cs.surface.withValues(alpha: 0.7),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      view.allBooksScope ? '全部账本' : view.currentBookName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: cs.onSurfaceVariant,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                   ),
                 ),
               ),
             ],
           ),
           const SizedBox(height: 4),
-          Text(
-            '$sym${formatMinor(overview.pendingTotalMinor)}',
-            key: const Key('reimburse-pending-total'),
-            style: theme.textTheme.headlineSmall?.copyWith(
-              fontWeight: FontWeight.w800,
-              color: cs.onSurface,
-              letterSpacing: -0.3,
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              '$sym${formatMinor(overview.pendingTotalMinor)}',
+              key: const Key('reimburse-pending-total'),
+              maxLines: 1,
+              softWrap: false,
+              style: theme.textTheme.headlineSmall?.copyWith(
+                fontWeight: FontWeight.w800,
+                color: cs.onSurface,
+                letterSpacing: -0.3,
+              ),
             ),
           ),
           const SizedBox(height: 12),
@@ -642,13 +658,13 @@ class _PendingBillCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(14),
         onTap: onRowTap,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
           child: Row(
             children: [
               if (batchMode) ...[
                 SizedBox(
-                  width: 32,
-                  height: 32,
+                  width: 30,
+                  height: 30,
                   child: Checkbox(
                     key: Key('reimburse-select-${item.recordId}'),
                     value: selected,
@@ -656,7 +672,7 @@ class _PendingBillCard extends StatelessWidget {
                     onChanged: (_) => onToggleSelect(),
                   ),
                 ),
-                const SizedBox(width: 6),
+                const SizedBox(width: 4),
               ],
               CategoryIconAvatar(
                 iconKey: row.categoryIconKey,
@@ -664,9 +680,9 @@ class _PendingBillCard extends StatelessWidget {
                 colorHex: row.categoryColorHex,
                 name: row.categoryDisplayName,
                 type: RecordType.expense,
-                size: batchMode ? 36 : 40,
+                size: batchMode ? 34 : 36,
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 8),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -711,38 +727,51 @@ class _PendingBillCard extends StatelessWidget {
                   ],
                 ),
               ),
-              const SizedBox(width: 8),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    '待报 $sym${formatMinor(item.remainingMinor)}',
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                      color: cs.primary,
-                    ),
-                  ),
-                  if (item.isPartial)
-                    Text(
-                      '垫付 $sym${formatMinor(item.originMinor)}',
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: cs.onSurfaceVariant,
+              const SizedBox(width: 6),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 112),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        '待报 $sym${formatMinor(item.remainingMinor)}',
+                        maxLines: 1,
+                        softWrap: false,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          color: cs.primary,
+                        ),
                       ),
                     ),
-                ],
+                    if (item.isPartial)
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          '垫付 $sym${formatMinor(item.originMinor)}',
+                          maxLines: 1,
+                          softWrap: false,
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: cs.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
               ),
               if (!batchMode) ...[
-                const SizedBox(width: 8),
+                const SizedBox(width: 6),
                 FilledButton.tonal(
                   key: Key('reimburse-action-${item.recordId}'),
                   style: FilledButton.styleFrom(
                     visualDensity: VisualDensity.compact,
                     padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 6,
+                      horizontal: 10,
+                      vertical: 5,
                     ),
-                    minimumSize: const Size(52, 32),
+                    minimumSize: const Size(44, 30),
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   ),
                   onPressed: onReimburseTap,
@@ -783,7 +812,9 @@ class _SettledBillCard extends StatelessWidget {
       if (showBookName) row.bookName,
       if (receiptCount > 0) '$receiptCount 笔收款',
     ];
-    const settledGreen = Color(0xFF2E7D32);
+    final settledGreen = theme.brightness == Brightness.dark
+        ? const Color(0xFF81C784)
+        : const Color(0xFF2E7D32);
 
     return Material(
       color: cs.surfaceContainerLow,
@@ -839,7 +870,7 @@ class _SettledBillCard extends StatelessWidget {
                             color: settledGreen.withValues(alpha: 0.14),
                             borderRadius: BorderRadius.circular(6),
                           ),
-                          child: const Text(
+                          child: Text(
                             '已报销',
                             style: TextStyle(
                               fontSize: 11,
@@ -1142,8 +1173,11 @@ class _SingleReimburseSheetState extends ConsumerState<_SingleReimburseSheet> {
             currencySymbol: sym,
           );
 
+    final settledGreen = theme.brightness == Brightness.dark
+        ? const Color(0xFF81C784)
+        : const Color(0xFF2E7D32);
     final Color previewColor = switch (preview?.kind) {
-      ReimbursePreviewKind.full => const Color(0xFF2E7D32),
+      ReimbursePreviewKind.full => settledGreen,
       ReimbursePreviewKind.overage => cs.primary,
       ReimbursePreviewKind.partial || null => cs.onSurfaceVariant,
     };

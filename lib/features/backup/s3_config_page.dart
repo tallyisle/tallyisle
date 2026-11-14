@@ -254,6 +254,7 @@ class _S3ConfigPageState extends ConsumerState<S3ConfigPage> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final keepOptions = <int>{..._presetKeepCounts, _keepCount}.toList()
       ..sort();
 
@@ -443,7 +444,9 @@ class _S3ConfigPageState extends ConsumerState<S3ConfigPage> {
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
                         color: _testSucceeded
-                            ? Colors.green.withValues(alpha: 0.12)
+                            ? Colors.green.withValues(
+                                alpha: isDark ? 0.18 : 0.12,
+                              )
                             : Theme.of(context).colorScheme.errorContainer,
                         borderRadius: BorderRadius.circular(8),
                       ),
@@ -451,7 +454,9 @@ class _S3ConfigPageState extends ConsumerState<S3ConfigPage> {
                         _testStatusMessage!,
                         style: TextStyle(
                           color: _testSucceeded
-                              ? Colors.green.shade800
+                              ? (isDark
+                                    ? Colors.green.shade300
+                                    : Colors.green.shade800)
                               : Theme.of(context).colorScheme.onErrorContainer,
                         ),
                       ),
@@ -464,8 +469,11 @@ class _S3ConfigPageState extends ConsumerState<S3ConfigPage> {
                         child: OutlinedButton.icon(
                           key: const Key('s3_test_connection_button'),
                           onPressed: _busy ? null : _handleTestConnection,
-                          icon: const Icon(Icons.wifi_tethering),
-                          label: const Text('测试连接'),
+                          icon: const Icon(Icons.wifi_tethering, size: 18),
+                          label: const FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text('测试连接', maxLines: 1, softWrap: false),
+                          ),
                         ),
                       ),
                       const SizedBox(width: 12),
@@ -473,8 +481,11 @@ class _S3ConfigPageState extends ConsumerState<S3ConfigPage> {
                         child: FilledButton.icon(
                           key: const Key('s3_save_config_button'),
                           onPressed: _busy ? null : _handleSave,
-                          icon: const Icon(Icons.save_outlined),
-                          label: const Text('保存配置'),
+                          icon: const Icon(Icons.save_outlined, size: 18),
+                          label: const FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text('保存配置', maxLines: 1, softWrap: false),
+                          ),
                         ),
                       ),
                     ],

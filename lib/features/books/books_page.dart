@@ -218,77 +218,96 @@ class _BooksPageState extends ConsumerState<BooksPage> {
           return const Center(child: Text('暂无账本'));
         }
 
-        return ReorderableListView(
+        return ReorderableListView.builder(
+          padding: const EdgeInsets.only(bottom: 96),
+          buildDefaultDragHandles: false,
+          itemCount: books.length,
           onReorderItem: (oldIndex, newIndex) =>
               _reorderBooks(books, oldIndex, newIndex),
-          children: [
-            for (final b in books)
-              ListTile(
-                key: ValueKey(b.id),
-                leading: Icon(
-                  b.id == currentBookId
-                      ? Icons.bookmark
-                      : Icons.bookmark_outline,
-                  color: b.id == currentBookId
-                      ? Theme.of(context).colorScheme.primary
-                      : null,
-                ),
-                title: Row(
-                  children: [
-                    Text(b.name),
-                    if (b.id == currentBookId) ...[
-                      const SizedBox(width: 8),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 6,
-                          vertical: 2,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Theme.of(context).colorScheme.primaryContainer,
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Text(
-                          '当前',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Theme.of(
-                              context,
-                            ).colorScheme.onPrimaryContainer,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-                subtitle: Text('每月 ${b.startDay} 日起始'),
-                trailing: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (b.id != currentBookId)
-                      TextButton(
-                        key: Key('book-set-current-${b.id}'),
-                        onPressed: () => _setCurrentBook(b.id),
-                        child: const Text('切到此本'),
-                      ),
-                    PopupMenuButton<String>(
-                      key: Key('book-menu-${b.id}'),
-                      onSelected: (val) {
-                        if (val == 'edit') {
-                          _editBook(b);
-                        } else if (val == 'delete') {
-                          _deleteBook(b);
-                        }
-                      },
-                      itemBuilder: (context) => [
-                        const PopupMenuItem(value: 'edit', child: Text('编辑')),
-                        const PopupMenuItem(value: 'delete', child: Text('删除')),
-                      ],
-                    ),
-                    const Icon(Icons.drag_handle),
-                  ],
-                ),
+          itemBuilder: (context, index) {
+            final b = books[index];
+            return ListTile(
+              key: ValueKey(b.id),
+              contentPadding: const EdgeInsets.only(left: 16, right: 12),
+              leading: Icon(
+                b.id == currentBookId ? Icons.bookmark : Icons.bookmark_outline,
+                color: b.id == currentBookId
+                    ? Theme.of(context).colorScheme.primary
+                    : null,
               ),
-          ],
+              title: Row(
+                children: [
+                  Flexible(
+                    child: Text(
+                      b.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  if (b.id == currentBookId) ...[
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.primaryContainer,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        '当前',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.onPrimaryContainer,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+              subtitle: Text('每月 ${b.startDay} 日起始'),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (b.id != currentBookId)
+                    TextButton(
+                      key: Key('book-set-current-${b.id}'),
+                      style: TextButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                      ),
+                      onPressed: () => _setCurrentBook(b.id),
+                      child: const Text('切到此本'),
+                    ),
+                  PopupMenuButton<String>(
+                    key: Key('book-menu-${b.id}'),
+                    padding: const EdgeInsets.all(4),
+                    onSelected: (val) {
+                      if (val == 'edit') {
+                        _editBook(b);
+                      } else if (val == 'delete') {
+                        _deleteBook(b);
+                      }
+                    },
+                    itemBuilder: (context) => [
+                      const PopupMenuItem(value: 'edit', child: Text('编辑')),
+                      const PopupMenuItem(value: 'delete', child: Text('删除')),
+                    ],
+                  ),
+                  ReorderableDragStartListener(
+                    index: index,
+                    child: const Padding(
+                      padding: EdgeInsets.all(4),
+                      child: Icon(Icons.drag_handle),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
         );
       }),
       floatingActionButton: FloatingActionButton.extended(

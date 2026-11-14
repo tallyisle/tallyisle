@@ -123,42 +123,44 @@ class _TemplateQuickBarState extends ConsumerState<TemplateQuickBar> {
         if (rows.isEmpty && widget.onManageTemplates == null) {
           return const SizedBox.shrink();
         }
-        return SizedBox(
+        return ConstrainedBox(
           key: const Key('template_quick_bar'),
-          height: 44,
-          child: ListView(
+          constraints: const BoxConstraints(minHeight: 44),
+          child: SingleChildScrollView(
             scrollDirection: Axis.horizontal,
-            children: [
-              for (final t in rows)
-                Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: GestureDetector(
-                    onLongPress: _busy || !widget.enabled
-                        ? null
-                        : () => _handleTap(t, forcePrefill: true),
-                    child: ActionChip(
-                      key: Key('quick_template_${t.id}'),
-                      avatar: Icon(
-                        t.autoSave
-                            ? Icons.flash_on_rounded
-                            : Icons.bookmark_outline,
-                        size: 16,
-                      ),
-                      label: Text(_chipLabel(t)),
-                      onPressed: _busy || !widget.enabled
+            child: Row(
+              children: [
+                for (final t in rows)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: GestureDetector(
+                      onLongPress: _busy || !widget.enabled
                           ? null
-                          : () => _handleTap(t),
+                          : () => _handleTap(t, forcePrefill: true),
+                      child: ActionChip(
+                        key: Key('quick_template_${t.id}'),
+                        avatar: Icon(
+                          t.autoSave
+                              ? Icons.flash_on_rounded
+                              : Icons.bookmark_outline,
+                          size: 16,
+                        ),
+                        label: Text(_chipLabel(t)),
+                        onPressed: _busy || !widget.enabled
+                            ? null
+                            : () => _handleTap(t),
+                      ),
                     ),
                   ),
-                ),
-              if (widget.onManageTemplates != null || rows.isNotEmpty)
-                ActionChip(
-                  key: const Key('quick_template_manage'),
-                  avatar: const Icon(Icons.settings_outlined, size: 16),
-                  label: const Text('模板'),
-                  onPressed: _busy || !widget.enabled ? null : _openManage,
-                ),
-            ],
+                if (widget.onManageTemplates != null || rows.isNotEmpty)
+                  ActionChip(
+                    key: const Key('quick_template_manage'),
+                    avatar: const Icon(Icons.settings_outlined, size: 16),
+                    label: const Text('模板'),
+                    onPressed: _busy || !widget.enabled ? null : _openManage,
+                  ),
+              ],
+            ),
           ),
         );
       },
@@ -553,6 +555,7 @@ class _TemplateCardTile extends StatelessWidget {
                       style: Theme.of(context).textTheme.titleMedium,
                     ),
                   ),
+                  const SizedBox(width: 8),
                   Text(
                     '${extra.sourceCurrency ?? '¥'} ${formatMinor(template.moneyMinor)}',
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
@@ -603,28 +606,49 @@ class _TemplateCardTile extends StatelessWidget {
               Row(
                 children: [
                   const Text('秒记'),
+                  const SizedBox(width: 4),
                   Switch(
                     key: Key('template_autosave_switch_${template.id}'),
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     value: template.autoSave,
                     onChanged: busy ? null : onToggleAutoSave,
                   ),
-                  const Spacer(),
-                  TextButton.icon(
-                    key: Key('template_apply_button_${template.id}'),
-                    onPressed: busy ? null : onApplyInstant,
-                    icon: const Icon(Icons.playlist_add_check, size: 18),
-                    label: const Text('记一笔'),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: Align(
+                      alignment: Alignment.centerRight,
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: TextButton.icon(
+                          key: Key('template_apply_button_${template.id}'),
+                          style: TextButton.styleFrom(
+                            visualDensity: VisualDensity.compact,
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                          onPressed: busy ? null : onApplyInstant,
+                          icon: const Icon(Icons.playlist_add_check, size: 18),
+                          label: const Text(
+                            '记一笔',
+                            maxLines: 1,
+                            softWrap: false,
+                          ),
+                        ),
+                      ),
+                    ),
                   ),
                   IconButton(
                     key: Key('template_edit_button_${template.id}'),
+                    visualDensity: VisualDensity.compact,
                     tooltip: '编辑',
-                    icon: const Icon(Icons.edit_outlined),
+                    icon: const Icon(Icons.edit_outlined, size: 20),
                     onPressed: busy ? null : onEdit,
                   ),
                   IconButton(
                     key: Key('template_delete_button_${template.id}'),
+                    visualDensity: VisualDensity.compact,
                     tooltip: '删除',
-                    icon: const Icon(Icons.delete_outline),
+                    icon: const Icon(Icons.delete_outline, size: 20),
                     onPressed: busy ? null : onDelete,
                   ),
                 ],

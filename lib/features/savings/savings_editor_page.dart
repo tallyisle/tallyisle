@@ -488,18 +488,38 @@ class _SavingsEditorPageState extends ConsumerState<SavingsEditorPage> {
                 Expanded(
                   child: OutlinedButton.icon(
                     key: const Key('pick_start_date_button'),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                    ),
                     onPressed: _busy ? null : () => _pickDate(isStart: true),
-                    icon: const Icon(Icons.event, size: 18),
-                    label: Text('开始 ${_startDate.dateKey}'),
+                    icon: const Icon(Icons.event, size: 16),
+                    label: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        '开始 ${_startDate.dateKey}',
+                        maxLines: 1,
+                        softWrap: false,
+                      ),
+                    ),
                   ),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: OutlinedButton.icon(
                     key: const Key('pick_end_date_button'),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                    ),
                     onPressed: _busy ? null : () => _pickDate(isStart: false),
-                    icon: const Icon(Icons.event_available, size: 18),
-                    label: Text('结束 ${_endDate.dateKey}'),
+                    icon: const Icon(Icons.event_available, size: 16),
+                    label: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        '结束 ${_endDate.dateKey}',
+                        maxLines: 1,
+                        softWrap: false,
+                      ),
+                    ),
                   ),
                 ),
               ],
@@ -544,16 +564,25 @@ class _SavingsEditorPageState extends ConsumerState<SavingsEditorPage> {
               child: Padding(
                 padding: const EdgeInsets.all(12),
                 child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text('预计共 $periods 期'),
-                    Text(
-                      previewTarget == null
-                          ? '--'
-                          : '目标总额 $currSymbol${formatMinor(previewTarget)}',
-                      key: const Key('savings_preview_target_text'),
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Align(
+                        alignment: Alignment.centerRight,
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text(
+                            previewTarget == null
+                                ? '--'
+                                : '目标总额 $currSymbol${formatMinor(previewTarget)}',
+                            key: const Key('savings_preview_target_text'),
+                            maxLines: 1,
+                            softWrap: false,
+                            style: Theme.of(context).textTheme.titleMedium
+                                ?.copyWith(fontWeight: FontWeight.bold),
+                          ),
+                        ),
                       ),
                     ),
                   ],
@@ -581,24 +610,43 @@ class _SavingsEditorPageState extends ConsumerState<SavingsEditorPage> {
                 Expanded(
                   child: OutlinedButton.icon(
                     key: const Key('pick_start_date_button'),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                    ),
                     onPressed: _busy ? null : () => _pickDate(isStart: true),
-                    icon: const Icon(Icons.event, size: 18),
-                    label: Text('开始 ${_startDate.dateKey}'),
+                    icon: const Icon(Icons.event, size: 16),
+                    label: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        '开始 ${_startDate.dateKey}',
+                        maxLines: 1,
+                        softWrap: false,
+                      ),
+                    ),
                   ),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: OutlinedButton.icon(
                     key: const Key('pick_end_date_button'),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                    ),
                     onPressed: _busy ? null : () => _pickDate(isStart: false),
-                    icon: const Icon(Icons.event_available, size: 18),
-                    label: Text(
-                      _freeHasEndDate ? '截止 ${_endDate.dateKey}' : '截止日期（可选）',
+                    icon: const Icon(Icons.event_available, size: 16),
+                    label: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        _freeHasEndDate ? '截止 ${_endDate.dateKey}' : '截止日期（可选）',
+                        maxLines: 1,
+                        softWrap: false,
+                      ),
                     ),
                   ),
                 ),
                 if (_freeHasEndDate)
                   IconButton(
+                    visualDensity: VisualDensity.compact,
                     tooltip: '清除截止日期',
                     onPressed: _busy
                         ? null

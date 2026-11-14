@@ -141,6 +141,8 @@ class _BudgetSummaryCardState extends ConsumerState<BudgetSummaryCard> {
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 child: Text(
                   resetLabel,
+                  maxLines: 1,
+                  softWrap: false,
                   style: theme.textTheme.labelSmall?.copyWith(
                     color: scheme.onPrimaryContainer,
                     fontWeight: FontWeight.w600,
@@ -184,12 +186,21 @@ class _BudgetSummaryCardState extends ConsumerState<BudgetSummaryCard> {
       }
     }
 
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
+    const cardMargin = EdgeInsets.symmetric(horizontal: 16, vertical: 6);
+
     if (overviewAsync.hasError && _cachedOverview == null) {
       return widget.hideWhenEmpty
           ? const SizedBox.shrink()
           : Card(
               key: const Key('budget_summary_card'),
-              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              elevation: 1,
+              margin: cardMargin,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
               child: Padding(
                 padding: const EdgeInsets.all(16),
                 child: Text('加载预算失败: ${safeMessage(overviewAsync.error!)}'),
@@ -201,10 +212,14 @@ class _BudgetSummaryCardState extends ConsumerState<BudgetSummaryCard> {
     if (overview == null) {
       return widget.hideWhenEmpty
           ? const SizedBox.shrink()
-          : const Card(
-              key: Key('budget_summary_card'),
-              margin: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: Padding(
+          : Card(
+              key: const Key('budget_summary_card'),
+              elevation: 1,
+              margin: cardMargin,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Padding(
                 padding: EdgeInsets.all(16),
                 child: Center(
                   child: SizedBox(
@@ -236,10 +251,10 @@ class _BudgetSummaryCardState extends ConsumerState<BudgetSummaryCard> {
           : '${displayPeriod.year}年${displayPeriod.month}月预算';
 
       if (widget.enablePeriodControls) {
-        final theme = Theme.of(context);
         return Card(
           key: const Key('budget_summary_card'),
-          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          elevation: 1,
+          margin: cardMargin,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
           ),
@@ -269,7 +284,10 @@ class _BudgetSummaryCardState extends ConsumerState<BudgetSummaryCard> {
                           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                         ),
                         onPressed: widget.onTap,
-                        child: const Text('去设置'),
+                        child: const FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text('去设置', maxLines: 1, softWrap: false),
+                        ),
                       ),
                     ],
                   ),
@@ -278,16 +296,20 @@ class _BudgetSummaryCardState extends ConsumerState<BudgetSummaryCard> {
                     children: [
                       Icon(
                         Icons.pie_chart_outline,
-                        color: theme.colorScheme.onSurfaceVariant,
+                        color: scheme.onSurfaceVariant,
                         size: 18,
                       ),
                       const SizedBox(width: 8),
-                      Text(
-                        effectiveOffset == 0 ? '未设置当期预算' : '该期未设置预算',
-                        key: const Key('budget_empty_prompt'),
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: theme.colorScheme.onSurfaceVariant,
+                      Expanded(
+                        child: Text(
+                          effectiveOffset == 0 ? '未设置当期预算' : '该期未设置预算',
+                          key: const Key('budget_empty_prompt'),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: scheme.onSurfaceVariant,
+                          ),
                         ),
                       ),
                     ],
@@ -302,7 +324,8 @@ class _BudgetSummaryCardState extends ConsumerState<BudgetSummaryCard> {
       // No budget set for selected period (standard non-stepping card)
       return Card(
         key: const Key('budget_summary_card'),
-        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        elevation: 1,
+        margin: cardMargin,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         child: InkWell(
           borderRadius: BorderRadius.circular(12),
@@ -311,9 +334,9 @@ class _BudgetSummaryCardState extends ConsumerState<BudgetSummaryCard> {
             padding: const EdgeInsets.all(16),
             child: Row(
               children: [
-                const Icon(
+                Icon(
                   Icons.pie_chart_outline,
-                  color: Colors.blueGrey,
+                  color: scheme.onSurfaceVariant,
                   size: 32,
                 ),
                 const SizedBox(width: 12),
@@ -323,20 +346,33 @@ class _BudgetSummaryCardState extends ConsumerState<BudgetSummaryCard> {
                     children: [
                       Text(
                         emptyTitle,
-                        style: Theme.of(context).textTheme.titleMedium,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleMedium,
                       ),
                       const SizedBox(height: 4),
-                      const Text(
+                      Text(
                         '未设置当期预算',
-                        key: Key('budget_empty_prompt'),
-                        style: TextStyle(color: Colors.grey),
+                        key: const Key('budget_empty_prompt'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(color: scheme.onSurfaceVariant),
                       ),
                     ],
                   ),
                 ),
+                const SizedBox(width: 8),
                 FilledButton.tonal(
+                  style: FilledButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
                   onPressed: widget.onTap,
-                  child: const Text('去设置'),
+                  child: const FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text('去设置', maxLines: 1, softWrap: false),
+                  ),
                 ),
               ],
             ),
@@ -351,10 +387,15 @@ class _BudgetSummaryCardState extends ConsumerState<BudgetSummaryCard> {
     final populatedTitle = displayMode == BudgetMode.yearly
         ? '${displayPeriod.year}年总预算'
         : '${displayPeriod.year}年${displayPeriod.month}月总预算';
+    final semanticRed = isDark ? Colors.red.shade300 : Colors.red.shade700;
+    final semanticGreen = isDark
+        ? Colors.green.shade300
+        : Colors.green.shade700;
 
     return Card(
       key: const Key('budget_summary_card'),
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      elevation: 1,
+      margin: cardMargin,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
@@ -377,19 +418,27 @@ class _BudgetSummaryCardState extends ConsumerState<BudgetSummaryCard> {
                       ),
                     )
                   else
-                    Flexible(
+                    Expanded(
                       child: Text(
                         populatedTitle,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.titleMedium,
+                        style: theme.textTheme.titleMedium,
                       ),
                     ),
                   const SizedBox(width: 8),
-                  Text(
-                    '¥${formatMinor(totalBudget.amountMinor)}',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 128),
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerRight,
+                      child: Text(
+                        '¥${formatMinor(totalBudget.amountMinor)}',
+                        maxLines: 1,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                     ),
                   ),
                 ],
@@ -401,39 +450,65 @@ class _BudgetSummaryCardState extends ConsumerState<BudgetSummaryCard> {
                   key: const Key('budget_progress_bar'),
                   value: progress,
                   minHeight: 8,
-                  backgroundColor: Colors.grey.withAlpha(50),
+                  backgroundColor: scheme.surfaceContainerHighest,
                   valueColor: AlwaysStoppedAnimation<Color>(
-                    isOverspent ? Colors.red : Theme.of(context).primaryColor,
+                    isOverspent ? scheme.error : scheme.primary,
                   ),
                 ),
               ),
               const SizedBox(height: 12),
               Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(
-                    '已用: ¥${formatMinor(totalUsage.displayUsedMinor)}',
-                    key: const Key('budget_used_text'),
-                    style: const TextStyle(fontSize: 13, color: Colors.grey),
-                  ),
-                  Text(
-                    '${percent.toStringAsFixed(1)}%',
-                    key: const Key('budget_percent_text'),
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.bold,
-                      color: isOverspent ? Colors.red : null,
+                  Expanded(
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          '已用: ¥${formatMinor(totalUsage.displayUsedMinor)}',
+                          key: const Key('budget_used_text'),
+                          maxLines: 1,
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
                     ),
                   ),
-                  Text(
-                    isOverspent
-                        ? '超支: ¥${formatMinor(-totalUsage.remainingMinor)}'
-                        : '剩余: ¥${formatMinor(totalUsage.remainingMinor)}',
-                    key: const Key('budget_remaining_text'),
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.bold,
-                      color: isOverspent ? Colors.red : Colors.green[700],
+                  const SizedBox(width: 8),
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      '${percent.toStringAsFixed(1)}%',
+                      key: const Key('budget_percent_text'),
+                      maxLines: 1,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                        color: isOverspent ? semanticRed : scheme.onSurface,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Align(
+                      alignment: Alignment.centerRight,
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          isOverspent
+                              ? '超支: ¥${formatMinor(-totalUsage.remainingMinor)}'
+                              : '剩余: ¥${formatMinor(totalUsage.remainingMinor)}',
+                          key: const Key('budget_remaining_text'),
+                          maxLines: 1,
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.bold,
+                            color: isOverspent ? semanticRed : semanticGreen,
+                          ),
+                        ),
+                      ),
                     ),
                   ),
                 ],
@@ -481,35 +556,37 @@ class RecordBudgetHintBar extends ConsumerWidget {
       data: (usage) {
         if (usage == null) return const SizedBox.shrink();
 
+        final isDark = Theme.of(context).brightness == Brightness.dark;
+        final bgAlpha = isDark ? 45 : 25;
         final isSaving = usage.budgetType == BudgetTypeCode.savingCategory;
         final isTotal = usage.budgetType == BudgetTypeCode.total;
         final label = isTotal ? '总预算' : (isSaving ? '储蓄目标' : '分类预算');
 
         final String text;
         final Color textColor;
+        final Color bgColor;
 
         if (isSaving) {
           text =
               '$label: 目标 ¥${formatMinor(usage.amountMinor)}，已存 ¥${formatMinor(usage.displayUsedMinor)}，待存 ¥${formatMinor(usage.remainingMinor)}';
-          textColor = Colors.teal[800]!;
+          textColor = isDark ? Colors.teal.shade200 : Colors.teal.shade800;
+          bgColor = Colors.teal.withAlpha(bgAlpha);
         } else if (usage.isOverspent) {
           text =
               '$label: 已超支 ¥${formatMinor(-usage.remainingMinor)} (${usage.percent.toStringAsFixed(1)}%)';
-          textColor = Colors.red[800]!;
+          textColor = isDark ? Colors.red.shade300 : Colors.red.shade800;
+          bgColor = Colors.red.withAlpha(bgAlpha);
         } else {
           text =
               '$label: 剩余 ¥${formatMinor(usage.remainingMinor)} (${usage.percent.toStringAsFixed(1)}%)';
-          textColor = Colors.green[800]!;
+          textColor = isDark ? Colors.green.shade300 : Colors.green.shade800;
+          bgColor = Colors.green.withAlpha(bgAlpha);
         }
 
         return Container(
           key: const Key('record_budget_hint_bar'),
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-          color: usage.isOverspent
-              ? Colors.red.withAlpha(25)
-              : (isSaving
-                    ? Colors.teal.withAlpha(25)
-                    : Colors.blueGrey.withAlpha(25)),
+          color: bgColor,
           child: Row(
             children: [
               Icon(
@@ -523,6 +600,7 @@ class RecordBudgetHintBar extends ConsumerWidget {
               Expanded(
                 child: Text(
                   text,
+                  maxLines: 1,
                   style: TextStyle(
                     fontSize: 12,
                     color: textColor,

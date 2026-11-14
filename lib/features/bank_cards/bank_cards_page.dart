@@ -225,8 +225,18 @@ class _BankCardTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
     final tint = parseCardColorOrNull(card.cardColor);
     final luhn = inspectCardLuhn(card.cardNo);
+    final luhnBgColor = luhn.passesLuhn
+        ? (isDark
+              ? Colors.green.shade900.withValues(alpha: 0.45)
+              : Colors.green.withValues(alpha: 0.14))
+        : theme.colorScheme.surfaceContainerHighest;
+    final luhnFgColor = luhn.passesLuhn
+        ? (isDark ? Colors.green.shade300 : Colors.green.shade700)
+        : theme.colorScheme.onSurfaceVariant;
     final displayNumber = masked
         ? formatCardNumberMasked(card.cardNo)
         : formatCardNumberGrouped(card.cardNo);
@@ -244,39 +254,51 @@ class _BankCardTile extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
+            SizedBox(
+              width: double.infinity,
+              child: Wrap(
+                alignment: WrapAlignment.spaceBetween,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 8,
+                runSpacing: 6,
+                children: [
+                  Text(
                     card.cardName,
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    style: theme.textTheme.titleMedium?.copyWith(
                       fontWeight: FontWeight.w600,
                     ),
                   ),
-                ),
-                Chip(
-                  visualDensity: VisualDensity.compact,
-                  label: Text(BankCardType.labelOf(card.cardType)),
-                ),
-                const SizedBox(width: 6),
-                Container(
-                  key: Key('card_luhn_badge_${card.id}'),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 3,
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 4,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      Chip(
+                        visualDensity: VisualDensity.compact,
+                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        label: Text(BankCardType.labelOf(card.cardType)),
+                      ),
+                      Container(
+                        key: Key('card_luhn_badge_${card.id}'),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 3,
+                        ),
+                        decoration: BoxDecoration(
+                          color: luhnBgColor,
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          luhn.passesLuhn ? 'Luhn 校验通过' : '非标准校验号',
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: luhnFgColor,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                  decoration: BoxDecoration(
-                    color: luhn.passesLuhn
-                        ? Colors.green.withValues(alpha: 0.14)
-                        : Theme.of(context).colorScheme.surfaceContainerHighest,
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                  child: Text(
-                    luhn.passesLuhn ? 'Luhn 校验通过' : '非标准校验号',
-                    style: Theme.of(context).textTheme.labelSmall,
-                  ),
-                ),
-              ],
+                ],
+              ),
             ),
             const SizedBox(height: 8),
             Row(
@@ -332,32 +354,59 @@ class _BankCardTile extends StatelessWidget {
               ),
             ],
             const Divider(height: 16),
-            Wrap(
-              spacing: 4,
-              crossAxisAlignment: WrapCrossAlignment.center,
+            Row(
               children: [
-                TextButton.icon(
-                  key: Key('copy_card_no_${card.id}'),
-                  onPressed: onCopyNumber,
-                  icon: const Icon(Icons.copy, size: 16),
-                  label: const Text('复制卡号'),
-                ),
-                TextButton.icon(
-                  key: Key('copy_card_full_${card.id}'),
-                  onPressed: onCopyFull,
-                  icon: const Icon(Icons.assignment_outlined, size: 16),
-                  label: const Text('复制完整信息'),
+                Expanded(
+                  child: Row(
+                    children: [
+                      Flexible(
+                        child: TextButton.icon(
+                          key: Key('copy_card_no_${card.id}'),
+                          style: TextButton.styleFrom(
+                            visualDensity: VisualDensity.compact,
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                          onPressed: onCopyNumber,
+                          icon: const Icon(Icons.copy, size: 15),
+                          label: const FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text('复制卡号', maxLines: 1, softWrap: false),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      Flexible(
+                        child: TextButton.icon(
+                          key: Key('copy_card_full_${card.id}'),
+                          style: TextButton.styleFrom(
+                            visualDensity: VisualDensity.compact,
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                          onPressed: onCopyFull,
+                          icon: const Icon(Icons.assignment_outlined, size: 15),
+                          label: const FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text('复制完整信息', maxLines: 1, softWrap: false),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
                 IconButton(
                   key: Key('edit_bank_card_${card.id}'),
+                  visualDensity: VisualDensity.compact,
                   tooltip: '编辑',
-                  icon: const Icon(Icons.edit_outlined),
+                  icon: const Icon(Icons.edit_outlined, size: 20),
                   onPressed: busy ? null : onEdit,
                 ),
                 IconButton(
                   key: Key('delete_bank_card_${card.id}'),
+                  visualDensity: VisualDensity.compact,
                   tooltip: '删除',
-                  icon: const Icon(Icons.delete_outline),
+                  icon: const Icon(Icons.delete_outline, size: 20),
                   onPressed: busy ? null : onDelete,
                 ),
               ],

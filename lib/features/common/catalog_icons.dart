@@ -1044,6 +1044,16 @@ CategoryVisual resolveCategoryVisual({
   );
 }
 
+Color _selectedForegroundOn(Color bgColor) =>
+    ThemeData.estimateBrightnessForColor(bgColor) == Brightness.light
+    ? Colors.black87
+    : Colors.white;
+
+Color _unselectedAvatarColor(Color baseColor, {required bool isDark}) =>
+    isDark && baseColor.toARGB32() == 0xFF2E7D32
+    ? const Color(0xFF66BB6A)
+    : baseColor;
+
 /// Soft/vivid circular badge rendering a category's semantic rounded icon.
 class CategoryIconAvatar extends StatelessWidget {
   const CategoryIconAvatar({
@@ -1077,10 +1087,14 @@ class CategoryIconAvatar extends StatelessWidget {
       type: type,
     );
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final unselectedColor = _unselectedAvatarColor(
+      visual.color,
+      isDark: isDark,
+    );
     final bgColor = selected
         ? visual.color
-        : visual.color.withValues(alpha: isDark ? 0.22 : 0.14);
-    final fgColor = selected ? Colors.white : visual.color;
+        : unselectedColor.withValues(alpha: isDark ? 0.22 : 0.14);
+    final fgColor = selected ? _selectedForegroundOn(bgColor) : unselectedColor;
 
     Widget badge = AnimatedContainer(
       duration: const Duration(milliseconds: 160),
@@ -1317,15 +1331,16 @@ class RecordTypeIconAvatar extends StatelessWidget {
       isRefund: isRefund,
     );
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final fgColor = _unselectedAvatarColor(visual.color, isDark: isDark);
     return Container(
       width: size,
       height: size,
       decoration: BoxDecoration(
-        color: visual.color.withValues(alpha: isDark ? 0.22 : 0.14),
+        color: fgColor.withValues(alpha: isDark ? 0.22 : 0.14),
         shape: BoxShape.circle,
       ),
       alignment: Alignment.center,
-      child: Icon(visual.icon, size: size * 0.52, color: visual.color),
+      child: Icon(visual.icon, size: size * 0.52, color: fgColor),
     );
   }
 }
@@ -1488,10 +1503,10 @@ class _CategoryVisualPickerSheetState
                                 : null,
                           ),
                           child: selected
-                              ? const Icon(
+                              ? Icon(
                                   Icons.check,
                                   size: 16,
-                                  color: Colors.white,
+                                  color: _selectedForegroundOn(color),
                                 )
                               : null,
                         ),
@@ -2447,10 +2462,14 @@ class AssetIconAvatar extends StatelessWidget {
       subType: subType,
     );
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final unselectedColor = _unselectedAvatarColor(
+      visual.color,
+      isDark: isDark,
+    );
     final bgColor = selected
         ? visual.color
-        : visual.color.withValues(alpha: isDark ? 0.22 : 0.14);
-    final fgColor = selected ? Colors.white : visual.color;
+        : unselectedColor.withValues(alpha: isDark ? 0.22 : 0.14);
+    final fgColor = selected ? _selectedForegroundOn(bgColor) : unselectedColor;
 
     final imageBytes = visual.customImageBytes;
     if (imageBytes != null) {
@@ -3109,32 +3128,49 @@ class _AssetVisualPickerSheetState extends State<_AssetVisualPickerSheet> {
           ),
         ),
         const SizedBox(height: 16),
-        Wrap(
-          spacing: 12,
-          runSpacing: 10,
-          alignment: WrapAlignment.center,
+        Row(
           children: [
-            FilledButton.icon(
-              key: const Key('asset-picker-upload-image-btn'),
-              onPressed: _uploadingImage
-                  ? null
-                  : () => _handlePickImage(messengerCtx),
-              icon: const Icon(Icons.photo_library_outlined, size: 18),
-              label: Text(
-                _uploadingImage
-                    ? '正在处理图片…'
-                    : (hasCustomImage ? '更换图片' : '从相册 / 文件选择图片'),
-              ),
-            ),
-            if (hasCustomImage)
-              OutlinedButton.icon(
-                key: const Key('asset-picker-reset-icon-btn'),
+            Expanded(
+              child: FilledButton.icon(
+                key: const Key('asset-picker-upload-image-btn'),
+                style: FilledButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                ),
                 onPressed: _uploadingImage
                     ? null
-                    : () => setState(() => _iconKey = _lastPresetIconKey),
-                icon: const Icon(Icons.restart_alt_rounded, size: 18),
-                label: const Text('恢复预设图标'),
+                    : () => _handlePickImage(messengerCtx),
+                icon: const Icon(Icons.photo_library_outlined, size: 18),
+                label: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    _uploadingImage
+                        ? '正在处理图片…'
+                        : (hasCustomImage ? '更换图片' : '从相册 / 文件选择图片'),
+                    maxLines: 1,
+                    softWrap: false,
+                  ),
+                ),
               ),
+            ),
+            if (hasCustomImage) ...[
+              const SizedBox(width: 8),
+              Expanded(
+                child: OutlinedButton.icon(
+                  key: const Key('asset-picker-reset-icon-btn'),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                  ),
+                  onPressed: _uploadingImage
+                      ? null
+                      : () => setState(() => _iconKey = _lastPresetIconKey),
+                  icon: const Icon(Icons.restart_alt_rounded, size: 18),
+                  label: const FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text('恢复预设图标', maxLines: 1, softWrap: false),
+                  ),
+                ),
+              ),
+            ],
           ],
         ),
       ],
@@ -3240,10 +3276,10 @@ class _AssetVisualPickerSheetState extends State<_AssetVisualPickerSheet> {
                                       : null,
                                 ),
                                 child: selected
-                                    ? const Icon(
+                                    ? Icon(
                                         Icons.check,
                                         size: 16,
-                                        color: Colors.white,
+                                        color: _selectedForegroundOn(color),
                                       )
                                     : null,
                               ),

@@ -178,6 +178,9 @@ class _WidgetPreviewSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
+
     return Card(
       key: Key('widget_section_${kind.wireKey}'),
       child: Padding(
@@ -195,25 +198,40 @@ class _WidgetPreviewSection extends StatelessWidget {
                     ),
                   ),
                 ),
-                if (activeCount > 0)
+                if (activeCount > 0) ...[
+                  const SizedBox(width: 8),
                   Chip(
                     label: Text('已添加 $activeCount 个'),
                     visualDensity: VisualDensity.compact,
                   ),
+                ],
               ],
             ),
             const SizedBox(height: 4),
             Text(description, style: theme.textTheme.bodySmall),
             const SizedBox(height: 14),
-            Center(child: preview),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 18),
+              decoration: BoxDecoration(
+                color: isDark
+                    ? scheme.surfaceContainerHigh.withValues(alpha: 0.65)
+                    : scheme.surfaceContainerLowest,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: scheme.outlineVariant.withValues(alpha: 0.35),
+                ),
+              ),
+              child: Center(child: preview),
+            ),
             const SizedBox(height: 14),
-            Align(
-              alignment: Alignment.centerRight,
-              child: OutlinedButton.icon(
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.tonalIcon(
                 key: Key('widget_pin_${kind.wireKey}'),
                 onPressed: onPin,
                 icon: const Icon(Icons.add_to_home_screen, size: 18),
-                label: const Text('添加到桌面'),
+                label: const Text('添加到桌面', maxLines: 1, softWrap: false),
               ),
             ),
           ],
@@ -223,50 +241,107 @@ class _WidgetPreviewSection extends StatelessWidget {
   }
 }
 
+class _WidgetPreviewPalette {
+  const _WidgetPreviewPalette._({
+    required this.cardColor,
+    required this.borderColor,
+    required this.shadowColor,
+    required this.accentColor,
+    required this.primaryTextColor,
+    required this.bodyTextColor,
+    required this.secondaryTextColor,
+    required this.pillBgColor,
+  });
+
+  factory _WidgetPreviewPalette.of(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    if (isDark) {
+      return const _WidgetPreviewPalette._(
+        cardColor: Color(0xFF242A35),
+        borderColor: Color(0xFF374151),
+        shadowColor: Color(0x28000000),
+        accentColor: Color(0xFF60A5FA),
+        primaryTextColor: Color(0xFFF3F4F6),
+        bodyTextColor: Color(0xFFD1D5DB),
+        secondaryTextColor: Color(0xFF9CA3AF),
+        pillBgColor: Color(0xFF1E3A5F),
+      );
+    }
+    return const _WidgetPreviewPalette._(
+      cardColor: Color(0xFFFFFFFF),
+      borderColor: Color(0xFFE0E6EE),
+      shadowColor: Color(0x12000000),
+      accentColor: Color(0xFF1F6FEB),
+      primaryTextColor: Color(0xFF111827),
+      bodyTextColor: Color(0xFF374151),
+      secondaryTextColor: Color(0xFF6B7280),
+      pillBgColor: Color(0xFFEFF6FF),
+    );
+  }
+
+  final Color cardColor;
+  final Color borderColor;
+  final Color shadowColor;
+  final Color accentColor;
+  final Color primaryTextColor;
+  final Color bodyTextColor;
+  final Color secondaryTextColor;
+  final Color pillBgColor;
+}
+
 class _QuickAddPreviewCard extends StatelessWidget {
   const _QuickAddPreviewCard();
 
   @override
-  Widget build(BuildContext context) => Container(
-    key: const Key('widget_preview_quick_add'),
-    width: 84,
-    height: 84,
-    decoration: BoxDecoration(
-      color: const Color(0xFFFFFFFF),
-      borderRadius: BorderRadius.circular(18),
-      border: Border.all(color: const Color(0xFFE0E6EE)),
-      boxShadow: const [
-        BoxShadow(
-          color: Color(0x12000000),
-          blurRadius: 8,
-          offset: Offset(0, 2),
-        ),
-      ],
-    ),
-    child: const Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Text(
-          '+',
-          style: TextStyle(
-            fontSize: 28,
-            height: 1.0,
-            fontWeight: FontWeight.bold,
-            color: Color(0xFF1F6FEB),
+  Widget build(BuildContext context) {
+    final palette = _WidgetPreviewPalette.of(context);
+    return Container(
+      key: const Key('widget_preview_quick_add'),
+      width: 84,
+      height: 84,
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: palette.cardColor,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: palette.borderColor),
+        boxShadow: [
+          BoxShadow(
+            color: palette.shadowColor,
+            blurRadius: 8,
+            offset: const Offset(0, 2),
           ),
+        ],
+      ),
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(
+              '+',
+              style: TextStyle(
+                fontSize: 28,
+                height: 1.0,
+                fontWeight: FontWeight.bold,
+                color: palette.accentColor,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '记一笔',
+              maxLines: 1,
+              softWrap: false,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: palette.primaryTextColor,
+              ),
+            ),
+          ],
         ),
-        SizedBox(height: 4),
-        Text(
-          '记一笔',
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-            color: Color(0xFF1F2937),
-          ),
-        ),
-      ],
-    ),
-  );
+      ),
+    );
+  }
 }
 
 class _MonthSummaryPreviewCard extends StatelessWidget {
@@ -276,6 +351,7 @@ class _MonthSummaryPreviewCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final palette = _WidgetPreviewPalette.of(context);
     final sym = snapshot.currencySymbol;
     final secondaryText = snapshot.budgetRemainingFormatted != null
         ? '预算剩余 $sym${snapshot.budgetRemainingFormatted}'
@@ -286,14 +362,14 @@ class _MonthSummaryPreviewCard extends StatelessWidget {
       width: 220,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFFFFFFFF),
+        color: palette.cardColor,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: const Color(0xFFE0E6EE)),
-        boxShadow: const [
+        border: Border.all(color: palette.borderColor),
+        boxShadow: [
           BoxShadow(
-            color: Color(0x12000000),
+            color: palette.shadowColor,
             blurRadius: 8,
-            offset: Offset(0, 2),
+            offset: const Offset(0, 2),
           ),
         ],
       ),
@@ -307,44 +383,57 @@ class _MonthSummaryPreviewCard extends StatelessWidget {
                   '${snapshot.bookName} · ${snapshot.periodLabel}',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 12,
-                    color: Color(0xFF6B7280),
+                    color: palette.secondaryTextColor,
                   ),
                 ),
               ),
-              const Text(
+              const SizedBox(width: 6),
+              Text(
                 '+ 记一笔',
+                maxLines: 1,
+                softWrap: false,
                 style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.bold,
-                  color: Color(0xFF1F6FEB),
+                  color: palette.accentColor,
                 ),
               ),
             ],
           ),
           const SizedBox(height: 10),
-          const Text(
-            '本期支出',
-            style: TextStyle(fontSize: 11, color: Color(0xFF6B7280)),
-          ),
           Text(
-            '$sym${snapshot.expenseFormatted}',
-            style: const TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-              color: Color(0xFF111827),
+            '本期支出',
+            style: TextStyle(fontSize: 11, color: palette.secondaryTextColor),
+          ),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              '$sym${snapshot.expenseFormatted}',
+              maxLines: 1,
+              softWrap: false,
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: palette.primaryTextColor,
+              ),
             ),
           ),
           const SizedBox(height: 8),
           Text(
             '收入 $sym${snapshot.incomeFormatted}',
-            style: const TextStyle(fontSize: 12, color: Color(0xFF374151)),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 12, color: palette.bodyTextColor),
           ),
           const SizedBox(height: 2),
           Text(
             secondaryText,
-            style: const TextStyle(fontSize: 12, color: Color(0xFF374151)),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 12, color: palette.bodyTextColor),
           ),
         ],
       ),
@@ -359,20 +448,21 @@ class _MonthBarPreviewCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final palette = _WidgetPreviewPalette.of(context);
     final sym = snapshot.currencySymbol;
     return Container(
       key: const Key('widget_preview_month_bar'),
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
       decoration: BoxDecoration(
-        color: const Color(0xFFFFFFFF),
+        color: palette.cardColor,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: const Color(0xFFE0E6EE)),
-        boxShadow: const [
+        border: Border.all(color: palette.borderColor),
+        boxShadow: [
           BoxShadow(
-            color: Color(0x12000000),
+            color: palette.shadowColor,
             blurRadius: 8,
-            offset: Offset(0, 2),
+            offset: const Offset(0, 2),
           ),
         ],
       ),
@@ -382,32 +472,46 @@ class _MonthBarPreviewCard extends StatelessWidget {
             child: _BarMetric(
               label: '${snapshot.bookName}支出',
               value: '$sym${snapshot.expenseFormatted}',
+              palette: palette,
             ),
           ),
+          const SizedBox(width: 4),
           Expanded(
             child: _BarMetric(
               label: '本期收入',
               value: '$sym${snapshot.incomeFormatted}',
+              palette: palette,
             ),
           ),
+          const SizedBox(width: 4),
           Expanded(
             child: _BarMetric(
               label: '今日支出',
               value: '$sym${snapshot.todayExpenseFormatted}',
+              palette: palette,
             ),
           ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            decoration: BoxDecoration(
-              color: const Color(0xFFEFF6FF),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: const Text(
-              '+ 记一笔',
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.bold,
-                color: Color(0xFF1F6FEB),
+          const SizedBox(width: 6),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 68),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              decoration: BoxDecoration(
+                color: palette.pillBgColor,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  '+ 记一笔',
+                  maxLines: 1,
+                  softWrap: false,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: palette.accentColor,
+                  ),
+                ),
               ),
             ),
           ),
@@ -418,10 +522,15 @@ class _MonthBarPreviewCard extends StatelessWidget {
 }
 
 class _BarMetric extends StatelessWidget {
-  const _BarMetric({required this.label, required this.value});
+  const _BarMetric({
+    required this.label,
+    required this.value,
+    required this.palette,
+  });
 
   final String label;
   final String value;
+  final _WidgetPreviewPalette palette;
 
   @override
   Widget build(BuildContext context) => Column(
@@ -431,17 +540,17 @@ class _BarMetric extends StatelessWidget {
         label,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
-        style: const TextStyle(fontSize: 11, color: Color(0xFF6B7280)),
+        style: TextStyle(fontSize: 11, color: palette.secondaryTextColor),
       ),
       const SizedBox(height: 2),
       Text(
         value,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
-        style: const TextStyle(
+        style: TextStyle(
           fontSize: 13,
           fontWeight: FontWeight.bold,
-          color: Color(0xFF111827),
+          color: palette.primaryTextColor,
         ),
       ),
     ],

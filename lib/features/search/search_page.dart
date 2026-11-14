@@ -301,10 +301,15 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                   Expanded(
                     child: OutlinedButton.icon(
                       icon: const Icon(Icons.date_range, size: 18),
-                      label: Text(
-                        _startDate == null && _endDate == null
-                            ? '选择日期范围'
-                            : '${_startDate == null ? '不限' : formatDate(_startDate!)} ~ ${_endDate == null ? '不限' : formatDate(_endDate!)}',
+                      label: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          _startDate == null && _endDate == null
+                              ? '选择日期范围'
+                              : '${_startDate == null ? '不限' : formatDate(_startDate!)} ~ ${_endDate == null ? '不限' : formatDate(_endDate!)}',
+                          maxLines: 1,
+                          softWrap: false,
+                        ),
                       ),
                       onPressed: () async {
                         final picked = await showDateRangePicker(
@@ -346,6 +351,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                 children: [
                   Expanded(
                     child: DropdownButtonFormField<int?>(
+                      isExpanded: true,
                       initialValue: _selectedAssetId,
                       decoration: const InputDecoration(
                         labelText: '账户',
@@ -358,10 +364,21 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                       items: [
                         const DropdownMenuItem(
                           value: null,
-                          child: Text('所有账户'),
+                          child: Text(
+                            '所有账户',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
                         for (final a in assets)
-                          DropdownMenuItem(value: a.id, child: Text(a.name)),
+                          DropdownMenuItem(
+                            value: a.id,
+                            child: Text(
+                              a.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
                       ],
                       onChanged: (val) =>
                           setState(() => _selectedAssetId = val),
@@ -370,6 +387,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                   const SizedBox(width: 8),
                   Expanded(
                     child: DropdownButtonFormField<int?>(
+                      isExpanded: true,
                       initialValue: _selectedCategoryIds.length == 1
                           ? _selectedCategoryIds.first
                           : null,
@@ -384,10 +402,21 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                       items: [
                         const DropdownMenuItem(
                           value: null,
-                          child: Text('所有分类'),
+                          child: Text(
+                            '所有分类',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
                         for (final c in categories)
-                          DropdownMenuItem(value: c.id, child: Text(c.name)),
+                          DropdownMenuItem(
+                            value: c.id,
+                            child: Text(
+                              c.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
                       ],
                       onChanged: (val) {
                         setState(() {
@@ -525,25 +554,28 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     AsyncValue<IncomeExpense> summaryAsync,
   ) {
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
     final summary = summaryAsync.value ?? IncomeExpense.zero;
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceAround,
         children: [
           _summaryColumn(
+            context,
             '支出',
             formatMinor(summary.expense),
-            Colors.red.shade700,
+            isDark ? Colors.red.shade300 : Colors.red.shade700,
           ),
           _summaryColumn(
+            context,
             '收入',
             formatMinor(summary.income),
-            Colors.green.shade700,
+            isDark ? Colors.green.shade300 : Colors.green.shade700,
           ),
           _summaryColumn(
+            context,
             '结余',
             formatMinor(summary.balance),
             theme.textTheme.bodyMedium?.color,
@@ -553,21 +585,37 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     );
   }
 
-  Widget _summaryColumn(String label, String amount, Color? color) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey)),
-        const SizedBox(height: 2),
-        Text(
-          '¥$amount',
-          style: TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.bold,
-            color: color,
-          ),
+  Widget _summaryColumn(
+    BuildContext context,
+    String label,
+    String amount,
+    Color? color,
+  ) {
+    final labelColor = Theme.of(context).colorScheme.onSurfaceVariant;
+    return Expanded(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(label, style: TextStyle(fontSize: 12, color: labelColor)),
+            const SizedBox(height: 2),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                '¥$amount',
+                maxLines: 1,
+                softWrap: false,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                  color: color,
+                ),
+              ),
+            ),
+          ],
         ),
-      ],
+      ),
     );
   }
 
@@ -577,6 +625,8 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     List<RecordCategory> categories,
     List<Asset> assets,
   ) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
     final widgets = <Widget>[];
     String? currentDay;
 
@@ -590,8 +640,8 @@ class _SearchPageState extends ConsumerState<SearchPage> {
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
             child: Text(
               dayKey,
-              style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                color: Theme.of(context).colorScheme.primary,
+              style: theme.textTheme.labelLarge?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
               ),
             ),
           ),
@@ -631,7 +681,9 @@ class _SearchPageState extends ConsumerState<SearchPage> {
           trailing: Text(
             label.amount,
             style: TextStyle(
-              color: r.type == RecordType.income ? Colors.green.shade700 : null,
+              color: r.type == RecordType.income
+                  ? (isDark ? Colors.green.shade300 : Colors.green.shade700)
+                  : null,
               fontWeight: FontWeight.w600,
             ),
           ),

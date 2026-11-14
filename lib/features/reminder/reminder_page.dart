@@ -105,30 +105,33 @@ class _ReminderPageState extends ConsumerState<ReminderPage>
           Expanded(
             child: asyncBody(remindersAsync, (items) {
               if (items.isEmpty) {
-                return const Center(
-                  key: Key('reminder_empty_state'),
+                final mutedColor = Theme.of(
+                  context,
+                ).colorScheme.onSurfaceVariant;
+                return Center(
+                  key: const Key('reminder_empty_state'),
                   child: Padding(
-                    padding: EdgeInsets.all(24),
+                    padding: const EdgeInsets.all(24),
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Icon(
                           Icons.notifications_none_outlined,
                           size: 56,
-                          color: Colors.grey,
+                          color: mutedColor,
                         ),
-                        SizedBox(height: 12),
-                        Text(
+                        const SizedBox(height: 12),
+                        const Text(
                           '暂无记账提醒',
                           style: TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.w600,
                           ),
                         ),
-                        SizedBox(height: 6),
+                        const SizedBox(height: 6),
                         Text(
                           '点击右下角按钮添加每日定时提醒',
-                          style: TextStyle(color: Colors.grey),
+                          style: TextStyle(color: mutedColor),
                         ),
                       ],
                     ),
@@ -146,6 +149,7 @@ class _ReminderPageState extends ConsumerState<ReminderPage>
                     key: Key('reminder_item_${item.id}'),
                     margin: EdgeInsets.zero,
                     child: ListTile(
+                      contentPadding: const EdgeInsets.fromLTRB(16, 4, 8, 4),
                       onTap: () => unawaited(_openEditor(existing: item)),
                       leading: CircleAvatar(
                         backgroundColor: Theme.of(
@@ -171,6 +175,7 @@ class _ReminderPageState extends ConsumerState<ReminderPage>
                         children: [
                           IconButton(
                             key: Key('edit_reminder_${item.id}'),
+                            visualDensity: VisualDensity.compact,
                             icon: const Icon(Icons.edit_outlined),
                             tooltip: '编辑',
                             onPressed: () =>
@@ -178,6 +183,7 @@ class _ReminderPageState extends ConsumerState<ReminderPage>
                           ),
                           IconButton(
                             key: Key('delete_reminder_${item.id}'),
+                            visualDensity: VisualDensity.compact,
                             icon: const Icon(Icons.delete_outline),
                             tooltip: '删除',
                             onPressed: () => unawaited(_confirmAndDelete(item)),
@@ -378,9 +384,12 @@ class _ReminderEditorDialogState extends ConsumerState<_ReminderEditorDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
+            Text(
               '提醒时间（每天 24 小时制）',
-              style: TextStyle(fontSize: 13, color: Colors.grey),
+              style: TextStyle(
+                fontSize: 13,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             ),
             const SizedBox(height: 8),
             Row(

@@ -368,12 +368,18 @@ class _DetailSummaryCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 6),
-            Text(
-              summary.isFinished
-                  ? '¥0.00'
-                  : '¥${formatMinor(progress.remainingTotalMinor)}',
-              style: theme.textTheme.headlineMedium?.copyWith(
-                fontWeight: FontWeight.bold,
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(
+                summary.isFinished
+                    ? '¥0.00'
+                    : '¥${formatMinor(progress.remainingTotalMinor)}',
+                maxLines: 1,
+                softWrap: false,
+                style: theme.textTheme.headlineMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ),
             const SizedBox(height: 10),
@@ -454,8 +460,18 @@ class _DetailSummaryCard extends StatelessWidget {
                     child: FilledButton.icon(
                       key: const Key('post_next_period_button'),
                       onPressed: busy ? null : onPostNext,
+                      style: FilledButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                      ),
                       icon: const Icon(Icons.playlist_add_check, size: 18),
-                      label: Text('本期入账（第${progress.nextPeriod}期）'),
+                      label: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          '本期入账（第${progress.nextPeriod}期）',
+                          maxLines: 1,
+                          softWrap: false,
+                        ),
+                      ),
                     ),
                   ),
                   const SizedBox(width: 10),
@@ -463,8 +479,14 @@ class _DetailSummaryCard extends StatelessWidget {
                     child: OutlinedButton.icon(
                       key: const Key('early_settle_button'),
                       onPressed: busy ? null : onEarlySettle,
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                      ),
                       icon: const Icon(Icons.done_all, size: 18),
-                      label: const Text('提前结清'),
+                      label: const FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text('提前结清', maxLines: 1, softWrap: false),
+                      ),
                     ),
                   ),
                 ],

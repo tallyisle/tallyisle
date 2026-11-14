@@ -235,20 +235,36 @@ class _CsvImportPageState extends ConsumerState<CsvImportPage> {
     return Scaffold(
       key: const Key('csv_import_page'),
       appBar: AppBar(
-        title: const Text('表格账单导入与导出'),
+        titleSpacing: 8,
+        title: const FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: Text('表格账单导入与导出', maxLines: 1, softWrap: false),
+        ),
         actions: [
           TextButton.icon(
             key: const Key('open_csv_export_button'),
+            style: TextButton.styleFrom(
+              visualDensity: VisualDensity.compact,
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
             onPressed: _openCsvExport,
-            icon: const Icon(Icons.upload_file_outlined, size: 18),
-            label: const Text('导出 CSV'),
+            icon: const Icon(Icons.upload_file_outlined, size: 16),
+            label: const Text('导出 CSV', maxLines: 1, softWrap: false),
           ),
           TextButton.icon(
             key: const Key('open_import_batches_button'),
+            style: TextButton.styleFrom(
+              visualDensity: VisualDensity.compact,
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
             onPressed: _openImportBatches,
-            icon: const Icon(Icons.history, size: 18),
-            label: const Text('导入记录'),
+            icon: const Icon(Icons.history, size: 16),
+            label: const Text('导入记录', maxLines: 1, softWrap: false),
           ),
+          const SizedBox(width: 4),
         ],
       ),
       body: asyncBody(booksAsync, (books) {
@@ -275,21 +291,60 @@ class _CsvImportPageState extends ConsumerState<CsvImportPage> {
                       style: Theme.of(context).textTheme.bodyMedium,
                     ),
                     const SizedBox(height: 16),
-                    Wrap(
-                      spacing: 12,
-                      runSpacing: 12,
+                    Row(
                       children: [
-                        FilledButton.icon(
-                          key: const Key('pick_import_file_button'),
-                          onPressed: busy ? null : _pickAndPreview,
-                          icon: const Icon(Icons.folder_open_outlined),
-                          label: const Text('选择账单文件'),
+                        Expanded(
+                          child: FilledButton.icon(
+                            key: const Key('pick_import_file_button'),
+                            style: const ButtonStyle(
+                              padding: WidgetStatePropertyAll(
+                                EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 10,
+                                ),
+                              ),
+                            ),
+                            onPressed: busy ? null : _pickAndPreview,
+                            icon: const Icon(
+                              Icons.folder_open_outlined,
+                              size: 18,
+                            ),
+                            label: const FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Text(
+                                '选择账单文件',
+                                maxLines: 1,
+                                softWrap: false,
+                              ),
+                            ),
+                          ),
                         ),
-                        OutlinedButton.icon(
-                          key: const Key('export_template_v3_button'),
-                          onPressed: busy ? null : _downloadTemplateV3,
-                          icon: const Icon(Icons.description_outlined),
-                          label: const Text('下载标准模板'),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            key: const Key('export_template_v3_button'),
+                            style: const ButtonStyle(
+                              padding: WidgetStatePropertyAll(
+                                EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 10,
+                                ),
+                              ),
+                            ),
+                            onPressed: busy ? null : _downloadTemplateV3,
+                            icon: const Icon(
+                              Icons.description_outlined,
+                              size: 18,
+                            ),
+                            label: const FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Text(
+                                '下载标准模板',
+                                maxLines: 1,
+                                softWrap: false,
+                              ),
+                            ),
+                          ),
                         ),
                       ],
                     ),

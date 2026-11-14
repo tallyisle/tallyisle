@@ -246,11 +246,13 @@ class _AppLockSettingsPageState extends ConsumerState<AppLockSettingsPage> {
               ),
             ),
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 6),
               child: Text(
                 '生物识别与自动锁定',
-                style: theme.textTheme.labelLarge?.copyWith(
-                  color: theme.colorScheme.primary,
+                style: theme.textTheme.labelMedium?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0.3,
                 ),
               ),
             ),
@@ -272,36 +274,68 @@ class _AppLockSettingsPageState extends ConsumerState<AppLockSettingsPage> {
                   ),
                   const Divider(height: 1),
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
                     child: Text('后台切回锁定延迟', style: theme.textTheme.titleSmall),
                   ),
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
-                    child: Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
+                    child: Column(
                       children: [
-                        for (final sec in allowedLockTimeouts)
-                          ChoiceChip(
-                            key: Key('app_lock_timeout_$sec'),
-                            label: Text(lockTimeoutLabel(sec)),
-                            selected: config.timeoutSeconds == sec,
-                            onSelected: (!_busy && config.isConfigured)
-                                ? (_) => _selectTimeout(config, sec)
-                                : null,
+                        for (
+                          var rowStart = 0;
+                          rowStart < allowedLockTimeouts.length;
+                          rowStart += 2
+                        ) ...[
+                          if (rowStart > 0) const SizedBox(height: 8),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: _TimeoutChoiceChip(
+                                  seconds: allowedLockTimeouts[rowStart],
+                                  selected:
+                                      config.timeoutSeconds ==
+                                      allowedLockTimeouts[rowStart],
+                                  enabled: !_busy && config.isConfigured,
+                                  onSelected: () => _selectTimeout(
+                                    config,
+                                    allowedLockTimeouts[rowStart],
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: rowStart + 1 < allowedLockTimeouts.length
+                                    ? _TimeoutChoiceChip(
+                                        seconds:
+                                            allowedLockTimeouts[rowStart + 1],
+                                        selected:
+                                            config.timeoutSeconds ==
+                                            allowedLockTimeouts[rowStart + 1],
+                                        enabled: !_busy && config.isConfigured,
+                                        onSelected: () => _selectTimeout(
+                                          config,
+                                          allowedLockTimeouts[rowStart + 1],
+                                        ),
+                                      )
+                                    : const SizedBox.shrink(),
+                              ),
+                            ],
                           ),
+                        ],
                       ],
                     ),
                   ),
                 ],
               ),
             ),
-            const Padding(
-              padding: EdgeInsets.fromLTRB(20, 12, 20, 24),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
               child: Text(
                 '安全说明：数字密码采用 16 字节随机盐与至少 10,000 轮 PBKDF2-HMAC-SHA256 单向派生存储，'
                 '不保存明文密码；连续输错 5 次将锁定冷却 30 秒。请定期通过「备份与恢复」导出 .tally 备份。',
-                style: TextStyle(fontSize: 12.5),
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
               ),
             ),
           ],
@@ -309,6 +343,42 @@ class _AppLockSettingsPageState extends ConsumerState<AppLockSettingsPage> {
       }),
     );
   }
+}
+
+class _TimeoutChoiceChip extends StatelessWidget {
+  const _TimeoutChoiceChip({
+    required this.seconds,
+    required this.selected,
+    required this.enabled,
+    required this.onSelected,
+  });
+
+  final int seconds;
+  final bool selected;
+  final bool enabled;
+  final VoidCallback onSelected;
+
+  @override
+  Widget build(BuildContext context) => ChoiceChip(
+    key: Key('app_lock_timeout_$seconds'),
+    showCheckmark: false,
+    visualDensity: VisualDensity.compact,
+    labelPadding: const EdgeInsets.symmetric(horizontal: 4),
+    label: SizedBox(
+      width: double.infinity,
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        child: Text(
+          lockTimeoutLabel(seconds),
+          maxLines: 1,
+          softWrap: false,
+          textAlign: TextAlign.center,
+        ),
+      ),
+    ),
+    selected: selected,
+    onSelected: enabled ? (_) => onSelected() : null,
+  );
 }
 
 class _SetNewPinDialog extends StatefulWidget {
@@ -356,19 +426,35 @@ class _SetNewPinDialogState extends State<_SetNewPinDialog> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          SegmentedButton<int>(
-            key: const Key('set_pin_length_selector'),
-            segments: const [
-              ButtonSegment<int>(value: 4, label: Text('4 位密码')),
-              ButtonSegment<int>(value: 6, label: Text('6 位密码')),
-            ],
-            selected: <int>{_pinLength},
-            onSelectionChanged: (s) => setState(() {
-              _pinLength = s.first;
-              _pinController.clear();
-              _confirmController.clear();
-              _error = null;
-            }),
+          SizedBox(
+            width: double.infinity,
+            child: SegmentedButton<int>(
+              key: const Key('set_pin_length_selector'),
+              showSelectedIcon: false,
+              segments: const [
+                ButtonSegment<int>(
+                  value: 4,
+                  label: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text('4 位密码', maxLines: 1, softWrap: false),
+                  ),
+                ),
+                ButtonSegment<int>(
+                  value: 6,
+                  label: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text('6 位密码', maxLines: 1, softWrap: false),
+                  ),
+                ),
+              ],
+              selected: <int>{_pinLength},
+              onSelectionChanged: (s) => setState(() {
+                _pinLength = s.first;
+                _pinController.clear();
+                _confirmController.clear();
+                _error = null;
+              }),
+            ),
           ),
           const SizedBox(height: 12),
           TextField(
@@ -470,18 +556,34 @@ class _ChangePinDialogState extends State<_ChangePinDialog> {
             ),
           ),
           const SizedBox(height: 8),
-          SegmentedButton<int>(
-            segments: const [
-              ButtonSegment<int>(value: 4, label: Text('新 4 位')),
-              ButtonSegment<int>(value: 6, label: Text('新 6 位')),
-            ],
-            selected: <int>{_newLength},
-            onSelectionChanged: (s) => setState(() {
-              _newLength = s.first;
-              _newController.clear();
-              _confirmController.clear();
-              _error = null;
-            }),
+          SizedBox(
+            width: double.infinity,
+            child: SegmentedButton<int>(
+              showSelectedIcon: false,
+              segments: const [
+                ButtonSegment<int>(
+                  value: 4,
+                  label: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text('新 4 位', maxLines: 1, softWrap: false),
+                  ),
+                ),
+                ButtonSegment<int>(
+                  value: 6,
+                  label: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text('新 6 位', maxLines: 1, softWrap: false),
+                  ),
+                ),
+              ],
+              selected: <int>{_newLength},
+              onSelectionChanged: (s) => setState(() {
+                _newLength = s.first;
+                _newController.clear();
+                _confirmController.clear();
+                _error = null;
+              }),
+            ),
           ),
           const SizedBox(height: 8),
           TextField(

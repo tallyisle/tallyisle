@@ -59,15 +59,23 @@ class _AnnualReportPageState extends ConsumerState<AnnualReportPage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('年度统计'),
+        title: const Text('年度统计', maxLines: 1, overflow: TextOverflow.ellipsis),
         actions: [
-          FilterChip(
-            key: const Key('annual-report-book-filter-chip'),
-            selected: _allBooks,
-            label: Text(_allBooks ? '全部账本' : (currentBook?.name ?? '当前账本')),
-            onSelected: (selected) {
-              setState(() => _allBooks = selected);
-            },
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 140),
+            child: FilterChip(
+              key: const Key('annual-report-book-filter-chip'),
+              visualDensity: VisualDensity.compact,
+              selected: _allBooks,
+              label: Text(
+                _allBooks ? '全部账本' : (currentBook?.name ?? '当前账本'),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              onSelected: (selected) {
+                setState(() => _allBooks = selected);
+              },
+            ),
           ),
           const SizedBox(width: 8),
         ],
@@ -159,24 +167,41 @@ class _AnnualReportPageState extends ConsumerState<AnnualReportPage> {
           const SizedBox(height: 6),
 
           // Segmented Tab Switch: 年度账单 vs 年度报告
-          SegmentedButton<int>(
-            key: const Key('annual-report-segmented-tabs'),
-            segments: const [
-              ButtonSegment<int>(
-                value: 0,
-                label: Text('年度账单'),
-                icon: Icon(Icons.table_chart_outlined),
+          SizedBox(
+            width: double.infinity,
+            child: SegmentedButton<int>(
+              key: const Key('annual-report-segmented-tabs'),
+              showSelectedIcon: false,
+              style: const ButtonStyle(
+                visualDensity: VisualDensity.compact,
+                padding: WidgetStatePropertyAll(
+                  EdgeInsets.symmetric(horizontal: 12),
+                ),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
-              ButtonSegment<int>(
-                value: 1,
-                label: Text('年度报告'),
-                icon: Icon(Icons.auto_awesome_outlined),
-              ),
-            ],
-            selected: {_activeTab},
-            onSelectionChanged: (set) {
-              setState(() => _activeTab = set.first);
-            },
+              segments: const [
+                ButtonSegment<int>(
+                  value: 0,
+                  label: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text('年度账单', maxLines: 1, softWrap: false),
+                  ),
+                  icon: Icon(Icons.table_chart_outlined, size: 18),
+                ),
+                ButtonSegment<int>(
+                  value: 1,
+                  label: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text('年度报告', maxLines: 1, softWrap: false),
+                  ),
+                  icon: Icon(Icons.auto_awesome_outlined, size: 18),
+                ),
+              ],
+              selected: {_activeTab},
+              onSelectionChanged: (set) {
+                setState(() => _activeTab = set.first);
+              },
+            ),
           ),
         ],
       ),
@@ -249,6 +274,19 @@ class _YearlyBillView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final expenseColor = isDark ? Colors.red.shade300 : Colors.red.shade700;
+    final incomeColor = isDark ? Colors.green.shade300 : Colors.green.shade700;
+    final positiveBalanceColor = isDark
+        ? Colors.teal.shade300
+        : Colors.teal.shade700;
+    final chartIncomeColor = isDark
+        ? Colors.green.shade400
+        : Colors.green.shade600;
+    final chartExpenseColor = isDark
+        ? Colors.red.shade400
+        : Colors.red.shade600;
+    final mutedColor = theme.colorScheme.onSurfaceVariant;
     final sortedMonths = sortDescending
         ? data.monthlySummaries.reversed.toList()
         : data.monthlySummaries;
@@ -267,25 +305,35 @@ class _YearlyBillView extends StatelessWidget {
             child: Column(
               children: [
                 Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceAround,
                   children: [
-                    _buildSummaryItem(
-                      label: '总结余',
-                      amount: data.totalBalance,
-                      color: data.totalBalance >= BigInt.zero
-                          ? Colors.teal
-                          : Colors.red,
-                      isBold: true,
+                    Expanded(
+                      child: _buildSummaryItem(
+                        label: '总结余',
+                        amount: data.totalBalance,
+                        color: data.totalBalance >= BigInt.zero
+                            ? positiveBalanceColor
+                            : expenseColor,
+                        mutedColor: mutedColor,
+                        isBold: true,
+                      ),
                     ),
-                    _buildSummaryItem(
-                      label: '总支出',
-                      amount: data.totalExpense,
-                      color: Colors.red.shade700,
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _buildSummaryItem(
+                        label: '总支出',
+                        amount: data.totalExpense,
+                        color: expenseColor,
+                        mutedColor: mutedColor,
+                      ),
                     ),
-                    _buildSummaryItem(
-                      label: '总收入',
-                      amount: data.totalIncome,
-                      color: Colors.green.shade700,
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _buildSummaryItem(
+                        label: '总收入',
+                        amount: data.totalIncome,
+                        color: incomeColor,
+                        mutedColor: mutedColor,
+                      ),
                     ),
                   ],
                 ),
@@ -294,11 +342,30 @@ class _YearlyBillView extends StatelessWidget {
                   child: Divider(height: 1),
                 ),
                 Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceAround,
                   children: [
-                    _buildSubSummaryItem('月均结余', data.averageMonthSurplus),
-                    _buildSubSummaryItem('月均支出', data.averageMonthExpense),
-                    _buildSubSummaryItem('月均收入', data.averageMonthIncome),
+                    Expanded(
+                      child: _buildSubSummaryItem(
+                        '月均结余',
+                        data.averageMonthSurplus,
+                        mutedColor,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _buildSubSummaryItem(
+                        '月均支出',
+                        data.averageMonthExpense,
+                        mutedColor,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _buildSubSummaryItem(
+                        '月均收入',
+                        data.averageMonthIncome,
+                        mutedColor,
+                      ),
+                    ),
                   ],
                 ),
               ],
@@ -321,17 +388,23 @@ class _YearlyBillView extends StatelessWidget {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text(
-                      '12个月收支趋势对比',
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
+                    Flexible(
+                      child: Text(
+                        '12个月收支趋势对比',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
+                    const SizedBox(width: 8),
                     Row(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        _buildLegend(Colors.green.shade600, '收入'),
+                        _buildLegend(chartIncomeColor, '收入', mutedColor),
                         const SizedBox(width: 12),
-                        _buildLegend(Colors.red.shade600, '支出'),
+                        _buildLegend(chartExpenseColor, '支出', mutedColor),
                       ],
                     ),
                   ],
@@ -343,11 +416,10 @@ class _YearlyBillView extends StatelessWidget {
                   child: CustomPaint(
                     painter: _AnnualTrendBarChartPainter(
                       months: data.monthlySummaries,
-                      incomeColor: Colors.green.shade600,
-                      expenseColor: Colors.red.shade600,
+                      incomeColor: chartIncomeColor,
+                      expenseColor: chartExpenseColor,
                       gridColor: theme.dividerColor,
-                      labelColor:
-                          theme.textTheme.bodySmall?.color ?? Colors.grey,
+                      labelColor: mutedColor,
                     ),
                   ),
                 ),
@@ -371,14 +443,23 @@ class _YearlyBillView extends StatelessWidget {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text(
-                      '月度收支明细表',
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
+                    Flexible(
+                      child: Text(
+                        '月度收支明细表',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
                     TextButton.icon(
                       key: const Key('annual-report-toggle-sort-button'),
+                      style: TextButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
                       onPressed: onToggleSort,
                       icon: Icon(
                         sortDescending
@@ -458,61 +539,85 @@ class _YearlyBillView extends StatelessWidget {
                       children: [
                         Expanded(
                           flex: 2,
-                          child: Text(
-                            '${m.month}月',
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(fontWeight: FontWeight.w500),
-                          ),
-                        ),
-                        Expanded(
-                          flex: 3,
-                          child: Text(
-                            m.income > BigInt.zero
-                                ? '+¥${formatMinor(m.income)}'
-                                : '-',
-                            textAlign: TextAlign.right,
-                            style: TextStyle(
-                              color: m.income > BigInt.zero
-                                  ? Colors.green.shade700
-                                  : theme.disabledColor,
-                              fontSize: 13,
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text(
+                              '${m.month}月',
+                              textAlign: TextAlign.center,
+                              maxLines: 1,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w500,
+                              ),
                             ),
                           ),
                         ),
+                        const SizedBox(width: 4),
                         Expanded(
                           flex: 3,
-                          child: Text(
-                            m.expense > BigInt.zero
-                                ? '-¥${formatMinor(m.expense)}'
-                                : '-',
-                            textAlign: TextAlign.right,
-                            style: TextStyle(
-                              color: m.expense > BigInt.zero
-                                  ? Colors.red.shade700
-                                  : theme.disabledColor,
-                              fontSize: 13,
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            alignment: Alignment.centerRight,
+                            child: Text(
+                              m.income > BigInt.zero
+                                  ? '+¥${formatMinor(m.income)}'
+                                  : '-',
+                              textAlign: TextAlign.right,
+                              maxLines: 1,
+                              style: TextStyle(
+                                color: m.income > BigInt.zero
+                                    ? incomeColor
+                                    : theme.disabledColor,
+                                fontSize: 13,
+                              ),
                             ),
                           ),
                         ),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          flex: 3,
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            alignment: Alignment.centerRight,
+                            child: Text(
+                              m.expense > BigInt.zero
+                                  ? '-¥${formatMinor(m.expense)}'
+                                  : '-',
+                              textAlign: TextAlign.right,
+                              maxLines: 1,
+                              style: TextStyle(
+                                color: m.expense > BigInt.zero
+                                    ? expenseColor
+                                    : theme.disabledColor,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 4),
                         Expanded(
                           flex: 3,
                           child: Padding(
                             padding: const EdgeInsets.only(right: 8),
-                            child: Text(
-                              m.balance == BigInt.zero
-                                  ? '¥0.00'
-                                  : (m.balance < BigInt.zero
-                                        ? '-¥${formatMinor(m.balance.abs())}'
-                                        : '+¥${formatMinor(m.balance)}'),
-                              textAlign: TextAlign.right,
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                color: m.balance > BigInt.zero
-                                    ? Colors.teal
+                            child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              alignment: Alignment.centerRight,
+                              child: Text(
+                                m.balance == BigInt.zero
+                                    ? '¥0.00'
                                     : (m.balance < BigInt.zero
-                                          ? Colors.red.shade700
-                                          : null),
-                                fontSize: 13,
+                                          ? '-¥${formatMinor(m.balance.abs())}'
+                                          : '+¥${formatMinor(m.balance)}'),
+                                textAlign: TextAlign.right,
+                                maxLines: 1,
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: m.balance > BigInt.zero
+                                      ? positiveBalanceColor
+                                      : (m.balance < BigInt.zero
+                                            ? expenseColor
+                                            : null),
+                                  fontSize: 13,
+                                ),
                               ),
                             ),
                           ),
@@ -533,42 +638,59 @@ class _YearlyBillView extends StatelessWidget {
     required String label,
     required BigInt amount,
     required Color color,
+    required Color mutedColor,
     bool isBold = false,
   }) {
     return Column(
       children: [
-        Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey)),
-        const SizedBox(height: 4),
         Text(
-          amount.isNegative
-              ? '-¥${formatMinor(amount.abs())}'
-              : '¥${formatMinor(amount)}',
-          style: TextStyle(
-            fontSize: isBold ? 18 : 16,
-            fontWeight: isBold ? FontWeight.bold : FontWeight.w600,
-            color: color,
+          label,
+          maxLines: 1,
+          style: TextStyle(fontSize: 12, color: mutedColor),
+        ),
+        const SizedBox(height: 4),
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(
+            amount.isNegative
+                ? '-¥${formatMinor(amount.abs())}'
+                : '¥${formatMinor(amount)}',
+            maxLines: 1,
+            style: TextStyle(
+              fontSize: isBold ? 18 : 16,
+              fontWeight: isBold ? FontWeight.bold : FontWeight.w600,
+              color: color,
+            ),
           ),
         ),
       ],
     );
   }
 
-  Widget _buildSubSummaryItem(String label, BigInt amount) {
+  Widget _buildSubSummaryItem(String label, BigInt amount, Color mutedColor) {
     return Column(
       children: [
-        Text(label, style: const TextStyle(fontSize: 11, color: Colors.grey)),
-        const SizedBox(height: 2),
         Text(
-          amount.isNegative
-              ? '-¥${formatMinor(amount.abs())}'
-              : '¥${formatMinor(amount)}',
-          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+          label,
+          maxLines: 1,
+          style: TextStyle(fontSize: 11, color: mutedColor),
+        ),
+        const SizedBox(height: 2),
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(
+            amount.isNegative
+                ? '-¥${formatMinor(amount.abs())}'
+                : '¥${formatMinor(amount)}',
+            maxLines: 1,
+            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+          ),
         ),
       ],
     );
   }
 
-  Widget _buildLegend(Color color, String text) {
+  Widget _buildLegend(Color color, String text, Color mutedColor) {
     return Row(
       children: [
         Container(
@@ -580,7 +702,7 @@ class _YearlyBillView extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 4),
-        Text(text, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+        Text(text, style: TextStyle(fontSize: 12, color: mutedColor)),
       ],
     );
   }
@@ -600,6 +722,15 @@ class _AnnualReportHighlightView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
+    final expenseColor = isDark ? Colors.red.shade300 : Colors.red.shade700;
+    final incomeColor = isDark ? Colors.green.shade300 : Colors.green.shade700;
+    final positiveBalanceColor = isDark
+        ? Colors.teal.shade300
+        : Colors.teal.shade700;
+    final amberAccent = isDark ? Colors.amber.shade300 : Colors.amber.shade700;
+    final mutedColor = scheme.onSurfaceVariant;
     final hasRecords = data.totalBillCount > 0;
 
     return ListView(
@@ -618,16 +749,16 @@ class _AnnualReportHighlightView extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    Icon(
-                      Icons.auto_stories,
-                      color: theme.colorScheme.primary,
-                      size: 24,
-                    ),
+                    Icon(Icons.auto_stories, color: scheme.primary, size: 24),
                     const SizedBox(width: 8),
-                    Text(
-                      '${data.year} 年度记账回顾',
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
+                    Flexible(
+                      child: Text(
+                        '${data.year} 年度记账回顾',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
                   ],
@@ -643,22 +774,33 @@ class _AnnualReportHighlightView extends StatelessWidget {
                 ),
                 const SizedBox(height: 16),
                 Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceAround,
                   children: [
-                    _buildMetricBox(
-                      icon: Icons.receipt_long,
-                      title: '记账总笔数',
-                      value: '${data.totalBillCount} 笔',
+                    Expanded(
+                      child: _buildMetricBox(
+                        icon: Icons.receipt_long,
+                        title: '记账总笔数',
+                        value: '${data.totalBillCount} 笔',
+                        mutedColor: mutedColor,
+                      ),
                     ),
-                    _buildMetricBox(
-                      icon: Icons.savings_outlined,
-                      title: '年度储蓄率',
-                      value: '${(data.savingsRate * 100).toStringAsFixed(1)}%',
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _buildMetricBox(
+                        icon: Icons.savings_outlined,
+                        title: '年度储蓄率',
+                        value:
+                            '${(data.savingsRate * 100).toStringAsFixed(1)}%',
+                        mutedColor: mutedColor,
+                      ),
                     ),
-                    _buildMetricBox(
-                      icon: Icons.calendar_today,
-                      title: '活跃记账天',
-                      value: '${data.activeDays} 天',
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _buildMetricBox(
+                        icon: Icons.calendar_today,
+                        title: '活跃记账天',
+                        value: '${data.activeDays} 天',
+                        mutedColor: mutedColor,
+                      ),
                     ),
                   ],
                 ),
@@ -670,14 +812,12 @@ class _AnnualReportHighlightView extends StatelessWidget {
                       vertical: 8,
                     ),
                     decoration: BoxDecoration(
-                      color: theme.colorScheme.primaryContainer.withValues(
-                        alpha: 0.4,
-                      ),
+                      color: scheme.primaryContainer.withValues(alpha: 0.4),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Row(
                       children: [
-                        const Icon(Icons.star, color: Colors.amber, size: 18),
+                        Icon(Icons.star, color: amberAccent, size: 18),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
@@ -708,16 +848,20 @@ class _AnnualReportHighlightView extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    const Icon(
+                    Icon(
                       Icons.emoji_events_outlined,
-                      color: Colors.amber,
+                      color: amberAccent,
                       size: 24,
                     ),
                     const SizedBox(width: 8),
-                    Text(
-                      '收支之最',
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
+                    Flexible(
+                      child: Text(
+                        '收支之最',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
                   ],
@@ -733,16 +877,20 @@ class _AnnualReportHighlightView extends StatelessWidget {
                     child: Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: Colors.red.withValues(alpha: 0.05),
+                        color: Colors.red.withValues(
+                          alpha: isDark ? 0.10 : 0.05,
+                        ),
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Row(
                         children: [
                           CircleAvatar(
-                            backgroundColor: Colors.red.shade100,
+                            backgroundColor: Colors.red.withValues(
+                              alpha: isDark ? 0.20 : 0.14,
+                            ),
                             child: Icon(
                               Icons.arrow_downward,
-                              color: Colors.red.shade700,
+                              color: expenseColor,
                             ),
                           ),
                           const SizedBox(width: 12),
@@ -750,16 +898,18 @@ class _AnnualReportHighlightView extends StatelessWidget {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                const Text(
+                                Text(
                                   '单笔最高支出',
                                   style: TextStyle(
                                     fontSize: 12,
-                                    color: Colors.grey,
+                                    color: mutedColor,
                                   ),
                                 ),
                                 const SizedBox(height: 2),
                                 Text(
                                   data.maxExpenseRecord!.categoryName,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
                                   style: const TextStyle(
                                     fontWeight: FontWeight.bold,
                                     fontSize: 15,
@@ -768,12 +918,21 @@ class _AnnualReportHighlightView extends StatelessWidget {
                               ],
                             ),
                           ),
-                          Text(
-                            '-¥${formatMinor(data.maxExpenseRecord!.amount)}',
-                            style: TextStyle(
-                              color: Colors.red.shade700,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 16,
+                          const SizedBox(width: 8),
+                          ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 132),
+                            child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              alignment: Alignment.centerRight,
+                              child: Text(
+                                '-¥${formatMinor(data.maxExpenseRecord!.amount)}',
+                                maxLines: 1,
+                                style: TextStyle(
+                                  color: expenseColor,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 16,
+                                ),
+                              ),
                             ),
                           ),
                         ],
@@ -788,33 +947,36 @@ class _AnnualReportHighlightView extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: Colors.green.withValues(alpha: 0.05),
+                      color: Colors.green.withValues(
+                        alpha: isDark ? 0.10 : 0.05,
+                      ),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Row(
                       children: [
                         CircleAvatar(
-                          backgroundColor: Colors.green.shade100,
-                          child: Icon(
-                            Icons.arrow_upward,
-                            color: Colors.green.shade700,
+                          backgroundColor: Colors.green.withValues(
+                            alpha: isDark ? 0.20 : 0.14,
                           ),
+                          child: Icon(Icons.arrow_upward, color: incomeColor),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text(
+                              Text(
                                 '单笔最高收入',
                                 style: TextStyle(
                                   fontSize: 12,
-                                  color: Colors.grey,
+                                  color: mutedColor,
                                 ),
                               ),
                               const SizedBox(height: 2),
                               Text(
                                 data.maxIncomeRecord!.categoryName,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(
                                   fontWeight: FontWeight.bold,
                                   fontSize: 15,
@@ -823,12 +985,21 @@ class _AnnualReportHighlightView extends StatelessWidget {
                             ],
                           ),
                         ),
-                        Text(
-                          '+¥${formatMinor(data.maxIncomeRecord!.amount)}',
-                          style: TextStyle(
-                            color: Colors.green.shade700,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 16,
+                        const SizedBox(width: 8),
+                        ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 132),
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            alignment: Alignment.centerRight,
+                            child: Text(
+                              '+¥${formatMinor(data.maxIncomeRecord!.amount)}',
+                              maxLines: 1,
+                              style: TextStyle(
+                                color: incomeColor,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                              ),
+                            ),
                           ),
                         ),
                       ],
@@ -845,7 +1016,9 @@ class _AnnualReportHighlightView extends StatelessWidget {
                         title: '支出最多月',
                         month: data.maxExpenseMonth,
                         amount: data.maxExpenseMonthAmount,
-                        color: Colors.red.shade700,
+                        color: expenseColor,
+                        mutedColor: mutedColor,
+                        isDark: isDark,
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -854,7 +1027,9 @@ class _AnnualReportHighlightView extends StatelessWidget {
                         title: '收入最多月',
                         month: data.maxIncomeMonth,
                         amount: data.maxIncomeMonthAmount,
-                        color: Colors.green.shade700,
+                        color: incomeColor,
+                        mutedColor: mutedColor,
+                        isDark: isDark,
                       ),
                     ),
                   ],
@@ -877,40 +1052,40 @@ class _AnnualReportHighlightView extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Row(
-                      children: [
-                        const Icon(
-                          Icons.pie_chart_outline,
-                          color: Colors.teal,
-                          size: 24,
+                    Icon(
+                      Icons.pie_chart_outline,
+                      color: positiveBalanceColor,
+                      size: 24,
+                    ),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text(
+                        '年度支出构成 Top 榜',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
                         ),
-                        const SizedBox(width: 8),
-                        Text(
-                          '年度支出构成 Top 榜',
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ],
+                      ),
                     ),
                   ],
                 ),
                 const SizedBox(height: 16),
                 if (data.topExpenseCategories.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 16),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
                     child: Center(
                       child: Text(
                         '暂无支出分类数据',
-                        style: TextStyle(color: Colors.grey),
+                        style: TextStyle(color: mutedColor),
                       ),
                     ),
                   )
                 else
                   ...data.topExpenseCategories.take(5).map((cat) {
                     final rank = data.topExpenseCategories.indexOf(cat) + 1;
+                    final isTop3 = rank <= 3;
                     return Padding(
                       padding: const EdgeInsets.symmetric(vertical: 8),
                       child: Column(
@@ -922,15 +1097,17 @@ class _AnnualReportHighlightView extends StatelessWidget {
                                 height: 22,
                                 alignment: Alignment.center,
                                 decoration: BoxDecoration(
-                                  color: rank <= 3
-                                      ? Colors.amber.shade700
-                                      : Colors.grey.shade400,
+                                  color: isTop3
+                                      ? amberAccent
+                                      : scheme.surfaceContainerHighest,
                                   shape: BoxShape.circle,
                                 ),
                                 child: Text(
                                   '$rank',
-                                  style: const TextStyle(
-                                    color: Colors.white,
+                                  style: TextStyle(
+                                    color: isTop3
+                                        ? Colors.black87
+                                        : scheme.onSurfaceVariant,
                                     fontSize: 12,
                                     fontWeight: FontWeight.bold,
                                   ),
@@ -940,24 +1117,37 @@ class _AnnualReportHighlightView extends StatelessWidget {
                               Expanded(
                                 child: Text(
                                   cat.categoryName,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
                                   style: const TextStyle(
                                     fontWeight: FontWeight.w600,
                                   ),
                                 ),
                               ),
+                              const SizedBox(width: 8),
                               Text(
                                 '${(cat.ratio * 100).toStringAsFixed(1)}%',
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontSize: 13,
-                                  color: Colors.grey,
+                                  color: mutedColor,
                                 ),
                               ),
-                              const SizedBox(width: 12),
-                              Text(
-                                '¥${formatMinor(cat.amount)}',
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 14,
+                              const SizedBox(width: 10),
+                              ConstrainedBox(
+                                constraints: const BoxConstraints(
+                                  maxWidth: 120,
+                                ),
+                                child: FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  alignment: Alignment.centerRight,
+                                  child: Text(
+                                    '¥${formatMinor(cat.amount)}',
+                                    maxLines: 1,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 14,
+                                    ),
+                                  ),
                                 ),
                               ),
                             ],
@@ -965,12 +1155,8 @@ class _AnnualReportHighlightView extends StatelessWidget {
                           const SizedBox(height: 6),
                           LinearProgressIndicator(
                             value: cat.ratio.clamp(0.0, 1.0),
-                            backgroundColor: theme.dividerColor.withValues(
-                              alpha: 0.3,
-                            ),
-                            color: rank == 1
-                                ? Colors.amber.shade700
-                                : theme.colorScheme.primary,
+                            backgroundColor: scheme.surfaceContainerHighest,
+                            color: rank == 1 ? amberAccent : scheme.primary,
                             borderRadius: BorderRadius.circular(4),
                             minHeight: 6,
                           ),
@@ -997,16 +1183,20 @@ class _AnnualReportHighlightView extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    const Icon(
+                    Icon(
                       Icons.account_balance_wallet_outlined,
-                      color: Colors.indigo,
+                      color: scheme.primary,
                       size: 24,
                     ),
                     const SizedBox(width: 8),
-                    Text(
-                      '账户与优惠',
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
+                    Flexible(
+                      child: Text(
+                        '账户与优惠',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
                   ],
@@ -1015,15 +1205,16 @@ class _AnnualReportHighlightView extends StatelessWidget {
                 if (data.mostUsedAsset != null)
                   ListTile(
                     contentPadding: EdgeInsets.zero,
-                    leading: const CircleAvatar(
-                      backgroundColor: Colors.indigoAccent,
-                      child: Icon(
-                        Icons.credit_card,
-                        color: Colors.white,
-                        size: 20,
-                      ),
+                    leading: CircleAvatar(
+                      backgroundColor: scheme.primaryContainer,
+                      foregroundColor: scheme.onPrimaryContainer,
+                      child: const Icon(Icons.credit_card, size: 20),
                     ),
-                    title: Text('最常用账户：${data.mostUsedAsset!.assetName}'),
+                    title: Text(
+                      '最常用账户：${data.mostUsedAsset!.assetName}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                     subtitle: Text(
                       '记账 ${data.mostUsedAsset!.count} 笔，占全部记录的 ${(data.mostUsedAsset!.ratio * 100).toStringAsFixed(1)}%',
                     ),
@@ -1031,24 +1222,21 @@ class _AnnualReportHighlightView extends StatelessWidget {
                 if (data.totalDiscount > BigInt.zero)
                   ListTile(
                     contentPadding: EdgeInsets.zero,
-                    leading: const CircleAvatar(
-                      backgroundColor: Colors.deepOrangeAccent,
-                      child: Icon(
-                        Icons.local_offer,
-                        color: Colors.white,
-                        size: 20,
-                      ),
+                    leading: CircleAvatar(
+                      backgroundColor: scheme.tertiaryContainer,
+                      foregroundColor: scheme.onTertiaryContainer,
+                      child: const Icon(Icons.local_offer, size: 20),
                     ),
                     title: const Text('全年优惠立减'),
                     subtitle: Text('共计省下 ¥${formatMinor(data.totalDiscount)}'),
                   ),
                 if (data.mostUsedAsset == null &&
                     data.totalDiscount == BigInt.zero)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 8),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
                     child: Text(
                       '暂无账户与优惠统计',
-                      style: TextStyle(color: Colors.grey),
+                      style: TextStyle(color: mutedColor),
                     ),
                   ),
               ],
@@ -1060,7 +1248,7 @@ class _AnnualReportHighlightView extends StatelessWidget {
         // Card 5: 年度结语卡
         Card(
           elevation: 1,
-          color: theme.colorScheme.primaryContainer.withValues(alpha: 0.3),
+          color: scheme.primaryContainer.withValues(alpha: 0.3),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
           ),
@@ -1069,7 +1257,7 @@ class _AnnualReportHighlightView extends StatelessWidget {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Icon(Icons.format_quote, color: Colors.amber, size: 32),
+                Icon(Icons.format_quote, color: amberAccent, size: 32),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Column(
@@ -1104,16 +1292,28 @@ class _AnnualReportHighlightView extends StatelessWidget {
     required IconData icon,
     required String title,
     required String value,
+    required Color mutedColor,
   }) {
     return Column(
       children: [
-        Icon(icon, size: 22, color: Colors.grey.shade600),
+        Icon(icon, size: 22, color: mutedColor),
         const SizedBox(height: 6),
-        Text(title, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(
+            title,
+            maxLines: 1,
+            style: TextStyle(fontSize: 12, color: mutedColor),
+          ),
+        ),
         const SizedBox(height: 4),
-        Text(
-          value,
-          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(
+            value,
+            maxLines: 1,
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+          ),
         ),
       ],
     );
@@ -1124,29 +1324,42 @@ class _AnnualReportHighlightView extends StatelessWidget {
     required int? month,
     required BigInt amount,
     required Color color,
+    required Color mutedColor,
+    required bool isDark,
   }) {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.05),
+        color: color.withValues(alpha: isDark ? 0.12 : 0.06),
         borderRadius: BorderRadius.circular(8),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+          Text(
+            title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 12, color: mutedColor),
+          ),
           const SizedBox(height: 4),
           Text(
             month != null ? '$month月' : '-',
+            maxLines: 1,
             style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
           ),
           const SizedBox(height: 2),
-          Text(
-            amount > BigInt.zero ? '¥${formatMinor(amount)}' : '-',
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w500,
-              color: color,
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              amount > BigInt.zero ? '¥${formatMinor(amount)}' : '-',
+              maxLines: 1,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+                color: color,
+              ),
             ),
           ),
         ],
@@ -1295,6 +1508,13 @@ class AnnualReportOverviewCard extends ConsumerWidget {
     );
 
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final expenseColor = isDark ? Colors.red.shade300 : Colors.red.shade700;
+    final incomeColor = isDark ? Colors.green.shade300 : Colors.green.shade700;
+    final positiveBalanceColor = isDark
+        ? Colors.teal.shade300
+        : Colors.teal.shade700;
+    final mutedColor = theme.colorScheme.onSurfaceVariant;
     final report = reportAsync.value;
 
     final totalExpense = report?.totalExpense ?? BigInt.zero;
@@ -1304,10 +1524,10 @@ class AnnualReportOverviewCard extends ConsumerWidget {
     return Card(
       key: const Key('annual-report-overview-card'),
       elevation: 1,
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: InkWell(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(12),
         onTap: onTap,
         child: Padding(
           padding: const EdgeInsets.all(16),
@@ -1316,34 +1536,58 @@ class AnnualReportOverviewCard extends ConsumerWidget {
             children: [
               // Header Row
               Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Container(
-                    padding: const EdgeInsets.all(6),
-                    decoration: BoxDecoration(
-                      color: theme.colorScheme.primary.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Icon(
-                      Icons.insights,
-                      size: 20,
-                      color: theme.colorScheme.primary,
+                  Flexible(
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(6),
+                          decoration: BoxDecoration(
+                            color: theme.colorScheme.primary.withValues(
+                              alpha: 0.12,
+                            ),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Icon(
+                            Icons.insights,
+                            size: 20,
+                            color: theme.colorScheme.primary,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Flexible(
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              '$year年度统计',
+                              maxLines: 1,
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                   const SizedBox(width: 8),
-                  Text(
-                    '$year年度统计',
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const Spacer(),
-                  Text(
-                    '查看年度账单与报告 >',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: theme.colorScheme.primary,
-                      fontWeight: FontWeight.w500,
+                  Flexible(
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerRight,
+                      child: Text(
+                        '查看年度账单与报告 >',
+                        maxLines: 1,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: theme.colorScheme.primary,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
                     ),
                   ),
                 ],
@@ -1352,28 +1596,38 @@ class AnnualReportOverviewCard extends ConsumerWidget {
 
               // 3 Metric columns: 支出 / 收入 / 结余
               Row(
-                mainAxisAlignment: MainAxisAlignment.spaceAround,
                 children: [
-                  _buildMetricCol(
-                    '支出',
-                    '-¥${formatMinor(totalExpense)}',
-                    Colors.red.shade700,
+                  Expanded(
+                    child: _buildMetricCol(
+                      '支出',
+                      '-¥${formatMinor(totalExpense)}',
+                      expenseColor,
+                      mutedColor,
+                    ),
                   ),
-                  _buildMetricCol(
-                    '收入',
-                    '+¥${formatMinor(totalIncome)}',
-                    Colors.green.shade700,
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _buildMetricCol(
+                      '收入',
+                      '+¥${formatMinor(totalIncome)}',
+                      incomeColor,
+                      mutedColor,
+                    ),
                   ),
-                  _buildMetricCol(
-                    '结余',
-                    totalBalance == BigInt.zero
-                        ? '¥0.00'
-                        : (totalBalance.isNegative
-                              ? '-¥${formatMinor(totalBalance.abs())}'
-                              : '+¥${formatMinor(totalBalance)}'),
-                    totalBalance >= BigInt.zero
-                        ? Colors.teal
-                        : Colors.red.shade700,
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _buildMetricCol(
+                      '结余',
+                      totalBalance == BigInt.zero
+                          ? '¥0.00'
+                          : (totalBalance.isNegative
+                                ? '-¥${formatMinor(totalBalance.abs())}'
+                                : '+¥${formatMinor(totalBalance)}'),
+                      totalBalance >= BigInt.zero
+                          ? positiveBalanceColor
+                          : expenseColor,
+                      mutedColor,
+                    ),
                   ),
                 ],
               ),
@@ -1384,17 +1638,30 @@ class AnnualReportOverviewCard extends ConsumerWidget {
     );
   }
 
-  Widget _buildMetricCol(String label, String amountStr, Color color) {
+  Widget _buildMetricCol(
+    String label,
+    String amountStr,
+    Color color,
+    Color mutedColor,
+  ) {
     return Column(
       children: [
-        Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey)),
-        const SizedBox(height: 4),
         Text(
-          amountStr,
-          style: TextStyle(
-            fontSize: 15,
-            fontWeight: FontWeight.bold,
-            color: color,
+          label,
+          maxLines: 1,
+          style: TextStyle(fontSize: 12, color: mutedColor),
+        ),
+        const SizedBox(height: 4),
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(
+            amountStr,
+            maxLines: 1,
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.bold,
+              color: color,
+            ),
           ),
         ),
       ],
