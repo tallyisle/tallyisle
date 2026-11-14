@@ -229,10 +229,11 @@ void main() {
       expect(find.text('该期未设置预算'), findsOneWidget);
       expect(tester.takeException(), isNull);
 
-      // Verify MePage renders with zero overflow even at 320x640 and 360x640
+      // Verify MePage renders with zero overflow even at 320x640 and 360x640 without duplicate brand header card
       await tester.tap(find.text('更多'));
       await settle();
-      expect(find.byKey(const Key('me-brand-card')), findsOneWidget);
+      expect(find.byKey(const Key('me-brand-card')), findsNothing);
+      expect(find.text('帮助与关于'), findsOneWidget);
       for (final w in <double>[320, 360]) {
         tester.view.physicalSize = Size(w, 640);
         tester.view.devicePixelRatio = 1.0;

@@ -1,6 +1,7 @@
 import 'package:drift/drift.dart' show driftRuntimeOptions;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show RenderParagraph;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
@@ -8,6 +9,8 @@ import 'package:tallyisle/app/app.dart';
 import 'package:tallyisle/app/providers.dart';
 import 'package:tallyisle/data/db/database.dart';
 import 'package:tallyisle/features/assets/assets_page.dart';
+import 'package:tallyisle/features/automation/automation_providers.dart'
+    show autoBillDraftCountProvider;
 import 'package:tallyisle/features/me/me_page.dart';
 
 void main() {
@@ -111,23 +114,18 @@ void main() {
       await tester.tap(find.byType(BackButton));
       await settle(tester);
 
-      // Compact brand header card & grouped borderless section headers render cleanly without legacy footer tiles.
-      expect(find.byKey(const Key('me-brand-card')), findsOneWidget);
-      expect(find.text('帐屿 · TallyIsle'), findsOneWidget);
+      // Grouped borderless section cards render cleanly without top brand banner, duplicate about entry, or legacy footer tiles.
+      expect(find.byKey(const Key('me-brand-card')), findsNothing);
+      expect(find.text('帐屿 · TallyIsle'), findsNothing);
+      expect(find.text('帮助与关于'), findsOneWidget);
       expect(find.text('基础管理'), findsOneWidget);
       expect(find.text('当前版本 · $appDisplayVersion'), findsNothing);
+      expect(find.text('版本 $appDisplayVersion'), findsNothing);
       expect(find.text('开源许可'), findsNothing);
       expect(find.text('开发版本'), findsNothing);
       expect(find.text('支持一羽记账备份迁入、微信/支付宝及第三方账单扩展'), findsNothing);
 
-      // Tapping compact brand header card navigates directly to AboutHelpPage.
-      await tester.tap(find.byKey(const Key('me-brand-card')));
-      await settle(tester);
-      expect(find.text('版本 0.1.0.rc'), findsOneWidget);
-      await tester.tap(find.byType(BackButton));
-      await settle(tester);
-
-      // Scroll down to me-about and verify AboutHelpPage shows '版本 0.1.0.rc' badge.
+      // Scroll down to sole me-about entry and verify AboutHelpPage shows '版本 0.1.0.rc' badge.
       await tester.scrollUntilVisible(
         find.byKey(const Key('me-about')),
         240,
@@ -289,6 +287,119 @@ void main() {
       await tester.pumpWidget(const SizedBox());
       await settle(tester);
       await tester.pump(const Duration(seconds: 1));
+    },
+  );
+
+  testWidgets(
+    'MePage (Scheme A) keeps all 34 menu labels strictly single-line with zero overflow across 320dp, 360dp, and 412dp widths in Light & Dark modes and 1.25x font scale',
+    (tester) async {
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      const menuKeys = <Key>[
+        Key('me-books'),
+        Key('me-categories'),
+        Key('me-tags'),
+        Key('me-currencies'),
+        Key('me-reimburse'),
+        Key('me-periodic'),
+        Key('me-installments'),
+        Key('me-debts'),
+        Key('me-savings'),
+        Key('me-deposits'),
+        Key('me-reminders'),
+        Key('me-backup'),
+        Key('me-import-csv'),
+        Key('me-import-batches'),
+        Key('me-export-csv'),
+        Key('me-migration'),
+        Key('me-wishes'),
+        Key('me-notes'),
+        Key('me-templates'),
+        Key('me-remarks'),
+        Key('me-bank-cards'),
+        Key('me-batch-records'),
+        Key('me-category-transfer'),
+        Key('me-attachments'),
+        Key('me-stat-stories'),
+        Key('me-auto-bill'),
+        Key('me-ocr'),
+        Key('me-widgets'),
+        Key('me-url-scheme'),
+        Key('me-app-lock'),
+        Key('me-settings'),
+        Key('me-diy-toolbar'),
+        Key('me-data-health'),
+        Key('me-about'),
+      ];
+
+      for (final brightness in <Brightness>[
+        Brightness.light,
+        Brightness.dark,
+      ]) {
+        for (final width in <double>[320, 360, 412]) {
+          tester.view.physicalSize = Size(width, 800);
+          tester.view.devicePixelRatio = 1.0;
+
+          await tester.pumpWidget(
+            ProviderScope(
+              overrides: [autoBillDraftCountProvider.overrideWithValue(3)],
+              child: MaterialApp(
+                theme: ThemeData(
+                  colorScheme: ColorScheme.fromSeed(
+                    seedColor: const Color(0xFF006972),
+                    brightness: brightness,
+                  ),
+                  useMaterial3: true,
+                ),
+                builder: (context, child) => MediaQuery(
+                  data: MediaQuery.of(
+                    context,
+                  ).copyWith(textScaler: const TextScaler.linear(1.25)),
+                  child: child!,
+                ),
+                home: const MePage(),
+              ),
+            ),
+          );
+          await tester.pumpAndSettle();
+          expect(tester.takeException(), isNull);
+          expect(find.byKey(const Key('me-brand-card')), findsNothing);
+          expect(find.text('帮助与关于'), findsOneWidget);
+          expect(find.text('3'), findsOneWidget);
+
+          for (final itemKey in menuKeys) {
+            final itemFinder = find.byKey(itemKey);
+            expect(itemFinder, findsOneWidget);
+            final textFinder = find.descendant(
+              of: itemFinder,
+              matching: find.byType(Text),
+            );
+            // Every row label (excluding optional numeric Badge text) must configure maxLines: 1 and lay out on 1 line.
+            for (final el in textFinder.evaluate()) {
+              final widget = el.widget as Text;
+              if (widget.data == '3') continue;
+              expect(widget.maxLines, 1);
+              expect(widget.softWrap, isFalse);
+              final renderObj = el.renderObject! as RenderParagraph;
+              expect(
+                renderObj.text.toPlainText().contains('\n'),
+                isFalse,
+                reason: 'Label $itemKey must not contain line breaks',
+              );
+              // Single-line height at 15sp * 1.25x is ~22-28px; wrapped 2-line text would exceed 38px.
+              expect(
+                renderObj.size.height,
+                lessThan(34),
+                reason:
+                    'Label $itemKey wrapped vertically at width=$width, brightness=$brightness',
+              );
+            }
+          }
+        }
+      }
     },
   );
 }
