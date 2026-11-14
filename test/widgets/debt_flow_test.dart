@@ -12,11 +12,12 @@ import 'package:tallyisle/domain/model/codes.dart';
 import 'package:tallyisle/features/debt/debt_page.dart';
 
 void main() {
-  Widget buildApp(Widget child, AppDatabase db) => ProviderScope(
-    retry: (_, _) => null,
-    overrides: [databaseProvider.overrideWith((ref) async => db)],
-    child: MaterialApp(home: child),
-  );
+  Widget buildApp(Widget child, AppDatabase db, {ThemeData? theme}) =>
+      ProviderScope(
+        retry: (_, _) => null,
+        overrides: [databaseProvider.overrideWith((ref) async => db)],
+        child: MaterialApp(theme: theme, home: child),
+      );
 
   Future<void> settle(WidgetTester tester) async {
     for (var i = 0; i < 12; i++) {
@@ -43,6 +44,12 @@ void main() {
 
       expect(find.byKey(const Key('debt_page')), findsOneWidget);
       expect(find.text('暂无进行中的借贷项目，点击右下角新建'), findsOneWidget);
+      expect(find.byType(ChoiceChip), findsNothing);
+      final stateTabs = tester.widget<SegmentedButton<int>>(
+        find.byKey(const Key('debt_state_tabs')),
+      );
+      expect(stateTabs.showSelectedIcon, isFalse);
+      expect(find.widgetWithText(FloatingActionButton, '新建借贷'), findsOneWidget);
 
       // 1. Open DebtEditorPage and create a 300.00 lending project ("张三")
       await tester.tap(find.byKey(const Key('add_debt_button')));
@@ -77,6 +84,21 @@ void main() {
       await settle(tester);
 
       expect(find.byKey(const Key('debt_detail_page')), findsOneWidget);
+      expect(find.byKey(const Key('debt_status_chip')), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('debt_status_chip')),
+          matching: find.text('进行中'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('debt_detail_summary_card')),
+          matching: find.byType(Chip),
+        ),
+        findsNothing,
+      );
       expect(
         tester.widget<Text>(find.byKey(const Key('debt_progress_label'))).data,
         '0.0%',
@@ -153,6 +175,13 @@ void main() {
       await settle(tester);
 
       expect(find.text('已结清'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('debt_status_chip')),
+          matching: find.text('已结清'),
+        ),
+        findsOneWidget,
+      );
       expect(
         tester.widget<Text>(find.byKey(const Key('debt_progress_label'))).data,
         '100.0%',
@@ -243,6 +272,17 @@ void main() {
     await settle(tester);
 
     // Default scope = current book (book 1) -> shows 日常借入A, hides 副业借出B
+    expect(find.byType(ChoiceChip), findsNothing);
+    final tabs = tester.widget<SegmentedButton<int>>(
+      find.byKey(const Key('debt_state_tabs')),
+    );
+    expect(tabs.showSelectedIcon, isFalse);
+    expect(
+      tester.widget<ActionChip>(find.byKey(const Key('debt_scope_toggle'))),
+      isNotNull,
+    );
+    expect(find.text('当前账本'), findsOneWidget);
+    expect(find.widgetWithText(FloatingActionButton, '新建借贷'), findsOneWidget);
     expect(find.text('日常借入A'), findsOneWidget);
     expect(find.text('副业借出B'), findsNothing);
 
@@ -255,11 +295,94 @@ void main() {
     await settle(tester);
     expect(find.text('副业借出B'), findsOneWidget);
 
+    await tester.tap(find.byKey(const Key('debt_tab_active')));
+    await settle(tester);
+    expect(find.text('日常借入A'), findsOneWidget);
+
     await tester.pumpWidget(const SizedBox());
     await settle(tester);
     await tester.pump(const Duration(seconds: 1));
     await db.close();
   });
+
+  testWidgets(
+    'DebtPage and DebtDetailPage render compact SegmentedButton, ActionChip, FAB, and borderless pills in 360dp Light & Dark themes',
+    (tester) async {
+      final db = AppDatabase(NativeDatabase.memory());
+      final debtService = DebtService(db);
+      final debtId = await debtService.createDebt(
+        commandId: 'd-narrow-1',
+        subType: AssetType.debtBorrow,
+        name: '房贷专项借款',
+        principal: Money.parse('12000.00'),
+        bookId: 1,
+        startDate: 1700000000000,
+        endDate: 1731536000000,
+        countedInNetWorth: false,
+        currency: 'CNY',
+      );
+
+      await tester.binding.setSurfaceSize(const Size(360, 640));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      for (final brightness in [Brightness.light, Brightness.dark]) {
+        final theme = ThemeData(
+          colorScheme: ColorScheme.fromSeed(
+            seedColor: const Color(0xFF2B6CB0),
+            brightness: brightness,
+          ),
+          useMaterial3: true,
+        );
+
+        await tester.pumpWidget(
+          MediaQuery(
+            data: const MediaQueryData(
+              size: Size(360, 640),
+              textScaler: TextScaler.linear(1.2),
+            ),
+            child: buildApp(const DebtPage(), db, theme: theme),
+          ),
+        );
+        await settle(tester);
+        expect(tester.takeException(), isNull);
+
+        expect(find.byType(ChoiceChip), findsNothing);
+        final seg = tester.widget<SegmentedButton<int>>(
+          find.byKey(const Key('debt_state_tabs')),
+        );
+        expect(seg.showSelectedIcon, isFalse);
+        expect(find.byKey(const Key('debt_scope_toggle')), findsOneWidget);
+        expect(find.byKey(const Key('add_debt_button')), findsOneWidget);
+        expect(find.text('新建借贷'), findsOneWidget);
+        expect(find.byKey(Key('debt_item_$debtId')), findsOneWidget);
+
+        await tester.tap(find.byKey(Key('debt_item_$debtId')));
+        await settle(tester);
+        expect(tester.takeException(), isNull);
+
+        expect(find.byKey(const Key('debt_detail_page')), findsOneWidget);
+        expect(find.byKey(const Key('debt_status_chip')), findsOneWidget);
+        expect(find.text('借入（应付）'), findsOneWidget);
+        expect(find.text('CNY'), findsOneWidget);
+        expect(find.text('不计入资产/负债'), findsOneWidget);
+        expect(
+          find.descendant(
+            of: find.byKey(const Key('debt_detail_summary_card')),
+            matching: find.byType(Chip),
+          ),
+          findsNothing,
+        );
+
+        await tester.pageBack();
+        await settle(tester);
+      }
+
+      await tester.pumpWidget(const SizedBox());
+      await settle(tester);
+      await tester.pump(const Duration(seconds: 1));
+      await db.close();
+    },
+  );
 
   testWidgets(
     'Direct entry DebtPage -> DebtDetailPage populates funding/book dropdowns and edits record with hidden funding account',

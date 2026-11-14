@@ -209,12 +209,37 @@ class _DebtDetailPageState extends ConsumerState<DebtDetailPage> {
     _ => RecordType.names[rec.type] ?? '流水',
   };
 
+  Widget _buildSummaryPill({
+    Key? key,
+    required ThemeData theme,
+    required String label,
+    required Color backgroundColor,
+    required Color foregroundColor,
+  }) {
+    return Container(
+      key: key,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: backgroundColor,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: theme.textTheme.labelSmall?.copyWith(
+          color: foregroundColor,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final viewAsync = ref.watch(debtDetailViewProvider(widget.debtId));
     ref.watch(debtFundingAccountsProvider);
     ref.watch(booksProvider);
     final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
 
     return Scaffold(
       key: const Key('debt_detail_page'),
@@ -286,15 +311,39 @@ class _DebtDetailPageState extends ConsumerState<DebtDetailPage> {
                       runSpacing: 8,
                       crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
-                        Chip(label: Text(isBorrow ? '借入（应付）' : '借出（应收）')),
-                        Chip(
+                        _buildSummaryPill(
+                          theme: theme,
+                          label: isBorrow ? '借入（应付）' : '借出（应收）',
+                          backgroundColor: colorScheme.primaryContainer,
+                          foregroundColor: colorScheme.onPrimaryContainer,
+                        ),
+                        _buildSummaryPill(
                           key: const Key('debt_status_chip'),
-                          label: Text(settled ? '已结清' : '进行中'),
+                          theme: theme,
+                          label: settled ? '已结清' : '进行中',
+                          backgroundColor: settled
+                              ? colorScheme.tertiaryContainer
+                              : colorScheme.secondaryContainer,
+                          foregroundColor: settled
+                              ? colorScheme.onTertiaryContainer
+                              : colorScheme.onSecondaryContainer,
                         ),
                         if (debt.currency != null)
-                          Chip(label: Text(debt.currency!)),
+                          _buildSummaryPill(
+                            theme: theme,
+                            label: debt.currency!,
+                            backgroundColor:
+                                colorScheme.surfaceContainerHighest,
+                            foregroundColor: colorScheme.onSurfaceVariant,
+                          ),
                         if (!m.countedInNetWorth)
-                          const Chip(label: Text('不计入资产/负债')),
+                          _buildSummaryPill(
+                            theme: theme,
+                            label: '不计入资产/负债',
+                            backgroundColor:
+                                colorScheme.surfaceContainerHighest,
+                            foregroundColor: colorScheme.onSurfaceVariant,
+                          ),
                       ],
                     ),
                     const SizedBox(height: 12),

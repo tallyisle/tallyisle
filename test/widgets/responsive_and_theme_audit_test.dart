@@ -15,23 +15,29 @@ import 'package:tallyisle/data/budget/budget_service.dart';
 import 'package:tallyisle/data/catalog/catalog_service.dart';
 import 'package:tallyisle/data/catalog/currency_service.dart';
 import 'package:tallyisle/data/db/database.dart';
+import 'package:tallyisle/data/debt/debt_service.dart';
 import 'package:tallyisle/data/ledger/ledger_service.dart';
 import 'package:tallyisle/data/periodic/periodic_service.dart';
+import 'package:tallyisle/data/tools/bank_card_service.dart';
 import 'package:tallyisle/domain/model/codes.dart';
 import 'package:tallyisle/domain/rules/app_settings_rules.dart';
 import 'package:tallyisle/domain/rules/billing_period.dart';
 import 'package:tallyisle/domain/rules/budget_rules.dart';
 import 'package:tallyisle/domain/rules/periodic_records.dart';
+import 'package:tallyisle/domain/rules/template_card_rules.dart';
 import 'package:tallyisle/features/automation/automation_providers.dart';
 import 'package:tallyisle/features/automation/desktop_widgets_page.dart';
 import 'package:tallyisle/features/backup/backup_page.dart';
 import 'package:tallyisle/features/backup/backup_providers.dart';
+import 'package:tallyisle/features/bank_cards/bank_cards_page.dart';
 import 'package:tallyisle/features/budget/budget_page.dart';
 import 'package:tallyisle/features/calendar/calendar_page.dart';
 import 'package:tallyisle/features/csv_transfer/csv_export_page.dart';
 import 'package:tallyisle/features/currencies/currencies_page.dart';
+import 'package:tallyisle/features/debt/debt_page.dart';
 import 'package:tallyisle/features/periodic/periodic_page.dart';
 import 'package:tallyisle/features/reminder/reminder_providers.dart';
+import 'package:tallyisle/features/settings/about_help_page.dart';
 import 'package:tallyisle/features/settings/settings_page.dart';
 import 'package:tallyisle/features/stats/stats_page.dart';
 import 'package:tallyisle/features/tags/tags_page.dart';
@@ -261,6 +267,52 @@ final class _AuditHarness {
           categoryId: foodCat.id,
           assetId: bankAssetId,
           remark: '每日通勤咖啡',
+        ),
+      );
+
+      final debtSvc = DebtService(db);
+      final startMs = DateTime(now.year, now.month, 1).millisecondsSinceEpoch;
+      await debtSvc.createDebt(
+        commandId: 'audit-debt-lend-1',
+        subType: AssetType.debtLend,
+        name: '张三周转借款',
+        principal: Money.parse('3000.00'),
+        bookId: 1,
+        startDate: startMs,
+        remark: '短期周转',
+      );
+      await debtSvc.createDebt(
+        commandId: 'audit-debt-borrow-1',
+        subType: AssetType.debtBorrow,
+        name: '父母装修拆借',
+        principal: Money.parse('1500.00'),
+        bookId: 1,
+        startDate: startMs,
+        countedInNetWorth: false,
+      );
+
+      final bankCardSvc = BankCardService(db);
+      await bankCardSvc.saveBankCard(
+        commandId: 'audit-card-debit-1',
+        draft: BankCardDraft(
+          cardType: BankCardType.debit,
+          cardName: '招商银行工资卡',
+          cardNo: '6225880123456789',
+          cardOwner: '王小明',
+          remark: '代发工资主卡',
+          cardColor: '#E53935',
+          cardAssetId: bankAssetId,
+        ),
+      );
+      await bankCardSvc.saveBankCard(
+        commandId: 'audit-card-credit-1',
+        draft: const BankCardDraft(
+          cardType: BankCardType.credit,
+          cardName: '招商经典白金卡',
+          cardNo: '4111111111111111',
+          cardOwner: '王小明',
+          remark: '日常消费主卡',
+          cardColor: '#1E88E5',
         ),
       );
     });
@@ -807,6 +859,124 @@ void main() {
           pageName: 'CurrenciesPage',
           harness: harness,
           pageBuilder: () => const CurrenciesPage(),
+        );
+      } finally {
+        await harness.dispose(tester);
+      }
+    },
+  );
+
+  testWidgets(
+    'DebtPage: zero overflow, single-line SegmentedButton (<34px, showSelectedIcon: false) & "新建借贷" FAB across 360x640, 390x844, 960x800 in Light & Dark @ 1.2x',
+    (tester) async {
+      final harness = await _AuditHarness.create(tester);
+      try {
+        await _runPageAuditMatrix(
+          tester,
+          pageName: 'DebtPage',
+          harness: harness,
+          pageBuilder: () => const DebtPage(),
+          expectedMinSegmentedButtons: 1,
+          onViewportReady: (tester, viewport, brightness, theme, ctx) async {
+            expect(
+              find.byKey(const Key('debt_state_tabs')),
+              findsOneWidget,
+              reason: 'DebtPage SegmentedButton must be rendered ($ctx)',
+            );
+            expect(find.byKey(const Key('debt_tab_active')), findsOneWidget);
+            expect(find.byKey(const Key('debt_tab_settled')), findsOneWidget);
+            expect(
+              find.byType(ChoiceChip),
+              findsNothing,
+              reason: 'DebtPage must not render legacy ChoiceChip ($ctx)',
+            );
+            expect(
+              find.byKey(const Key('add_debt_button')),
+              findsOneWidget,
+              reason: '"新建借贷" FAB key must exist on DebtPage ($ctx)',
+            );
+            expect(
+              find.widgetWithText(FloatingActionButton, '新建借贷'),
+              findsOneWidget,
+              reason: '"新建借贷" FAB must be rendered on DebtPage ($ctx)',
+            );
+          },
+        );
+      } finally {
+        await harness.dispose(tester);
+      }
+    },
+  );
+
+  testWidgets(
+    'BankCardsPage: zero overflow & single-line SegmentedButton (<34px, showSelectedIcon: false) across 360x640, 390x844, 960x800 in Light & Dark @ 1.2x',
+    (tester) async {
+      final harness = await _AuditHarness.create(tester);
+      try {
+        await _runPageAuditMatrix(
+          tester,
+          pageName: 'BankCardsPage',
+          harness: harness,
+          pageBuilder: () => const BankCardsPage(),
+          expectedMinSegmentedButtons: 1,
+          onViewportReady: (tester, viewport, brightness, theme, ctx) async {
+            expect(
+              find.byKey(const Key('bank_card_filter_tabs')),
+              findsOneWidget,
+              reason: 'BankCardsPage SegmentedButton must be rendered ($ctx)',
+            );
+            expect(find.byKey(const Key('card_filter_all')), findsOneWidget);
+            expect(find.byKey(const Key('card_filter_0')), findsOneWidget);
+            expect(find.byKey(const Key('card_filter_1')), findsOneWidget);
+            expect(
+              find.byType(ChoiceChip),
+              findsNothing,
+              reason: 'BankCardsPage must not render legacy ChoiceChip ($ctx)',
+            );
+          },
+        );
+      } finally {
+        await harness.dispose(tester);
+      }
+    },
+  );
+
+  testWidgets(
+    'AboutHelpPage: zero overflow & renders GitHub repo + feedback links across 360x640, 390x844, 960x800 in Light & Dark @ 1.2x',
+    (tester) async {
+      final harness = await _AuditHarness.create(tester);
+      try {
+        await _runPageAuditMatrix(
+          tester,
+          pageName: 'AboutHelpPage',
+          harness: harness,
+          pageBuilder: () => const AboutHelpPage(),
+          onViewportReady: (tester, viewport, brightness, theme, ctx) async {
+            expect(
+              find.text('https://github.com/tallyisle/tallyisle'),
+              findsOneWidget,
+              reason:
+                  'GitHub repo URL must be rendered on AboutHelpPage ($ctx)',
+            );
+            expect(
+              find.text('问题反馈与建议'),
+              findsOneWidget,
+              reason:
+                  '"问题反馈与建议" entry must be rendered on AboutHelpPage ($ctx)',
+            );
+            expect(
+              find.byKey(const Key('about_github_repo_tile')),
+              findsOneWidget,
+            );
+            expect(
+              find.byKey(const Key('about_github_issues_tile')),
+              findsOneWidget,
+            );
+            expect(
+              find.byKey(const Key('about_licenses_tile')),
+              findsOneWidget,
+            );
+          },
         );
       } finally {
         await harness.dispose(tester);

@@ -17,26 +17,58 @@ class DebtPage extends ConsumerWidget {
     final selectedStatus = ref.watch(debtStatusTabProvider);
     final viewAsync = ref.watch(debtListViewProvider);
     final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
 
     return Scaffold(
       key: const Key('debt_page'),
       appBar: AppBar(
         title: const Text('借贷管理'),
         actions: [
-          TextButton.icon(
-            key: const Key('debt_scope_toggle'),
-            onPressed: () =>
-                ref.read(debtAllBooksScopeProvider.notifier).toggle(),
-            icon: Icon(
-              allBooks ? Icons.library_books : Icons.book_outlined,
-              size: 18,
+          Padding(
+            padding: const EdgeInsets.only(right: 12),
+            child: Center(
+              child: ActionChip(
+                key: const Key('debt_scope_toggle'),
+                visualDensity: VisualDensity.compact,
+                avatar: Icon(
+                  allBooks ? Icons.library_books_rounded : Icons.book_outlined,
+                  size: 16,
+                  color: allBooks
+                      ? colorScheme.primary
+                      : colorScheme.onSurfaceVariant,
+                ),
+                backgroundColor: allBooks
+                    ? colorScheme.primaryContainer.withValues(alpha: 0.65)
+                    : colorScheme.surfaceContainerHighest.withValues(
+                        alpha: 0.55,
+                      ),
+                side: BorderSide(
+                  color: allBooks
+                      ? colorScheme.primary.withValues(alpha: 0.35)
+                      : colorScheme.outlineVariant.withValues(alpha: 0.5),
+                ),
+                label: Text(
+                  allBooks ? '全部账本' : '当前账本',
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                    color: allBooks
+                        ? colorScheme.primary
+                        : colorScheme.onSurface,
+                  ),
+                ),
+                onPressed: () =>
+                    ref.read(debtAllBooksScopeProvider.notifier).toggle(),
+              ),
             ),
-            label: Text(allBooks ? '全部账本' : '当前账本'),
           ),
         ],
       ),
       body: asyncBody(viewAsync, (view) {
-        final items = selectedStatus == AssetStatus.settled
+        final activeTab = selectedStatus == AssetStatus.settled
+            ? AssetStatus.settled
+            : AssetStatus.active;
+        final items = activeTab == AssetStatus.settled
             ? view.settledItems
             : view.activeItems;
 
@@ -78,48 +110,48 @@ class DebtPage extends ConsumerWidget {
               ),
             ),
             const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: ChoiceChip(
-                    key: const Key('debt_tab_active'),
-                    label: Center(
-                      child: FittedBox(
-                        fit: BoxFit.scaleDown,
-                        child: Text(
-                          '进行中 (${view.activeItems.length})',
-                          maxLines: 1,
-                          softWrap: false,
-                        ),
-                      ),
-                    ),
-                    selected: selectedStatus == AssetStatus.active,
-                    onSelected: (_) => ref
-                        .read(debtStatusTabProvider.notifier)
-                        .select(AssetStatus.active),
+            SizedBox(
+              width: double.infinity,
+              child: SegmentedButton<int>(
+                key: const Key('debt_state_tabs'),
+                showSelectedIcon: false,
+                style: const ButtonStyle(
+                  visualDensity: VisualDensity.compact,
+                  padding: WidgetStatePropertyAll(
+                    EdgeInsets.symmetric(horizontal: 10),
                   ),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: ChoiceChip(
-                    key: const Key('debt_tab_settled'),
-                    label: Center(
-                      child: FittedBox(
-                        fit: BoxFit.scaleDown,
-                        child: Text(
-                          '已结清 (${view.settledItems.length})',
-                          maxLines: 1,
-                          softWrap: false,
-                        ),
+                segments: [
+                  ButtonSegment<int>(
+                    value: AssetStatus.active,
+                    label: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        '进行中 (${view.activeItems.length})',
+                        key: const Key('debt_tab_active'),
+                        maxLines: 1,
+                        softWrap: false,
                       ),
                     ),
-                    selected: selectedStatus == AssetStatus.settled,
-                    onSelected: (_) => ref
-                        .read(debtStatusTabProvider.notifier)
-                        .select(AssetStatus.settled),
                   ),
-                ),
-              ],
+                  ButtonSegment<int>(
+                    value: AssetStatus.settled,
+                    label: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        '已结清 (${view.settledItems.length})',
+                        key: const Key('debt_tab_settled'),
+                        maxLines: 1,
+                        softWrap: false,
+                      ),
+                    ),
+                  ),
+                ],
+                selected: {activeTab},
+                onSelectionChanged: (selection) => ref
+                    .read(debtStatusTabProvider.notifier)
+                    .select(selection.first),
+              ),
             ),
             const SizedBox(height: 12),
             if (items.isEmpty)
@@ -127,10 +159,12 @@ class DebtPage extends ConsumerWidget {
                 padding: const EdgeInsets.symmetric(vertical: 48),
                 child: Center(
                   child: Text(
-                    selectedStatus == AssetStatus.settled
+                    activeTab == AssetStatus.settled
                         ? '暂无已结清的借贷项目'
                         : '暂无进行中的借贷项目，点击右下角新建',
-                    style: theme.textTheme.bodyMedium,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                    ),
                   ),
                 ),
               )
@@ -173,7 +207,12 @@ class _SummaryCell extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 4),
       child: Column(
         children: [
-          Text(label, style: theme.textTheme.labelMedium),
+          Text(
+            label,
+            style: theme.textTheme.labelMedium?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
           const SizedBox(height: 4),
           FittedBox(
             fit: BoxFit.scaleDown,
@@ -199,6 +238,7 @@ class _DebtItemCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
     final debt = item.debt;
     final isBorrow = debt.subType == AssetType.debtBorrow;
     final dueText = item.loanInfo.endDate != noRef && item.loanInfo.endDate > 0
@@ -225,6 +265,9 @@ class _DebtItemCard extends StatelessWidget {
                   Icon(
                     isBorrow ? Icons.call_received : Icons.call_made,
                     size: 18,
+                    color: isBorrow
+                        ? colorScheme.tertiary
+                        : colorScheme.primary,
                   ),
                   const SizedBox(width: 6),
                   Expanded(
@@ -250,13 +293,18 @@ class _DebtItemCard extends StatelessWidget {
                         if (!item.countedInNetWorth) '不计入资产',
                         ?dueText,
                       ].join(' · '),
-                      style: theme.textTheme.bodySmall,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: colorScheme.onSurfaceVariant,
+                      ),
                     ),
                   ),
+                  const SizedBox(width: 8),
                   Text(
                     '进度 ${item.progressLabel}',
                     key: Key('debt_item_progress_${debt.id}'),
-                    style: theme.textTheme.labelMedium,
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                    ),
                   ),
                 ],
               ),

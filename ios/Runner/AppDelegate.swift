@@ -40,8 +40,47 @@ import UIKit
       presentActivitySheet(call: call, isSave: true, result: result)
     case "shareBytes":
       presentActivitySheet(call: call, isSave: false, result: result)
+    case "openExternalUrl":
+      openExternalUrl(call: call, result: result)
     default:
       result(FlutterMethodNotImplemented)
+    }
+  }
+
+  private func openExternalUrl(call: FlutterMethodCall, result: @escaping FlutterResult) {
+    guard
+      let args = call.arguments as? [String: Any],
+      let rawUrl = (args["url"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+      let url = URL(string: rawUrl),
+      let scheme = url.scheme?.lowercased(),
+      scheme == "https" || scheme == "http",
+      let host = url.host,
+      !host.isEmpty
+    else {
+      result(
+        FlutterError(
+          code: "INVALID_ARGS",
+          message: "仅支持打开 HTTP/HTTPS 网页链接",
+          details: nil
+        )
+      )
+      return
+    }
+
+    DispatchQueue.main.async {
+      UIApplication.shared.open(url, options: [:]) { ok in
+        if ok {
+          result(nil)
+        } else {
+          result(
+            FlutterError(
+              code: "UNAVAILABLE",
+              message: "无法调起系统浏览器",
+              details: nil
+            )
+          )
+        }
+      }
     }
   }
 

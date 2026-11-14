@@ -1,9 +1,11 @@
 import 'package:drift/drift.dart' show Value, driftRuntimeOptions;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tallyisle/app/providers.dart';
+import 'package:tallyisle/core/failure.dart';
 import 'package:tallyisle/data/db/database.dart';
 import 'package:tallyisle/data/db/seed.dart';
 import 'package:tallyisle/data/settings/app_lock_service.dart';
@@ -12,10 +14,12 @@ import 'package:tallyisle/domain/model/codes.dart';
 import 'package:tallyisle/features/security/app_lock_gate.dart';
 import 'package:tallyisle/features/security/app_lock_providers.dart';
 import 'package:tallyisle/features/security/app_lock_settings_page.dart';
+import 'package:tallyisle/features/settings/about_help_page.dart';
 import 'package:tallyisle/features/settings/data_health_page.dart';
 import 'package:tallyisle/features/settings/settings_page.dart';
 import 'package:tallyisle/features/settings/stat_stories_page.dart';
 import 'package:tallyisle/platform/biometrics.dart';
+import 'package:tallyisle/platform/files.dart';
 
 void main() {
   driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
@@ -258,11 +262,153 @@ void main() {
       await settle(tester);
 
       expect(find.text('帐屿 · TallyIsle'), findsOneWidget);
+      expect(find.text('项目与开源'), findsOneWidget);
+      expect(find.text('开源代码仓库'), findsOneWidget);
+      expect(find.text(tallyIsleRepoUrl), findsOneWidget);
+      expect(find.text('问题反馈与建议'), findsOneWidget);
+      expect(find.byKey(const Key('about_licenses_tile')), findsOneWidget);
       expect(find.text('全功能永久免费 · 无会员门控'), findsOneWidget);
       expect(find.textContaining('一羽记账'), findsNothing);
       expect(find.textContaining('账屿'), findsNothing);
 
       await closeCleanly();
+    },
+  );
+
+  testWidgets(
+    'AboutHelpPage opens GitHub repo & Issues URLs, supports one-tap copy buttons, and falls back to clipboard when browser launch fails',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(800, 1200));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      String clipboardText = '';
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(SystemChannels.platform, (call) async {
+            if (call.method == 'Clipboard.setData') {
+              final args = call.arguments as Map<Object?, Object?>;
+              clipboardText = (args['text'] as String?) ?? '';
+            } else if (call.method == 'Clipboard.getData') {
+              return <String, Object?>{'text': clipboardText};
+            }
+            return null;
+          });
+      addTearDown(() {
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(SystemChannels.platform, null);
+      });
+
+      final openedUrls = <String>[];
+      var failBrowser = false;
+      final fileAccess = FileAccess(
+        onOpenExternalUrl: (url) async {
+          if (failBrowser) {
+            throw const Failure(FailureCode.unsupportedCapability, '无法调起系统浏览器');
+          }
+          openedUrls.add(url);
+        },
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(home: AboutHelpPage(fileAccess: fileAccess)),
+      );
+      await settle(tester);
+
+      expect(find.text('本地优先、精确到分的开源个人记账与资产管理工具'), findsOneWidget);
+      expect(
+        find.text('基于 Flutter 构建 · 支持 Android / iOS / Windows / Linux / macOS'),
+        findsOneWidget,
+      );
+      expect(find.text('项目与开源'), findsOneWidget);
+      expect(find.text('开源代码仓库'), findsOneWidget);
+      expect(
+        find.text('https://github.com/tallyisle/tallyisle'),
+        findsOneWidget,
+      );
+      expect(find.text('问题反馈与建议'), findsOneWidget);
+      expect(find.byKey(const Key('about_licenses_tile')), findsOneWidget);
+      expect(find.textContaining('一羽记账'), findsNothing);
+      expect(find.textContaining('账屿'), findsNothing);
+
+      // 1. Tap repo & issues tiles -> launches external browser with exact URLs
+      await tester.tap(find.byKey(const Key('about_github_repo_tile')));
+      await settle(tester);
+      await tester.tap(find.byKey(const Key('about_github_issues_tile')));
+      await settle(tester);
+      expect(openedUrls, const <String>[tallyIsleRepoUrl, tallyIsleIssuesUrl]);
+      expect(clipboardText, isEmpty);
+
+      // 2. Tap copy buttons -> copies to Clipboard + shows SnackBar without launching browser
+      await tester.tap(find.byKey(const Key('about_copy_repo_url_button')));
+      await settle(tester);
+      expect(clipboardText, tallyIsleRepoUrl);
+      expect(find.text('已复制开源仓库地址'), findsOneWidget);
+      expect(openedUrls, hasLength(2));
+
+      await tester.tap(find.byKey(const Key('about_copy_issues_url_button')));
+      await settle(tester);
+      expect(clipboardText, tallyIsleIssuesUrl);
+      expect(find.text('已复制问题反馈地址'), findsOneWidget);
+      expect(openedUrls, hasLength(2));
+
+      // 3. Browser launch throws -> automatically copies URL to Clipboard + fallback SnackBar
+      failBrowser = true;
+      clipboardText = '';
+      await tester.tap(find.byKey(const Key('about_github_repo_tile')));
+      await settle(tester);
+      expect(clipboardText, tallyIsleRepoUrl);
+      expect(find.text('未检测到可用浏览器，已复制链接：$tallyIsleRepoUrl'), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('about_github_issues_tile')));
+      await settle(tester);
+      expect(clipboardText, tallyIsleIssuesUrl);
+      expect(find.text('未检测到可用浏览器，已复制链接：$tallyIsleIssuesUrl'), findsOneWidget);
+
+      // 4. Verify zero RenderFlex overflow across 360x640, 390x844, 960x800 in Light & Dark @ 1.2x text scale
+      for (final viewport in const <Size>[
+        Size(360, 640),
+        Size(390, 844),
+        Size(960, 800),
+      ]) {
+        for (final brightness in const <Brightness>[
+          Brightness.light,
+          Brightness.dark,
+        ]) {
+          await tester.binding.setSurfaceSize(viewport);
+          await tester.pumpWidget(
+            MaterialApp(
+              key: ValueKey<String>('$viewport-$brightness'),
+              theme: ThemeData(
+                colorScheme: ColorScheme.fromSeed(
+                  seedColor: const Color(0xFF006972),
+                  brightness: brightness,
+                ),
+                useMaterial3: true,
+              ),
+              builder: (context, child) => MediaQuery(
+                data: MediaQuery.of(
+                  context,
+                ).copyWith(textScaler: const TextScaler.linear(1.2)),
+                child: child!,
+              ),
+              home: const AboutHelpPage(),
+            ),
+          );
+          await settle(tester);
+          expect(tester.takeException(), isNull);
+          expect(
+            find.text('https://github.com/tallyisle/tallyisle'),
+            findsOneWidget,
+          );
+          expect(find.text('问题反馈与建议'), findsOneWidget);
+
+          final scrollable = tester.state<ScrollableState>(
+            find.byType(Scrollable).first,
+          );
+          scrollable.position.jumpTo(scrollable.position.maxScrollExtent);
+          await tester.pump(const Duration(milliseconds: 50));
+          expect(tester.takeException(), isNull);
+        }
+      }
     },
   );
 

@@ -465,4 +465,144 @@ void main() {
       },
     );
   });
+
+  group('openExternalUrl across validation, overrides, Web, and Mobile', () {
+    test(
+      'rejects empty, javascript:, file:, custom scheme, and hostless URLs before invoking handler',
+      () async {
+        final opened = <String>[];
+        final access = FileAccess(
+          onOpenExternalUrl: (url) async => opened.add(url),
+        );
+
+        for (final invalid in <String>[
+          '',
+          '   ',
+          'javascript:alert(1)',
+          'file:///etc/passwd',
+          'tallyisle://add?money=10',
+          'https://',
+          'http:///missing-host',
+        ]) {
+          await expectLater(
+            access.openExternalUrl(invalid),
+            throwsA(
+              isA<Failure>()
+                  .having((f) => f.code, 'code', FailureCode.validation)
+                  .having((f) => f.message, 'message', '仅支持打开 HTTP/HTTPS 网页链接'),
+            ),
+            reason: 'Expected validation failure for "$invalid"',
+          );
+        }
+        expect(opened, isEmpty);
+
+        // Valid trimmed HTTP/HTTPS URLs invoke onOpenExternalUrl override
+        await access.openExternalUrl(
+          '  https://github.com/tallyisle/tallyisle  ',
+        );
+        await access.openExternalUrl('http://example.com/issues');
+        expect(opened, const <String>[
+          'https://github.com/tallyisle/tallyisle',
+          'http://example.com/issues',
+        ]);
+      },
+    );
+
+    test(
+      'Web throws unsupportedCapability unless onOpenExternalUrl override is supplied',
+      () async {
+        const webAccess = FileAccess(isWebOverride: true);
+        await expectLater(
+          webAccess.openExternalUrl('https://github.com/tallyisle/tallyisle'),
+          throwsA(
+            isA<Failure>()
+                .having(
+                  (f) => f.code,
+                  'code',
+                  FailureCode.unsupportedCapability,
+                )
+                .having((f) => f.message, 'message', '当前环境不支持直接打开外部浏览器'),
+          ),
+        );
+
+        String? captured;
+        final overriddenWeb = FileAccess(
+          isWebOverride: true,
+          onOpenExternalUrl: (url) async => captured = url,
+        );
+        await overriddenWeb.openExternalUrl(
+          'https://github.com/tallyisle/tallyisle/issues',
+        );
+        expect(captured, 'https://github.com/tallyisle/tallyisle/issues');
+      },
+    );
+
+    for (final platform in <TargetPlatform>[
+      TargetPlatform.android,
+      TargetPlatform.iOS,
+    ]) {
+      test(
+        'invokes native openExternalUrl MethodChannel and maps PlatformException / MissingPluginException on $platform',
+        () async {
+          debugDefaultTargetPlatformOverride = platform;
+          const channel = MethodChannel(fileBridgeChannelName);
+          final recordedCalls = <MethodCall>[];
+          var shouldFail = false;
+
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+              .setMockMethodCallHandler(channel, (call) async {
+                recordedCalls.add(call);
+                if (shouldFail) {
+                  throw PlatformException(
+                    code: 'UNAVAILABLE',
+                    message: '无法调起系统浏览器',
+                  );
+                }
+                return null;
+              });
+
+          const access = FileAccess(channel: channel);
+          await access.openExternalUrl(
+            'https://github.com/tallyisle/tallyisle',
+          );
+
+          expect(recordedCalls, hasLength(1));
+          expect(recordedCalls.single.method, 'openExternalUrl');
+          expect(recordedCalls.single.arguments, <Object?, Object?>{
+            'url': 'https://github.com/tallyisle/tallyisle',
+          });
+
+          shouldFail = true;
+          await expectLater(
+            access.openExternalUrl(
+              'https://github.com/tallyisle/tallyisle/issues',
+            ),
+            throwsA(
+              isA<Failure>()
+                  .having(
+                    (f) => f.code,
+                    'code',
+                    FailureCode.unsupportedCapability,
+                  )
+                  .having((f) => f.message, 'message', '无法调起系统浏览器'),
+            ),
+          );
+
+          // Unmounted channel -> MissingPluginException -> unsupportedCapability
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+              .setMockMethodCallHandler(channel, null);
+          await expectLater(
+            access.openExternalUrl('https://github.com/tallyisle/tallyisle'),
+            throwsA(
+              isA<Failure>().having(
+                (f) => f.code,
+                'code',
+                FailureCode.unsupportedCapability,
+              ),
+            ),
+          );
+        },
+      );
+    }
+  });
 }

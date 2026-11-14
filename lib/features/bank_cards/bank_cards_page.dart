@@ -131,23 +131,41 @@ class _BankCardsPageState extends ConsumerState<BankCardsPage> {
             children: [
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-                child: Wrap(
-                  spacing: 8,
-                  children: [
-                    for (final (value, label) in const <(int?, String)>[
-                      (null, '全部'),
-                      (BankCardType.debit, '储蓄卡'),
-                      (BankCardType.credit, '信用卡'),
-                    ])
-                      ChoiceChip(
-                        key: Key('card_filter_${value ?? "all"}'),
-                        label: Text(label),
-                        selected: filterType == value,
-                        onSelected: (_) => ref
-                            .read(bankCardFilterProvider.notifier)
-                            .select(value),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: SegmentedButton<int?>(
+                    key: const Key('bank_card_filter_tabs'),
+                    showSelectedIcon: false,
+                    style: const ButtonStyle(
+                      visualDensity: VisualDensity.compact,
+                      padding: WidgetStatePropertyAll(
+                        EdgeInsets.symmetric(horizontal: 10),
                       ),
-                  ],
+                    ),
+                    segments: [
+                      for (final (value, label) in const <(int?, String)>[
+                        (null, '全部'),
+                        (BankCardType.debit, '储蓄卡'),
+                        (BankCardType.credit, '信用卡'),
+                      ])
+                        ButtonSegment<int?>(
+                          value: value,
+                          label: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text(
+                              label,
+                              key: Key('card_filter_${value ?? "all"}'),
+                              maxLines: 1,
+                              softWrap: false,
+                            ),
+                          ),
+                        ),
+                    ],
+                    selected: {filterType},
+                    onSelectionChanged: (selection) => ref
+                        .read(bankCardFilterProvider.notifier)
+                        .select(selection.first),
+                  ),
                 ),
               ),
               Expanded(

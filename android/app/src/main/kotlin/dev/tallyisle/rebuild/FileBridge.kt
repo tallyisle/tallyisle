@@ -53,7 +53,32 @@ class FileBridge(private val activity: Activity) {
         when (call.method) {
             "saveBytes" -> handleSaveBytes(call, result)
             "shareBytes" -> handleShareBytes(call, result)
+            "openExternalUrl" -> handleOpenExternalUrl(call, result)
             else -> result.notImplemented()
+        }
+    }
+
+    private fun handleOpenExternalUrl(call: MethodCall, result: MethodChannel.Result) {
+        val url = call.argument<String>("url")?.trim().orEmpty()
+        if (!url.startsWith("https://", ignoreCase = true) &&
+            !url.startsWith("http://", ignoreCase = true)
+        ) {
+            result.error(ERROR_INVALID_ARGS, "仅支持打开 HTTP/HTTPS 网页链接", null)
+            return
+        }
+        try {
+            val uri = Uri.parse(url)
+            if (uri.host.isNullOrBlank()) {
+                result.error(ERROR_INVALID_ARGS, "仅支持打开 HTTP/HTTPS 网页链接", null)
+                return
+            }
+            val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+                addCategory(Intent.CATEGORY_BROWSABLE)
+            }
+            activity.startActivity(intent)
+            result.success(null)
+        } catch (e: Exception) {
+            result.error(ERROR_UNAVAILABLE, e.message ?: "无法调起系统浏览器", null)
         }
     }
 

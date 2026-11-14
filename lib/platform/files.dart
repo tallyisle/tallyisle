@@ -1,3 +1,5 @@
+import 'dart:io' show Process;
+
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -41,6 +43,7 @@ typedef ShareBytesHandler =
       String? mimeType,
       String? subject,
     );
+typedef OpenExternalUrlHandler = Future<void> Function(String url);
 
 /// OS chooser & system share boundary (ADR-008).
 ///
@@ -52,17 +55,20 @@ class FileAccess {
     PickBytesHandler? onPickBytes,
     SaveBytesHandler? onSaveBytes,
     ShareBytesHandler? onShareBytes,
+    OpenExternalUrlHandler? onOpenExternalUrl,
   }) : _channel = channel,
        _isWebOverride = isWebOverride,
        _onPickBytes = onPickBytes,
        _onSaveBytes = onSaveBytes,
-       _onShareBytes = onShareBytes;
+       _onShareBytes = onShareBytes,
+       _onOpenExternalUrl = onOpenExternalUrl;
 
   final MethodChannel? _channel;
   final bool? _isWebOverride;
   final PickBytesHandler? _onPickBytes;
   final SaveBytesHandler? _onSaveBytes;
   final ShareBytesHandler? _onShareBytes;
+  final OpenExternalUrlHandler? _onOpenExternalUrl;
 
   MethodChannel get _effectiveChannel =>
       _channel ?? const MethodChannel(fileBridgeChannelName);
@@ -240,6 +246,73 @@ class FileAccess {
       );
     } catch (_) {
       throw const Failure(FailureCode.storageUnavailable, '无法调起系统分享');
+    }
+  }
+
+  Future<void> openExternalUrl(String rawUrl) async {
+    final trimmed = rawUrl.trim();
+    final uri = Uri.tryParse(trimmed);
+    if (uri == null ||
+        (uri.scheme != 'https' && uri.scheme != 'http') ||
+        uri.host.isEmpty) {
+      throw const Failure(FailureCode.validation, '仅支持打开 HTTP/HTTPS 网页链接');
+    }
+    final normalizedUrl = uri.toString();
+
+    if (_onOpenExternalUrl != null) {
+      await _onOpenExternalUrl(normalizedUrl);
+      return;
+    }
+
+    if (_isWeb) {
+      throw const Failure(
+        FailureCode.unsupportedCapability,
+        '当前环境不支持直接打开外部浏览器',
+      );
+    }
+
+    if (_usesNativeFileChannel) {
+      try {
+        await _effectiveChannel.invokeMethod<void>('openExternalUrl', {
+          'url': normalizedUrl,
+        });
+        return;
+      } on PlatformException catch (e) {
+        final message = e.message;
+        throw Failure(
+          FailureCode.unsupportedCapability,
+          message != null && message.isNotEmpty ? message : '无法调起系统浏览器',
+        );
+      } on MissingPluginException {
+        throw Failure(
+          FailureCode.unsupportedCapability,
+          _isIOSNative ? '当前环境未挂载 iOS 原生浏览器通道' : '当前环境未挂载 Android 原生浏览器通道',
+        );
+      } catch (_) {
+        throw const Failure(FailureCode.unsupportedCapability, '无法调起系统浏览器');
+      }
+    }
+
+    try {
+      final result = switch (defaultTargetPlatform) {
+        TargetPlatform.linux => await Process.run('xdg-open', [normalizedUrl]),
+        TargetPlatform.macOS => await Process.run('open', [normalizedUrl]),
+        TargetPlatform.windows => await Process.run('rundll32', [
+          'url.dll,FileProtocolHandler',
+          normalizedUrl,
+        ]),
+        _ => throw const Failure(
+          FailureCode.unsupportedCapability,
+          '当前环境不支持直接打开外部浏览器',
+        ),
+      };
+      if (result.exitCode != 0) {
+        throw const Failure(FailureCode.unsupportedCapability, '无法调起系统浏览器');
+      }
+    } on Failure {
+      rethrow;
+    } catch (_) {
+      throw const Failure(FailureCode.unsupportedCapability, '无法调起系统浏览器');
     }
   }
 
