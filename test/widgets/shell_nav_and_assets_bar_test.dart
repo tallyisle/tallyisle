@@ -111,17 +111,29 @@ void main() {
       await tester.tap(find.byType(BackButton));
       await settle(tester);
 
-      // Scroll down to verify version string '当前版本 · 0.1.0.rc' and zero '开发版本'.
+      // Compact brand header card & grouped borderless section headers render cleanly without legacy footer tiles.
+      expect(find.byKey(const Key('me-brand-card')), findsOneWidget);
+      expect(find.text('帐屿 · TallyIsle'), findsOneWidget);
+      expect(find.text('基础管理'), findsOneWidget);
+      expect(find.text('当前版本 · $appDisplayVersion'), findsNothing);
+      expect(find.text('开源许可'), findsNothing);
+      expect(find.text('开发版本'), findsNothing);
+      expect(find.text('支持一羽记账备份迁入、微信/支付宝及第三方账单扩展'), findsNothing);
+
+      // Tapping compact brand header card navigates directly to AboutHelpPage.
+      await tester.tap(find.byKey(const Key('me-brand-card')));
+      await settle(tester);
+      expect(find.text('版本 0.1.0.rc'), findsOneWidget);
+      await tester.tap(find.byType(BackButton));
+      await settle(tester);
+
+      // Scroll down to me-about and verify AboutHelpPage shows '版本 0.1.0.rc' badge.
       await tester.scrollUntilVisible(
-        find.text('当前版本 · $appDisplayVersion'),
+        find.byKey(const Key('me-about')),
         240,
         scrollable: find.byType(Scrollable).first,
       );
       await tester.pump();
-      expect(find.text('当前版本 · 0.1.0.rc'), findsOneWidget);
-      expect(find.text('开发版本'), findsNothing);
-
-      // Open AboutHelpPage and verify '版本 0.1.0.rc' badge.
       await tester.tap(find.byKey(const Key('me-about')));
       await settle(tester);
       expect(find.text('版本 0.1.0.rc'), findsOneWidget);

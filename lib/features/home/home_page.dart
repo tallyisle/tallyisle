@@ -8,6 +8,7 @@ import '../../domain/model/codes.dart';
 import '../../domain/rules/app_settings_rules.dart';
 import '../../domain/rules/asset_overview.dart';
 import '../../domain/rules/income_expense.dart';
+import '../budget/budget_providers.dart' show budgetOffsetProvider;
 import '../budget/budget_widgets.dart';
 import '../common/catalog_icons.dart';
 import '../common/common.dart';
@@ -189,8 +190,12 @@ class _HomeBody extends ConsumerWidget {
         if (settings.showHomeBudgetCard && ref.watch(periodOffsetProvider) == 0)
           SliverToBoxAdapter(
             child: BudgetSummaryCard(
+              fixedOffset: 0,
               hideWhenEmpty: true,
-              onTap: () => context.push('/budget'),
+              onTap: () {
+                ref.read(budgetOffsetProvider.notifier).reset();
+                context.push('/budget');
+              },
             ),
           ),
         ...switch (records) {

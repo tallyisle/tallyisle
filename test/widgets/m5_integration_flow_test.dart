@@ -204,18 +204,8 @@ void main() {
         expect(find.text('更多'), findsWidgets);
       }
 
-      await tester.scrollUntilVisible(
-        find.text('当前版本 · 0.1.0.rc'),
-        200,
-        scrollable: find.byType(Scrollable).first,
-      );
-      await _settle(tester);
-      expect(
-        find.text(
-          '数据保存在本机，可选配置私有 WebDAV / S3 云同步与备份；已支持核心记账、资产与多币种（含可选在线汇率）、统计预算、计划提醒、数据迁移备份，以及常用工具、安全锁与桌面/自动记账联动。',
-        ),
-        findsOneWidget,
-      );
+      expect(find.text('当前版本 · 0.1.0.rc'), findsNothing);
+      expect(find.text('开源许可'), findsNothing);
 
       // Legacy deep link `/import/penny` lands cleanly on unified MigrationPage.
       await tester.scrollUntilVisible(

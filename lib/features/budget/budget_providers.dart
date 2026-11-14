@@ -38,29 +38,55 @@ final budgetOffsetProvider = NotifierProvider<BudgetOffsetNotifier, int>(
   BudgetOffsetNotifier.new,
 );
 
+final budgetPeriodForOffsetProvider = FutureProvider.family<BillingPeriod, int>(
+  (ref, offset) async {
+    final book = await ref.watch(currentBookProvider.future);
+    final startDay = book?.startDay ?? 1;
+    final mode = await ref.watch(budgetModeProvider.future);
+    final now = DateTime.now();
+    if (mode == BudgetMode.yearly) {
+      final currentYearPeriod = BillingPeriod.containingYear(now, startDay);
+      return BillingPeriod.year(currentYearPeriod.year + offset, startDay);
+    } else {
+      final currentMonthPeriod = BillingPeriod.containing(now, startDay);
+      return BillingPeriod.starting(
+        currentMonthPeriod.year,
+        currentMonthPeriod.month + offset,
+        startDay,
+      );
+    }
+  },
+);
+
 final budgetPeriodProvider = FutureProvider<BillingPeriod>((ref) async {
-  final book = await ref.watch(currentBookProvider.future);
-  final startDay = book?.startDay ?? 1;
-  final mode = (await ref.watch(budgetModeProvider.future));
   final offset = ref.watch(budgetOffsetProvider);
-  final now = DateTime.now();
-  if (mode == BudgetMode.yearly) {
-    final currentYearPeriod = BillingPeriod.containingYear(now, startDay);
-    return BillingPeriod.year(currentYearPeriod.year + offset, startDay);
-  } else {
-    final currentMonthPeriod = BillingPeriod.containing(now, startDay);
-    return BillingPeriod.starting(
-      currentMonthPeriod.year,
-      currentMonthPeriod.month + offset,
-      startDay,
-    );
-  }
+  return ref.watch(budgetPeriodForOffsetProvider(offset).future);
+});
+
+final budgetSectionForOffsetProvider = FutureProvider.family<String, int>((
+  ref,
+  offset,
+) async {
+  final mode = await ref.watch(budgetModeProvider.future);
+  final period = await ref.watch(budgetPeriodForOffsetProvider(offset).future);
+  return mode.sectionFor(period);
 });
 
 final budgetSectionProvider = FutureProvider<String>((ref) async {
-  final mode = await ref.watch(budgetModeProvider.future);
-  final period = await ref.watch(budgetPeriodProvider.future);
-  return mode.sectionFor(period);
+  final offset = ref.watch(budgetOffsetProvider);
+  return ref.watch(budgetSectionForOffsetProvider(offset).future);
+});
+
+final budgetsForOffsetProvider = StreamProvider.family<List<Budget>, int>((
+  ref,
+  offset,
+) async* {
+  final q = await ref.watch(budgetQueriesProvider.future);
+  final bookId = await ref.watch(currentBookIdProvider.future);
+  final section = await ref.watch(
+    budgetSectionForOffsetProvider(offset).future,
+  );
+  yield* q.watchBudgets(bookId, section);
 });
 
 final currentBudgetsProvider = StreamProvider<List<Budget>>((ref) async* {
@@ -69,6 +95,16 @@ final currentBudgetsProvider = StreamProvider<List<Budget>>((ref) async* {
   final section = await ref.watch(budgetSectionProvider.future);
   yield* q.watchBudgets(bookId, section);
 });
+
+final budgetPeriodRecordsForOffsetProvider =
+    StreamProvider.family<List<LedgerRecord>, int>((ref, offset) async* {
+      final q = await ref.watch(budgetQueriesProvider.future);
+      final bookId = await ref.watch(currentBookIdProvider.future);
+      final period = await ref.watch(
+        budgetPeriodForOffsetProvider(offset).future,
+      );
+      yield* q.watchBudgetPeriodRecords(bookId, period.startMs, period.endMs);
+    });
 
 final budgetPeriodRecordsProvider = StreamProvider<List<LedgerRecord>>((
   ref,
@@ -115,127 +151,141 @@ final class BudgetOverview {
   final List<CategoryBudgetDetail> savingCategoryBudgets;
 }
 
+final budgetOverviewForOffsetProvider =
+    FutureProvider.family<BudgetOverview, int>((ref, offset) async {
+      final mode = await ref.watch(budgetModeProvider.future);
+      final period = await ref.watch(
+        budgetPeriodForOffsetProvider(offset).future,
+      );
+      final section = await ref.watch(
+        budgetSectionForOffsetProvider(offset).future,
+      );
+      final bookId = await ref.watch(currentBookIdProvider.future);
+      final budgets = await ref.watch(budgetsForOffsetProvider(offset).future);
+      final records = await ref.watch(
+        budgetPeriodRecordsForOffsetProvider(offset).future,
+      );
+      final categories = await ref.watch(categoriesProvider(bookId).future);
+
+      final categoryNodeList = categories
+          .map(
+            (c) => BudgetCategoryNode(
+              id: c.id,
+              name: c.name,
+              icon: c.icon,
+              type: c.type,
+              parentCatId: c.parentCatId,
+            ),
+          )
+          .toList();
+
+      final categoryMap = {for (final c in categories) c.id: c};
+
+      final inputs = records
+          .map(
+            (r) => BudgetRecordInput(
+              recordId: r.recordId,
+              recordCatId: r.recordCatId,
+              entry: statEntryOf(r),
+            ),
+          )
+          .toList();
+
+      // 1. Total budget
+      final totalBudget = budgets
+          .where(
+            (b) => b.budgetType == BudgetTypeCode.total && b.recordCatId == -1,
+          )
+          .firstOrNull;
+
+      final totalUsage = totalBudget != null
+          ? computeTotalBudgetUsage(
+              amountMinor: totalBudget.amountMinor,
+              budgetId: totalBudget.id,
+              records: inputs,
+            )
+          : null;
+
+      // 2. Expense category budgets
+      final expenseCategoryBudgets = <CategoryBudgetDetail>[];
+      final savingCategoryBudgets = <CategoryBudgetDetail>[];
+
+      for (final b in budgets) {
+        if (b.budgetType == BudgetTypeCode.expenseCategory) {
+          final cat = categoryMap[b.recordCatId];
+          if (cat != null) {
+            final node = BudgetCategoryNode(
+              id: cat.id,
+              name: cat.name,
+              icon: cat.icon,
+              type: cat.type,
+              parentCatId: cat.parentCatId,
+            );
+            final usage = computeCategoryBudgetUsage(
+              category: node,
+              allCategories: categoryNodeList,
+              amountMinor: b.amountMinor,
+              budgetId: b.id,
+              budgetType: b.budgetType,
+              records: inputs,
+            );
+            expenseCategoryBudgets.add(
+              CategoryBudgetDetail(
+                budget: b,
+                category: cat,
+                usage: usage,
+                parentCategory: cat.parentCatId != -1
+                    ? categoryMap[cat.parentCatId]
+                    : null,
+              ),
+            );
+          }
+        } else if (b.budgetType == BudgetTypeCode.savingCategory) {
+          final cat = categoryMap[b.recordCatId];
+          if (cat != null) {
+            final node = BudgetCategoryNode(
+              id: cat.id,
+              name: cat.name,
+              icon: cat.icon,
+              type: cat.type,
+              parentCatId: cat.parentCatId,
+            );
+            final usage = computeCategoryBudgetUsage(
+              category: node,
+              allCategories: categoryNodeList,
+              amountMinor: b.amountMinor,
+              budgetId: b.id,
+              budgetType: b.budgetType,
+              records: inputs,
+            );
+            savingCategoryBudgets.add(
+              CategoryBudgetDetail(
+                budget: b,
+                category: cat,
+                usage: usage,
+                parentCategory: cat.parentCatId != -1
+                    ? categoryMap[cat.parentCatId]
+                    : null,
+              ),
+            );
+          }
+        }
+      }
+
+      return BudgetOverview(
+        mode: mode,
+        period: period,
+        section: section,
+        totalBudget: totalBudget,
+        totalUsage: totalUsage,
+        expenseCategoryBudgets: expenseCategoryBudgets,
+        savingCategoryBudgets: savingCategoryBudgets,
+      );
+    });
+
 final budgetOverviewProvider = FutureProvider<BudgetOverview>((ref) async {
-  final mode = await ref.watch(budgetModeProvider.future);
-  final period = await ref.watch(budgetPeriodProvider.future);
-  final section = await ref.watch(budgetSectionProvider.future);
-  final bookId = await ref.watch(currentBookIdProvider.future);
-  final budgets = await ref.watch(currentBudgetsProvider.future);
-  final records = await ref.watch(budgetPeriodRecordsProvider.future);
-  final categories = await ref.watch(categoriesProvider(bookId).future);
-
-  final categoryNodeList = categories
-      .map(
-        (c) => BudgetCategoryNode(
-          id: c.id,
-          name: c.name,
-          icon: c.icon,
-          type: c.type,
-          parentCatId: c.parentCatId,
-        ),
-      )
-      .toList();
-
-  final categoryMap = {for (final c in categories) c.id: c};
-
-  final inputs = records
-      .map(
-        (r) => BudgetRecordInput(
-          recordId: r.recordId,
-          recordCatId: r.recordCatId,
-          entry: statEntryOf(r),
-        ),
-      )
-      .toList();
-
-  // 1. Total budget
-  final totalBudget = budgets
-      .where((b) => b.budgetType == BudgetTypeCode.total && b.recordCatId == -1)
-      .firstOrNull;
-
-  final totalUsage = totalBudget != null
-      ? computeTotalBudgetUsage(
-          amountMinor: totalBudget.amountMinor,
-          budgetId: totalBudget.id,
-          records: inputs,
-        )
-      : null;
-
-  // 2. Expense category budgets
-  final expenseCategoryBudgets = <CategoryBudgetDetail>[];
-  final savingCategoryBudgets = <CategoryBudgetDetail>[];
-
-  for (final b in budgets) {
-    if (b.budgetType == BudgetTypeCode.expenseCategory) {
-      final cat = categoryMap[b.recordCatId];
-      if (cat != null) {
-        final node = BudgetCategoryNode(
-          id: cat.id,
-          name: cat.name,
-          icon: cat.icon,
-          type: cat.type,
-          parentCatId: cat.parentCatId,
-        );
-        final usage = computeCategoryBudgetUsage(
-          category: node,
-          allCategories: categoryNodeList,
-          amountMinor: b.amountMinor,
-          budgetId: b.id,
-          budgetType: b.budgetType,
-          records: inputs,
-        );
-        expenseCategoryBudgets.add(
-          CategoryBudgetDetail(
-            budget: b,
-            category: cat,
-            usage: usage,
-            parentCategory: cat.parentCatId != -1
-                ? categoryMap[cat.parentCatId]
-                : null,
-          ),
-        );
-      }
-    } else if (b.budgetType == BudgetTypeCode.savingCategory) {
-      final cat = categoryMap[b.recordCatId];
-      if (cat != null) {
-        final node = BudgetCategoryNode(
-          id: cat.id,
-          name: cat.name,
-          icon: cat.icon,
-          type: cat.type,
-          parentCatId: cat.parentCatId,
-        );
-        final usage = computeCategoryBudgetUsage(
-          category: node,
-          allCategories: categoryNodeList,
-          amountMinor: b.amountMinor,
-          budgetId: b.id,
-          budgetType: b.budgetType,
-          records: inputs,
-        );
-        savingCategoryBudgets.add(
-          CategoryBudgetDetail(
-            budget: b,
-            category: cat,
-            usage: usage,
-            parentCategory: cat.parentCatId != -1
-                ? categoryMap[cat.parentCatId]
-                : null,
-          ),
-        );
-      }
-    }
-  }
-
-  return BudgetOverview(
-    mode: mode,
-    period: period,
-    section: section,
-    totalBudget: totalBudget,
-    totalUsage: totalUsage,
-    expenseCategoryBudgets: expenseCategoryBudgets,
-    savingCategoryBudgets: savingCategoryBudgets,
-  );
+  final offset = ref.watch(budgetOffsetProvider);
+  return ref.watch(budgetOverviewForOffsetProvider(offset).future);
 });
 
 /// Query parameter for real-time record budget hint resolution.

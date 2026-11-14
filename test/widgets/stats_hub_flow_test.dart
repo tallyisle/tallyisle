@@ -1,3 +1,4 @@
+import 'package:drift/drift.dart' show driftRuntimeOptions;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -7,6 +8,8 @@ import 'package:tallyisle/app/providers.dart';
 import 'package:tallyisle/data/db/database.dart';
 
 void main() {
+  driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
+
   testWidgets(
     'M3 end-to-end integration: Stats hub, budget setup, Home card, RecordEditor hint, Category/Annual/Trend navigation & AssetDetail trend menu',
     (tester) async {
@@ -150,6 +153,125 @@ void main() {
       await tester.tap(find.byKey(const Key('menu-trend')));
       await settle();
       expect(find.text('现金 趋势'), findsOneWidget);
+
+      // Cleanup drift streams
+      await tester.pumpWidget(const SizedBox());
+      await settle();
+      await tester.pump(const Duration(seconds: 1));
+    },
+  );
+
+  testWidgets(
+    'Stats hub inline budget month switching, BudgetPage sync, Home fixedOffset isolation, and MePage narrow-screen zero-overflow',
+    (tester) async {
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      final db = AppDatabase(NativeDatabase.memory());
+      await tester.pumpWidget(
+        ProviderScope(
+          retry: (_, _) => null,
+          overrides: [databaseProvider.overrideWith((ref) async => db)],
+          child: const TallyIsleApp(),
+        ),
+      );
+
+      Future<void> settle() async {
+        for (var i = 0; i < 12; i++) {
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 20)),
+          );
+          await tester.pump();
+        }
+      }
+
+      Finder statsScrollable() => find.descendant(
+        of: find.byKey(const Key('stats-hub-list')),
+        matching: find.byType(Scrollable),
+      );
+
+      await settle();
+
+      // 1. Open "统计" Tab, scroll to BudgetSummaryCard, set current-month total budget = 2000
+      await tester.tap(find.text('统计'));
+      await settle();
+      await tester.scrollUntilVisible(
+        find.byKey(const Key('budget_summary_card')),
+        200,
+        scrollable: statsScrollable(),
+      );
+      await settle();
+
+      await tester.tap(find.text('去设置'));
+      await settle();
+      expect(find.byKey(const Key('budget_page')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('set_total_budget_button')));
+      await settle();
+      await tester.enterText(
+        find.byKey(const Key('total_budget_amount_input')),
+        '2000',
+      );
+      await tester.tap(find.byKey(const Key('save_total_budget_button')));
+      await settle();
+      expect(find.text('¥2000.00'), findsOneWidget);
+      await tester.tap(find.byType(BackButton));
+      await settle();
+
+      // 2. Step to previous month directly on StatsPage without entering BudgetPage
+      expect(find.byKey(const Key('budget_card_period_reset')), findsNothing);
+      await tester.tap(find.byKey(const Key('budget_card_period_prev')));
+      await settle();
+      expect(find.byKey(const Key('stats-hub-page')), findsOneWidget);
+      expect(find.byKey(const Key('budget_card_period_reset')), findsOneWidget);
+      expect(find.text('回本月'), findsOneWidget);
+      expect(find.text('该期未设置预算'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+
+      // Verify MePage renders with zero overflow even at 320x640 and 360x640
+      await tester.tap(find.text('更多'));
+      await settle();
+      expect(find.byKey(const Key('me-brand-card')), findsOneWidget);
+      for (final w in <double>[320, 360]) {
+        tester.view.physicalSize = Size(w, 640);
+        tester.view.devicePixelRatio = 1.0;
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+      }
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+      await tester.pumpAndSettle();
+
+      // 3. Switch to "明细" (HomePage): Home budget card MUST stay anchored to current month (¥2000.00)!
+      await tester.tap(find.text('明细'));
+      await settle();
+      expect(find.byKey(const Key('budget_summary_card')), findsOneWidget);
+      expect(find.text('¥2000.00'), findsOneWidget);
+      expect(find.byKey(const Key('budget_card_period_prev')), findsNothing);
+
+      // 4. Switch back to "统计" Tab: still on previous month, tap '去设置' -> opens BudgetPage on previous month
+      await tester.tap(find.text('统计'));
+      await settle();
+      await tester.scrollUntilVisible(
+        find.byKey(const Key('budget_summary_card')),
+        200,
+        scrollable: statsScrollable(),
+      );
+      await settle();
+      expect(find.text('回本月'), findsOneWidget);
+      await tester.tap(find.text('去设置'));
+      await settle();
+      expect(find.byKey(const Key('budget_page')), findsOneWidget);
+      expect(find.text('未设置当期预算'), findsOneWidget);
+      await tester.tap(find.byType(BackButton));
+      await settle();
+
+      // 5. Tap '回本月' directly on StatsPage -> immediately restores current month ¥2000.00!
+      await tester.tap(find.byKey(const Key('budget_card_period_reset')));
+      await settle();
+      expect(find.byKey(const Key('budget_card_period_reset')), findsNothing);
+      expect(find.text('¥2000.00'), findsOneWidget);
 
       // Cleanup drift streams
       await tester.pumpWidget(const SizedBox());

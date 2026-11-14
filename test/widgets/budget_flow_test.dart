@@ -1,4 +1,4 @@
-import 'package:drift/drift.dart' show Value;
+import 'package:drift/drift.dart' show Value, driftRuntimeOptions;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -14,6 +14,8 @@ import 'package:tallyisle/features/budget/budget_page.dart';
 import 'package:tallyisle/features/budget/budget_widgets.dart';
 
 void main() {
+  driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
+
   Widget buildApp(Widget child, AppDatabase db) => ProviderScope(
     retry: (_, _) => null,
     overrides: [databaseProvider.overrideWith((ref) async => db)],
@@ -271,4 +273,126 @@ void main() {
     await settle(tester);
     await tester.pump(const Duration(seconds: 1));
   });
+
+  testWidgets(
+    'BudgetSummaryCard inline period controls step months/years, reset to current period without firing onTap, and do not prematurely copy future budgets',
+    (tester) async {
+      final db = AppDatabase(NativeDatabase.memory());
+      final service = BudgetService(db);
+      final now = DateTime.now();
+      final curPeriod = BillingPeriod.containing(now, 1);
+      final prevPeriod = BillingPeriod.starting(
+        curPeriod.year,
+        curPeriod.month - 1,
+        1,
+      );
+      final nextPeriod = BillingPeriod.starting(
+        curPeriod.year,
+        curPeriod.month + 1,
+        1,
+      );
+
+      // Current period has 2500.00 total budget with autoCopy=true; previous & next have none.
+      await service.upsertTotalBudget(
+        commandId: 'cmd-inline-cur',
+        bookId: 1,
+        section: curPeriod.monthlySection,
+        amountMinor: BigInt.from(250000),
+        autoCopy: true,
+        forward: true,
+      );
+
+      var cardTappedCount = 0;
+      await tester.pumpWidget(
+        buildApp(
+          Scaffold(
+            body: BudgetSummaryCard(
+              enablePeriodControls: true,
+              onTap: () => cardTappedCount++,
+            ),
+          ),
+          db,
+        ),
+      );
+      await settle(tester);
+
+      // Offset == 0: reset pill is hidden, arrows are visible, shows current month total budget.
+      expect(find.byKey(const Key('budget_card_period_prev')), findsOneWidget);
+      expect(find.byKey(const Key('budget_card_period_next')), findsOneWidget);
+      expect(find.byKey(const Key('budget_card_period_reset')), findsNothing);
+      expect(
+        find.text('${curPeriod.year}年${curPeriod.month}月总预算'),
+        findsOneWidget,
+      );
+      expect(find.text('¥2500.00'), findsOneWidget);
+
+      // Step to previous month (empty): arrows remain, reset pill '回本月' appears, onTap NOT fired.
+      await tester.tap(find.byKey(const Key('budget_card_period_prev')));
+      await settle(tester);
+      expect(cardTappedCount, 0);
+      expect(find.byKey(const Key('budget_card_period_prev')), findsOneWidget);
+      expect(find.byKey(const Key('budget_card_period_next')), findsOneWidget);
+      expect(find.byKey(const Key('budget_card_period_reset')), findsOneWidget);
+      expect(find.text('回本月'), findsOneWidget);
+      expect(
+        find.text('${prevPeriod.year}年${prevPeriod.month}月预算'),
+        findsOneWidget,
+      );
+      expect(find.text('该期未设置预算'), findsOneWidget);
+
+      // Verify zero overflow on narrow 320dp and 360dp viewports in both empty & populated states.
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+      for (final w in <double>[320, 360]) {
+        tester.view.physicalSize = Size(w, 640);
+        tester.view.devicePixelRatio = 1.0;
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+      }
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+      await tester.pumpAndSettle();
+
+      // Tap '回本月' -> returns immediately to current month, hides reset pill, onTap NOT fired.
+      await tester.tap(find.byKey(const Key('budget_card_period_reset')));
+      await settle(tester);
+      expect(cardTappedCount, 0);
+      expect(find.byKey(const Key('budget_card_period_reset')), findsNothing);
+      expect(find.text('¥2500.00'), findsOneWidget);
+
+      // Step forward to next month (offset == +1): must NOT materialize auto-carryover into next month!
+      await tester.tap(find.byKey(const Key('budget_card_period_next')));
+      await settle(tester);
+      expect(cardTappedCount, 0);
+      expect(
+        find.text('${nextPeriod.year}年${nextPeriod.month}月预算'),
+        findsOneWidget,
+      );
+      expect(find.text('该期未设置预算'), findsOneWidget);
+
+      // Switch to yearly mode -> reset pill shows '回今年'.
+      await service.setBudgetMode(
+        commandId: 'cmd-inline-yearly',
+        bookId: 1,
+        mode: BudgetMode.yearly,
+      );
+      await settle(tester);
+      expect(find.text('回今年'), findsOneWidget);
+
+      // Reset to current year -> hides '回今年'.
+      await tester.tap(find.byKey(const Key('budget_card_period_reset')));
+      await settle(tester);
+      expect(find.byKey(const Key('budget_card_period_reset')), findsNothing);
+
+      // Tapping the card body itself still fires onTap.
+      await tester.tap(find.byKey(const Key('budget_summary_card')));
+      expect(cardTappedCount, 1);
+
+      await tester.pumpWidget(const SizedBox());
+      await settle(tester);
+      await tester.pump(const Duration(seconds: 1));
+    },
+  );
 }

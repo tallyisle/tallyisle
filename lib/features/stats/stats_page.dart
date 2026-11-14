@@ -95,7 +95,10 @@ class _StatsPageState extends ConsumerState<StatsPage> {
               onTapTag: (item) => context.push('/stats/tag/${item.tagId}'),
             ),
           ),
-          BudgetSummaryCard(onTap: () => context.push('/budget')),
+          BudgetSummaryCard(
+            enablePeriodControls: true,
+            onTap: () => context.push('/budget'),
+          ),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
             child: AssetTrendOverviewCard(

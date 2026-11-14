@@ -333,7 +333,7 @@ void main() {
       );
       await settle(tester);
       expect(find.text('第三方数据导入'), findsOneWidget);
-      expect(find.text('支持一羽记账备份迁入、微信/支付宝及第三方账单扩展'), findsOneWidget);
+      expect(find.text('支持一羽记账备份迁入、微信/支付宝及第三方账单扩展'), findsNothing);
 
       // Navigate /me -> /migration
       await tester.tap(find.byKey(const Key('me-migration')));

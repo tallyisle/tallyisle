@@ -2,9 +2,22 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../app/app.dart' show appDisplayVersion, brandName;
 import '../automation/automation_providers.dart'
     show autoBillDraftCountProvider;
+
+final class _MeMenuEntry {
+  const _MeMenuEntry({
+    required this.key,
+    required this.leading,
+    required this.title,
+    required this.route,
+  });
+
+  final Key key;
+  final Widget leading;
+  final String title;
+  final String route;
+}
 
 class MePage extends ConsumerWidget {
   const MePage({super.key});
@@ -12,309 +25,375 @@ class MePage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
     final draftCount = ref.watch(autoBillDraftCountProvider);
-    Widget sectionHeader(String text) => Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-      child: Text(
-        text,
-        style: theme.textTheme.labelLarge?.copyWith(
-          color: theme.colorScheme.primary,
-        ),
-      ),
-    );
+
+    final sectionCardColor = isDark
+        ? scheme.surfaceContainerLow
+        : Color.lerp(
+            scheme.surfaceContainerLow,
+            scheme.surfaceContainer,
+            0.55,
+          )!;
+
+    Widget buildSection(String title, List<_MeMenuEntry> entries) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 14, 20, 6),
+            child: Text(
+              title,
+              style: theme.textTheme.labelLarge?.copyWith(
+                color: scheme.primary,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Material(
+              color: sectionCardColor,
+              borderRadius: BorderRadius.circular(16),
+              clipBehavior: Clip.antiAlias,
+              child: Column(
+                children: [
+                  for (var i = 0; i < entries.length; i++) ...[
+                    if (i > 0)
+                      Divider(
+                        height: 1,
+                        thickness: 0.5,
+                        indent: 52,
+                        endIndent: 16,
+                        color: scheme.outlineVariant.withValues(alpha: 0.35),
+                      ),
+                    ListTile(
+                      key: entries[i].key,
+                      visualDensity: const VisualDensity(vertical: -1),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 1,
+                      ),
+                      iconColor: scheme.onSurfaceVariant,
+                      leading: entries[i].leading,
+                      title: Text(entries[i].title),
+                      trailing: Icon(
+                        Icons.chevron_right_rounded,
+                        size: 20,
+                        color: scheme.onSurfaceVariant,
+                      ),
+                      onTap: () => context.push(entries[i].route),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ],
+      );
+    }
 
     return Scaffold(
-      appBar: AppBar(title: const Text('更多')),
+      appBar: AppBar(title: const Text('更多'), scrolledUnderElevation: 0),
       body: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(0, 6, 0, 28),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const SizedBox(height: 20),
-            Center(
-              child: Image.asset(
-                'assets/branding/tallyisle-logo-original.png',
-                width: 88,
-                height: 88,
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+              child: Material(
+                key: const Key('me-brand-card'),
+                color: scheme.primaryContainer.withValues(
+                  alpha: isDark ? 0.32 : 0.45,
+                ),
+                borderRadius: BorderRadius.circular(16),
+                clipBehavior: Clip.antiAlias,
+                child: InkWell(
+                  onTap: () => context.push('/about'),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 14,
+                    ),
+                    child: Row(
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(12),
+                          child: Image.asset(
+                            'assets/branding/tallyisle-logo-original.png',
+                            width: 44,
+                            height: 44,
+                            errorBuilder: (_, _, _) => Container(
+                              width: 44,
+                              height: 44,
+                              color: scheme.primaryContainer,
+                              alignment: Alignment.center,
+                              child: Icon(
+                                Icons.account_balance_wallet_outlined,
+                                size: 24,
+                                color: scheme.onPrimaryContainer,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                '帐屿 · TallyIsle',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.titleMedium?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                '本地优先 · 精确记账',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: scheme.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Icon(
+                          Icons.chevron_right_rounded,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               ),
             ),
-            const SizedBox(height: 10),
-            Center(
-              child: Text(
-                brandName(Localizations.localeOf(context)),
-                style: theme.textTheme.headlineSmall,
+            buildSection('基础管理', const [
+              _MeMenuEntry(
+                key: Key('me-books'),
+                leading: Icon(Icons.book_outlined),
+                title: '账本管理',
+                route: '/books',
               ),
-            ),
-            const SizedBox(height: 16),
-            ListTile(
-              key: const Key('me-books'),
-              leading: const Icon(Icons.book_outlined),
-              title: const Text('账本管理'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => context.push('/books'),
-            ),
-            ListTile(
-              key: const Key('me-categories'),
-              leading: const Icon(Icons.category_outlined),
-              title: const Text('分类管理'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => context.push('/categories'),
-            ),
-            ListTile(
-              key: const Key('me-tags'),
-              leading: const Icon(Icons.label_outlined),
-              title: const Text('标签管理'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => context.push('/tags'),
-            ),
-            ListTile(
-              key: const Key('me-currencies'),
-              leading: const Icon(Icons.currency_exchange),
-              title: const Text('币种与汇率'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => context.push('/currencies'),
-            ),
-            const Divider(),
-            sectionHeader('计划与提醒'),
-            ListTile(
-              key: const Key('me-reimburse'),
-              leading: const Icon(Icons.request_quote_outlined),
-              title: const Text('报销管理'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => context.push('/reimburse'),
-            ),
-            ListTile(
-              key: const Key('me-periodic'),
-              leading: const Icon(Icons.event_repeat_outlined),
-              title: const Text('周期记账'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => context.push('/periodic'),
-            ),
-            ListTile(
-              key: const Key('me-installments'),
-              leading: const Icon(Icons.calendar_view_month_outlined),
-              title: const Text('分期管理'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => context.push('/installments'),
-            ),
-            ListTile(
-              key: const Key('me-debts'),
-              leading: const Icon(Icons.swap_horiz_outlined),
-              title: const Text('借贷管理'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => context.push('/debts'),
-            ),
-            ListTile(
-              key: const Key('me-savings'),
-              leading: const Icon(Icons.savings_outlined),
-              title: const Text('存钱计划'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => context.push('/savings'),
-            ),
-            ListTile(
-              key: const Key('me-deposits'),
-              leading: const Icon(Icons.lock_clock_outlined),
-              title: const Text('定期存款'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => context.push('/deposits'),
-            ),
-            ListTile(
-              key: const Key('me-reminders'),
-              leading: const Icon(Icons.notifications_active_outlined),
-              title: const Text('记账提醒'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => context.push('/reminders'),
-            ),
-            const Divider(),
-            sectionHeader('数据与备份'),
-            ListTile(
-              key: const Key('me-backup'),
-              leading: const Icon(Icons.cloud_sync_outlined),
-              title: const Text('云同步与备份'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => context.push('/backup'),
-            ),
-            ListTile(
-              key: const Key('me-import-csv'),
-              leading: const Icon(Icons.upload_file_outlined),
-              title: const Text('账单导入'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => context.push('/import/csv'),
-            ),
-            ListTile(
-              key: const Key('me-import-batches'),
-              leading: const Icon(Icons.history_edu_outlined),
-              title: const Text('导入批次管理'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => context.push('/import/batches'),
-            ),
-            ListTile(
-              key: const Key('me-export-csv'),
-              leading: const Icon(Icons.download_outlined),
-              title: const Text('账单导出'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => context.push('/export/csv'),
-            ),
-            ListTile(
-              key: const Key('me-migration'),
-              leading: const Icon(Icons.phonelink_setup_outlined),
-              title: const Text('第三方数据导入'),
-              subtitle: const Text('支持一羽记账备份迁入、微信/支付宝及第三方账单扩展'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => context.push('/migration'),
-            ),
-            const Divider(),
-            sectionHeader('常用工具'),
-            ListTile(
-              key: const Key('me-wishes'),
-              leading: const Icon(Icons.auto_awesome_outlined),
-              title: const Text('心愿单'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => context.push('/wishes'),
-            ),
-            ListTile(
-              key: const Key('me-notes'),
-              leading: const Icon(Icons.sticky_note_2_outlined),
-              title: const Text('便签与回收站'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => context.push('/notes'),
-            ),
-            ListTile(
-              key: const Key('me-templates'),
-              leading: const Icon(Icons.bookmarks_outlined),
-              title: const Text('账单模板'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => context.push('/templates'),
-            ),
-            ListTile(
-              key: const Key('me-remarks'),
-              leading: const Icon(Icons.comment_outlined),
-              title: const Text('常用备注'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => context.push('/remarks'),
-            ),
-            ListTile(
-              key: const Key('me-bank-cards'),
-              leading: const Icon(Icons.credit_card_outlined),
-              title: const Text('银行卡备忘'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => context.push('/bank-cards'),
-            ),
-            ListTile(
-              key: const Key('me-batch-records'),
-              leading: const Icon(Icons.checklist_rtl_outlined),
-              title: const Text('账单批量操作'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => context.push('/records/batch'),
-            ),
-            ListTile(
-              key: const Key('me-category-transfer'),
-              leading: const Icon(Icons.import_export_outlined),
-              title: const Text('分类导入导出与迁移'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => context.push('/categories/transfer'),
-            ),
-            ListTile(
-              key: const Key('me-attachments'),
-              leading: const Icon(Icons.photo_library_outlined),
-              title: const Text('账单图片库'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => context.push('/attachments'),
-            ),
-            ListTile(
-              key: const Key('me-stat-stories'),
-              leading: const Icon(Icons.auto_stories_outlined),
-              title: const Text('统计故事'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => context.push('/stat-stories'),
-            ),
-            const Divider(),
-            sectionHeader('智能与外部联动'),
-            ListTile(
-              key: const Key('me-auto-bill'),
-              leading: Badge(
-                isLabelVisible: draftCount > 0,
-                label: Text('$draftCount'),
-                child: const Icon(Icons.bolt_outlined),
+              _MeMenuEntry(
+                key: Key('me-categories'),
+                leading: Icon(Icons.category_outlined),
+                title: '分类管理',
+                route: '/categories',
               ),
-              title: const Text('自动记账与草稿箱'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => context.push('/automation/auto-bill'),
-            ),
-            ListTile(
-              key: const Key('me-ocr'),
-              leading: const Icon(Icons.document_scanner_outlined),
-              title: const Text('账单截图识图'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => context.push('/automation/ocr'),
-            ),
-            ListTile(
-              key: const Key('me-widgets'),
-              leading: const Icon(Icons.widgets_outlined),
-              title: const Text('桌面小组件'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => context.push('/automation/widgets'),
-            ),
-            ListTile(
-              key: const Key('me-url-scheme'),
-              leading: const Icon(Icons.link_outlined),
-              title: const Text('外部快捷链接 (URL Scheme)'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => context.push('/automation/url-scheme'),
-            ),
-            const Divider(),
-            sectionHeader('安全与系统设置'),
-            ListTile(
-              key: const Key('me-app-lock'),
-              leading: const Icon(Icons.lock_outline),
-              title: const Text('应用安全锁'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => context.push('/security/app-lock'),
-            ),
-            ListTile(
-              key: const Key('me-settings'),
-              leading: const Icon(Icons.tune_outlined),
-              title: const Text('系统与首页设置'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => context.push('/settings'),
-            ),
-            ListTile(
-              key: const Key('me-diy-toolbar'),
-              leading: const Icon(Icons.dashboard_customize_outlined),
-              title: const Text('记账工具栏自定义'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => context.push('/settings/diy-toolbar'),
-            ),
-            ListTile(
-              key: const Key('me-data-health'),
-              leading: const Icon(Icons.health_and_safety_outlined),
-              title: const Text('数据体检'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => context.push('/settings/data-health'),
-            ),
-            ListTile(
-              key: const Key('me-about'),
-              leading: const Icon(Icons.help_outline),
-              title: const Text('帮助与关于'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => context.push('/about'),
-            ),
-            const Divider(),
-            const ListTile(
-              leading: Icon(Icons.info_outline),
-              title: Text('当前版本 · $appDisplayVersion'),
-              subtitle: Text(
-                '数据保存在本机，可选配置私有 WebDAV / S3 云同步与备份；已支持核心记账、资产与多币种（含可选在线汇率）、统计预算、计划提醒、数据迁移备份，以及常用工具、安全锁与桌面/自动记账联动。',
+              _MeMenuEntry(
+                key: Key('me-tags'),
+                leading: Icon(Icons.label_outlined),
+                title: '标签管理',
+                route: '/tags',
               ),
-            ),
-            ListTile(
-              leading: const Icon(Icons.description_outlined),
-              title: const Text('开源许可'),
-              onTap: () => showLicensePage(
-                context: context,
-                applicationName: brandName(Localizations.localeOf(context)),
-                applicationVersion: appDisplayVersion,
+              _MeMenuEntry(
+                key: Key('me-currencies'),
+                leading: Icon(Icons.currency_exchange),
+                title: '币种与汇率',
+                route: '/currencies',
               ),
-            ),
+            ]),
+            buildSection('计划与提醒', const [
+              _MeMenuEntry(
+                key: Key('me-reimburse'),
+                leading: Icon(Icons.request_quote_outlined),
+                title: '报销管理',
+                route: '/reimburse',
+              ),
+              _MeMenuEntry(
+                key: Key('me-periodic'),
+                leading: Icon(Icons.event_repeat_outlined),
+                title: '周期记账',
+                route: '/periodic',
+              ),
+              _MeMenuEntry(
+                key: Key('me-installments'),
+                leading: Icon(Icons.calendar_view_month_outlined),
+                title: '分期管理',
+                route: '/installments',
+              ),
+              _MeMenuEntry(
+                key: Key('me-debts'),
+                leading: Icon(Icons.swap_horiz_outlined),
+                title: '借贷管理',
+                route: '/debts',
+              ),
+              _MeMenuEntry(
+                key: Key('me-savings'),
+                leading: Icon(Icons.savings_outlined),
+                title: '存钱计划',
+                route: '/savings',
+              ),
+              _MeMenuEntry(
+                key: Key('me-deposits'),
+                leading: Icon(Icons.lock_clock_outlined),
+                title: '定期存款',
+                route: '/deposits',
+              ),
+              _MeMenuEntry(
+                key: Key('me-reminders'),
+                leading: Icon(Icons.notifications_active_outlined),
+                title: '记账提醒',
+                route: '/reminders',
+              ),
+            ]),
+            buildSection('数据与备份', const [
+              _MeMenuEntry(
+                key: Key('me-backup'),
+                leading: Icon(Icons.cloud_sync_outlined),
+                title: '云同步与备份',
+                route: '/backup',
+              ),
+              _MeMenuEntry(
+                key: Key('me-import-csv'),
+                leading: Icon(Icons.upload_file_outlined),
+                title: '账单导入',
+                route: '/import/csv',
+              ),
+              _MeMenuEntry(
+                key: Key('me-import-batches'),
+                leading: Icon(Icons.history_edu_outlined),
+                title: '导入批次管理',
+                route: '/import/batches',
+              ),
+              _MeMenuEntry(
+                key: Key('me-export-csv'),
+                leading: Icon(Icons.download_outlined),
+                title: '账单导出',
+                route: '/export/csv',
+              ),
+              _MeMenuEntry(
+                key: Key('me-migration'),
+                leading: Icon(Icons.phonelink_setup_outlined),
+                title: '第三方数据导入',
+                route: '/migration',
+              ),
+            ]),
+            buildSection('常用工具', const [
+              _MeMenuEntry(
+                key: Key('me-wishes'),
+                leading: Icon(Icons.auto_awesome_outlined),
+                title: '心愿单',
+                route: '/wishes',
+              ),
+              _MeMenuEntry(
+                key: Key('me-notes'),
+                leading: Icon(Icons.sticky_note_2_outlined),
+                title: '便签与回收站',
+                route: '/notes',
+              ),
+              _MeMenuEntry(
+                key: Key('me-templates'),
+                leading: Icon(Icons.bookmarks_outlined),
+                title: '账单模板',
+                route: '/templates',
+              ),
+              _MeMenuEntry(
+                key: Key('me-remarks'),
+                leading: Icon(Icons.comment_outlined),
+                title: '常用备注',
+                route: '/remarks',
+              ),
+              _MeMenuEntry(
+                key: Key('me-bank-cards'),
+                leading: Icon(Icons.credit_card_outlined),
+                title: '银行卡备忘',
+                route: '/bank-cards',
+              ),
+              _MeMenuEntry(
+                key: Key('me-batch-records'),
+                leading: Icon(Icons.checklist_rtl_outlined),
+                title: '账单批量操作',
+                route: '/records/batch',
+              ),
+              _MeMenuEntry(
+                key: Key('me-category-transfer'),
+                leading: Icon(Icons.import_export_outlined),
+                title: '分类导入导出与迁移',
+                route: '/categories/transfer',
+              ),
+              _MeMenuEntry(
+                key: Key('me-attachments'),
+                leading: Icon(Icons.photo_library_outlined),
+                title: '账单图片库',
+                route: '/attachments',
+              ),
+              _MeMenuEntry(
+                key: Key('me-stat-stories'),
+                leading: Icon(Icons.auto_stories_outlined),
+                title: '统计故事',
+                route: '/stat-stories',
+              ),
+            ]),
+            buildSection('智能与外部联动', [
+              _MeMenuEntry(
+                key: const Key('me-auto-bill'),
+                leading: Badge(
+                  isLabelVisible: draftCount > 0,
+                  label: Text('$draftCount'),
+                  child: const Icon(Icons.bolt_outlined),
+                ),
+                title: '自动记账与草稿箱',
+                route: '/automation/auto-bill',
+              ),
+              const _MeMenuEntry(
+                key: Key('me-ocr'),
+                leading: Icon(Icons.document_scanner_outlined),
+                title: '账单截图识图',
+                route: '/automation/ocr',
+              ),
+              const _MeMenuEntry(
+                key: Key('me-widgets'),
+                leading: Icon(Icons.widgets_outlined),
+                title: '桌面小组件',
+                route: '/automation/widgets',
+              ),
+              const _MeMenuEntry(
+                key: Key('me-url-scheme'),
+                leading: Icon(Icons.link_outlined),
+                title: '外部快捷链接 (URL Scheme)',
+                route: '/automation/url-scheme',
+              ),
+            ]),
+            buildSection('安全与系统设置', const [
+              _MeMenuEntry(
+                key: Key('me-app-lock'),
+                leading: Icon(Icons.lock_outline),
+                title: '应用安全锁',
+                route: '/security/app-lock',
+              ),
+              _MeMenuEntry(
+                key: Key('me-settings'),
+                leading: Icon(Icons.tune_outlined),
+                title: '系统与首页设置',
+                route: '/settings',
+              ),
+              _MeMenuEntry(
+                key: Key('me-diy-toolbar'),
+                leading: Icon(Icons.dashboard_customize_outlined),
+                title: '记账工具栏自定义',
+                route: '/settings/diy-toolbar',
+              ),
+              _MeMenuEntry(
+                key: Key('me-data-health'),
+                leading: Icon(Icons.health_and_safety_outlined),
+                title: '数据体检',
+                route: '/settings/data-health',
+              ),
+              _MeMenuEntry(
+                key: Key('me-about'),
+                leading: Icon(Icons.help_outline),
+                title: '帮助与关于',
+                route: '/about',
+              ),
+            ]),
           ],
         ),
       ),
