@@ -32,6 +32,8 @@ flutter:
     - assets/branding/tallyisle-logo-original.png
 
 dependency_overrides:
+  code_assets:
+    path: third_party/ohos_packages/code_assets
   cupertino_ui:
     path: third_party/ohos_packages/cupertino_ui
   material_ui:

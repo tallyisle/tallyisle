@@ -63,6 +63,7 @@ class BiometricProbeResult {
 
 class AuthSession {
   private instance: userAuth.UserAuthInstance | null = null;
+  private callback: userAuth.IAuthCallback | null = null;
   private result: MethodResult;
   private finished: boolean = false;
 
@@ -70,8 +71,12 @@ class AuthSession {
     this.result = result;
   }
 
-  setInstance(instance: userAuth.UserAuthInstance): void {
+  attachInstance(
+    instance: userAuth.UserAuthInstance,
+    callback: userAuth.IAuthCallback
+  ): void {
     this.instance = instance;
+    this.callback = callback;
   }
 
   complete(outcome: string, message: string): boolean {
@@ -81,11 +86,16 @@ class AuthSession {
     this.finished = true;
     if (this.instance != null) {
       try {
-        this.instance.off('result');
+        if (this.callback != null) {
+          this.instance.off('result', this.callback);
+        } else {
+          this.instance.off('result');
+        }
       } catch (_ignoreOff) {
         // Ignore listener detach errors after completion.
       }
       this.instance = null;
+      this.callback = null;
     }
     const payload: Map<string, Any> = new Map<string, Any>();
     payload.set('outcome', outcome);
@@ -107,6 +117,20 @@ class AuthSession {
       }
     }
     this.complete(OUTCOME_CANCELLED, reason);
+  }
+}
+
+class BiometricAuthCallback implements userAuth.IAuthCallback {
+  private bridge: BiometricBridge;
+  private session: AuthSession;
+
+  constructor(bridge: BiometricBridge, session: AuthSession) {
+    this.bridge = bridge;
+    this.session = session;
+  }
+
+  onResult(authResult: userAuth.UserAuthResult): void {
+    this.bridge.onAuthResultCode(this.session, authResult.result);
   }
 }
 
@@ -282,27 +306,23 @@ export class BiometricBridge implements MethodCallHandler {
         authParam,
         widgetParam
       );
-      session.setInstance(authInstance);
+      const authCallback: BiometricAuthCallback = new BiometricAuthCallback(this, session);
+      session.attachInstance(authInstance, authCallback);
 
-      const authCallback: userAuth.IAuthCallback = {
-        onResult: (authResult: userAuth.UserAuthResult): void => {
-          this.handleAuthResultCode(session, authResult.result);
-        },
-      };
       authInstance.on('result', authCallback);
       authInstance.start();
     } catch (err) {
       Log.e(TAG, 'Failed starting UserAuthInstance: ' + JSON.stringify(err));
       const bizErr: BusinessError = err as BusinessError;
       if (bizErr && typeof bizErr.code === 'number') {
-        this.handleAuthResultCode(session, bizErr.code);
+        this.onAuthResultCode(session, bizErr.code);
       } else {
         this.finishSession(session, OUTCOME_UNAVAILABLE, '无法调起系统生物识别，请使用数字密码');
       }
     }
   }
 
-  private handleAuthResultCode(session: AuthSession, code: number): void {
+  onAuthResultCode(session: AuthSession, code: number): void {
     if (code === CODE_SUCCESS) {
       this.finishSession(session, OUTCOME_AUTHENTICATED, '生物识别验证通过');
     } else if (code === CODE_CANCELED_FROM_WIDGET) {

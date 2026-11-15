@@ -54,9 +54,35 @@ function emptyWidgetCountsMap(): Map<string, Any> {
   return counts;
 }
 
+class DeepLinkAckCallback implements MethodResult {
+  private bridge: AutomationBridge;
+  private expectedUri: string;
+
+  constructor(bridge: AutomationBridge, expectedUri: string) {
+    this.bridge = bridge;
+    this.expectedUri = expectedUri;
+  }
+
+  success = (handled: Any): void => {
+    if (handled === true) {
+      this.bridge.acknowledgeDeepLink(this.expectedUri);
+    }
+  };
+
+  error = (_code: string, _msg: string, _details: Any): void => {};
+
+  notImplemented = (): void => {};
+}
+
 export class AutomationBridge implements MethodCallHandler {
   private channel: MethodChannel | null = null;
   private pendingDeepLinkUri: string | null = null;
+
+  acknowledgeDeepLink(uri: string): void {
+    if (this.pendingDeepLinkUri === uri) {
+      this.pendingDeepLinkUri = null;
+    }
+  }
 
   attach(messenger: BinaryMessenger): void {
     this.detach();
@@ -91,15 +117,7 @@ export class AutomationBridge implements MethodCallHandler {
 
     const activeChannel: MethodChannel | null = this.channel;
     if (notifyFlutter && activeChannel != null) {
-      const replyCallback: MethodResult = {
-        success: (handled: Any): void => {
-          if (handled === true && this.pendingDeepLinkUri === matchedUri) {
-            this.pendingDeepLinkUri = null;
-          }
-        },
-        error: (_code: string, _msg: string, _details: Any): void => {},
-        notImplemented: (): void => {},
-      };
+      const replyCallback: DeepLinkAckCallback = new DeepLinkAckCallback(this, matchedUri);
       activeChannel.invokeMethod('onDeepLink', matchedUri, replyCallback);
     }
     return true;

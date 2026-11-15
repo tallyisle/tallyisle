@@ -22,7 +22,7 @@ const DEFAULT_LAUNCH_ROUTE: string = '/record/new';
 const APP_BUNDLE_NAME: string = 'dev.tallyisle.app';
 const APP_ABILITY_NAME: string = 'EntryAbility';
 
-interface PersistedReminderRecord {
+class PersistedReminderRecord {
   id: number;
   hour: number;
   minute: number;
@@ -30,6 +30,44 @@ interface PersistedReminderRecord {
   body: string;
   route: string;
   osReminderId: number;
+
+  constructor(
+    id: number,
+    hour: number,
+    minute: number,
+    title: string,
+    body: string,
+    route: string,
+    osReminderId: number
+  ) {
+    this.id = id;
+    this.hour = hour;
+    this.minute = minute;
+    this.title = title;
+    this.body = body;
+    this.route = route;
+    this.osReminderId = osReminderId;
+  }
+}
+
+class LaunchRouteAckCallback implements MethodResult {
+  private bridge: ReminderBridge;
+  private expectedRoute: string;
+
+  constructor(bridge: ReminderBridge, expectedRoute: string) {
+    this.bridge = bridge;
+    this.expectedRoute = expectedRoute;
+  }
+
+  success = (handled: Any): void => {
+    if (handled === true) {
+      this.bridge.acknowledgeLaunchRoute(this.expectedRoute);
+    }
+  };
+
+  error = (_code: string, _msg: string, _details: Any): void => {};
+
+  notImplemented = (): void => {};
 }
 
 function clampInt(value: number, minVal: number, maxVal: number): number {
@@ -75,15 +113,15 @@ function parseIncomingReminders(rawArg: Any): Array<PersistedReminderRecord> {
           ? rawRoute
           : DEFAULT_LAUNCH_ROUTE;
 
-      const rec: PersistedReminderRecord = {
-        id: Math.trunc(rawId),
-        hour: hour,
-        minute: minute,
-        title: title,
-        body: body,
-        route: route,
-        osReminderId: -1,
-      };
+      const rec: PersistedReminderRecord = new PersistedReminderRecord(
+        Math.trunc(rawId),
+        hour,
+        minute,
+        title,
+        body,
+        route,
+        -1
+      );
       parsed.push(rec);
     }
   }
@@ -97,6 +135,12 @@ export class ReminderBridge implements MethodCallHandler {
 
   constructor(context: common.UIAbilityContext) {
     this.context = context;
+  }
+
+  acknowledgeLaunchRoute(route: string): void {
+    if (this.pendingLaunchRoute === route) {
+      this.pendingLaunchRoute = null;
+    }
   }
 
   attach(messenger: BinaryMessenger): void {
@@ -131,15 +175,7 @@ export class ReminderBridge implements MethodCallHandler {
 
     const activeChannel: MethodChannel | null = this.channel;
     if (notifyFlutter && activeChannel != null) {
-      const replyCallback: MethodResult = {
-        success: (handled: Any): void => {
-          if (handled === true && this.pendingLaunchRoute === route) {
-            this.pendingLaunchRoute = null;
-          }
-        },
-        error: (_code: string, _msg: string, _details: Any): void => {},
-        notImplemented: (): void => {},
-      };
+      const replyCallback: LaunchRouteAckCallback = new LaunchRouteAckCallback(this, route);
       activeChannel.invokeMethod('onLaunchRoute', route, replyCallback);
     }
   }
@@ -274,6 +310,11 @@ export class ReminderBridge implements MethodCallHandler {
       const launchParams: Record<string, Object> = {
         'launch_route': item.route,
       };
+      const wantAgentInfo: reminderAgentManager.WantAgent = {
+        pkgName: APP_BUNDLE_NAME,
+        abilityName: APP_ABILITY_NAME,
+        parameters: launchParams,
+      };
       const alarmReq: reminderAgentManager.ReminderRequestAlarm = {
         reminderType: reminderAgentManager.ReminderType.REMINDER_TYPE_ALARM,
         hour: item.hour,
@@ -284,11 +325,7 @@ export class ReminderBridge implements MethodCallHandler {
         notificationId: 40000 + item.id,
         slotType: notificationManager.SlotType.SOCIAL_COMMUNICATION,
         tapDismissed: true,
-        wantAgent: {
-          pkgName: APP_BUNDLE_NAME,
-          abilityName: APP_ABILITY_NAME,
-          parameters: launchParams,
-        },
+        wantAgent: wantAgentInfo,
       };
       try {
         const osId: number = await reminderAgentManager.publishReminder(alarmReq);
@@ -356,10 +393,47 @@ export class ReminderBridge implements MethodCallHandler {
       if (!text || text.trim().length === 0) {
         return new Array<PersistedReminderRecord>();
       }
-      const decoded: Array<PersistedReminderRecord> =
-        JSON.parse(text) as Array<PersistedReminderRecord>;
-      if (decoded instanceof Array) {
-        return decoded;
+      const parsedJson: Object = JSON.parse(text);
+      if (parsedJson instanceof Array) {
+        const rawList: Array<Object> = parsedJson as Array<Object>;
+        const out: Array<PersistedReminderRecord> = new Array<PersistedReminderRecord>();
+        for (let i: number = 0; i < rawList.length; i++) {
+          const itemObj: Record<string, Object> = rawList[i] as Record<string, Object>;
+          if (itemObj == null || typeof itemObj['id'] !== 'number') {
+            continue;
+          }
+          const idVal: number = Math.trunc(itemObj['id'] as number);
+          const hourVal: number =
+            typeof itemObj['hour'] === 'number' ? clampInt(itemObj['hour'] as number, 0, 23) : 20;
+          const minVal: number =
+            typeof itemObj['minute'] === 'number'
+              ? clampInt(itemObj['minute'] as number, 0, 59)
+              : 0;
+          const titleVal: string =
+            typeof itemObj['title'] === 'string' ? (itemObj['title'] as string) : DEFAULT_REMINDER_TIP;
+          const bodyVal: string =
+            typeof itemObj['body'] === 'string' ? (itemObj['body'] as string) : '';
+          const routeVal: string =
+            typeof itemObj['route'] === 'string'
+              ? (itemObj['route'] as string)
+              : DEFAULT_LAUNCH_ROUTE;
+          const osIdVal: number =
+            typeof itemObj['osReminderId'] === 'number'
+              ? Math.trunc(itemObj['osReminderId'] as number)
+              : -1;
+          out.push(
+            new PersistedReminderRecord(
+              idVal,
+              hourVal,
+              minVal,
+              titleVal,
+              bodyVal,
+              routeVal,
+              osIdVal
+            )
+          );
+        }
+        return out;
       }
     } catch (_err) {
       // Ignore corrupted store and start fresh.

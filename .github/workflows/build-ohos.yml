@@ -19,7 +19,6 @@ permissions:
 env:
   UPSTREAM_FLUTTER_VERSION: '3.47.7'
   OHOS_FLUTTER_COMMIT: '650641656fef1d0578f0bc1ed8f7a35087fc99f3'
-  OHOS_CODE_ASSETS_COMMIT: '124484c19678e7fbc21de3ef6726a5e6bd51832e'
   OHOS_CLT_VERSION: '6.0.1.251'
   OHOS_CLT_URL: 'https://huggingface.co/csukuangfj/harmonyos-commandline-tools/resolve/main/commandline-tools-linux-x64-6.0.1.251.zip'
   SQLITE_AMALGAMATION_URL: 'https://sqlite.org/2026/sqlite-amalgamation-3540000.zip'
@@ -189,30 +188,8 @@ jobs:
           "$OHOS_NATIVE/llvm/bin/llvm-nm" -D ohos/entry/libs/arm64-v8a/libsqlite3.so | grep -q "sqlite3_open_v2"
           ls -lh ohos/entry/libs/arm64-v8a/libsqlite3.so
 
-      - name: Inject OHOS code_assets support & resolve dependencies
-        run: |
-          CA_DIR="$RUNNER_TEMP/ohos_code_assets"
-          git init "$CA_DIR"
-          git -C "$CA_DIR" remote add origin https://gitcode.com/zhong_ning/fluttertpc_dart_native_zn_whl_1009.git
-          git -C "$CA_DIR" sparse-checkout init --cone
-          git -C "$CA_DIR" sparse-checkout set pkgs/code_assets
-          git -C "$CA_DIR" fetch --depth 1 --filter=blob:none origin "$OHOS_CODE_ASSETS_COMMIT"
-          git -C "$CA_DIR" checkout FETCH_HEAD
-
-          python3 - "$CA_DIR/pkgs/code_assets" <<'PY'
-          import sys
-          ca_path = sys.argv[1]
-          with open("pubspec.yaml", "r", encoding="utf-8") as f:
-              text = f.read()
-          target = "dependency_overrides:\n"
-          assert target in text, "dependency_overrides section missing"
-          inject = f"dependency_overrides:\n  code_assets:\n    path: {ca_path}\n"
-          text = text.replace(target, inject, 1)
-          with open("pubspec.yaml", "w", encoding="utf-8") as f:
-              f.write(text)
-          PY
-
-          flutter pub get
+      - name: Resolve Dart & OHOS plugin dependencies
+        run: flutter pub get --enforce-lockfile
 
       - name: Build HarmonyOS Release HAP (arm64-v8a)
         run: |
