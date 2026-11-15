@@ -104,9 +104,12 @@ abstract interface class ReminderScheduler {
 const String reminderChannelName = 'dev.tallyisle/reminders';
 
 /// Creates the platform-appropriate [ReminderScheduler].
-ReminderScheduler createReminderScheduler() {
-  if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
-    return MethodChannelReminderScheduler();
+ReminderScheduler createReminderScheduler({bool? isOhosOverride}) {
+  if (!kIsWeb) {
+    final isOhos = isOhosOverride ?? (defaultTargetPlatform.name == 'ohos');
+    if (defaultTargetPlatform == TargetPlatform.android || isOhos) {
+      return MethodChannelReminderScheduler(isOhosOverride: isOhosOverride);
+    }
   }
   return InMemoryReminderScheduler(
     capability: const Capability(
@@ -116,25 +119,33 @@ ReminderScheduler createReminderScheduler() {
   );
 }
 
-/// Android native implementation bridged via `MethodChannel('dev.tallyisle/reminders')`.
+/// Native implementation bridged via `MethodChannel('dev.tallyisle/reminders')`
+/// on Android and HarmonyOS.
 ///
 /// If invoked inside headless Flutter widget tests where no native host is
 /// attached (`MissingPluginException`), degrades cleanly to an internal
 /// [InMemoryReminderScheduler] while surfacing real `PlatformException`s.
 final class MethodChannelReminderScheduler implements ReminderScheduler {
-  MethodChannelReminderScheduler({MethodChannel? channel})
-    : _channel = channel ?? const MethodChannel(reminderChannelName) {
+  MethodChannelReminderScheduler({MethodChannel? channel, bool? isOhosOverride})
+    : _channel = channel ?? const MethodChannel(reminderChannelName),
+      _isOhosOverride = isOhosOverride {
     _channel.setMethodCallHandler(_handleNativeCallback);
   }
 
   final MethodChannel _channel;
+  final bool? _isOhosOverride;
   final InMemoryReminderScheduler _fallback = InMemoryReminderScheduler();
   final StreamController<String> _launchRouteController =
       StreamController<String>.broadcast();
 
+  bool get _isOhos =>
+      !kIsWeb && (_isOhosOverride ?? (defaultTargetPlatform.name == 'ohos'));
+
   @override
-  Capability get capability =>
-      const Capability(CapabilityState.available, 'Android 原生每日提醒通知已接入');
+  Capability get capability => Capability(
+    CapabilityState.available,
+    _isOhos ? 'HarmonyOS 原生每日提醒通知已接入' : 'Android 原生每日提醒通知已接入',
+  );
 
   @override
   Stream<String> get onLaunchRoute => _launchRouteController.stream;

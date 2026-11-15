@@ -90,9 +90,14 @@ abstract interface class BiometricAuthenticator {
 }
 
 /// Creates the platform-appropriate [BiometricAuthenticator].
-BiometricAuthenticator createBiometricAuthenticator() {
-  if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
-    return MethodChannelBiometricAuthenticator();
+BiometricAuthenticator createBiometricAuthenticator({bool? isOhosOverride}) {
+  if (!kIsWeb) {
+    final isOhos = isOhosOverride ?? (defaultTargetPlatform.name == 'ohos');
+    if (defaultTargetPlatform == TargetPlatform.android || isOhos) {
+      return MethodChannelBiometricAuthenticator(
+        isOhosOverride: isOhosOverride,
+      );
+    }
   }
   return const UnsupportedBiometricAuthenticator();
 }
@@ -131,18 +136,28 @@ final class UnsupportedBiometricAuthenticator
   Future<void> cancelAuthentication() async {}
 }
 
-/// Android native implementation backed by `MethodChannel('dev.tallyisle/biometrics')`.
+/// Native implementation backed by `MethodChannel('dev.tallyisle/biometrics')`
+/// on Android (`BiometricPrompt`) and HarmonyOS (`@ohos.userIAM.userAuth`).
 final class MethodChannelBiometricAuthenticator
     implements BiometricAuthenticator {
-  MethodChannelBiometricAuthenticator({MethodChannel? channel})
-    : _channel = channel ?? const MethodChannel(biometricChannelName);
+  MethodChannelBiometricAuthenticator({
+    MethodChannel? channel,
+    bool? isOhosOverride,
+  }) : _channel = channel ?? const MethodChannel(biometricChannelName),
+       _isOhosOverride = isOhosOverride;
 
   final MethodChannel _channel;
+  final bool? _isOhosOverride;
+
+  bool get _isOhos =>
+      !kIsWeb && (_isOhosOverride ?? (defaultTargetPlatform.name == 'ohos'));
 
   @override
-  Capability get capability => const Capability(
+  Capability get capability => Capability(
     CapabilityState.available,
-    'Android 原生生物识别通道（BiometricPrompt）已接入',
+    _isOhos
+        ? 'HarmonyOS 原生生物识别通道（UserAuth）已接入'
+        : 'Android 原生生物识别通道（BiometricPrompt）已接入',
   );
 
   @override

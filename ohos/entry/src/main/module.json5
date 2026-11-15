@@ -30,6 +30,22 @@
             "actions": [
               "action.system.home"
             ]
+          },
+          {
+            "actions": [
+              "ohos.want.action.viewData"
+            ],
+            "entities": [
+              "entity.system.browsable"
+            ],
+            "uris": [
+              {
+                "scheme": "tallyisle"
+              },
+              {
+                "scheme": "yyjz"
+              }
+            ]
           }
         ]
       }
@@ -37,6 +53,9 @@
     "requestPermissions": [
       {
         "name": "ohos.permission.INTERNET"
+      },
+      {
+        "name": "ohos.permission.ACCESS_BIOMETRIC"
       }
     ]
   }

@@ -129,9 +129,12 @@ abstract interface class AutoBillBridge {
 }
 
 /// Creates the platform-appropriate [AutoBillBridge].
-AutoBillBridge createAutoBillBridge() {
-  if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
-    return MethodChannelAutoBillBridge();
+AutoBillBridge createAutoBillBridge({bool? isOhosOverride}) {
+  if (!kIsWeb) {
+    final isOhos = isOhosOverride ?? (defaultTargetPlatform.name == 'ohos');
+    if (defaultTargetPlatform == TargetPlatform.android || isOhos) {
+      return MethodChannelAutoBillBridge(isOhosOverride: isOhosOverride);
+    }
   }
   return InMemoryAutoBillBridge(
     capability: const Capability(
@@ -142,25 +145,38 @@ AutoBillBridge createAutoBillBridge() {
   );
 }
 
-/// Android native implementation bridged via `MethodChannel('dev.tallyisle/automation')`.
+/// Native implementation bridged via `MethodChannel('dev.tallyisle/automation')`
+/// on Android and HarmonyOS.
 final class MethodChannelAutoBillBridge implements AutoBillBridge {
-  MethodChannelAutoBillBridge({MethodChannel? channel})
-    : _channel = channel ?? const MethodChannel(automationChannelName) {
+  MethodChannelAutoBillBridge({MethodChannel? channel, bool? isOhosOverride})
+    : _channel = channel ?? const MethodChannel(automationChannelName),
+      _isOhosOverride = isOhosOverride {
+    _fallback = InMemoryAutoBillBridge(status: _defaultStatus);
     _channel.setMethodCallHandler(_handleNativeCall);
   }
 
   final MethodChannel _channel;
-  final InMemoryAutoBillBridge _fallback = InMemoryAutoBillBridge(
-    status: const AccessibilityBridgeStatus.android(enabled: false),
-  );
+  final bool? _isOhosOverride;
+  late final InMemoryAutoBillBridge _fallback;
   final StreamController<String> _deepLinkController =
       StreamController<String>.broadcast();
   final StreamController<CapturedPaymentEvent> _eventController =
       StreamController<CapturedPaymentEvent>.broadcast();
 
+  bool get _isOhos =>
+      !kIsWeb && (_isOhosOverride ?? (defaultTargetPlatform.name == 'ohos'));
+
+  AccessibilityBridgeStatus get _defaultStatus => _isOhos
+      ? const AccessibilityBridgeStatus.unsupported()
+      : const AccessibilityBridgeStatus.android(enabled: false);
+
   @override
-  Capability get capability =>
-      const Capability(CapabilityState.available, 'Android 原生自动记账与外部链接桥接已接入');
+  Capability get capability => Capability(
+    CapabilityState.available,
+    _isOhos
+        ? 'HarmonyOS 外部链接（tallyisle:// / yyjz://）桥接已接入'
+        : 'Android 原生自动记账与外部链接桥接已接入',
+  );
 
   @override
   Stream<String> get onDeepLink => _deepLinkController.stream;
@@ -204,13 +220,13 @@ final class MethodChannelAutoBillBridge implements AutoBillBridge {
         'getAccessibilityStatus',
       );
       if (raw == null) {
-        return const AccessibilityBridgeStatus.android(enabled: false);
+        return _defaultStatus;
       }
       return AccessibilityBridgeStatus.fromMap(raw);
     } on MissingPluginException {
       return _fallback.getAccessibilityStatus();
     } on PlatformException {
-      return const AccessibilityBridgeStatus.android(enabled: false);
+      return _defaultStatus;
     }
   }
 
