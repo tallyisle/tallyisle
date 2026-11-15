@@ -191,6 +191,11 @@ jobs:
       - name: Resolve Dart & OHOS plugin dependencies
         run: flutter pub get --enforce-lockfile
 
+      - name: Precache OHOS engine & patch embedding HAR for SDK 21
+        run: |
+          flutter precache --ohos
+          python3 tool/ohos/patch_flutter_har.py "$FLUTTER_ROOT/bin/cache/artifacts/engine"
+
       - name: Build HarmonyOS Release HAP (arm64-v8a)
         run: |
           mkdir -p build/ohos/hap
