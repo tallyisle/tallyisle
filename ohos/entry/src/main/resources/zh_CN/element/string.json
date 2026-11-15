@@ -1,0 +1,16 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "帐屿本地优先记账与资产管理"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "帐屿 — 本地优先、精确到分的个人记账与资产管理工具"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "帐屿"
+    }
+  ]
+}

@@ -52,12 +52,14 @@ class FileAccess {
   const FileAccess({
     MethodChannel? channel,
     bool? isWebOverride,
+    bool? isOhosOverride,
     PickBytesHandler? onPickBytes,
     SaveBytesHandler? onSaveBytes,
     ShareBytesHandler? onShareBytes,
     OpenExternalUrlHandler? onOpenExternalUrl,
   }) : _channel = channel,
        _isWebOverride = isWebOverride,
+       _isOhosOverride = isOhosOverride,
        _onPickBytes = onPickBytes,
        _onSaveBytes = onSaveBytes,
        _onShareBytes = onShareBytes,
@@ -65,6 +67,7 @@ class FileAccess {
 
   final MethodChannel? _channel;
   final bool? _isWebOverride;
+  final bool? _isOhosOverride;
   final PickBytesHandler? _onPickBytes;
   final SaveBytesHandler? _onSaveBytes;
   final ShareBytesHandler? _onShareBytes;
@@ -81,7 +84,11 @@ class FileAccess {
   bool get _isIOSNative =>
       !_isWeb && defaultTargetPlatform == TargetPlatform.iOS;
 
-  bool get _usesNativeFileChannel => _isAndroidNative || _isIOSNative;
+  bool get _isOhosNative =>
+      !_isWeb && (_isOhosOverride ?? (defaultTargetPlatform.name == 'ohos'));
+
+  bool get _usesNativeFileChannel =>
+      _isAndroidNative || _isIOSNative || _isOhosNative;
 
   Capability get saveLocationCapability {
     if (_onSaveBytes != null) {
@@ -97,6 +104,12 @@ class FileAccess {
       return const Capability(
         CapabilityState.available,
         'iOS 系统文件导出（UIActivityViewController / 存储到“文件”）已接入',
+      );
+    }
+    if (_isOhosNative) {
+      return const Capability(
+        CapabilityState.available,
+        'HarmonyOS 系统文件保存（DocumentViewPicker）已接入',
       );
     }
     if (_isWeb) {
@@ -125,6 +138,12 @@ class FileAccess {
       return const Capability(
         CapabilityState.available,
         'iOS 系统文件分享（UIActivityViewController）已接入',
+      );
+    }
+    if (_isOhosNative) {
+      return const Capability(
+        CapabilityState.available,
+        'HarmonyOS 系统文件分享（ShareKit）已接入',
       );
     }
     return const Capability(
@@ -192,7 +211,11 @@ class FileAccess {
       } on MissingPluginException {
         throw Failure(
           FailureCode.unsupportedCapability,
-          _isIOSNative ? '当前环境未挂载 iOS 原生文件保存通道' : '当前环境未挂载 Android 原生文件保存通道',
+          _isOhosNative
+              ? '当前环境未挂载 HarmonyOS 原生文件保存通道'
+              : (_isIOSNative
+                    ? '当前环境未挂载 iOS 原生文件保存通道'
+                    : '当前环境未挂载 Android 原生文件保存通道'),
         );
       } catch (_) {
         throw const Failure(FailureCode.storageUnavailable, '文件未完成保存');
@@ -242,7 +265,11 @@ class FileAccess {
     } on MissingPluginException {
       throw Failure(
         FailureCode.unsupportedCapability,
-        _isIOSNative ? '当前环境未挂载 iOS 原生系统分享通道' : '当前环境未挂载 Android 原生系统分享通道',
+        _isOhosNative
+            ? '当前环境未挂载 HarmonyOS 原生系统分享通道'
+            : (_isIOSNative
+                  ? '当前环境未挂载 iOS 原生系统分享通道'
+                  : '当前环境未挂载 Android 原生系统分享通道'),
       );
     } catch (_) {
       throw const Failure(FailureCode.storageUnavailable, '无法调起系统分享');
@@ -286,7 +313,11 @@ class FileAccess {
       } on MissingPluginException {
         throw Failure(
           FailureCode.unsupportedCapability,
-          _isIOSNative ? '当前环境未挂载 iOS 原生浏览器通道' : '当前环境未挂载 Android 原生浏览器通道',
+          _isOhosNative
+              ? '当前环境未挂载 HarmonyOS 原生浏览器通道'
+              : (_isIOSNative
+                    ? '当前环境未挂载 iOS 原生浏览器通道'
+                    : '当前环境未挂载 Android 原生浏览器通道'),
         );
       } catch (_) {
         throw const Failure(FailureCode.unsupportedCapability, '无法调起系统浏览器');

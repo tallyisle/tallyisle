@@ -1,0 +1,32 @@
+name: path_provider_ohos
+description: OpenHarmony implementation of the path_provider plugin
+repository: https://gitcode.com/CPF-Flutter/flutter_packages/tree/oh-3.47.7-dev/packages/path_provider/path_provider_ohos
+issue_tracker: https://gitcode.com/CPF-Flutter/flutter_packages/issues
+version: 2.1.6
+
+environment:
+  sdk: ^3.10.0
+  flutter: ">=3.38.0"
+
+flutter:
+  plugin:
+    implements: path_provider
+    platforms:
+      ohos:
+        dartPluginClass: PathProviderOhos
+
+dependencies:
+  ffi: ">=1.1.2 <3.0.0"
+  flutter:
+    sdk: flutter
+  path: ^1.8.0
+  path_provider_platform_interface: ^2.1.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+topics:
+  - files
+  - path-provider
+  - paths

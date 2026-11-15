@@ -30,3 +30,24 @@ flutter:
   uses-material-design: true
   assets:
     - assets/branding/tallyisle-logo-original.png
+
+dependency_overrides:
+  cupertino_ui:
+    path: third_party/ohos_packages/cupertino_ui
+  material_ui:
+    path: third_party/ohos_packages/material_ui
+  path_provider:
+    path: third_party/ohos_packages/path_provider
+  path_provider_ohos:
+    path: third_party/ohos_packages/path_provider_ohos
+  file_selector:
+    path: third_party/ohos_packages/file_selector
+  file_selector_ohos:
+    path: third_party/ohos_packages/file_selector_ohos
+
+hooks:
+  user_defines:
+    sqlite3:
+      source:
+        ohos: system
+        default: sqlite3

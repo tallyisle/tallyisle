@@ -1,0 +1,16 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "TallyIsle local-first bookkeeping"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "TallyIsle — local-first integer-cent bookkeeping"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "TallyIsle"
+    }
+  ]
+}

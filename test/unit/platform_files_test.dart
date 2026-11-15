@@ -605,4 +605,152 @@ void main() {
       );
     }
   });
+
+  group('HarmonyOS (ohos) MethodChannel bridge & capabilities', () {
+    test(
+      'exposes native save/share capabilities, passes empty pickBytes groups, and maps MethodChannel outcomes',
+      () async {
+        const channel = MethodChannel(fileBridgeChannelName);
+        final recordedCalls = <MethodCall>[];
+        String? throwCode;
+
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(channel, (call) async {
+              recordedCalls.add(call);
+              final code = throwCode;
+              if (code != null) {
+                throw PlatformException(code: code, message: 'ohos mock $code');
+              }
+              return null;
+            });
+
+        // Also verify dynamic TargetPlatform.ohos detection when running under CPF-Flutter.
+        final ohosTargets = TargetPlatform.values
+            .where((p) => p.name == 'ohos')
+            .toList();
+        for (final target in ohosTargets) {
+          debugDefaultTargetPlatformOverride = target;
+          const nativeDetected = FileAccess(channel: channel);
+          expect(
+            nativeDetected.saveLocationCapability.state,
+            CapabilityState.available,
+          );
+          expect(
+            nativeDetected.shareCapability.state,
+            CapabilityState.available,
+          );
+        }
+        debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+
+        const access = FileAccess(channel: channel, isOhosOverride: true);
+        expect(access.saveLocationCapability.state, CapabilityState.available);
+        expect(access.saveLocationCapability.reason, contains('HarmonyOS'));
+        expect(access.shareCapability.state, CapabilityState.available);
+        expect(access.shareCapability.reason, contains('HarmonyOS'));
+
+        // pickBytes uses empty acceptedTypeGroups so .tally/.penny files are selectable
+        final tempDir = await Directory.systemTemp.createTemp(
+          'tallyisle_pick_ohos_',
+        );
+        addTearDown(() async {
+          if (await tempDir.exists()) {
+            await tempDir.delete(recursive: true);
+          }
+        });
+        final sampleBytes = Uint8List.fromList(<int>[0x50, 0x4B, 0x03, 0x04]);
+        final sampleFile = File('${tempDir.path}/backup_ohos.tally');
+        await sampleFile.writeAsBytes(sampleBytes);
+        fakeFileSelector.onOpenFile = (_) async => XFile(sampleFile.path);
+
+        final picked = await access.pickBytes(
+          allowedExtensions: const <String>['tally', 'penny', 'yi2a'],
+        );
+        expect(picked.name, 'backup_ohos.tally');
+        expect(picked.bytes, sampleBytes);
+        expect(fakeFileSelector.lastOpenTypeGroups, isEmpty);
+
+        // saveBytes, shareBytes, openExternalUrl succeed over dev.tallyisle/files
+        await access.saveBytes('ohos_backup.tally', sampleBytes);
+        await access.shareBytes(
+          'ohos_backup.zip',
+          sampleBytes,
+          subject: '帐屿备份',
+        );
+        await access.openExternalUrl('https://github.com/tallyisle/tallyisle');
+
+        expect(recordedCalls, hasLength(3));
+        expect(recordedCalls[0].method, 'saveBytes');
+        expect(recordedCalls[1].method, 'shareBytes');
+        expect(recordedCalls[2].method, 'openExternalUrl');
+
+        // Cancel -> FailureCode.cancelled
+        throwCode = 'CANCELLED';
+        await expectLater(
+          access.saveBytes('cancel.tally', sampleBytes),
+          throwsA(
+            isA<Failure>().having((f) => f.code, 'code', FailureCode.cancelled),
+          ),
+        );
+        await expectLater(
+          access.shareBytes('cancel.tally', sampleBytes),
+          throwsA(
+            isA<Failure>().having((f) => f.code, 'code', FailureCode.cancelled),
+          ),
+        );
+
+        // IO_ERROR -> FailureCode.storageUnavailable
+        throwCode = 'IO_ERROR';
+        await expectLater(
+          access.saveBytes('fail.tally', sampleBytes),
+          throwsA(
+            isA<Failure>().having(
+              (f) => f.code,
+              'code',
+              FailureCode.storageUnavailable,
+            ),
+          ),
+        );
+
+        // MissingPluginException -> HarmonyOS-specific unsupportedCapability reason
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(channel, null);
+        await expectLater(
+          access.saveBytes('missing.tally', sampleBytes),
+          throwsA(
+            isA<Failure>()
+                .having(
+                  (f) => f.code,
+                  'code',
+                  FailureCode.unsupportedCapability,
+                )
+                .having((f) => f.message, 'message', contains('HarmonyOS')),
+          ),
+        );
+        await expectLater(
+          access.shareBytes('missing.tally', sampleBytes),
+          throwsA(
+            isA<Failure>()
+                .having(
+                  (f) => f.code,
+                  'code',
+                  FailureCode.unsupportedCapability,
+                )
+                .having((f) => f.message, 'message', contains('HarmonyOS')),
+          ),
+        );
+        await expectLater(
+          access.openExternalUrl('https://github.com/tallyisle/tallyisle'),
+          throwsA(
+            isA<Failure>()
+                .having(
+                  (f) => f.code,
+                  'code',
+                  FailureCode.unsupportedCapability,
+                )
+                .having((f) => f.message, 'message', contains('HarmonyOS')),
+          ),
+        );
+      },
+    );
+  });
 }
