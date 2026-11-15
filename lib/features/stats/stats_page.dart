@@ -1,4 +1,3 @@
-import 'package:drift/drift.dart' show OrderingTerm;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -7,6 +6,7 @@ import '../../app/providers.dart';
 import '../../data/db/database.dart';
 import '../../domain/rules/category_stats.dart';
 import '../../domain/rules/tag_stats.dart';
+import '../books/book_switcher_modal.dart';
 import '../budget/budget_widgets.dart';
 import '../common/common.dart';
 import 'annual_report_page.dart';
@@ -120,56 +120,7 @@ class _StatsPageState extends ConsumerState<StatsPage> {
     if (_pickingBook) return;
     _pickingBook = true;
     try {
-      final db = await ref.read(databaseProvider.future);
-      final books =
-          await (db.select(db.accountBooks)..orderBy([
-                (t) => OrderingTerm.asc(t.sort),
-                (t) => OrderingTerm.asc(t.id),
-              ]))
-              .get();
-      final pref = await (db.select(
-        db.preferences,
-      )..where((t) => t.key.equals('current_book_id'))).getSingleOrNull();
-      final current =
-          int.tryParse(pref?.value ?? '') ??
-          (books.isNotEmpty ? books.first.id : 1);
-
-      if (!mounted || !(ModalRoute.of(context)?.isCurrent ?? true)) return;
-
-      final picked = await showModalBottomSheet<int>(
-        context: context,
-        builder: (sheetCtx) => SafeArea(
-          child: ListView(
-            shrinkWrap: true,
-            children: [
-              for (final b in books)
-                ListTile(
-                  title: Text(b.name),
-                  trailing: b.id == current ? const Icon(Icons.check) : null,
-                  onTap: () => Navigator.pop(sheetCtx, b.id),
-                ),
-              const Divider(height: 1),
-              ListTile(
-                leading: const Icon(Icons.settings_outlined),
-                title: const Text('管理账本…'),
-                onTap: () {
-                  Navigator.pop(sheetCtx);
-                  context.push('/books');
-                },
-              ),
-            ],
-          ),
-        ),
-      );
-      if (picked == null || !mounted) return;
-      await db
-          .into(db.preferences)
-          .insertOnConflictUpdate(
-            PreferencesCompanion.insert(
-              key: 'current_book_id',
-              value: '$picked',
-            ),
-          );
+      await showBookSwitcher(context, ref, mobileManageLabel: '管理账本…');
     } finally {
       _pickingBook = false;
     }

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../app/adaptive.dart';
 import '../../core/failure.dart';
 import '../../domain/model/codes.dart';
 import '../../domain/rules/app_settings_rules.dart';
@@ -376,6 +377,14 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                   ],
                 ),
               ),
+              if (DesktopAdaptive.isDesktop(context)) ...[
+                const SizedBox(height: 16),
+                const _SectionHeader(title: '桌面键盘快捷键'),
+                _DesktopShortcutsCard(
+                  primaryMod: DesktopAdaptive.primaryModifierLabel(context),
+                  altMod: DesktopAdaptive.altModifierLabel(context),
+                ),
+              ],
               const SizedBox(height: 20),
               Align(
                 alignment: Alignment.center,
@@ -389,6 +398,73 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             ],
           );
         },
+      ),
+    );
+  }
+}
+
+class _DesktopShortcutsCard extends StatelessWidget {
+  const _DesktopShortcutsCard({required this.primaryMod, required this.altMod});
+
+  final String primaryMod;
+  final String altMod;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final items = <({String label, String keys})>[
+      (label: '新建记一笔', keys: '$primaryMod + N'),
+      (label: '搜索账单', keys: '$primaryMod + F / K'),
+      (label: '切换四大主栏目', keys: '$primaryMod + 1 .. 4'),
+      (label: '切换上一账期 / 下一账期', keys: '$altMod + ← / → 或 [ / ]'),
+      (label: '回到当前账期', keys: 'T'),
+      (label: '关闭弹窗 / 清空搜索返回', keys: 'Esc'),
+      (label: '应用安全锁解锁', keys: '数字键 0–9 / Backspace'),
+    ];
+
+    return Card(
+      key: const Key('desktop_shortcuts_card'),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        child: Column(
+          children: [
+            for (var i = 0; i < items.length; i++) ...[
+              if (i > 0) const Divider(height: 12, thickness: 0.5),
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        items[i].label,
+                        style: theme.textTheme.bodyMedium,
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 3,
+                      ),
+                      decoration: BoxDecoration(
+                        color: scheme.surfaceContainerHighest,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        items[i].keys,
+                        style: theme.textTheme.labelMedium?.copyWith(
+                          fontFamily: 'monospace',
+                          color: scheme.onSurfaceVariant,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }

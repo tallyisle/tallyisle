@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/adaptive.dart';
 import '../../core/failure.dart';
 import '../../domain/rules/reminder_rules.dart';
 import '../common/common.dart';
@@ -88,19 +89,24 @@ class _ReminderPageState extends ConsumerState<ReminderPage>
 
   @override
   Widget build(BuildContext context) {
+    final isDesktop = DesktopAdaptive.isDesktop(context);
     final remindersAsync = ref.watch(remindersProvider);
     final permissionAsync = ref.watch(reminderNotificationPermissionProvider);
-    final showPermissionBanner = permissionAsync.maybeWhen(
-      data: (enabled) => !enabled,
-      orElse: () => false,
-    );
+    final showPermissionBanner =
+        !isDesktop &&
+        permissionAsync.maybeWhen(
+          data: (enabled) => !enabled,
+          orElse: () => false,
+        );
 
     return Scaffold(
       key: const Key('reminder_page'),
       appBar: AppBar(title: const Text('记账提醒')),
       body: Column(
         children: [
-          if (showPermissionBanner)
+          if (isDesktop)
+            const _DesktopReminderSyncBanner()
+          else if (showPermissionBanner)
             _PermissionBanner(onEnablePressed: _handleEnablePermission),
           Expanded(
             child: asyncBody(remindersAsync, (items) {
@@ -204,6 +210,41 @@ class _ReminderPageState extends ConsumerState<ReminderPage>
         onPressed: () => unawaited(_openEditor()),
         icon: const Icon(Icons.add),
         label: const Text('新建提醒'),
+      ),
+    );
+  }
+}
+
+class _DesktopReminderSyncBanner extends StatelessWidget {
+  const _DesktopReminderSyncBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      key: const Key('reminder_desktop_sync_banner'),
+      width: double.infinity,
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHigh,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            Icons.phonelink_ring_outlined,
+            size: 20,
+            color: scheme.onSurfaceVariant,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              '桌面端关闭窗口后不常驻后台发通知；您在此配置的提醒规则会随本地 .tally 备份或 WebDAV / S3 云同步在 Android 手机端定时生效。',
+              style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 13),
+            ),
+          ),
+        ],
       ),
     );
   }

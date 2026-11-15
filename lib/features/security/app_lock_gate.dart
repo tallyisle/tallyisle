@@ -1,8 +1,10 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/adaptive.dart';
 import '../../core/failure.dart';
 import '../../domain/rules/app_lock_rules.dart';
 import '../common/common.dart';
@@ -247,107 +249,167 @@ class _LockOverlayScreen extends StatelessWidget {
   final VoidCallback onBiometric;
   final VoidCallback onForgotHelp;
 
+  static String? _digitFromLogicalKey(LogicalKeyboardKey key) {
+    return switch (key) {
+      LogicalKeyboardKey.digit0 || LogicalKeyboardKey.numpad0 => '0',
+      LogicalKeyboardKey.digit1 || LogicalKeyboardKey.numpad1 => '1',
+      LogicalKeyboardKey.digit2 || LogicalKeyboardKey.numpad2 => '2',
+      LogicalKeyboardKey.digit3 || LogicalKeyboardKey.numpad3 => '3',
+      LogicalKeyboardKey.digit4 || LogicalKeyboardKey.numpad4 => '4',
+      LogicalKeyboardKey.digit5 || LogicalKeyboardKey.numpad5 => '5',
+      LogicalKeyboardKey.digit6 || LogicalKeyboardKey.numpad6 => '6',
+      LogicalKeyboardKey.digit7 || LogicalKeyboardKey.numpad7 => '7',
+      LogicalKeyboardKey.digit8 || LogicalKeyboardKey.numpad8 => '8',
+      LogicalKeyboardKey.digit9 || LogicalKeyboardKey.numpad9 => '9',
+      _ => null,
+    };
+  }
+
+  KeyEventResult _handleKeyEvent(BuildContext context, KeyEvent event) {
+    if (verifying) {
+      return KeyEventResult.ignored;
+    }
+    if (!(ModalRoute.of(context)?.isCurrent ?? true)) {
+      return KeyEventResult.ignored;
+    }
+
+    final hw = HardwareKeyboard.instance;
+    if (hw.isControlPressed || hw.isAltPressed || hw.isMetaPressed) {
+      return KeyEventResult.ignored;
+    }
+
+    if (event is KeyDownEvent || event is KeyRepeatEvent) {
+      if (event.logicalKey == LogicalKeyboardKey.backspace) {
+        onBackspace();
+        return KeyEventResult.handled;
+      }
+    }
+
+    if (event is KeyDownEvent) {
+      if (event.logicalKey == LogicalKeyboardKey.escape ||
+          event.logicalKey == LogicalKeyboardKey.delete) {
+        onClear();
+        return KeyEventResult.handled;
+      }
+      final digit = _digitFromLogicalKey(event.logicalKey);
+      if (digit != null) {
+        onDigit(digit);
+        return KeyEventResult.handled;
+      }
+    }
+
+    return KeyEventResult.ignored;
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isDesktop = DesktopAdaptive.isDesktop(context);
     final coolingDown = config.isCoolingDownAt(nowMs);
     final cooldownSecs = config.remainingCooldownSecondsAt(nowMs);
     final effectiveMessage = coolingDown
         ? '已连续输错 $maxPinFailedAttempts 次，请等待 $cooldownSecs 秒后再试'
         : message;
 
-    return Material(
-      key: const Key('app_lock_overlay'),
-      color: theme.colorScheme.surface,
-      child: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 340),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    Icons.lock_outline,
-                    size: 44,
-                    color: theme.colorScheme.primary,
-                  ),
-                  const SizedBox(height: 12),
-                  Text('帐屿已锁定', style: theme.textTheme.headlineSmall),
-                  const SizedBox(height: 6),
-                  Text(
-                    '请输入 ${config.pinLength} 位数字密码解锁',
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
+    return Focus(
+      autofocus: true,
+      onKeyEvent: (_, event) => _handleKeyEvent(context, event),
+      child: Material(
+        key: const Key('app_lock_overlay'),
+        color: theme.colorScheme.surface,
+        child: SafeArea(
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 340),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.lock_outline,
+                      size: 44,
+                      color: theme.colorScheme.primary,
                     ),
-                  ),
-                  const SizedBox(height: 20),
-                  Row(
-                    key: const Key('app_lock_pin_dots'),
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      for (var i = 0; i < config.pinLength; i++)
-                        Container(
-                          width: 14,
-                          height: 14,
-                          margin: const EdgeInsets.symmetric(horizontal: 8),
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: i < enteredLength
-                                ? theme.colorScheme.primary
-                                : Colors.transparent,
-                            border: Border.all(
-                              color: theme.colorScheme.primary,
-                              width: 1.8,
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  ConstrainedBox(
-                    constraints: const BoxConstraints(minHeight: 40),
-                    child: Center(
-                      child: effectiveMessage == null
-                          ? const SizedBox.shrink()
-                          : Text(
-                              effectiveMessage,
-                              key: const Key('app_lock_message'),
-                              textAlign: TextAlign.center,
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: theme.colorScheme.error,
+                    const SizedBox(height: 12),
+                    Text('帐屿已锁定', style: theme.textTheme.headlineSmall),
+                    const SizedBox(height: 6),
+                    Text(
+                      isDesktop
+                          ? '请使用键盘输入或点击 ${config.pinLength} 位数字密码解锁'
+                          : '请输入 ${config.pinLength} 位数字密码解锁',
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    Row(
+                      key: const Key('app_lock_pin_dots'),
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        for (var i = 0; i < config.pinLength; i++)
+                          Container(
+                            width: 14,
+                            height: 14,
+                            margin: const EdgeInsets.symmetric(horizontal: 8),
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: i < enteredLength
+                                  ? theme.colorScheme.primary
+                                  : Colors.transparent,
+                              border: Border.all(
+                                color: theme.colorScheme.primary,
+                                width: 1.8,
                               ),
                             ),
+                          ),
+                      ],
                     ),
-                  ),
-                  const SizedBox(height: 8),
-                  _PinNumericKeypad(
-                    enabled: !verifying,
-                    onDigit: onDigit,
-                    onBackspace: onBackspace,
-                    onClear: onClear,
-                  ),
-                  const SizedBox(height: 12),
-                  Wrap(
-                    alignment: WrapAlignment.center,
-                    spacing: 12,
-                    children: [
-                      if (canUseBiometric)
-                        TextButton.icon(
-                          key: const Key('app_lock_biometric_button'),
-                          onPressed: verifying ? null : onBiometric,
-                          icon: const Icon(Icons.fingerprint),
-                          label: const Text('使用生物识别解锁'),
-                        ),
-                      TextButton(
-                        key: const Key('app_lock_forgot_button'),
-                        onPressed: onForgotHelp,
-                        child: const Text('忘记密码？'),
+                    const SizedBox(height: 16),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(minHeight: 40),
+                      child: Center(
+                        child: effectiveMessage == null
+                            ? const SizedBox.shrink()
+                            : Text(
+                                effectiveMessage,
+                                key: const Key('app_lock_message'),
+                                textAlign: TextAlign.center,
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: theme.colorScheme.error,
+                                ),
+                              ),
                       ),
-                    ],
-                  ),
-                ],
+                    ),
+                    const SizedBox(height: 8),
+                    _PinNumericKeypad(
+                      enabled: !verifying,
+                      onDigit: onDigit,
+                      onBackspace: onBackspace,
+                      onClear: onClear,
+                    ),
+                    const SizedBox(height: 12),
+                    Wrap(
+                      alignment: WrapAlignment.center,
+                      spacing: 12,
+                      children: [
+                        if (canUseBiometric && !isDesktop)
+                          TextButton.icon(
+                            key: const Key('app_lock_biometric_button'),
+                            onPressed: verifying ? null : onBiometric,
+                            icon: const Icon(Icons.fingerprint),
+                            label: const Text('使用生物识别解锁'),
+                          ),
+                        TextButton(
+                          key: const Key('app_lock_forgot_button'),
+                          onPressed: onForgotHelp,
+                          child: const Text('忘记密码？'),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
             ),
           ),

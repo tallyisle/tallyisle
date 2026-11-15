@@ -8,6 +8,7 @@ import '../../domain/model/codes.dart';
 import '../../domain/rules/app_settings_rules.dart';
 import '../../domain/rules/asset_overview.dart';
 import '../../domain/rules/income_expense.dart';
+import '../books/book_switcher_modal.dart';
 import '../budget/budget_providers.dart' show budgetOffsetProvider;
 import '../budget/budget_widgets.dart';
 import '../common/catalog_icons.dart';
@@ -73,61 +74,7 @@ class _HomePageState extends ConsumerState<HomePage> {
     if (_pickingBook) return;
     _pickingBook = true;
     try {
-      final q = await ref.read(queriesProvider.future);
-      final books = await q.getBooks();
-      final currentId = await q.getCurrentBookId();
-      if (!mounted || !(ModalRoute.of(context)?.isCurrent ?? true)) return;
-      final picked = await showModalBottomSheet<int>(
-        context: context,
-        builder: (ctx) => SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 8, 4),
-                child: Row(
-                  children: [
-                    Text('切换账本', style: Theme.of(ctx).textTheme.titleMedium),
-                    const Spacer(),
-                    TextButton.icon(
-                      key: const Key('book-picker-manage'),
-                      onPressed: () {
-                        Navigator.pop(ctx);
-                        if (mounted) {
-                          context.push('/books');
-                        }
-                      },
-                      icon: const Icon(Icons.settings_outlined, size: 18),
-                      label: const Text('账本管理'),
-                    ),
-                  ],
-                ),
-              ),
-              const Divider(height: 1),
-              Flexible(
-                child: ListView(
-                  shrinkWrap: true,
-                  children: [
-                    for (final b in books)
-                      ListTile(
-                        key: Key('book-option-${b.id}'),
-                        title: Text(b.name),
-                        trailing: b.id == currentId
-                            ? const Icon(Icons.check)
-                            : null,
-                        onTap: () => Navigator.pop(ctx, b.id),
-                      ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-      if (picked == null || !mounted) return;
-      await q.setCurrentBook(picked);
-      if (!mounted) return;
-      ref.read(periodOffsetProvider.notifier).reset();
+      await showBookSwitcher(context, ref);
     } finally {
       _pickingBook = false;
     }

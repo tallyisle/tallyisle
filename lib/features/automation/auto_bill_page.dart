@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/adaptive.dart';
 import '../../app/providers.dart';
 import '../../core/money.dart';
 import '../../data/db/database.dart';
@@ -279,10 +280,14 @@ class _AutoBillPageState extends ConsumerState<AutoBillPage> {
           children: [
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-              child: _AccessibilityStatusCard(
-                statusAsync: statusAsync,
-                onOpenSettings: _openSystemAccessibilitySettings,
-              ),
+              child: DesktopAdaptive.isDesktop(context)
+                  ? _DesktopAutoBillBanner(
+                      onPasteParse: _showPastePaymentDialog,
+                    )
+                  : _AccessibilityStatusCard(
+                      statusAsync: statusAsync,
+                      onOpenSettings: _openSystemAccessibilitySettings,
+                    ),
             ),
             Expanded(
               child: TabBarView(
@@ -317,6 +322,47 @@ class _AutoBillPageState extends ConsumerState<AutoBillPage> {
                   ),
                 ],
               ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _DesktopAutoBillBanner extends StatelessWidget {
+  const _DesktopAutoBillBanner({required this.onPasteParse});
+
+  final VoidCallback onPasteParse;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Card(
+      key: const Key('auto_bill_desktop_banner'),
+      margin: EdgeInsets.zero,
+      color: scheme.surfaceContainerLow,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Row(
+          children: [
+            Icon(Icons.paste_rounded, size: 22, color: scheme.primary),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                '支持直接粘贴银行短信、微信/支付宝通知文本自动解析入箱，也可在此审核手机端云同步过来的待确认草稿。',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            FilledButton.tonalIcon(
+              key: const Key('auto_bill_desktop_paste_button'),
+              onPressed: onPasteParse,
+              icon: const Icon(Icons.content_paste_go_rounded, size: 17),
+              label: const Text('粘贴识账'),
             ),
           ],
         ),

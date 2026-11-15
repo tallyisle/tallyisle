@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../app/adaptive.dart';
 import '../../app/providers.dart';
 import '../../core/money.dart';
 import '../../data/db/database.dart';
@@ -133,13 +135,14 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     final recordsAsync = ref.watch(searchRecordsProvider(filter));
     final summaryAsync = ref.watch(searchSummaryProvider(filter));
 
-    return Scaffold(
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    final scaffold = Scaffold(
       appBar: AppBar(
         titleSpacing: 0,
         title: TextField(
           key: const Key('search-keyword-field'),
           controller: _keywordController,
-          autofocus: false,
+          autofocus: isDesktop,
           decoration: InputDecoration(
             hintText: '搜索备注关键词…',
             border: InputBorder.none,
@@ -216,6 +219,32 @@ class _SearchPageState extends ConsumerState<SearchPage> {
           ),
         ],
       ),
+    );
+    if (!isDesktop) {
+      return scaffold;
+    }
+    return Focus(
+      canRequestFocus: false,
+      onKeyEvent: (_, event) {
+        if (event is! KeyDownEvent ||
+            event.logicalKey != LogicalKeyboardKey.escape) {
+          return KeyEventResult.ignored;
+        }
+        if (!(ModalRoute.of(context)?.isCurrent ?? true)) {
+          return KeyEventResult.ignored;
+        }
+        if (_keywordController.text.isNotEmpty) {
+          _keywordController.clear();
+          setState(() {});
+          return KeyEventResult.handled;
+        }
+        if (context.canPop()) {
+          context.pop();
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: scaffold,
     );
   }
 

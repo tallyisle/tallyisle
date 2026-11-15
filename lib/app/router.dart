@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../domain/model/codes.dart';
 import '../features/assets/asset_detail_page.dart';
 import '../features/assets/asset_editor_page.dart';
 import '../features/assets/assets_page.dart';
@@ -66,12 +65,15 @@ import '../features/templates/template_editor_page.dart';
 import '../features/templates/templates_page.dart';
 import '../features/wishes/wish_editor_page.dart';
 import '../features/wishes/wishes_page.dart';
+import 'adaptive.dart';
+import 'desktop_shell.dart';
 import 'providers.dart';
 
 /// Semantic routes (ADR-015). Mapping to the original app's 73 routes is kept
 /// in docs/reference/ as modules are implemented.
-GoRouter buildRouter() => GoRouter(
+GoRouter buildRouter({List<NavigatorObserver>? observers}) => GoRouter(
   initialLocation: '/',
+  observers: observers,
   routes: [
     StatefulShellRoute.indexedStack(
       builder: (context, state, shell) => _Shell(shell),
@@ -410,6 +412,10 @@ class _Shell extends ConsumerWidget {
         (asyncVal) => asyncVal.value?.defaultRecordType,
       ),
     );
+    if (DesktopAdaptive.useSideNavigation(context)) {
+      return DesktopNavigationScaffold(shell: shell);
+    }
+
     final scheme = Theme.of(context).colorScheme;
     final selectedIndex = shell.currentIndex;
 
@@ -459,19 +465,7 @@ class _Shell extends ConsumerWidget {
                           clipBehavior: Clip.antiAlias,
                           child: InkWell(
                             key: const Key('add-record'),
-                            onTap: () {
-                              final defaultType =
-                                  ref
-                                      .read(appSettingsProvider)
-                                      .value
-                                      ?.defaultRecordType ??
-                                  RecordType.expense;
-                              context.push(
-                                defaultType == RecordType.expense
-                                    ? '/record/new'
-                                    : '/record/new?type=$defaultType',
-                              );
-                            },
+                            onTap: () => openNewRecordEntry(context, ref),
                             child: SizedBox(
                               width: 46,
                               height: 40,

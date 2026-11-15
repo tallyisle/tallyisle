@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/adaptive.dart';
 import '../../domain/rules/app_lock_rules.dart';
 import '../../platform/biometrics.dart';
 import '../common/common.dart';
@@ -248,7 +249,7 @@ class _AppLockSettingsPageState extends ConsumerState<AppLockSettingsPage> {
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 16, 20, 6),
               child: Text(
-                '生物识别与自动锁定',
+                DesktopAdaptive.isDesktop(context) ? '自动锁定策略' : '生物识别与自动锁定',
                 style: theme.textTheme.labelMedium?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                   fontWeight: FontWeight.w600,
@@ -261,18 +262,20 @@ class _AppLockSettingsPageState extends ConsumerState<AppLockSettingsPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  SwitchListTile(
-                    key: const Key('app_lock_biometric_switch'),
-                    secondary: const Icon(Icons.fingerprint),
-                    title: const Text('使用系统生物识别解锁'),
-                    subtitle: Text(bio.reason),
-                    value: config.isConfigured && config.biometricEnabled,
-                    onChanged:
-                        (!_busy && config.isConfigured && bio.canAuthenticate)
-                        ? (v) => _toggleBiometric(config, bio, v)
-                        : null,
-                  ),
-                  const Divider(height: 1),
+                  if (!DesktopAdaptive.isDesktop(context)) ...[
+                    SwitchListTile(
+                      key: const Key('app_lock_biometric_switch'),
+                      secondary: const Icon(Icons.fingerprint),
+                      title: const Text('使用系统生物识别解锁'),
+                      subtitle: Text(bio.reason),
+                      value: config.isConfigured && config.biometricEnabled,
+                      onChanged:
+                          (!_busy && config.isConfigured && bio.canAuthenticate)
+                          ? (v) => _toggleBiometric(config, bio, v)
+                          : null,
+                    ),
+                    const Divider(height: 1),
+                  ],
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
                     child: Text('后台切回锁定延迟', style: theme.textTheme.titleSmall),

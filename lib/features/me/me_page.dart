@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../app/adaptive.dart';
 import '../automation/automation_providers.dart'
     show autoBillDraftCountProvider;
 
@@ -330,12 +331,13 @@ class MePage extends ConsumerWidget {
                   title: '账单截图识图',
                   route: '/automation/ocr',
                 ),
-                const _MeMenuEntry(
-                  key: Key('me-widgets'),
-                  icon: Icons.widgets_outlined,
-                  title: '桌面小组件',
-                  route: '/automation/widgets',
-                ),
+                if (!DesktopAdaptive.isDesktop(context))
+                  const _MeMenuEntry(
+                    key: Key('me-widgets'),
+                    icon: Icons.widgets_outlined,
+                    title: '桌面小组件',
+                    route: '/automation/widgets',
+                  ),
                 const _MeMenuEntry(
                   key: Key('me-url-scheme'),
                   icon: Icons.link_outlined,

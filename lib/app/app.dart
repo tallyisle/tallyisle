@@ -20,6 +20,8 @@ import '../features/reminder/reminder_providers.dart';
 import '../features/savings/savings_providers.dart';
 import '../features/security/app_lock_gate.dart';
 import '../platform/auto_bill_bridge.dart';
+import 'adaptive.dart';
+import 'desktop_shell.dart';
 import 'providers.dart';
 import 'router.dart';
 
@@ -58,7 +60,10 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
         },
       );
 
-  late final router = buildRouter();
+  final DesktopPopupRouteObserver _popupObserver = DesktopPopupRouteObserver();
+  late final router = buildRouter(
+    observers: <NavigatorObserver>[_popupObserver],
+  );
   AppLifecycleListener? _lifecycleListener;
   BackupSyncScheduler? _backupSyncScheduler;
   TallyBackupService? _schedulerService;
@@ -402,6 +407,7 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
   Widget build(BuildContext context) {
     final settings =
         ref.watch(appSettingsProvider).value ?? AppSettings.defaults;
+    final desktopOverride = ref.watch(desktopModeOverrideProvider);
     final seedColor = Color(settings.themeSeedArgb32);
     final themeMode = switch (settings.themeMode) {
       AppThemeModePreference.system => ThemeMode.system,
@@ -444,8 +450,11 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
         useMaterial3: true,
       ),
       builder: (context, child) {
+        final isDesktop =
+            desktopOverride ??
+            isDesktopTargetPlatform(Theme.of(context).platform);
         Widget content = child ?? const SizedBox.shrink();
-        if (MediaQuery.sizeOf(context).width > 960) {
+        if (!isDesktop && MediaQuery.sizeOf(context).width > 960) {
           content = ColoredBox(
             key: const Key('desktop_widescreen_shell'),
             color: Theme.of(context).colorScheme.surfaceContainerLowest,
@@ -459,7 +468,16 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
             ),
           );
         }
-        return AppLockGate(child: content);
+        return DesktopAdaptiveScope(
+          isDesktop: isDesktop,
+          child: AppLockGate(
+            child: DesktopGlobalShortcuts(
+              router: router,
+              popupObserver: _popupObserver,
+              child: content,
+            ),
+          ),
+        );
       },
       routerConfig: router,
     );
