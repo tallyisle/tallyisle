@@ -10,6 +10,7 @@ import '../../domain/model/codes.dart';
 import '../../domain/rules/asset_overview.dart' show normalizeCurrency;
 import '../../domain/rules/currency_rates.dart';
 import '../common/common.dart';
+import '../common/desktop_modal_page.dart';
 import 'debt_editor_page.dart';
 import 'debt_providers.dart';
 
@@ -42,8 +43,9 @@ class _DebtDetailPageState extends ConsumerState<DebtDetailPage> {
       switch (action) {
         case _DetailMenuAction.edit:
           if (!mounted) return;
-          await Navigator.of(context).push<bool>(
-            MaterialPageRoute(builder: (_) => DebtEditorPage(debtId: debt.id)),
+          await pushDesktopModalOrMaterialRoute<bool>(
+            context,
+            child: DebtEditorPage(debtId: debt.id),
           );
         case _DetailMenuAction.recalibrate:
           await service.recalibrateDebt(

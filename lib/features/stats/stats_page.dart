@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../app/adaptive.dart';
 import '../../app/providers.dart';
 import '../../data/db/database.dart';
 import '../../domain/rules/category_stats.dart';
@@ -37,6 +38,28 @@ class _StatsPageState extends ConsumerState<StatsPage> {
   @override
   Widget build(BuildContext context) {
     final book = ref.watch(currentBookProvider);
+    final isExpandedDesktop = DesktopAdaptive.isExpandedDesktop(context);
+
+    final annualCard = AnnualReportOverviewCard(
+      onTap: () => context.push('/stats/annual'),
+    );
+    final categoryCard = CategoryStatsOverviewCard(
+      key: const Key('stats-category-overview-card'),
+      onOpenDetail: () => context.push('/stats/category'),
+      onTapCategory: (row) => context.push('/stats/category/${row.categoryId}'),
+    );
+    final tagCard = _TagStatsOverviewCard(
+      key: const Key('stats-tag-overview-card'),
+      onOpenAll: () => context.push('/stats/tags'),
+      onTapTag: (item) => context.push('/stats/tag/${item.tagId}'),
+    );
+    final budgetCard = BudgetSummaryCard(
+      enablePeriodControls: true,
+      onTap: () => context.push('/budget'),
+    );
+    final trendCard = AssetTrendOverviewCard(
+      onTap: () => context.push('/stats/trend'),
+    );
 
     return Scaffold(
       key: const Key('stats-hub-page'),
@@ -79,40 +102,90 @@ class _StatsPageState extends ConsumerState<StatsPage> {
           ),
         ],
       ),
-      body: ListView(
-        key: const Key('stats-hub-list'),
-        padding: const EdgeInsets.only(top: 6, bottom: 32),
-        children: [
-          AnnualReportOverviewCard(onTap: () => context.push('/stats/annual')),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-            child: CategoryStatsOverviewCard(
-              key: const Key('stats-category-overview-card'),
-              onOpenDetail: () => context.push('/stats/category'),
-              onTapCategory: (row) =>
-                  context.push('/stats/category/${row.categoryId}'),
+      body: isExpandedDesktop
+          ? SingleChildScrollView(
+              key: const Key('stats-hub-list'),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+              child: Center(
+                child: ConstrainedBox(
+                  key: const Key('stats-desktop-grid'),
+                  constraints: const BoxConstraints(maxWidth: 1360),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(child: annualCard),
+                          Expanded(child: budgetCard),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 6,
+                              ),
+                              child: categoryCard,
+                            ),
+                          ),
+                          Expanded(
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 6,
+                              ),
+                              child: tagCard,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 6,
+                        ),
+                        child: trendCard,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            )
+          : ListView(
+              key: const Key('stats-hub-list'),
+              padding: const EdgeInsets.only(top: 6, bottom: 32),
+              children: [
+                annualCard,
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 6,
+                  ),
+                  child: categoryCard,
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 6,
+                  ),
+                  child: tagCard,
+                ),
+                budgetCard,
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 6,
+                  ),
+                  child: trendCard,
+                ),
+              ],
             ),
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-            child: _TagStatsOverviewCard(
-              key: const Key('stats-tag-overview-card'),
-              onOpenAll: () => context.push('/stats/tags'),
-              onTapTag: (item) => context.push('/stats/tag/${item.tagId}'),
-            ),
-          ),
-          BudgetSummaryCard(
-            enablePeriodControls: true,
-            onTap: () => context.push('/budget'),
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-            child: AssetTrendOverviewCard(
-              onTap: () => context.push('/stats/trend'),
-            ),
-          ),
-        ],
-      ),
     );
   }
 

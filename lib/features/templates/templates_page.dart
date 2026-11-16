@@ -7,6 +7,7 @@ import '../../data/db/database.dart';
 import '../../domain/model/codes.dart';
 import '../../domain/rules/template_card_rules.dart';
 import '../common/common.dart';
+import '../common/desktop_modal_page.dart';
 import 'remarks_page.dart';
 import 'template_editor_page.dart';
 import 'template_providers.dart';
@@ -200,12 +201,11 @@ class _TemplatesPageState extends ConsumerState<TemplatesPage> {
 
   Future<void> _openCreate() async {
     final currentBookId = ref.read(currentBookIdProvider).value;
-    await Navigator.of(context).push(
-      MaterialPageRoute<int>(
-        builder: (_) => TemplateEditorPage(
-          initialBookId: _bookFilterOrNull ?? currentBookId,
-          initialType: ref.read(templateTypeFilterProvider),
-        ),
+    await pushDesktopModalOrMaterialRoute<int>(
+      context,
+      child: TemplateEditorPage(
+        initialBookId: _bookFilterOrNull ?? currentBookId,
+        initialType: ref.read(templateTypeFilterProvider),
       ),
     );
     if (mounted) {
@@ -214,10 +214,9 @@ class _TemplatesPageState extends ConsumerState<TemplatesPage> {
   }
 
   Future<void> _openEdit(RecordTemplate t) async {
-    await Navigator.of(context).push(
-      MaterialPageRoute<int>(
-        builder: (_) => TemplateEditorPage(templateId: t.id),
-      ),
+    await pushDesktopModalOrMaterialRoute<int>(
+      context,
+      child: TemplateEditorPage(templateId: t.id),
     );
     if (mounted) {
       ref.invalidate(allBookCategoriesMapProvider);

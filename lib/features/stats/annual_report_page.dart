@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/adaptive.dart';
 import '../../app/providers.dart';
 import '../../domain/rules/annual_report.dart';
 import '../common/common.dart';
@@ -115,94 +116,108 @@ class _AnnualReportPageState extends ConsumerState<AnnualReportPage> {
   }
 
   Widget _buildTopControls(List<int> availableYears) {
+    final isExpandedDesktop = DesktopAdaptive.isExpandedDesktop(context);
+
+    final yearSelectorRow = Row(
+      mainAxisSize: MainAxisSize.min,
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        IconButton(
+          key: const Key('annual-report-prev-year-button'),
+          icon: const Icon(Icons.chevron_left),
+          tooltip: '上一年',
+          onPressed: () {
+            setState(() => _selectedYear -= 1);
+          },
+        ),
+        InkWell(
+          key: const Key('annual-report-year-picker-button'),
+          borderRadius: BorderRadius.circular(8),
+          onTap: () => _showYearPickerDialog(availableYears),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            child: Row(
+              children: [
+                Text(
+                  '$_selectedYear年',
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const Icon(Icons.arrow_drop_down),
+              ],
+            ),
+          ),
+        ),
+        IconButton(
+          key: const Key('annual-report-next-year-button'),
+          icon: const Icon(Icons.chevron_right),
+          tooltip: '下一年',
+          onPressed: () {
+            setState(() => _selectedYear += 1);
+          },
+        ),
+      ],
+    );
+
+    final segmentedTabs = SegmentedButton<int>(
+      key: const Key('annual-report-segmented-tabs'),
+      showSelectedIcon: false,
+      style: const ButtonStyle(
+        visualDensity: VisualDensity.compact,
+        padding: WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: 12)),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
+      segments: const [
+        ButtonSegment<int>(
+          value: 0,
+          label: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text('年度账单', maxLines: 1, softWrap: false),
+          ),
+          icon: Icon(Icons.table_chart_outlined, size: 18),
+        ),
+        ButtonSegment<int>(
+          value: 1,
+          label: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text('年度报告', maxLines: 1, softWrap: false),
+          ),
+          icon: Icon(Icons.auto_awesome_outlined, size: 18),
+        ),
+      ],
+      selected: {_activeTab},
+      onSelectionChanged: (set) {
+        setState(() => _activeTab = set.first);
+      },
+    );
+
+    if (isExpandedDesktop) {
+      return Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 1400),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+            child: Row(
+              children: [
+                yearSelectorRow,
+                const Spacer(),
+                SizedBox(width: 280, child: segmentedTabs),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Column(
         children: [
-          // Year Selector Row
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              IconButton(
-                key: const Key('annual-report-prev-year-button'),
-                icon: const Icon(Icons.chevron_left),
-                tooltip: '上一年',
-                onPressed: () {
-                  setState(() => _selectedYear -= 1);
-                },
-              ),
-              InkWell(
-                key: const Key('annual-report-year-picker-button'),
-                borderRadius: BorderRadius.circular(8),
-                onTap: () => _showYearPickerDialog(availableYears),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 6,
-                  ),
-                  child: Row(
-                    children: [
-                      Text(
-                        '$_selectedYear年',
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const Icon(Icons.arrow_drop_down),
-                    ],
-                  ),
-                ),
-              ),
-              IconButton(
-                key: const Key('annual-report-next-year-button'),
-                icon: const Icon(Icons.chevron_right),
-                tooltip: '下一年',
-                onPressed: () {
-                  setState(() => _selectedYear += 1);
-                },
-              ),
-            ],
-          ),
+          Center(child: yearSelectorRow),
           const SizedBox(height: 6),
-
-          // Segmented Tab Switch: 年度账单 vs 年度报告
-          SizedBox(
-            width: double.infinity,
-            child: SegmentedButton<int>(
-              key: const Key('annual-report-segmented-tabs'),
-              showSelectedIcon: false,
-              style: const ButtonStyle(
-                visualDensity: VisualDensity.compact,
-                padding: WidgetStatePropertyAll(
-                  EdgeInsets.symmetric(horizontal: 12),
-                ),
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-              segments: const [
-                ButtonSegment<int>(
-                  value: 0,
-                  label: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: Text('年度账单', maxLines: 1, softWrap: false),
-                  ),
-                  icon: Icon(Icons.table_chart_outlined, size: 18),
-                ),
-                ButtonSegment<int>(
-                  value: 1,
-                  label: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: Text('年度报告', maxLines: 1, softWrap: false),
-                  ),
-                  icon: Icon(Icons.auto_awesome_outlined, size: 18),
-                ),
-              ],
-              selected: {_activeTab},
-              onSelectionChanged: (set) {
-                setState(() => _activeTab = set.first);
-              },
-            ),
-          ),
+          SizedBox(width: double.infinity, child: segmentedTabs),
         ],
       ),
     );
@@ -290,346 +305,371 @@ class _YearlyBillView extends StatelessWidget {
     final sortedMonths = sortDescending
         ? data.monthlySummaries.reversed.toList()
         : data.monthlySummaries;
+    final isExpandedDesktop = DesktopAdaptive.isExpandedDesktop(context);
+
+    final summaryCard = Card(
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: _buildSummaryItem(
+                    label: '总结余',
+                    amount: data.totalBalance,
+                    color: data.totalBalance >= BigInt.zero
+                        ? positiveBalanceColor
+                        : expenseColor,
+                    mutedColor: mutedColor,
+                    isBold: true,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _buildSummaryItem(
+                    label: '总支出',
+                    amount: data.totalExpense,
+                    color: expenseColor,
+                    mutedColor: mutedColor,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _buildSummaryItem(
+                    label: '总收入',
+                    amount: data.totalIncome,
+                    color: incomeColor,
+                    mutedColor: mutedColor,
+                  ),
+                ),
+              ],
+            ),
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 12),
+              child: Divider(height: 1),
+            ),
+            Row(
+              children: [
+                Expanded(
+                  child: _buildSubSummaryItem(
+                    '月均结余',
+                    data.averageMonthSurplus,
+                    mutedColor,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _buildSubSummaryItem(
+                    '月均支出',
+                    data.averageMonthExpense,
+                    mutedColor,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _buildSubSummaryItem(
+                    '月均收入',
+                    data.averageMonthIncome,
+                    mutedColor,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+
+    final trendBarCard = Card(
+      elevation: 1,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Flexible(
+                  child: Text(
+                    '12个月收支趋势对比',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _buildLegend(chartIncomeColor, '收入', mutedColor),
+                    const SizedBox(width: 12),
+                    _buildLegend(chartExpenseColor, '支出', mutedColor),
+                  ],
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            SizedBox(
+              height: isExpandedDesktop ? 210 : 170,
+              width: double.infinity,
+              child: CustomPaint(
+                painter: _AnnualTrendBarChartPainter(
+                  months: data.monthlySummaries,
+                  incomeColor: chartIncomeColor,
+                  expenseColor: chartExpenseColor,
+                  gridColor: theme.dividerColor,
+                  labelColor: mutedColor,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    final monthlyTableCard = Card(
+      elevation: 1,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Flexible(
+                  child: Text(
+                    '月度收支明细表',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                TextButton.icon(
+                  key: const Key('annual-report-toggle-sort-button'),
+                  style: TextButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  onPressed: onToggleSort,
+                  icon: Icon(
+                    sortDescending ? Icons.arrow_downward : Icons.arrow_upward,
+                    size: 16,
+                  ),
+                  label: Text(sortDescending ? '12月至1月' : '1月至12月'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+
+            // Table Header
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surfaceContainerHighest.withValues(
+                  alpha: 0.5,
+                ),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Row(
+                children: [
+                  Expanded(
+                    flex: 2,
+                    child: Text(
+                      '月份',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  Expanded(
+                    flex: 3,
+                    child: Text(
+                      '收入',
+                      textAlign: TextAlign.right,
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  Expanded(
+                    flex: 3,
+                    child: Text(
+                      '支出',
+                      textAlign: TextAlign.right,
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  Expanded(
+                    flex: 3,
+                    child: Padding(
+                      padding: EdgeInsets.only(right: 8),
+                      child: Text(
+                        '结余',
+                        textAlign: TextAlign.right,
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 4),
+
+            // Month Rows
+            ...sortedMonths.map((m) {
+              return Container(
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                decoration: BoxDecoration(
+                  border: Border(
+                    bottom: BorderSide(
+                      color: theme.dividerColor.withValues(alpha: 0.3),
+                    ),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      flex: 2,
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          '${m.month}月',
+                          textAlign: TextAlign.center,
+                          maxLines: 1,
+                          style: const TextStyle(fontWeight: FontWeight.w500),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      flex: 3,
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerRight,
+                        child: Text(
+                          m.income > BigInt.zero
+                              ? '+¥${formatMinor(m.income)}'
+                              : '-',
+                          textAlign: TextAlign.right,
+                          maxLines: 1,
+                          style: TextStyle(
+                            color: m.income > BigInt.zero
+                                ? incomeColor
+                                : theme.disabledColor,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      flex: 3,
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerRight,
+                        child: Text(
+                          m.expense > BigInt.zero
+                              ? '-¥${formatMinor(m.expense)}'
+                              : '-',
+                          textAlign: TextAlign.right,
+                          maxLines: 1,
+                          style: TextStyle(
+                            color: m.expense > BigInt.zero
+                                ? expenseColor
+                                : theme.disabledColor,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      flex: 3,
+                      child: Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: Alignment.centerRight,
+                          child: Text(
+                            m.balance == BigInt.zero
+                                ? '¥0.00'
+                                : (m.balance < BigInt.zero
+                                      ? '-¥${formatMinor(m.balance.abs())}'
+                                      : '+¥${formatMinor(m.balance)}'),
+                            textAlign: TextAlign.right,
+                            maxLines: 1,
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: m.balance > BigInt.zero
+                                  ? positiveBalanceColor
+                                  : (m.balance < BigInt.zero
+                                        ? expenseColor
+                                        : null),
+                              fontSize: 13,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }),
+          ],
+        ),
+      ),
+    );
+
+    if (isExpandedDesktop) {
+      return Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 1400),
+          child: Row(
+            key: const Key('annual-bill-desktop-split'),
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(
+                flex: 46,
+                child: ListView(
+                  padding: const EdgeInsets.fromLTRB(20, 16, 12, 24),
+                  children: [
+                    summaryCard,
+                    const SizedBox(height: 16),
+                    trendBarCard,
+                  ],
+                ),
+              ),
+              const VerticalDivider(width: 1),
+              Expanded(
+                flex: 54,
+                child: ListView(
+                  padding: const EdgeInsets.fromLTRB(12, 16, 20, 24),
+                  children: [monthlyTableCard],
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
 
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        // Annual Summary Header Card
-        Card(
-          elevation: 2,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: _buildSummaryItem(
-                        label: '总结余',
-                        amount: data.totalBalance,
-                        color: data.totalBalance >= BigInt.zero
-                            ? positiveBalanceColor
-                            : expenseColor,
-                        mutedColor: mutedColor,
-                        isBold: true,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: _buildSummaryItem(
-                        label: '总支出',
-                        amount: data.totalExpense,
-                        color: expenseColor,
-                        mutedColor: mutedColor,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: _buildSummaryItem(
-                        label: '总收入',
-                        amount: data.totalIncome,
-                        color: incomeColor,
-                        mutedColor: mutedColor,
-                      ),
-                    ),
-                  ],
-                ),
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 12),
-                  child: Divider(height: 1),
-                ),
-                Row(
-                  children: [
-                    Expanded(
-                      child: _buildSubSummaryItem(
-                        '月均结余',
-                        data.averageMonthSurplus,
-                        mutedColor,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: _buildSubSummaryItem(
-                        '月均支出',
-                        data.averageMonthExpense,
-                        mutedColor,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: _buildSubSummaryItem(
-                        '月均收入',
-                        data.averageMonthIncome,
-                        mutedColor,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
+        summaryCard,
         const SizedBox(height: 16),
-
-        // 12-Month CustomPaint Trend Chart Card
-        Card(
-          elevation: 1,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Flexible(
-                      child: Text(
-                        '12个月收支趋势对比',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        _buildLegend(chartIncomeColor, '收入', mutedColor),
-                        const SizedBox(width: 12),
-                        _buildLegend(chartExpenseColor, '支出', mutedColor),
-                      ],
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                SizedBox(
-                  height: 170,
-                  width: double.infinity,
-                  child: CustomPaint(
-                    painter: _AnnualTrendBarChartPainter(
-                      months: data.monthlySummaries,
-                      incomeColor: chartIncomeColor,
-                      expenseColor: chartExpenseColor,
-                      gridColor: theme.dividerColor,
-                      labelColor: mutedColor,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
+        trendBarCard,
         const SizedBox(height: 16),
-
-        // 12-Month Detailed Table Card
-        Card(
-          elevation: 1,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Flexible(
-                      child: Text(
-                        '月度收支明细表',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                    TextButton.icon(
-                      key: const Key('annual-report-toggle-sort-button'),
-                      style: TextButton.styleFrom(
-                        visualDensity: VisualDensity.compact,
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      ),
-                      onPressed: onToggleSort,
-                      icon: Icon(
-                        sortDescending
-                            ? Icons.arrow_downward
-                            : Icons.arrow_upward,
-                        size: 16,
-                      ),
-                      label: Text(sortDescending ? '12月至1月' : '1月至12月'),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-
-                // Table Header
-                Container(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.surfaceContainerHighest.withValues(
-                      alpha: 0.5,
-                    ),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: const Row(
-                    children: [
-                      Expanded(
-                        flex: 2,
-                        child: Text(
-                          '月份',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                      ),
-                      Expanded(
-                        flex: 3,
-                        child: Text(
-                          '收入',
-                          textAlign: TextAlign.right,
-                          style: TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                      ),
-                      Expanded(
-                        flex: 3,
-                        child: Text(
-                          '支出',
-                          textAlign: TextAlign.right,
-                          style: TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                      ),
-                      Expanded(
-                        flex: 3,
-                        child: Padding(
-                          padding: EdgeInsets.only(right: 8),
-                          child: Text(
-                            '结余',
-                            textAlign: TextAlign.right,
-                            style: TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 4),
-
-                // Month Rows
-                ...sortedMonths.map((m) {
-                  return Container(
-                    padding: const EdgeInsets.symmetric(vertical: 10),
-                    decoration: BoxDecoration(
-                      border: Border(
-                        bottom: BorderSide(
-                          color: theme.dividerColor.withValues(alpha: 0.3),
-                        ),
-                      ),
-                    ),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          flex: 2,
-                          child: FittedBox(
-                            fit: BoxFit.scaleDown,
-                            child: Text(
-                              '${m.month}月',
-                              textAlign: TextAlign.center,
-                              maxLines: 1,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 4),
-                        Expanded(
-                          flex: 3,
-                          child: FittedBox(
-                            fit: BoxFit.scaleDown,
-                            alignment: Alignment.centerRight,
-                            child: Text(
-                              m.income > BigInt.zero
-                                  ? '+¥${formatMinor(m.income)}'
-                                  : '-',
-                              textAlign: TextAlign.right,
-                              maxLines: 1,
-                              style: TextStyle(
-                                color: m.income > BigInt.zero
-                                    ? incomeColor
-                                    : theme.disabledColor,
-                                fontSize: 13,
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 4),
-                        Expanded(
-                          flex: 3,
-                          child: FittedBox(
-                            fit: BoxFit.scaleDown,
-                            alignment: Alignment.centerRight,
-                            child: Text(
-                              m.expense > BigInt.zero
-                                  ? '-¥${formatMinor(m.expense)}'
-                                  : '-',
-                              textAlign: TextAlign.right,
-                              maxLines: 1,
-                              style: TextStyle(
-                                color: m.expense > BigInt.zero
-                                    ? expenseColor
-                                    : theme.disabledColor,
-                                fontSize: 13,
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 4),
-                        Expanded(
-                          flex: 3,
-                          child: Padding(
-                            padding: const EdgeInsets.only(right: 8),
-                            child: FittedBox(
-                              fit: BoxFit.scaleDown,
-                              alignment: Alignment.centerRight,
-                              child: Text(
-                                m.balance == BigInt.zero
-                                    ? '¥0.00'
-                                    : (m.balance < BigInt.zero
-                                          ? '-¥${formatMinor(m.balance.abs())}'
-                                          : '+¥${formatMinor(m.balance)}'),
-                                textAlign: TextAlign.right,
-                                maxLines: 1,
-                                style: TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  color: m.balance > BigInt.zero
-                                      ? positiveBalanceColor
-                                      : (m.balance < BigInt.zero
-                                            ? expenseColor
-                                            : null),
-                                  fontSize: 13,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                }),
-              ],
-            ),
-          ),
-        ),
+        monthlyTableCard,
       ],
     );
   }
@@ -732,558 +772,565 @@ class _AnnualReportHighlightView extends StatelessWidget {
     final amberAccent = isDark ? Colors.amber.shade300 : Colors.amber.shade700;
     final mutedColor = scheme.onSurfaceVariant;
     final hasRecords = data.totalBillCount > 0;
+    final isExpandedDesktop = DesktopAdaptive.isExpandedDesktop(context);
 
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        // Card 1: 年度记账回顾
-        Card(
-          elevation: 2,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+    // Card 1: 年度记账回顾
+    final reviewCard = Card(
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
               children: [
-                Row(
-                  children: [
-                    Icon(Icons.auto_stories, color: scheme.primary, size: 24),
-                    const SizedBox(width: 8),
-                    Flexible(
-                      child: Text(
-                        '${data.year} 年度记账回顾',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  hasRecords
-                      ? '这一年，你坚持记录了 ${data.activeDays} 天的生活。'
-                      : '这一年暂无记账数据。',
-                  style: theme.textTheme.bodyLarge?.copyWith(
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Row(
-                  children: [
-                    Expanded(
-                      child: _buildMetricBox(
-                        icon: Icons.receipt_long,
-                        title: '记账总笔数',
-                        value: '${data.totalBillCount} 笔',
-                        mutedColor: mutedColor,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: _buildMetricBox(
-                        icon: Icons.savings_outlined,
-                        title: '年度储蓄率',
-                        value:
-                            '${(data.savingsRate * 100).toStringAsFixed(1)}%',
-                        mutedColor: mutedColor,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: _buildMetricBox(
-                        icon: Icons.calendar_today,
-                        title: '活跃记账天',
-                        value: '${data.activeDays} 天',
-                        mutedColor: mutedColor,
-                      ),
-                    ),
-                  ],
-                ),
-                if (data.maxBillDayDate != null) ...[
-                  const SizedBox(height: 16),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 8,
-                    ),
-                    decoration: BoxDecoration(
-                      color: scheme.primaryContainer.withValues(alpha: 0.4),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(Icons.star, color: amberAccent, size: 18),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            '最忙碌的一天：${data.maxBillDayDate}，共记录了 ${data.maxBillDayCount} 笔账单',
-                            style: const TextStyle(fontSize: 13),
-                          ),
-                        ),
-                      ],
+                Icon(Icons.auto_stories, color: scheme.primary, size: 24),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(
+                    '${data.year} 年度记账回顾',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
                     ),
                   ),
-                ],
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 16),
-
-        // Card 2: 消费之最与峰值月份
-        Card(
-          elevation: 1,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Icon(
-                      Icons.emoji_events_outlined,
-                      color: amberAccent,
-                      size: 24,
-                    ),
-                    const SizedBox(width: 8),
-                    Flexible(
-                      child: Text(
-                        '收支之最',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-
-                // Max Expense Record
-                if (data.maxExpenseRecord != null) ...[
-                  InkWell(
-                    key: const Key('annual-report-max-expense-record-tile'),
-                    borderRadius: BorderRadius.circular(8),
-                    onTap: () => onRecordTap?.call(data.maxExpenseRecord!.id),
-                    child: Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: Colors.red.withValues(
-                          alpha: isDark ? 0.10 : 0.05,
-                        ),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Row(
-                        children: [
-                          CircleAvatar(
-                            backgroundColor: Colors.red.withValues(
-                              alpha: isDark ? 0.20 : 0.14,
-                            ),
-                            child: Icon(
-                              Icons.arrow_downward,
-                              color: expenseColor,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  '单笔最高支出',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: mutedColor,
-                                  ),
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  data.maxExpenseRecord!.categoryName,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 15,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          ConstrainedBox(
-                            constraints: const BoxConstraints(maxWidth: 132),
-                            child: FittedBox(
-                              fit: BoxFit.scaleDown,
-                              alignment: Alignment.centerRight,
-                              child: Text(
-                                '-¥${formatMinor(data.maxExpenseRecord!.amount)}',
-                                maxLines: 1,
-                                style: TextStyle(
-                                  color: expenseColor,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 16,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                ],
-
-                // Max Income Record
-                if (data.maxIncomeRecord != null) ...[
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.green.withValues(
-                        alpha: isDark ? 0.10 : 0.05,
-                      ),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Row(
-                      children: [
-                        CircleAvatar(
-                          backgroundColor: Colors.green.withValues(
-                            alpha: isDark ? 0.20 : 0.14,
-                          ),
-                          child: Icon(Icons.arrow_upward, color: incomeColor),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                '单笔最高收入',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: mutedColor,
-                                ),
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                data.maxIncomeRecord!.categoryName,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 15,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        ConstrainedBox(
-                          constraints: const BoxConstraints(maxWidth: 132),
-                          child: FittedBox(
-                            fit: BoxFit.scaleDown,
-                            alignment: Alignment.centerRight,
-                            child: Text(
-                              '+¥${formatMinor(data.maxIncomeRecord!.amount)}',
-                              maxLines: 1,
-                              style: TextStyle(
-                                color: incomeColor,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 16,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                ],
-
-                // Peak Months
-                Row(
-                  children: [
-                    Expanded(
-                      child: _buildMonthPeakTile(
-                        title: '支出最多月',
-                        month: data.maxExpenseMonth,
-                        amount: data.maxExpenseMonthAmount,
-                        color: expenseColor,
-                        mutedColor: mutedColor,
-                        isDark: isDark,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: _buildMonthPeakTile(
-                        title: '收入最多月',
-                        month: data.maxIncomeMonth,
-                        amount: data.maxIncomeMonthAmount,
-                        color: incomeColor,
-                        mutedColor: mutedColor,
-                        isDark: isDark,
-                      ),
-                    ),
-                  ],
                 ),
               ],
             ),
-          ),
-        ),
-        const SizedBox(height: 16),
-
-        // Card 3: 年度支出构成 Top 榜
-        Card(
-          elevation: 1,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Icon(
-                      Icons.pie_chart_outline,
-                      color: positiveBalanceColor,
-                      size: 24,
-                    ),
-                    const SizedBox(width: 8),
-                    Flexible(
-                      child: Text(
-                        '年度支出构成 Top 榜',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                if (data.topExpenseCategories.isEmpty)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    child: Center(
-                      child: Text(
-                        '暂无支出分类数据',
-                        style: TextStyle(color: mutedColor),
-                      ),
-                    ),
-                  )
-                else
-                  ...data.topExpenseCategories.take(5).map((cat) {
-                    final rank = data.topExpenseCategories.indexOf(cat) + 1;
-                    final isTop3 = rank <= 3;
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 8),
-                      child: Column(
-                        children: [
-                          Row(
-                            children: [
-                              Container(
-                                width: 22,
-                                height: 22,
-                                alignment: Alignment.center,
-                                decoration: BoxDecoration(
-                                  color: isTop3
-                                      ? amberAccent
-                                      : scheme.surfaceContainerHighest,
-                                  shape: BoxShape.circle,
-                                ),
-                                child: Text(
-                                  '$rank',
-                                  style: TextStyle(
-                                    color: isTop3
-                                        ? Colors.black87
-                                        : scheme.onSurfaceVariant,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Text(
-                                  cat.categoryName,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Text(
-                                '${(cat.ratio * 100).toStringAsFixed(1)}%',
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  color: mutedColor,
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              ConstrainedBox(
-                                constraints: const BoxConstraints(
-                                  maxWidth: 120,
-                                ),
-                                child: FittedBox(
-                                  fit: BoxFit.scaleDown,
-                                  alignment: Alignment.centerRight,
-                                  child: Text(
-                                    '¥${formatMinor(cat.amount)}',
-                                    maxLines: 1,
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 14,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 6),
-                          LinearProgressIndicator(
-                            value: cat.ratio.clamp(0.0, 1.0),
-                            backgroundColor: scheme.surfaceContainerHighest,
-                            color: rank == 1 ? amberAccent : scheme.primary,
-                            borderRadius: BorderRadius.circular(4),
-                            minHeight: 6,
-                          ),
-                        ],
-                      ),
-                    );
-                  }),
-              ],
+            const SizedBox(height: 16),
+            Text(
+              hasRecords ? '这一年，你坚持记录了 ${data.activeDays} 天的生活。' : '这一年暂无记账数据。',
+              style: theme.textTheme.bodyLarge?.copyWith(
+                fontWeight: FontWeight.w500,
+              ),
             ),
-          ),
-        ),
-        const SizedBox(height: 16),
-
-        // Card 4: 账户与优惠
-        Card(
-          elevation: 1,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            const SizedBox(height: 16),
+            Row(
               children: [
-                Row(
-                  children: [
-                    Icon(
-                      Icons.account_balance_wallet_outlined,
-                      color: scheme.primary,
-                      size: 24,
-                    ),
-                    const SizedBox(width: 8),
-                    Flexible(
-                      child: Text(
-                        '账户与优惠',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ],
+                Expanded(
+                  child: _buildMetricBox(
+                    icon: Icons.receipt_long,
+                    title: '记账总笔数',
+                    value: '${data.totalBillCount} 笔',
+                    mutedColor: mutedColor,
+                  ),
                 ),
-                const SizedBox(height: 16),
-                if (data.mostUsedAsset != null)
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: CircleAvatar(
-                      backgroundColor: scheme.primaryContainer,
-                      foregroundColor: scheme.onPrimaryContainer,
-                      child: const Icon(Icons.credit_card, size: 20),
-                    ),
-                    title: Text(
-                      '最常用账户：${data.mostUsedAsset!.assetName}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    subtitle: Text(
-                      '记账 ${data.mostUsedAsset!.count} 笔，占全部记录的 ${(data.mostUsedAsset!.ratio * 100).toStringAsFixed(1)}%',
-                    ),
-                  ),
-                if (data.totalDiscount > BigInt.zero)
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: CircleAvatar(
-                      backgroundColor: scheme.tertiaryContainer,
-                      foregroundColor: scheme.onTertiaryContainer,
-                      child: const Icon(Icons.local_offer, size: 20),
-                    ),
-                    title: const Text('全年优惠立减'),
-                    subtitle: Text('共计省下 ¥${formatMinor(data.totalDiscount)}'),
-                  ),
-                if (data.mostUsedAsset == null &&
-                    data.totalDiscount == BigInt.zero)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    child: Text(
-                      '暂无账户与优惠统计',
-                      style: TextStyle(color: mutedColor),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 16),
-
-        // Card 5: 年度结语卡
-        Card(
-          elevation: 1,
-          color: scheme.primaryContainer.withValues(alpha: 0.3),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(Icons.format_quote, color: amberAccent, size: 32),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                  child: _buildMetricBox(
+                    icon: Icons.savings_outlined,
+                    title: '年度储蓄率',
+                    value: '${(data.savingsRate * 100).toStringAsFixed(1)}%',
+                    mutedColor: mutedColor,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _buildMetricBox(
+                    icon: Icons.calendar_today,
+                    title: '活跃记账天',
+                    value: '${data.activeDays} 天',
+                    mutedColor: mutedColor,
+                  ),
+                ),
+              ],
+            ),
+            if (data.maxBillDayDate != null) ...[
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  color: scheme.primaryContainer.withValues(alpha: 0.4),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.star, color: amberAccent, size: 18),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        '最忙碌的一天：${data.maxBillDayDate}，共记录了 ${data.maxBillDayCount} 笔账单',
+                        style: const TextStyle(fontSize: 13),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+
+    // Card 2: 消费之最与峰值月份
+    final peaksCard = Card(
+      elevation: 1,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.emoji_events_outlined, color: amberAccent, size: 24),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(
+                    '收支之最',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+
+            // Max Expense Record
+            if (data.maxExpenseRecord != null) ...[
+              InkWell(
+                key: const Key('annual-report-max-expense-record-tile'),
+                borderRadius: BorderRadius.circular(8),
+                onTap: () => onRecordTap?.call(data.maxExpenseRecord!.id),
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.red.withValues(alpha: isDark ? 0.10 : 0.05),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
                     children: [
-                      const Text(
-                        '年度寄语',
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 15,
+                      CircleAvatar(
+                        backgroundColor: Colors.red.withValues(
+                          alpha: isDark ? 0.20 : 0.14,
+                        ),
+                        child: Icon(Icons.arrow_downward, color: expenseColor),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '单笔最高支出',
+                              style: TextStyle(fontSize: 12, color: mutedColor),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              data.maxExpenseRecord!.categoryName,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 15,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                      const SizedBox(height: 6),
-                      Text(
-                        hasRecords
-                            ? '点滴汇聚成海，每一笔收支都是生活的真实印记。${data.year}年你用心管理财务，新的一年继续保持良好记账习惯！'
-                            : '${data.year}年尚无有效记账数据，期待新的一年与你一起记录每一份精彩！',
-                        style: const TextStyle(fontSize: 14, height: 1.4),
+                      const SizedBox(width: 8),
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 132),
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: Alignment.centerRight,
+                          child: Text(
+                            '-¥${formatMinor(data.maxExpenseRecord!.amount)}',
+                            maxLines: 1,
+                            style: TextStyle(
+                              color: expenseColor,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                            ),
+                          ),
+                        ),
                       ),
                     ],
                   ),
                 ),
+              ),
+              const SizedBox(height: 12),
+            ],
+
+            // Max Income Record
+            if (data.maxIncomeRecord != null) ...[
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.green.withValues(alpha: isDark ? 0.10 : 0.05),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  children: [
+                    CircleAvatar(
+                      backgroundColor: Colors.green.withValues(
+                        alpha: isDark ? 0.20 : 0.14,
+                      ),
+                      child: Icon(Icons.arrow_upward, color: incomeColor),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '单笔最高收入',
+                            style: TextStyle(fontSize: 12, color: mutedColor),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            data.maxIncomeRecord!.categoryName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 15,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 132),
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerRight,
+                        child: Text(
+                          '+¥${formatMinor(data.maxIncomeRecord!.amount)}',
+                          maxLines: 1,
+                          style: TextStyle(
+                            color: incomeColor,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+            ],
+
+            // Peak Months
+            Row(
+              children: [
+                Expanded(
+                  child: _buildMonthPeakTile(
+                    title: '支出最多月',
+                    month: data.maxExpenseMonth,
+                    amount: data.maxExpenseMonthAmount,
+                    color: expenseColor,
+                    mutedColor: mutedColor,
+                    isDark: isDark,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _buildMonthPeakTile(
+                    title: '收入最多月',
+                    month: data.maxIncomeMonth,
+                    amount: data.maxIncomeMonthAmount,
+                    color: incomeColor,
+                    mutedColor: mutedColor,
+                    isDark: isDark,
+                  ),
+                ),
               ],
             ),
-          ),
+          ],
         ),
+      ),
+    );
+
+    // Card 3: 年度支出构成 Top 榜
+    final topCategoryCard = Card(
+      elevation: 1,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  Icons.pie_chart_outline,
+                  color: positiveBalanceColor,
+                  size: 24,
+                ),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(
+                    '年度支出构成 Top 榜',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            if (data.topExpenseCategories.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                child: Center(
+                  child: Text('暂无支出分类数据', style: TextStyle(color: mutedColor)),
+                ),
+              )
+            else
+              ...data.topExpenseCategories.take(5).map((cat) {
+                final rank = data.topExpenseCategories.indexOf(cat) + 1;
+                final isTop3 = rank <= 3;
+                return Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Column(
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            width: 22,
+                            height: 22,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: isTop3
+                                  ? amberAccent
+                                  : scheme.surfaceContainerHighest,
+                              shape: BoxShape.circle,
+                            ),
+                            child: Text(
+                              '$rank',
+                              style: TextStyle(
+                                color: isTop3
+                                    ? Colors.black87
+                                    : scheme.onSurfaceVariant,
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              cat.categoryName,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            '${(cat.ratio * 100).toStringAsFixed(1)}%',
+                            style: TextStyle(fontSize: 13, color: mutedColor),
+                          ),
+                          const SizedBox(width: 10),
+                          ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 120),
+                            child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              alignment: Alignment.centerRight,
+                              child: Text(
+                                '¥${formatMinor(cat.amount)}',
+                                maxLines: 1,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 14,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      LinearProgressIndicator(
+                        value: cat.ratio.clamp(0.0, 1.0),
+                        backgroundColor: scheme.surfaceContainerHighest,
+                        color: rank == 1 ? amberAccent : scheme.primary,
+                        borderRadius: BorderRadius.circular(4),
+                        minHeight: 6,
+                      ),
+                    ],
+                  ),
+                );
+              }),
+          ],
+        ),
+      ),
+    );
+
+    // Card 4: 账户与优惠
+    final assetDiscountCard = Card(
+      elevation: 1,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  Icons.account_balance_wallet_outlined,
+                  color: scheme.primary,
+                  size: 24,
+                ),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(
+                    '账户与优惠',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            if (data.mostUsedAsset != null)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: CircleAvatar(
+                  backgroundColor: scheme.primaryContainer,
+                  foregroundColor: scheme.onPrimaryContainer,
+                  child: const Icon(Icons.credit_card, size: 20),
+                ),
+                title: Text(
+                  '最常用账户：${data.mostUsedAsset!.assetName}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                subtitle: Text(
+                  '记账 ${data.mostUsedAsset!.count} 笔，占全部记录的 ${(data.mostUsedAsset!.ratio * 100).toStringAsFixed(1)}%',
+                ),
+              ),
+            if (data.totalDiscount > BigInt.zero)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: CircleAvatar(
+                  backgroundColor: scheme.tertiaryContainer,
+                  foregroundColor: scheme.onTertiaryContainer,
+                  child: const Icon(Icons.local_offer, size: 20),
+                ),
+                title: const Text('全年优惠立减'),
+                subtitle: Text('共计省下 ¥${formatMinor(data.totalDiscount)}'),
+              ),
+            if (data.mostUsedAsset == null && data.totalDiscount == BigInt.zero)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Text('暂无账户与优惠统计', style: TextStyle(color: mutedColor)),
+              ),
+          ],
+        ),
+      ),
+    );
+
+    // Card 5: 年度结语卡
+    final closingQuoteCard = Card(
+      elevation: 1,
+      color: scheme.primaryContainer.withValues(alpha: 0.3),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(Icons.format_quote, color: amberAccent, size: 32),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    '年度寄语',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    hasRecords
+                        ? '点滴汇聚成海，每一笔收支都是生活的真实印记。${data.year}年你用心管理财务，新的一年继续保持良好记账习惯！'
+                        : '${data.year}年尚无有效记账数据，期待新的一年与你一起记录每一份精彩！',
+                    style: const TextStyle(fontSize: 14, height: 1.4),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (isExpandedDesktop) {
+      return ListView(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+        children: [
+          Center(
+            child: ConstrainedBox(
+              key: const Key('annual-report-desktop-grid'),
+              constraints: const BoxConstraints(maxWidth: 1360),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(child: reviewCard),
+                      const SizedBox(width: 16),
+                      Expanded(child: peaksCard),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(child: topCategoryCard),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            assetDiscountCard,
+                            const SizedBox(height: 16),
+                            closingQuoteCard,
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        reviewCard,
+        const SizedBox(height: 16),
+        peaksCard,
+        const SizedBox(height: 16),
+        topCategoryCard,
+        const SizedBox(height: 16),
+        assetDiscountCard,
+        const SizedBox(height: 16),
+        closingQuoteCard,
       ],
     );
   }

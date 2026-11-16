@@ -6,6 +6,7 @@ import '../../app/providers.dart';
 import '../../data/db/database.dart';
 import '../../domain/rules/wish_note_rules.dart';
 import '../common/common.dart';
+import '../common/desktop_modal_page.dart';
 import 'wish_editor_page.dart';
 import 'wish_providers.dart';
 
@@ -36,8 +37,9 @@ class _WishesPageState extends ConsumerState<WishesPage>
   }
 
   Future<void> _openEditor({String? wishId}) async {
-    await Navigator.of(context).push<void>(
-      MaterialPageRoute(builder: (_) => WishEditorPage(wishId: wishId)),
+    await pushDesktopModalOrMaterialRoute<void>(
+      context,
+      child: WishEditorPage(wishId: wishId),
     );
   }
 

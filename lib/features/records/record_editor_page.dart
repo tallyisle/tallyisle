@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../app/adaptive.dart';
 import '../../app/providers.dart';
 import '../../core/failure.dart';
 import '../../core/money.dart';
@@ -21,6 +22,7 @@ import '../../domain/rules/asset_overview.dart'
     show RateTable, normalizeCurrency;
 import '../../domain/rules/currency_rates.dart';
 import '../../domain/rules/record_keypad_calc.dart';
+import '../assets/assets_page.dart';
 import '../attachments/attachment_providers.dart';
 import '../automation/automation_providers.dart'
     show widgetSnapshotServiceProvider;
@@ -35,6 +37,7 @@ import '../tags/tags_page.dart';
 import '../templates/template_providers.dart';
 import '../templates/templates_page.dart'
     show RemarksPage, TemplatePrefill, TemplateQuickBar, TemplatesPage;
+import 'desktop_record_editor_dialog.dart';
 import 'record_datetime_dialog.dart';
 import 'record_keypad.dart';
 
@@ -159,6 +162,8 @@ class RecordEditorPage extends ConsumerStatefulWidget {
     this.initialTo,
     this.initialAmount,
     this.initialRemark,
+    this.initialRecordTimeMs,
+    this.embeddedInDesktopDialog = false,
   });
 
   final String? recordId;
@@ -172,6 +177,8 @@ class RecordEditorPage extends ConsumerStatefulWidget {
   final int? initialTo;
   final String? initialAmount;
   final String? initialRemark;
+  final int? initialRecordTimeMs;
+  final bool embeddedInDesktopDialog;
 
   @override
   ConsumerState<RecordEditorPage> createState() => _RecordEditorPageState();
@@ -184,9 +191,22 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
   final discount = TextEditingController();
   final fee = TextEditingController();
   final remark = TextEditingController();
-  final _amountFocus = FocusNode();
-  final _remarkFocus = FocusNode();
-  final _feeFocus = FocusNode();
+  late final FocusNode _amountFocus = FocusNode(
+    debugLabel: 'record-editor-amount',
+    onKeyEvent: _handleAmountFieldKeyEvent,
+  );
+  late final FocusNode _remarkFocus = FocusNode(
+    debugLabel: 'record-editor-remark',
+    onKeyEvent: _handleAuxFieldKeyEvent,
+  );
+  late final FocusNode _feeFocus = FocusNode(
+    debugLabel: 'record-editor-fee',
+    onKeyEvent: _handleAuxFieldKeyEvent,
+  );
+  late final FocusNode _desktopScopeFocus = FocusNode(
+    debugLabel: 'record-editor-desktop-scope',
+    onKeyEvent: _handleDesktopScopeKeyEvent,
+  );
   final ids = CommandIds();
   final imageIds = CommandIds();
   final remarkIds = CommandIds();
@@ -221,6 +241,9 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
   bool _savedAndResetBanner = false;
   bool _remarksShowAllScope = false;
   _BottomPanelMode _panelMode = _BottomPanelMode.customKeypad;
+  bool _desktopKeypadExpanded = false;
+  bool _desktopRemarksExpanded = false;
+  bool _didAutoFocusDesktopAmount = false;
   bool _imeWasVisible = false;
   DateTime time = DateTime.now();
   LedgerRecord? original;
@@ -228,6 +251,23 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
   String? error;
 
   bool get editing => widget.recordId != null;
+
+  bool get _isDesktopActive => mounted && DesktopAdaptive.isDesktop(context);
+
+  bool get _isEmbeddedInDesktopDialog =>
+      widget.embeddedInDesktopDialog ||
+      (mounted && DesktopRecordDialogScope.isEmbedded(context));
+
+  bool get _isImperativeDialogRoute {
+    if (!mounted) return false;
+    final route = ModalRoute.of(context);
+    return route is PopupRoute && route.settings is! Page;
+  }
+
+  bool get _isTopmostRoute =>
+      mounted && (ModalRoute.of(context)?.isCurrent ?? true);
+
+  bool get _canSubmitNow => !busy && !loading && (!editing || original != null);
 
   bool get _hasOsKeyboardFieldFocus =>
       _remarkFocus.hasFocus || _feeFocus.hasFocus;
@@ -244,10 +284,344 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     if (_feeFocus.hasFocus) _feeFocus.unfocus();
   }
 
+  void _ensureInitialDesktopFocusScheduled() {
+    if (_didAutoFocusDesktopAmount || loading || busy || !_isDesktopActive) {
+      return;
+    }
+    _didAutoFocusDesktopAmount = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || busy || loading || _hasOsKeyboardFieldFocus) return;
+      if (!_amountFocus.hasFocus) {
+        _amountFocus.requestFocus();
+      }
+    });
+  }
+
+  void _focusDesktopAmountIfIdle() {
+    if (!_isDesktopActive || busy || loading || _hasOsKeyboardFieldFocus) {
+      return;
+    }
+    if (!_amountFocus.hasFocus) {
+      _amountFocus.requestFocus();
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || busy || loading || _hasOsKeyboardFieldFocus) return;
+      if (!_amountFocus.hasFocus) {
+        _amountFocus.requestFocus();
+      }
+    });
+  }
+
+  void _closeEditor([String? result]) {
+    _unfocusOsKeyboardFields();
+    if (_isImperativeDialogRoute) {
+      if (Navigator.of(context).canPop()) {
+        Navigator.of(context).pop(result);
+      }
+      return;
+    }
+    final router = GoRouter.maybeOf(context);
+    if (router != null) {
+      if (context.canPop()) {
+        context.pop(result);
+      } else {
+        context.go('/');
+      }
+    } else if (Navigator.of(context).canPop()) {
+      Navigator.of(context).pop(result);
+    }
+  }
+
+  void _toggleDesktopKeypadPanel() {
+    if (busy) return;
+    setState(() {
+      _desktopKeypadExpanded = !_desktopKeypadExpanded;
+      if (_desktopKeypadExpanded) {
+        _desktopRemarksExpanded = false;
+      }
+    });
+    _focusDesktopAmountIfIdle();
+  }
+
+  void _toggleDesktopRemarksPanel() {
+    if (busy) return;
+    setState(() {
+      _desktopRemarksExpanded = !_desktopRemarksExpanded;
+      if (_desktopRemarksExpanded) {
+        _desktopKeypadExpanded = false;
+      }
+    });
+    if (!_desktopRemarksExpanded) {
+      _focusDesktopAmountIfIdle();
+    }
+  }
+
+  static bool _isEnterKey(LogicalKeyboardKey key) =>
+      key == LogicalKeyboardKey.enter || key == LogicalKeyboardKey.numpadEnter;
+
+  bool _isPrimarySubmitModifierPressed(HardwareKeyboard hw) {
+    if (hw.isAltPressed) return false;
+    if (DesktopAdaptive.isMacOS(context)) {
+      return hw.isControlPressed || hw.isMetaPressed;
+    }
+    return hw.isControlPressed && !hw.isMetaPressed;
+  }
+
+  static String? _mapDesktopKeyToKeypadToken(
+    KeyEvent event,
+    HardwareKeyboard hw,
+  ) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+      return null;
+    }
+    if (hw.isControlPressed || hw.isMetaPressed || hw.isAltPressed) {
+      return null;
+    }
+    final key = event.logicalKey;
+    final shift = hw.isShiftPressed;
+
+    if (shift) {
+      if (key == LogicalKeyboardKey.equal ||
+          key == LogicalKeyboardKey.add ||
+          key == LogicalKeyboardKey.numpadAdd ||
+          event.character == '+') {
+        return '+';
+      }
+      if (key == LogicalKeyboardKey.digit8 ||
+          key == LogicalKeyboardKey.asterisk ||
+          key == LogicalKeyboardKey.numpadMultiply ||
+          event.character == '*') {
+        return '×';
+      }
+      return null;
+    }
+
+    return switch (key) {
+      LogicalKeyboardKey.digit0 || LogicalKeyboardKey.numpad0 => '0',
+      LogicalKeyboardKey.digit1 || LogicalKeyboardKey.numpad1 => '1',
+      LogicalKeyboardKey.digit2 || LogicalKeyboardKey.numpad2 => '2',
+      LogicalKeyboardKey.digit3 || LogicalKeyboardKey.numpad3 => '3',
+      LogicalKeyboardKey.digit4 || LogicalKeyboardKey.numpad4 => '4',
+      LogicalKeyboardKey.digit5 || LogicalKeyboardKey.numpad5 => '5',
+      LogicalKeyboardKey.digit6 || LogicalKeyboardKey.numpad6 => '6',
+      LogicalKeyboardKey.digit7 || LogicalKeyboardKey.numpad7 => '7',
+      LogicalKeyboardKey.digit8 || LogicalKeyboardKey.numpad8 => '8',
+      LogicalKeyboardKey.digit9 || LogicalKeyboardKey.numpad9 => '9',
+      LogicalKeyboardKey.period || LogicalKeyboardKey.numpadDecimal => '.',
+      LogicalKeyboardKey.add || LogicalKeyboardKey.numpadAdd => '+',
+      LogicalKeyboardKey.minus || LogicalKeyboardKey.numpadSubtract => '-',
+      LogicalKeyboardKey.asterisk || LogicalKeyboardKey.numpadMultiply => '×',
+      LogicalKeyboardKey.slash || LogicalKeyboardKey.numpadDivide => '/',
+      LogicalKeyboardKey.backspace => '⌫',
+      LogicalKeyboardKey.delete => event is KeyDownEvent ? 'CLEAR' : null,
+      LogicalKeyboardKey.equal ||
+      LogicalKeyboardKey.numpadEqual => event is KeyDownEvent ? '=' : null,
+      _ => switch (event.character) {
+        '+' => '+',
+        '-' || '−' => '-',
+        '*' => '×',
+        '/' => '/',
+        '.' => '.',
+        '=' => event is KeyDownEvent ? '=' : null,
+        _ => null,
+      },
+    };
+  }
+
+  void _cycleDesktopFieldFocus({required bool reverse}) {
+    if (busy || loading) return;
+    final ring = <FocusNode>[
+      _amountFocus,
+      if (type == RecordType.transfer) _feeFocus,
+      _remarkFocus,
+    ];
+    final currentIdx = ring.indexWhere((n) => n.hasFocus);
+    final int nextIdx;
+    if (currentIdx < 0) {
+      nextIdx = reverse ? ring.length - 1 : 0;
+    } else if (reverse) {
+      nextIdx = (currentIdx - 1 + ring.length) % ring.length;
+    } else {
+      nextIdx = (currentIdx + 1) % ring.length;
+    }
+    final target = ring[nextIdx];
+    target.requestFocus();
+    if (identical(target, _remarkFocus)) {
+      remark.selection = TextSelection.collapsed(offset: remark.text.length);
+    } else if (identical(target, _feeFocus)) {
+      fee.selection = TextSelection.collapsed(offset: fee.text.length);
+    } else if (identical(target, _amountFocus)) {
+      amount.selection = TextSelection.collapsed(offset: amount.text.length);
+    }
+  }
+
+  void _triggerDesktopEnter() {
+    if (!_canSubmitNow) return;
+    if (hasOperator(amount.text)) {
+      _evaluateInPlace();
+      return;
+    }
+    unawaited(_save(stayAndReset: false));
+  }
+
+  void _triggerDesktopSaveAndAgain() {
+    if (!_canSubmitNow) return;
+    unawaited(_save(stayAndReset: true));
+  }
+
+  void _applyDesktopKeypadToken(String token) {
+    if (busy || loading) return;
+    if (token == '=') {
+      _evaluateInPlace();
+      return;
+    }
+    ScaffoldMessenger.maybeOf(context)?.clearSnackBars();
+    _unfocusOsKeyboardFields();
+    final nextValue = applyCustomKeypadValue(
+      amount.value,
+      token,
+      allowMultiplyDivide: true,
+    );
+    setState(() {
+      error = null;
+      _savedAndResetBanner = false;
+      if (_desktopRemarksExpanded) {
+        _desktopRemarksExpanded = false;
+      }
+      amount.value = nextValue;
+      _autoConvert();
+    });
+    if (!_amountFocus.hasFocus) {
+      _amountFocus.requestFocus();
+    }
+  }
+
+  KeyEventResult _handleSharedDesktopShortcuts(
+    KeyEvent event, {
+    required bool isTextFieldComposing,
+  }) {
+    if (!_isDesktopActive || !_isTopmostRoute) {
+      return KeyEventResult.ignored;
+    }
+    if (event is! KeyDownEvent) {
+      return KeyEventResult.ignored;
+    }
+    final hw = HardwareKeyboard.instance;
+    final key = event.logicalKey;
+
+    if (key == LogicalKeyboardKey.escape &&
+        !hw.isControlPressed &&
+        !hw.isAltPressed &&
+        !hw.isMetaPressed &&
+        !hw.isShiftPressed) {
+      if (isTextFieldComposing) return KeyEventResult.ignored;
+      if (!busy) {
+        _closeEditor();
+      }
+      return KeyEventResult.handled;
+    }
+
+    if (key == LogicalKeyboardKey.tab &&
+        !hw.isControlPressed &&
+        !hw.isAltPressed &&
+        !hw.isMetaPressed) {
+      if (isTextFieldComposing) return KeyEventResult.ignored;
+      _cycleDesktopFieldFocus(reverse: hw.isShiftPressed);
+      return KeyEventResult.handled;
+    }
+
+    if (_isEnterKey(key) &&
+        _isPrimarySubmitModifierPressed(hw) &&
+        !hw.isShiftPressed) {
+      _triggerDesktopSaveAndAgain();
+      return KeyEventResult.handled;
+    }
+
+    if (_isEnterKey(key) &&
+        !hw.isControlPressed &&
+        !hw.isMetaPressed &&
+        !hw.isAltPressed &&
+        !hw.isShiftPressed) {
+      if (isTextFieldComposing) return KeyEventResult.ignored;
+      _triggerDesktopEnter();
+      return KeyEventResult.handled;
+    }
+
+    return KeyEventResult.ignored;
+  }
+
+  KeyEventResult _handleAmountFieldKeyEvent(FocusNode node, KeyEvent event) {
+    if (!_isDesktopActive || !_isTopmostRoute) {
+      return KeyEventResult.ignored;
+    }
+    final shared = _handleSharedDesktopShortcuts(
+      event,
+      isTextFieldComposing: false,
+    );
+    if (shared != KeyEventResult.ignored) {
+      return shared;
+    }
+    final token = _mapDesktopKeyToKeypadToken(event, HardwareKeyboard.instance);
+    if (token != null) {
+      _applyDesktopKeypadToken(token);
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
+  KeyEventResult _handleAuxFieldKeyEvent(FocusNode node, KeyEvent event) {
+    if (!_isDesktopActive || !_isTopmostRoute) {
+      return KeyEventResult.ignored;
+    }
+    final activeCtrl = identical(node, _feeFocus) ? fee : remark;
+    final composing =
+        activeCtrl.value.composing.isValid &&
+        !activeCtrl.value.composing.isCollapsed;
+    return _handleSharedDesktopShortcuts(
+      event,
+      isTextFieldComposing: composing,
+    );
+  }
+
+  KeyEventResult _handleDesktopScopeKeyEvent(FocusNode node, KeyEvent event) {
+    if (!_isDesktopActive || !_isTopmostRoute || _hasOsKeyboardFieldFocus) {
+      return KeyEventResult.ignored;
+    }
+    final shared = _handleSharedDesktopShortcuts(
+      event,
+      isTextFieldComposing: false,
+    );
+    if (shared != KeyEventResult.ignored) {
+      return shared;
+    }
+    final token = _mapDesktopKeyToKeypadToken(event, HardwareKeyboard.instance);
+    if (token != null) {
+      _applyDesktopKeypadToken(token);
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
   void _activateCustomKeypad() {
     if (busy) return;
     _imeWasVisible = false;
     _unfocusOsKeyboardFields();
+    if (_isDesktopActive) {
+      if (_desktopRemarksExpanded) {
+        setState(() => _desktopRemarksExpanded = false);
+      }
+      if (!_amountFocus.hasFocus) {
+        _amountFocus.requestFocus();
+      }
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && !busy && !_hasOsKeyboardFieldFocus) {
+          if (!_amountFocus.hasFocus) {
+            _amountFocus.requestFocus();
+          }
+        }
+      });
+      return;
+    }
     unawaited(SystemChannels.textInput.invokeMethod<void>('TextInput.hide'));
     if (_panelMode != _BottomPanelMode.customKeypad) {
       setState(() => _panelMode = _BottomPanelMode.customKeypad);
@@ -259,6 +633,10 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
 
   void _toggleFrequentRemarksPanel() {
     if (busy) return;
+    if (_isDesktopActive) {
+      _toggleDesktopRemarksPanel();
+      return;
+    }
     if (_panelMode == _BottomPanelMode.frequentRemarks) {
       _activateCustomKeypad();
       return;
@@ -624,10 +1002,17 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
   void _showCalcError(String message) {
     if (!mounted) return;
     final mq = MediaQuery.of(context);
-    final slotHeight = math.max(
-      RecordCustomKeypad.panelHeight + mq.padding.bottom,
-      mq.viewInsets.bottom,
-    );
+    final double slotHeight;
+    if (_isDesktopActive) {
+      slotHeight = _desktopKeypadExpanded
+          ? RecordCustomKeypad.panelHeight + 48.0
+          : 52.0;
+    } else {
+      slotHeight = math.max(
+        RecordCustomKeypad.panelHeight + mq.padding.bottom,
+        mq.viewInsets.bottom,
+      );
+    }
     final targetMargin = slotHeight + 118.0;
     final bottomMargin = mq.size.height - mq.padding.top > targetMargin + 96
         ? targetMargin
@@ -709,6 +1094,9 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     toAssetId = widget.initialTo ?? noRef;
     if (widget.initialAmount != null) _setAmountText(widget.initialAmount!);
     if (widget.initialRemark != null) remark.text = widget.initialRemark!;
+    if (!editing && widget.initialRecordTimeMs != null) {
+      time = DateTime.fromMillisecondsSinceEpoch(widget.initialRecordTimeMs!);
+    }
     unawaited(_load());
   }
 
@@ -866,6 +1254,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     _amountFocus.dispose();
     _remarkFocus.dispose();
     _feeFocus.dispose();
+    _desktopScopeFocus.dispose();
     super.dispose();
   }
 
@@ -1108,6 +1497,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
               _userTouchedCategory = false;
             }
             _panelMode = _BottomPanelMode.customKeypad;
+            _desktopRemarksExpanded = false;
             _savedAndResetBanner = true;
             error = null;
           });
@@ -1116,6 +1506,14 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
         }
 
         _unfocusOsKeyboardFields();
+        if (_isImperativeDialogRoute) {
+          unawaited(
+            Navigator.of(
+              context,
+            ).pushReplacement(createDesktopRecordEditorDialogRoute(context)),
+          );
+          return;
+        }
         final router = GoRouter.maybeOf(context);
         if (router != null) {
           context.pushReplacement('/record/new');
@@ -1129,16 +1527,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
         return;
       }
 
-      final router = GoRouter.maybeOf(context);
-      if (router != null) {
-        if (context.canPop()) {
-          context.pop(id);
-        } else {
-          context.go('/');
-        }
-      } else if (Navigator.of(context).canPop()) {
-        Navigator.of(context).pop(id);
-      }
+      _closeEditor(id);
     } catch (e) {
       if (mounted) setState(() => error = safeMessage(e));
     } finally {
@@ -1210,7 +1599,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
   }
 
   void _openCategoriesManager() {
-    if (GoRouter.maybeOf(context) != null) {
+    if (!_isImperativeDialogRoute && GoRouter.maybeOf(context) != null) {
       unawaited(context.push('/categories'));
     } else {
       unawaited(
@@ -1222,7 +1611,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
   }
 
   void _openTagsManager() {
-    if (GoRouter.maybeOf(context) != null) {
+    if (!_isImperativeDialogRoute && GoRouter.maybeOf(context) != null) {
       unawaited(context.push('/tags'));
     } else {
       unawaited(
@@ -1234,7 +1623,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
   }
 
   void _openTemplatesManager() {
-    if (GoRouter.maybeOf(context) != null) {
+    if (!_isImperativeDialogRoute && GoRouter.maybeOf(context) != null) {
       unawaited(context.push('/templates'));
     } else {
       unawaited(
@@ -1247,7 +1636,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
 
   void _openRemarksManager() {
     _unfocusOsKeyboardFields();
-    if (GoRouter.maybeOf(context) != null) {
+    if (!_isImperativeDialogRoute && GoRouter.maybeOf(context) != null) {
       unawaited(
         context.push(
           categoryId == null ? '/remarks' : '/remarks?categoryId=$categoryId',
@@ -1292,7 +1681,9 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
         : null;
 
     final showRemarksToggle = remarksEnabled && type != RecordType.transfer;
-    final inRemarksMode = _panelMode == _BottomPanelMode.frequentRemarks;
+    final inRemarksMode = _isDesktopActive
+        ? _desktopRemarksExpanded
+        : (_panelMode == _BottomPanelMode.frequentRemarks);
     final remarksToggleBtn = showRemarksToggle
         ? TextFieldTapRegion(
             child: ExcludeFocus(
@@ -1328,6 +1719,18 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     return clearBtn ?? remarksToggleBtn;
   }
 
+  void _openAssetsManager() {
+    if (!_isImperativeDialogRoute && GoRouter.maybeOf(context) != null) {
+      unawaited(context.push('/assets'));
+    } else {
+      unawaited(
+        Navigator.of(
+          context,
+        ).push(MaterialPageRoute<void>(builder: (_) => const AssetsPage())),
+      );
+    }
+  }
+
   Future<void> _openAccountPickerSheet({
     required String title,
     required List<Asset> assets,
@@ -1336,104 +1739,320 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     required ValueChanged<int> onSelected,
   }) async {
     _unfocusOsKeyboardFields();
-    final chosen = await showModalBottomSheet<int>(
-      context: context,
-      showDragHandle: true,
-      isScrollControlled: true,
-      sheetAnimationStyle: AnimationStyle.noAnimation,
-      builder: (sheetCtx) {
-        final cs = Theme.of(sheetCtx).colorScheme;
-        return SafeArea(
-          child: ConstrainedBox(
-            constraints: BoxConstraints(
-              maxHeight: MediaQuery.sizeOf(sheetCtx).height * 0.65,
+    final isDesktop = _isDesktopActive;
+    final int? chosen;
+    if (isDesktop) {
+      chosen = await showDialog<int>(
+        context: context,
+        builder: (dialogCtx) {
+          final cs = Theme.of(dialogCtx).colorScheme;
+          return Dialog(
+            key: const Key('desktop-account-picker-dialog'),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(18),
             ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                  child: Row(
-                    children: [
-                      Text(
-                        title,
-                        style: Theme.of(sheetCtx).textTheme.titleMedium,
-                      ),
-                      const Spacer(),
-                      if (GoRouter.maybeOf(context) != null)
+            clipBehavior: Clip.antiAlias,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 420, maxHeight: 520),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 14, 10, 10),
+                    child: Row(
+                      children: [
+                        Text(
+                          title,
+                          style: Theme.of(dialogCtx).textTheme.titleMedium
+                              ?.copyWith(fontWeight: FontWeight.w600),
+                        ),
+                        const Spacer(),
                         TextButton.icon(
                           onPressed: () {
-                            Navigator.pop(sheetCtx);
-                            unawaited(context.push('/assets'));
+                            Navigator.of(dialogCtx).pop();
+                            _openAssetsManager();
                           },
                           icon: const Icon(Icons.settings_outlined, size: 16),
                           label: const Text('管理账户'),
                         ),
-                    ],
-                  ),
-                ),
-                Flexible(
-                  child: ListView(
-                    shrinkWrap: true,
-                    children: [
-                      if (allowNone)
-                        ListTile(
-                          leading: Container(
-                            width: 36,
-                            height: 36,
-                            decoration: BoxDecoration(
-                              color: cs.surfaceContainerHighest,
-                              shape: BoxShape.circle,
-                            ),
-                            alignment: Alignment.center,
-                            child: Icon(
-                              Icons.remove_circle_outline_rounded,
-                              size: 18,
-                              color: cs.onSurfaceVariant,
-                            ),
-                          ),
-                          title: const Text('不选账户'),
-                          trailing: currentId == noRef
-                              ? Icon(Icons.check_rounded, color: cs.primary)
-                              : null,
-                          onTap: () => Navigator.pop(sheetCtx, noRef),
+                        CloseButton(
+                          onPressed: () => Navigator.of(dialogCtx).pop(),
                         ),
-                      for (final a in assets)
-                        ListTile(
-                          leading: AssetIconAvatar(
-                            iconKey: a.icon,
-                            colorHex: a.color,
-                            name: a.name,
-                            assetType: a.type,
-                            subType: a.subType,
-                            size: 36,
-                            selected: currentId == a.id,
-                          ),
-                          title: Text(a.name),
-                          subtitle: Text(
-                            '${normalizeCurrency(a.currency) ?? baseCurrency} · ${formatMinor(a.balanceMinor)}',
-                            style: const TextStyle(fontSize: 12),
-                          ),
-                          trailing: currentId == a.id
-                              ? Icon(Icons.check_rounded, color: cs.primary)
-                              : null,
-                          onTap: () => Navigator.pop(sheetCtx, a.id),
-                        ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
-              ],
+                  const Divider(height: 1),
+                  Flexible(
+                    child: ListView(
+                      shrinkWrap: true,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 6,
+                      ),
+                      children: [
+                        if (allowNone)
+                          ListTile(
+                            dense: true,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            leading: Container(
+                              width: 34,
+                              height: 34,
+                              decoration: BoxDecoration(
+                                color: cs.surfaceContainerHighest,
+                                shape: BoxShape.circle,
+                              ),
+                              alignment: Alignment.center,
+                              child: Icon(
+                                Icons.remove_circle_outline_rounded,
+                                size: 18,
+                                color: cs.onSurfaceVariant,
+                              ),
+                            ),
+                            title: const Text('不选账户'),
+                            trailing: currentId == noRef
+                                ? Icon(Icons.check_rounded, color: cs.primary)
+                                : null,
+                            onTap: () => Navigator.of(dialogCtx).pop(noRef),
+                          ),
+                        for (final a in assets)
+                          ListTile(
+                            dense: true,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            leading: AssetIconAvatar(
+                              iconKey: a.icon,
+                              colorHex: a.color,
+                              name: a.name,
+                              assetType: a.type,
+                              subType: a.subType,
+                              size: 34,
+                              selected: currentId == a.id,
+                            ),
+                            title: Text(a.name),
+                            subtitle: Text(
+                              '${normalizeCurrency(a.currency) ?? baseCurrency} · ${formatMinor(a.balanceMinor)}',
+                              style: const TextStyle(fontSize: 12),
+                            ),
+                            trailing: currentId == a.id
+                                ? Icon(Icons.check_rounded, color: cs.primary)
+                                : null,
+                            onTap: () => Navigator.of(dialogCtx).pop(a.id),
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-        );
-      },
-    );
-    if (chosen == null || !mounted) return;
-    onSelected(chosen);
+          );
+        },
+      );
+    } else {
+      chosen = await showModalBottomSheet<int>(
+        context: context,
+        showDragHandle: true,
+        isScrollControlled: true,
+        sheetAnimationStyle: AnimationStyle.noAnimation,
+        builder: (sheetCtx) {
+          final cs = Theme.of(sheetCtx).colorScheme;
+          return SafeArea(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.sizeOf(sheetCtx).height * 0.65,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                    child: Row(
+                      children: [
+                        Text(
+                          title,
+                          style: Theme.of(sheetCtx).textTheme.titleMedium,
+                        ),
+                        const Spacer(),
+                        if (GoRouter.maybeOf(context) != null)
+                          TextButton.icon(
+                            onPressed: () {
+                              Navigator.pop(sheetCtx);
+                              unawaited(context.push('/assets'));
+                            },
+                            icon: const Icon(Icons.settings_outlined, size: 16),
+                            label: const Text('管理账户'),
+                          ),
+                      ],
+                    ),
+                  ),
+                  Flexible(
+                    child: ListView(
+                      shrinkWrap: true,
+                      children: [
+                        if (allowNone)
+                          ListTile(
+                            leading: Container(
+                              width: 36,
+                              height: 36,
+                              decoration: BoxDecoration(
+                                color: cs.surfaceContainerHighest,
+                                shape: BoxShape.circle,
+                              ),
+                              alignment: Alignment.center,
+                              child: Icon(
+                                Icons.remove_circle_outline_rounded,
+                                size: 18,
+                                color: cs.onSurfaceVariant,
+                              ),
+                            ),
+                            title: const Text('不选账户'),
+                            trailing: currentId == noRef
+                                ? Icon(Icons.check_rounded, color: cs.primary)
+                                : null,
+                            onTap: () => Navigator.pop(sheetCtx, noRef),
+                          ),
+                        for (final a in assets)
+                          ListTile(
+                            leading: AssetIconAvatar(
+                              iconKey: a.icon,
+                              colorHex: a.color,
+                              name: a.name,
+                              assetType: a.type,
+                              subType: a.subType,
+                              size: 36,
+                              selected: currentId == a.id,
+                            ),
+                            title: Text(a.name),
+                            subtitle: Text(
+                              '${normalizeCurrency(a.currency) ?? baseCurrency} · ${formatMinor(a.balanceMinor)}',
+                              style: const TextStyle(fontSize: 12),
+                            ),
+                            trailing: currentId == a.id
+                                ? Icon(Icons.check_rounded, color: cs.primary)
+                                : null,
+                            onTap: () => Navigator.pop(sheetCtx, a.id),
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      );
+    }
+    if (!mounted) return;
+    if (chosen != null) {
+      onSelected(chosen);
+    }
+    _focusDesktopAmountIfIdle();
   }
 
   Future<void> _openTagPickerSheet(List<Tag> tags) async {
     _unfocusOsKeyboardFields();
+    if (_isDesktopActive) {
+      await showDialog<void>(
+        context: context,
+        builder: (dialogCtx) {
+          return Dialog(
+            key: const Key('desktop-tag-picker-dialog'),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(18),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 420, maxHeight: 500),
+              child: StatefulBuilder(
+                builder: (dialogCtx, setDialogState) {
+                  return Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 14, 16, 16),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Row(
+                          children: [
+                            Text(
+                              '选择标签',
+                              style: Theme.of(dialogCtx).textTheme.titleMedium
+                                  ?.copyWith(fontWeight: FontWeight.w600),
+                            ),
+                            const Spacer(),
+                            TextButton.icon(
+                              key: const Key('manage-tags-sheet-btn'),
+                              onPressed: () {
+                                Navigator.of(dialogCtx).pop();
+                                _openTagsManager();
+                              },
+                              icon: const Icon(Icons.sell_outlined, size: 16),
+                              label: const Text('管理标签'),
+                            ),
+                            CloseButton(
+                              onPressed: () => Navigator.of(dialogCtx).pop(),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        if (tags.isEmpty)
+                          const Padding(
+                            padding: EdgeInsets.symmetric(vertical: 20),
+                            child: Text(
+                              '暂无可用标签，可点击右上角“管理标签”新建。',
+                              textAlign: TextAlign.center,
+                            ),
+                          )
+                        else
+                          Flexible(
+                            child: SingleChildScrollView(
+                              child: Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: [
+                                  for (final t in tags)
+                                    FilterChip(
+                                      key: Key('tag-${t.name}'),
+                                      label: Text(t.name),
+                                      selected: selectedTagIds.contains(
+                                        t.tagId,
+                                      ),
+                                      onSelected: (sel) {
+                                        setState(() {
+                                          if (sel) {
+                                            selectedTagIds.add(t.tagId);
+                                          } else {
+                                            selectedTagIds.remove(t.tagId);
+                                          }
+                                        });
+                                        setDialogState(() {});
+                                      },
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        const SizedBox(height: 14),
+                        FilledButton.tonal(
+                          onPressed: () => Navigator.of(dialogCtx).pop(),
+                          child: const Text('完成'),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+          );
+        },
+      );
+      if (mounted) {
+        _focusDesktopAmountIfIdle();
+      }
+      return;
+    }
+
     await showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
@@ -1525,94 +2144,206 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     if (type == RecordType.transfer) return;
     _unfocusOsKeyboardFields();
     final ac = _currencyOf(assetId);
-    final chosen = await showModalBottomSheet<String>(
-      context: context,
-      showDragHandle: true,
-      isScrollControlled: true,
-      sheetAnimationStyle: AnimationStyle.noAnimation,
-      builder: (sheetCtx) {
-        final cs = Theme.of(sheetCtx).colorScheme;
-        return SafeArea(
-          child: ConstrainedBox(
-            constraints: BoxConstraints(
-              maxHeight: MediaQuery.sizeOf(sheetCtx).height * 0.65,
+    final String? chosen;
+    if (_isDesktopActive) {
+      chosen = await showDialog<String>(
+        context: context,
+        builder: (dialogCtx) {
+          final cs = Theme.of(dialogCtx).colorScheme;
+          return Dialog(
+            key: const Key('desktop-currency-picker-dialog'),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(18),
             ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                  child: Text(
-                    '选择记账币种',
-                    style: Theme.of(sheetCtx).textTheme.titleMedium,
+            clipBehavior: Clip.antiAlias,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 420, maxHeight: 520),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 14, 10, 10),
+                    child: Row(
+                      children: [
+                        Text(
+                          '选择记账币种',
+                          style: Theme.of(dialogCtx).textTheme.titleMedium
+                              ?.copyWith(fontWeight: FontWeight.w600),
+                        ),
+                        const Spacer(),
+                        CloseButton(
+                          onPressed: () => Navigator.of(dialogCtx).pop(),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-                Flexible(
-                  child: ListView(
-                    shrinkWrap: true,
-                    children: [
-                      ListTile(
-                        key: const Key('currency-option-follow-account'),
-                        leading: CircleAvatar(
-                          radius: 15,
-                          backgroundColor: cs.primaryContainer,
-                          child: Icon(
-                            Icons.account_balance_wallet_outlined,
-                            size: 15,
-                            color: cs.onPrimaryContainer,
-                          ),
-                        ),
-                        title: Text('跟随账户币种（当前：$ac）'),
-                        subtitle: const Text(
-                          '切换资产账户时自动同步该账户币种',
-                          style: TextStyle(fontSize: 12),
-                        ),
-                        trailing: sourceCurrency == null
-                            ? Icon(Icons.check_rounded, color: cs.primary)
-                            : null,
-                        onTap: () => Navigator.pop(
-                          sheetCtx,
-                          _followAccountCurrencySentinel,
-                        ),
+                  const Divider(height: 1),
+                  Flexible(
+                    child: ListView(
+                      shrinkWrap: true,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 6,
                       ),
-                      const Divider(height: 1, indent: 16, endIndent: 16),
-                      for (final c in currencies)
+                      children: [
                         ListTile(
-                          key: Key('currency-option-${c.code}'),
+                          key: const Key('currency-option-follow-account'),
+                          dense: true,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
                           leading: CircleAvatar(
                             radius: 15,
-                            backgroundColor: cs.secondaryContainer,
-                            child: Text(
-                              c.symbol,
-                              style: TextStyle(
-                                fontSize: 13,
-                                color: cs.onSecondaryContainer,
-                                fontWeight: FontWeight.w600,
-                              ),
+                            backgroundColor: cs.primaryContainer,
+                            child: Icon(
+                              Icons.account_balance_wallet_outlined,
+                              size: 15,
+                              color: cs.onPrimaryContainer,
                             ),
                           ),
-                          title: Text('${c.code} · ${c.name}'),
-                          trailing: sourceCurrency == c.code
+                          title: Text('跟随账户币种（当前：$ac）'),
+                          subtitle: const Text(
+                            '切换资产账户时自动同步该账户币种',
+                            style: TextStyle(fontSize: 12),
+                          ),
+                          trailing: sourceCurrency == null
                               ? Icon(Icons.check_rounded, color: cs.primary)
                               : null,
-                          onTap: () => Navigator.pop(sheetCtx, c.code),
+                          onTap: () => Navigator.of(
+                            dialogCtx,
+                          ).pop(_followAccountCurrencySentinel),
                         ),
-                    ],
+                        const Divider(height: 4, indent: 12, endIndent: 12),
+                        for (final c in currencies)
+                          ListTile(
+                            key: Key('currency-option-${c.code}'),
+                            dense: true,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            leading: CircleAvatar(
+                              radius: 15,
+                              backgroundColor: cs.secondaryContainer,
+                              child: Text(
+                                c.symbol,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: cs.onSecondaryContainer,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                            title: Text('${c.code} · ${c.name}'),
+                            trailing: sourceCurrency == c.code
+                                ? Icon(Icons.check_rounded, color: cs.primary)
+                                : null,
+                            onTap: () => Navigator.of(dialogCtx).pop(c.code),
+                          ),
+                      ],
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-        );
-      },
-    );
-    if (chosen == null || !mounted) return;
-    setState(() {
-      sourceCurrency = chosen == _followAccountCurrencySentinel ? null : chosen;
-      convertedEdited = false;
-      _autoConvert();
-    });
+          );
+        },
+      );
+    } else {
+      chosen = await showModalBottomSheet<String>(
+        context: context,
+        showDragHandle: true,
+        isScrollControlled: true,
+        sheetAnimationStyle: AnimationStyle.noAnimation,
+        builder: (sheetCtx) {
+          final cs = Theme.of(sheetCtx).colorScheme;
+          return SafeArea(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.sizeOf(sheetCtx).height * 0.65,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                    child: Text(
+                      '选择记账币种',
+                      style: Theme.of(sheetCtx).textTheme.titleMedium,
+                    ),
+                  ),
+                  Flexible(
+                    child: ListView(
+                      shrinkWrap: true,
+                      children: [
+                        ListTile(
+                          key: const Key('currency-option-follow-account'),
+                          leading: CircleAvatar(
+                            radius: 15,
+                            backgroundColor: cs.primaryContainer,
+                            child: Icon(
+                              Icons.account_balance_wallet_outlined,
+                              size: 15,
+                              color: cs.onPrimaryContainer,
+                            ),
+                          ),
+                          title: Text('跟随账户币种（当前：$ac）'),
+                          subtitle: const Text(
+                            '切换资产账户时自动同步该账户币种',
+                            style: TextStyle(fontSize: 12),
+                          ),
+                          trailing: sourceCurrency == null
+                              ? Icon(Icons.check_rounded, color: cs.primary)
+                              : null,
+                          onTap: () => Navigator.pop(
+                            sheetCtx,
+                            _followAccountCurrencySentinel,
+                          ),
+                        ),
+                        const Divider(height: 1, indent: 16, endIndent: 16),
+                        for (final c in currencies)
+                          ListTile(
+                            key: Key('currency-option-${c.code}'),
+                            leading: CircleAvatar(
+                              radius: 15,
+                              backgroundColor: cs.secondaryContainer,
+                              child: Text(
+                                c.symbol,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: cs.onSecondaryContainer,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                            title: Text('${c.code} · ${c.name}'),
+                            trailing: sourceCurrency == c.code
+                                ? Icon(Icons.check_rounded, color: cs.primary)
+                                : null,
+                            onTap: () => Navigator.pop(sheetCtx, c.code),
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      );
+    }
+    if (!mounted) return;
+    if (chosen != null) {
+      setState(() {
+        sourceCurrency = chosen == _followAccountCurrencySentinel
+            ? null
+            : chosen;
+        convertedEdited = false;
+        _autoConvert();
+      });
+    }
+    _focusDesktopAmountIfIdle();
   }
 
   @override
@@ -1692,113 +2423,125 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
       }
     });
 
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    final embeddedInDialog = _isEmbeddedInDesktopDialog;
     final canSubmit = !busy && !loading && (!editing || original != null);
     final canPopRoute =
+        embeddedInDialog ||
         (GoRouter.maybeOf(context)?.canPop() ?? false) ||
         Navigator.of(context).canPop();
 
+    if (isDesktop && !loading) {
+      _ensureInitialDesktopFocusScheduled();
+    }
+
+    Widget buildEditorContent() {
+      final column = Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Zone 1: Compact Type Bar (primary tabs + secondary pills)
+          _buildTypeSwitcherBar(
+            context,
+            categories: categories,
+            diyConfig: diyConfig,
+          ),
+          // Zone 2 + Zone 3: Scrollable middle zone + unified bottom dock & slot
+          Expanded(
+            child: LayoutBuilder(
+              builder: (context, areaConstraints) {
+                return _buildMiddleAndBottomZones(
+                  context,
+                  areaConstraints: areaConstraints,
+                  bookId: bookId,
+                  categories: categories,
+                  assets: assets,
+                  tags: tags,
+                  currencies: currencies,
+                  diyConfig: diyConfig,
+                  canSubmit: canSubmit,
+                );
+              },
+            ),
+          ),
+        ],
+      );
+      if (isDesktop && embeddedInDialog) {
+        return column;
+      }
+      return Center(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: isDesktop ? 620 : 680),
+          child: column,
+        ),
+      );
+    }
+
+    final scaffold = Scaffold(
+      resizeToAvoidBottomInset: false,
+      appBar: AppBar(
+        toolbarHeight: 48,
+        leading: canPopRoute
+            ? (isDesktop && embeddedInDialog
+                  ? CloseButton(
+                      key: const Key('desktop-editor-close-btn'),
+                      onPressed: busy ? null : _closeEditor,
+                    )
+                  : BackButton(onPressed: busy ? null : _closeEditor))
+            : null,
+        title: Text(editing ? '编辑账单' : '记一笔'),
+        actions: [
+          if (!editing && diyConfig.isEnabled(DiyToolbarAction.templates))
+            IconButton(
+              key: const Key('editor-templates-btn'),
+              tooltip: '账单模板',
+              icon: const Icon(Icons.bookmarks_outlined, size: 21),
+              onPressed: busy ? null : _openTemplatesManager,
+            ),
+          IconButton(
+            key: const Key('editor-diy-toolbar-btn'),
+            tooltip: '记账工具栏自定义',
+            icon: const Icon(Icons.tune, size: 21),
+            onPressed: busy
+                ? null
+                : () {
+                    if (!_isImperativeDialogRoute &&
+                        GoRouter.maybeOf(context) != null) {
+                      unawaited(context.push('/settings/diy-toolbar'));
+                    } else {
+                      unawaited(
+                        Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => const DiyToolbarSettingsPage(),
+                          ),
+                        ),
+                      );
+                    }
+                  },
+          ),
+          IconButton(
+            key: const Key('editor-quick-save-btn'),
+            tooltip: '保存',
+            icon: const Icon(Icons.check_rounded, size: 22),
+            onPressed: canSubmit
+                ? () => unawaited(_save(stayAndReset: false))
+                : null,
+          ),
+        ],
+      ),
+      body: loading ? const Loading() : buildEditorContent(),
+    );
+
     return PopScope(
-      canPop: !busy && _panelMode == _BottomPanelMode.customKeypad,
+      canPop:
+          !busy && (isDesktop || _panelMode == _BottomPanelMode.customKeypad),
       onPopInvokedWithResult: (didPop, _) {
-        if (!didPop && !busy) {
+        if (!didPop && !busy && !isDesktop) {
           _activateCustomKeypad();
         }
       },
-      child: Scaffold(
-        resizeToAvoidBottomInset: false,
-        appBar: AppBar(
-          toolbarHeight: 48,
-          leading: canPopRoute
-              ? BackButton(
-                  onPressed: busy
-                      ? null
-                      : () {
-                          _unfocusOsKeyboardFields();
-                          final router = GoRouter.maybeOf(context);
-                          if (router != null && context.canPop()) {
-                            context.pop();
-                          } else if (Navigator.of(context).canPop()) {
-                            Navigator.of(context).pop();
-                          }
-                        },
-                )
-              : null,
-          title: Text(editing ? '编辑账单' : '记一笔'),
-          actions: [
-            if (!editing && diyConfig.isEnabled(DiyToolbarAction.templates))
-              IconButton(
-                key: const Key('editor-templates-btn'),
-                tooltip: '账单模板',
-                icon: const Icon(Icons.bookmarks_outlined, size: 21),
-                onPressed: busy ? null : _openTemplatesManager,
-              ),
-            IconButton(
-              key: const Key('editor-diy-toolbar-btn'),
-              tooltip: '记账工具栏自定义',
-              icon: const Icon(Icons.tune, size: 21),
-              onPressed: busy
-                  ? null
-                  : () {
-                      if (GoRouter.maybeOf(context) != null) {
-                        unawaited(context.push('/settings/diy-toolbar'));
-                      } else {
-                        unawaited(
-                          Navigator.of(context).push(
-                            MaterialPageRoute<void>(
-                              builder: (_) => const DiyToolbarSettingsPage(),
-                            ),
-                          ),
-                        );
-                      }
-                    },
-            ),
-            IconButton(
-              key: const Key('editor-quick-save-btn'),
-              tooltip: '保存',
-              icon: const Icon(Icons.check_rounded, size: 22),
-              onPressed: canSubmit
-                  ? () => unawaited(_save(stayAndReset: false))
-                  : null,
-            ),
-          ],
-        ),
-        body: loading
-            ? const Loading()
-            : Center(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 680),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      // Zone 1: Compact Type Bar (primary tabs + secondary pills)
-                      _buildTypeSwitcherBar(
-                        context,
-                        categories: categories,
-                        diyConfig: diyConfig,
-                      ),
-                      // Zone 2 + Zone 3: Scrollable middle zone + unified bottom dock & slot
-                      Expanded(
-                        child: LayoutBuilder(
-                          builder: (context, areaConstraints) {
-                            return _buildMiddleAndBottomZones(
-                              context,
-                              areaConstraints: areaConstraints,
-                              bookId: bookId,
-                              categories: categories,
-                              assets: assets,
-                              tags: tags,
-                              currencies: currencies,
-                              diyConfig: diyConfig,
-                              canSubmit: canSubmit,
-                            );
-                          },
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-      ),
+      child: isDesktop
+          ? Focus(focusNode: _desktopScopeFocus, child: scaffold)
+          : scaffold,
     );
   }
 
@@ -1813,9 +2556,57 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     required DiyToolbarConfig diyConfig,
     required bool canSubmit,
   }) {
+    final isDesktop = DesktopAdaptive.isDesktop(context);
     final cs = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final mediaQuery = MediaQuery.of(context);
+    final trayColor = isDark
+        ? cs.surfaceContainerLowest
+        : cs.surfaceContainerLow;
+
+    if (isDesktop) {
+      const desktopDockHeaderAndActionReserve = 168.0;
+      final maxOptionalPanelHeight = math.max(
+        0.0,
+        areaConstraints.maxHeight - desktopDockHeaderAndActionReserve,
+      );
+      final desktopPanelSlotHeight = _desktopKeypadExpanded
+          ? math.min(RecordCustomKeypad.panelHeight, maxOptionalPanelHeight)
+          : (_desktopRemarksExpanded && type != RecordType.transfer
+                ? math.min(188.0, maxOptionalPanelHeight)
+                : 0.0);
+
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(
+            child: _buildScrollableMiddleZone(
+              context,
+              bookId: bookId,
+              categories: categories,
+              assets: assets,
+              diyConfig: diyConfig,
+            ),
+          ),
+          ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: areaConstraints.maxHeight),
+            child: _buildBottomDock(
+              context,
+              bookId: bookId,
+              categories: categories,
+              assets: assets,
+              tags: tags,
+              currencies: currencies,
+              diyConfig: diyConfig,
+              canSubmit: canSubmit,
+              panelSlotHeight: desktopPanelSlotHeight,
+              bottomSafePadding: 0.0,
+            ),
+          ),
+        ],
+      );
+    }
+
     final imeHeight = mediaQuery.viewInsets.bottom;
     final basePanelHeight =
         RecordCustomKeypad.panelHeight + mediaQuery.padding.bottom;
@@ -1832,9 +2623,6 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     );
     final panelSlotHeight = math.min(basePanelHeight, targetSlotHeight);
     final extraImeSpacer = math.max(0.0, targetSlotHeight - panelSlotHeight);
-    final trayColor = isDark
-        ? cs.surfaceContainerLowest
-        : cs.surfaceContainerLow;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1930,6 +2718,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                     parentCatId = null;
                     sourceCurrency = null;
                     convertedEdited = false;
+                    _desktopRemarksExpanded = false;
                     if (_panelMode == _BottomPanelMode.frequentRemarks) {
                       _panelMode = _BottomPanelMode.customKeypad;
                     }
@@ -1946,6 +2735,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                   _remarksShowAllScope = false;
                   _autoConvert();
                 });
+                _focusDesktopAmountIfIdle();
               },
       );
     }
@@ -2025,16 +2815,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                 onPrefill: _applyTemplatePrefill,
                 onInstantSaved: (savedId) {
                   if (!mounted) return;
-                  final router = GoRouter.maybeOf(context);
-                  if (router != null) {
-                    if (context.canPop()) {
-                      context.pop(savedId);
-                    } else {
-                      context.go('/');
-                    }
-                  } else if (Navigator.of(context).canPop()) {
-                    Navigator.of(context).pop(savedId);
-                  }
+                  _closeEditor(savedId);
                 },
               ),
             ),
@@ -2056,11 +2837,14 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                   subCategories: subCats,
                   selectedCategoryId: categoryId,
                   enabled: !busy,
-                  onSelectCategoryId: (id) => setState(() {
-                    _userTouchedCategory = true;
-                    categoryId = id;
-                    _remarksShowAllScope = false;
-                  }),
+                  onSelectCategoryId: (id) {
+                    setState(() {
+                      _userTouchedCategory = true;
+                      categoryId = id;
+                      _remarksShowAllScope = false;
+                    });
+                    _focusDesktopAmountIfIdle();
+                  },
                 ),
               ),
             ),
@@ -2070,12 +2854,15 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
               categories: topCats,
               selectedParentId: parentCatId,
               enabled: !busy,
-              onSelectCategory: (cat) => setState(() {
-                _userTouchedCategory = true;
-                parentCatId = cat.id;
-                categoryId = cat.id;
-                _remarksShowAllScope = false;
-              }),
+              onSelectCategory: (cat) {
+                setState(() {
+                  _userTouchedCategory = true;
+                  parentCatId = cat.id;
+                  categoryId = cat.id;
+                  _remarksShowAllScope = false;
+                });
+                _focusDesktopAmountIfIdle();
+              },
               onManageCategories: _openCategoriesManager,
             ),
           ),
@@ -2255,8 +3042,18 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                     decimal: true,
                   ),
                   textInputAction: TextInputAction.done,
-                  onEditingComplete: _activateCustomKeypad,
-                  onSubmitted: (_) => _activateCustomKeypad(),
+                  onEditingComplete: () {
+                    if (!_isDesktopActive) {
+                      _activateCustomKeypad();
+                    }
+                  },
+                  onSubmitted: (_) {
+                    if (_isDesktopActive) {
+                      _triggerDesktopEnter();
+                    } else {
+                      _activateCustomKeypad();
+                    }
+                  },
                   inputFormatters: amountInputFormatters,
                   style: const TextStyle(fontSize: 14),
                   decoration: InputDecoration(
@@ -2758,6 +3555,12 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                                               textAlign: TextAlign.right,
                                               inputFormatters:
                                                   _keypadExpressionFormatters,
+                                              onTapOutside:
+                                                  DesktopAdaptive.isDesktop(
+                                                    context,
+                                                  )
+                                                  ? (_) {}
+                                                  : null,
                                               onTap: busy
                                                   ? null
                                                   : _activateCustomKeypad,
@@ -2872,8 +3675,18 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                       enabled: !busy,
                       maxLength: 200,
                       textInputAction: TextInputAction.done,
-                      onEditingComplete: _activateCustomKeypad,
-                      onSubmitted: (_) => _activateCustomKeypad(),
+                      onEditingComplete: () {
+                        if (!_isDesktopActive) {
+                          _activateCustomKeypad();
+                        }
+                      },
+                      onSubmitted: (_) {
+                        if (_isDesktopActive) {
+                          _triggerDesktopEnter();
+                        } else {
+                          _activateCustomKeypad();
+                        }
+                      },
                       buildCounter:
                           (
                             _, {
@@ -2929,8 +3742,47 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
             ),
           ),
 
-          // Unified Bottom Panel Slot for Custom Keypad / Plan A Frequent Remarks
-          if (_panelMode != _BottomPanelMode.osKeyboard)
+          // Unified Bottom Panel Slot (Mobile) or Compact Action Bar + Optional Collapsible Panel (Desktop)
+          if (DesktopAdaptive.isDesktop(context)) ...[
+            if (panelSlotHeight > 0 &&
+                (_desktopKeypadExpanded ||
+                    (_desktopRemarksExpanded && type != RecordType.transfer)))
+              Container(
+                key: const Key('editor-bottom-panel-slot'),
+                height: panelSlotHeight,
+                color: trayColor,
+                child: _desktopRemarksExpanded && type != RecordType.transfer
+                    ? _buildFrequentRemarksPanel(
+                        context,
+                        categories: categories,
+                        selectedCategory: selectedCat,
+                        bottomSafePadding: 0,
+                      )
+                    : SingleChildScrollView(
+                        physics: const ClampingScrollPhysics(),
+                        child: RecordCustomKeypad(
+                          amountText: amount.text,
+                          enabled: canSubmit,
+                          busy: busy,
+                          enableMultiplyDivide: true,
+                          onKeyTap: _onKeypadKey,
+                          onBackspace: () => _onKeypadKey('BACKSPACE'),
+                          onClearAll: () => _onKeypadKey('CLEAR'),
+                          onEvaluate: _evaluateInPlace,
+                          onSave: () => unawaited(_save(stayAndReset: false)),
+                          onSaveAndNew: () =>
+                              unawaited(_save(stayAndReset: true)),
+                        ),
+                      ),
+              ),
+            _buildDesktopActionBar(
+              context,
+              trayColor: trayColor,
+              remarksEnabled: remarksEnabled && type != RecordType.transfer,
+              pendingOp: pendingOp,
+              canSubmit: canSubmit,
+            ),
+          ] else if (_panelMode != _BottomPanelMode.osKeyboard)
             Container(
               key: const Key('editor-bottom-panel-slot'),
               height: panelSlotHeight,
@@ -2963,6 +3815,119 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                     ),
             ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildDesktopActionBar(
+    BuildContext context, {
+    required Color trayColor,
+    required bool remarksEnabled,
+    required bool pendingOp,
+    required bool canSubmit,
+  }) {
+    final cs = Theme.of(context).colorScheme;
+    final modLabel = DesktopAdaptive.primaryModifierLabel(context);
+    final saveLabel = pendingOp ? '= (Enter)' : (busy ? '保存中…' : '保存 (Enter)');
+
+    final leftButtons = <Widget>[
+      if (remarksEnabled)
+        _DesktopActionToggleChip(
+          buttonKey: const Key('desktop-toggle-remarks'),
+          icon: Icons.speaker_notes_outlined,
+          label: '常用备注',
+          active: _desktopRemarksExpanded,
+          onTap: busy ? null : _toggleDesktopRemarksPanel,
+        ),
+      _DesktopActionToggleChip(
+        buttonKey: const Key('desktop-toggle-keypad'),
+        icon: Icons.calculate_outlined,
+        label: '小键盘',
+        active: _desktopKeypadExpanded,
+        onTap: busy ? null : _toggleDesktopKeypadPanel,
+      ),
+    ];
+
+    final rightButtons = <Widget>[
+      OutlinedButton(
+        key: const Key('desktop-save-and-again'),
+        style: OutlinedButton.styleFrom(
+          visualDensity: VisualDensity.compact,
+          minimumSize: const Size(0, 36),
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          side: BorderSide(color: cs.outlineVariant.withValues(alpha: 0.85)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
+        ),
+        onPressed: canSubmit ? _triggerDesktopSaveAndAgain : null,
+        child: Text(
+          '再记 ($modLabel+Enter)',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+        ),
+      ),
+      FilledButton(
+        key: const Key('desktop-save-button'),
+        style: FilledButton.styleFrom(
+          visualDensity: VisualDensity.compact,
+          minimumSize: const Size(0, 36),
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
+        ),
+        onPressed: canSubmit
+            ? (pendingOp
+                  ? _evaluateInPlace
+                  : () => unawaited(_save(stayAndReset: false)))
+            : null,
+        child: Text(
+          saveLabel,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+        ),
+      ),
+    ];
+
+    return TextFieldTapRegion(
+      child: ExcludeFocus(
+        child: Container(
+          key: const Key('desktop-editor-action-bar'),
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
+          decoration: BoxDecoration(
+            color: trayColor,
+            border: Border(
+              top: BorderSide(
+                color: cs.outlineVariant.withValues(alpha: 0.35),
+                width: 0.6,
+              ),
+            ),
+          ),
+          child: OverflowBar(
+            alignment: MainAxisAlignment.spaceBetween,
+            overflowAlignment: OverflowBarAlignment.end,
+            spacing: 8,
+            overflowSpacing: 6,
+            children: [
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: leftButtons,
+              ),
+              Wrap(
+                spacing: 8,
+                runSpacing: 6,
+                alignment: WrapAlignment.end,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: rightButtons,
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -3257,6 +4222,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     required List<Currency> currencies,
     required DiyToolbarConfig diyConfig,
   }) {
+    final isDesktop = DesktopAdaptive.isDesktop(context);
     final cs = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final currentAsset = assets.where((a) => a.id == assetId).firstOrNull;
@@ -3284,13 +4250,14 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
           ? (accentColor != null ? cs.onSurface : cs.onSecondaryContainer)
           : cs.onSurface;
       return Padding(
-        padding: const EdgeInsets.only(right: 6),
+        padding: EdgeInsets.only(right: isDesktop ? 0 : 6),
         child: Material(
           color: bgColor,
           shape: const StadiumBorder(side: BorderSide.none),
           clipBehavior: Clip.antiAlias,
           child: InkWell(
             key: key,
+            canRequestFocus: !isDesktop,
             onTap: busy ? null : onTap,
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
@@ -3512,6 +4479,17 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
         case DiyToolbarAction.autoSelectFirstCategory:
           break;
       }
+    }
+
+    if (isDesktop) {
+      return ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 38),
+        child: Padding(
+          key: const Key('editor-pill-toolbar'),
+          padding: const EdgeInsets.fromLTRB(12, 2, 12, 6),
+          child: Wrap(spacing: 6, runSpacing: 6, children: pills),
+        ),
+      );
     }
 
     return ConstrainedBox(
@@ -3770,6 +4748,61 @@ class _ConversionEditDialogState extends State<_ConversionEditDialog> {
           child: const Text('确定'),
         ),
       ],
+    );
+  }
+}
+
+class _DesktopActionToggleChip extends StatelessWidget {
+  const _DesktopActionToggleChip({
+    required this.buttonKey,
+    required this.icon,
+    required this.label,
+    required this.active,
+    required this.onTap,
+  });
+
+  final Key buttonKey;
+  final IconData icon;
+  final String label;
+  final bool active;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final bgColor = active
+        ? cs.secondaryContainer
+        : (isDark ? cs.surfaceContainerHigh : cs.surface);
+    final fgColor = active ? cs.onSecondaryContainer : cs.onSurfaceVariant;
+
+    return Material(
+      color: bgColor,
+      borderRadius: BorderRadius.circular(10),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        key: buttonKey,
+        canRequestFocus: false,
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 16, color: fgColor),
+              const SizedBox(width: 5),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: active ? FontWeight.w600 : FontWeight.w500,
+                  color: fgColor,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

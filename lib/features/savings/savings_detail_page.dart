@@ -9,6 +9,7 @@ import '../../core/money.dart';
 import '../../data/db/database.dart';
 import '../../domain/rules/savings_plan.dart';
 import '../common/common.dart';
+import '../common/desktop_modal_page.dart';
 import 'savings_editor_page.dart';
 import 'savings_page.dart' show SavingsProgressBar;
 import 'savings_providers.dart';
@@ -46,8 +47,9 @@ class _SavingsDetailPageState extends ConsumerState<SavingsDetailPage> {
   }
 
   Future<void> _openEdit(int planId) async {
-    await Navigator.of(context).push<int>(
-      MaterialPageRoute(builder: (_) => SavingsEditorPage(planId: planId)),
+    await pushDesktopModalOrMaterialRoute<int>(
+      context,
+      child: SavingsEditorPage(planId: planId),
     );
   }
 

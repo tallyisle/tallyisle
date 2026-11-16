@@ -2,12 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/adaptive.dart';
 import '../../app/providers.dart';
 import '../../data/db/database.dart';
 import '../../data/tools/bank_card_service.dart';
 import '../../domain/model/codes.dart';
 import '../../domain/rules/template_card_rules.dart';
 import '../common/common.dart';
+import '../common/desktop_modal_page.dart';
 import 'bank_card_providers.dart';
 
 Color? parseCardColorOrNull(String? hex) {
@@ -137,257 +139,271 @@ class _BankCardEditorPageState extends ConsumerState<BankCardEditorPage> {
     final luhn = inspectCardLuhn(_noController.text);
     final groupedPreview = formatCardNumberGrouped(_noController.text);
 
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+
     return PopScope(
       canPop: !_busy,
-      child: Scaffold(
-        key: const Key('bank_card_editor_page'),
-        appBar: AppBar(title: Text(_editing ? '编辑银行卡' : '添加银行卡')),
-        bottomNavigationBar: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-            child: FilledButton(
-              key: const Key('save_bank_card_button'),
-              onPressed: _busy || _loading ? null : _submit,
-              child: Text(_busy ? '保存中…' : '保存'),
+      child: DesktopModalEscapeScope(
+        enabled: isDesktop,
+        child: Scaffold(
+          key: const Key('bank_card_editor_page'),
+          appBar: AppBar(
+            leading: isDesktop ? const CloseButton() : null,
+            scrolledUnderElevation: isDesktop ? 0 : null,
+            title: Text(_editing ? '编辑银行卡' : '添加银行卡'),
+          ),
+          bottomNavigationBar: SafeArea(
+            child: Padding(
+              padding: isDesktop
+                  ? const EdgeInsets.fromLTRB(20, 8, 20, 14)
+                  : const EdgeInsets.fromLTRB(16, 8, 16, 12),
+              child: FilledButton(
+                key: const Key('save_bank_card_button'),
+                onPressed: _busy || _loading ? null : _submit,
+                child: Text(_busy ? '保存中…' : '保存'),
+              ),
             ),
           ),
-        ),
-        body: _loading
-            ? const Loading()
-            : Center(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 640),
-                  child: ListView(
-                    padding: const EdgeInsets.all(16),
-                    children: [
-                      Wrap(
-                        spacing: 8,
-                        children: [
-                          ChoiceChip(
-                            key: const Key('bank_card_type_0'),
-                            label: const Text('储蓄卡'),
-                            selected: _cardType == BankCardType.debit,
-                            onSelected: _busy
-                                ? null
-                                : (_) => setState(
-                                    () => _cardType = BankCardType.debit,
-                                  ),
-                          ),
-                          ChoiceChip(
-                            key: const Key('bank_card_type_1'),
-                            label: const Text('信用卡'),
-                            selected: _cardType == BankCardType.credit,
-                            onSelected: _busy
-                                ? null
-                                : (_) => setState(
-                                    () => _cardType = BankCardType.credit,
-                                  ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-                      TextField(
-                        key: const Key('bank_card_name_input'),
-                        controller: _nameController,
-                        enabled: !_busy,
-                        maxLength: maxBankCardNameLength,
-                        decoration: const InputDecoration(
-                          labelText: '银行与卡片名称（如：招商银行储蓄卡）',
-                          border: OutlineInputBorder(),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      TextField(
-                        key: const Key('bank_card_no_input'),
-                        controller: _noController,
-                        enabled: !_busy,
-                        keyboardType: TextInputType.number,
-                        inputFormatters: <TextInputFormatter>[
-                          FilteringTextInputFormatter.allow(
-                            RegExp(r'[0-9\s\-]'),
-                          ),
-                        ],
-                        onChanged: (_) => setState(() {}),
-                        decoration: const InputDecoration(
-                          labelText: '银行卡号',
-                          hintText: '支持输入或粘贴带空格/连字符的卡号',
-                          border: OutlineInputBorder(),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Builder(
-                        builder: (context) {
-                          final theme = Theme.of(context);
-                          final isDark = theme.brightness == Brightness.dark;
-                          final luhnBgColor = luhn.passesLuhn
-                              ? (isDark
-                                    ? Colors.green.shade900.withValues(
-                                        alpha: 0.45,
-                                      )
-                                    : Colors.green.withValues(alpha: 0.14))
-                              : theme.colorScheme.surfaceContainerHighest;
-                          final luhnFgColor = luhn.passesLuhn
-                              ? (isDark
-                                    ? Colors.green.shade300
-                                    : Colors.green.shade700)
-                              : theme.colorScheme.onSurfaceVariant;
-                          return Row(
-                            children: [
-                              Flexible(
-                                child: Container(
-                                  key: const Key('editor_luhn_badge'),
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 10,
-                                    vertical: 4,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: luhnBgColor,
-                                    borderRadius: BorderRadius.circular(999),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(
-                                        luhn.passesLuhn
-                                            ? Icons.verified_outlined
-                                            : Icons.info_outline,
-                                        size: 16,
-                                        color: luhnFgColor,
-                                      ),
-                                      const SizedBox(width: 4),
-                                      Flexible(
-                                        child: Text(
-                                          luhn.badgeLabel,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: theme.textTheme.labelSmall
-                                              ?.copyWith(color: luhnFgColor),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                              if (groupedPreview.isNotEmpty) ...[
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Text(
-                                    groupedPreview,
-                                    key: const Key('editor_grouped_preview'),
-                                    overflow: TextOverflow.ellipsis,
-                                    style: theme.textTheme.bodySmall,
-                                  ),
-                                ),
-                              ],
-                            ],
-                          );
-                        },
-                      ),
-                      const SizedBox(height: 16),
-                      TextField(
-                        key: const Key('bank_card_owner_input'),
-                        controller: _ownerController,
-                        enabled: !_busy,
-                        maxLength: maxBankCardOwnerLength,
-                        decoration: const InputDecoration(
-                          labelText: '持卡人（可选）',
-                          border: OutlineInputBorder(),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      InputDecorator(
-                        decoration: const InputDecoration(
-                          labelText: '关联资产账户（可选）',
-                          border: OutlineInputBorder(),
-                          contentPadding: EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 4,
-                          ),
-                        ),
-                        child: DropdownButtonHideUnderline(
-                          child: DropdownButton<int>(
-                            key: const Key('bank_card_asset_dropdown'),
-                            isExpanded: true,
-                            isDense: true,
-                            value: validAssetId,
-                            items: [
-                              const DropdownMenuItem<int>(
-                                value: noRef,
-                                child: Text('不关联账户'),
-                              ),
-                              for (final a in assets)
-                                DropdownMenuItem<int>(
-                                  value: a.id,
-                                  child: Text(a.name),
-                                ),
-                            ],
-                            onChanged: _busy
-                                ? null
-                                : (v) =>
-                                      setState(() => _cardAssetId = v ?? noRef),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      Text(
-                        '卡片配色',
-                        style: Theme.of(context).textTheme.labelLarge,
-                      ),
-                      const SizedBox(height: 8),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          ChoiceChip(
-                            key: const Key('card_color_default'),
-                            label: const Text('默认'),
-                            selected: _cardColor == null,
-                            onSelected: _busy
-                                ? null
-                                : (_) => setState(() => _cardColor = null),
-                          ),
-                          for (final (hex, label) in presetBankCardColors)
+          body: _loading
+              ? const Loading()
+              : Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 640),
+                    child: ListView(
+                      padding: isDesktop
+                          ? const EdgeInsets.fromLTRB(20, 12, 20, 16)
+                          : const EdgeInsets.all(16),
+                      children: [
+                        Wrap(
+                          spacing: 8,
+                          children: [
                             ChoiceChip(
-                              key: Key('card_color_$hex'),
-                              avatar: CircleAvatar(
-                                backgroundColor: parseCardColorOrNull(hex),
-                                radius: 8,
-                              ),
-                              label: Text(label),
-                              selected: _cardColor?.toUpperCase() == hex,
+                              key: const Key('bank_card_type_0'),
+                              label: const Text('储蓄卡'),
+                              selected: _cardType == BankCardType.debit,
                               onSelected: _busy
                                   ? null
-                                  : (_) => setState(() => _cardColor = hex),
+                                  : (_) => setState(
+                                      () => _cardType = BankCardType.debit,
+                                    ),
                             ),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-                      TextField(
-                        key: const Key('bank_card_remark_input'),
-                        controller: _remarkController,
-                        enabled: !_busy,
-                        maxLength: maxBankCardRemarkLength,
-                        maxLines: 2,
-                        decoration: const InputDecoration(
-                          labelText: '开户支行 / 备注（可选）',
-                          border: OutlineInputBorder(),
+                            ChoiceChip(
+                              key: const Key('bank_card_type_1'),
+                              label: const Text('信用卡'),
+                              selected: _cardType == BankCardType.credit,
+                              onSelected: _busy
+                                  ? null
+                                  : (_) => setState(
+                                      () => _cardType = BankCardType.credit,
+                                    ),
+                            ),
+                          ],
                         ),
-                      ),
-                      if (_error != null)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 12),
-                          child: Text(
-                            _error!,
-                            key: const Key('bank_card_form_error'),
-                            style: TextStyle(
-                              color: Theme.of(context).colorScheme.error,
+                        const SizedBox(height: 16),
+                        TextField(
+                          key: const Key('bank_card_name_input'),
+                          controller: _nameController,
+                          enabled: !_busy,
+                          maxLength: maxBankCardNameLength,
+                          decoration: const InputDecoration(
+                            labelText: '银行与卡片名称（如：招商银行储蓄卡）',
+                            border: OutlineInputBorder(),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        TextField(
+                          key: const Key('bank_card_no_input'),
+                          controller: _noController,
+                          enabled: !_busy,
+                          keyboardType: TextInputType.number,
+                          inputFormatters: <TextInputFormatter>[
+                            FilteringTextInputFormatter.allow(
+                              RegExp(r'[0-9\s\-]'),
+                            ),
+                          ],
+                          onChanged: (_) => setState(() {}),
+                          decoration: const InputDecoration(
+                            labelText: '银行卡号',
+                            hintText: '支持输入或粘贴带空格/连字符的卡号',
+                            border: OutlineInputBorder(),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Builder(
+                          builder: (context) {
+                            final theme = Theme.of(context);
+                            final isDark = theme.brightness == Brightness.dark;
+                            final luhnBgColor = luhn.passesLuhn
+                                ? (isDark
+                                      ? Colors.green.shade900.withValues(
+                                          alpha: 0.45,
+                                        )
+                                      : Colors.green.withValues(alpha: 0.14))
+                                : theme.colorScheme.surfaceContainerHighest;
+                            final luhnFgColor = luhn.passesLuhn
+                                ? (isDark
+                                      ? Colors.green.shade300
+                                      : Colors.green.shade700)
+                                : theme.colorScheme.onSurfaceVariant;
+                            return Row(
+                              children: [
+                                Flexible(
+                                  child: Container(
+                                    key: const Key('editor_luhn_badge'),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                      vertical: 4,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: luhnBgColor,
+                                      borderRadius: BorderRadius.circular(999),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          luhn.passesLuhn
+                                              ? Icons.verified_outlined
+                                              : Icons.info_outline,
+                                          size: 16,
+                                          color: luhnFgColor,
+                                        ),
+                                        const SizedBox(width: 4),
+                                        Flexible(
+                                          child: Text(
+                                            luhn.badgeLabel,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: theme.textTheme.labelSmall
+                                                ?.copyWith(color: luhnFgColor),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                                if (groupedPreview.isNotEmpty) ...[
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Text(
+                                      groupedPreview,
+                                      key: const Key('editor_grouped_preview'),
+                                      overflow: TextOverflow.ellipsis,
+                                      style: theme.textTheme.bodySmall,
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            );
+                          },
+                        ),
+                        const SizedBox(height: 16),
+                        TextField(
+                          key: const Key('bank_card_owner_input'),
+                          controller: _ownerController,
+                          enabled: !_busy,
+                          maxLength: maxBankCardOwnerLength,
+                          decoration: const InputDecoration(
+                            labelText: '持卡人（可选）',
+                            border: OutlineInputBorder(),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        InputDecorator(
+                          decoration: const InputDecoration(
+                            labelText: '关联资产账户（可选）',
+                            border: OutlineInputBorder(),
+                            contentPadding: EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 4,
+                            ),
+                          ),
+                          child: DropdownButtonHideUnderline(
+                            child: DropdownButton<int>(
+                              key: const Key('bank_card_asset_dropdown'),
+                              isExpanded: true,
+                              isDense: true,
+                              value: validAssetId,
+                              items: [
+                                const DropdownMenuItem<int>(
+                                  value: noRef,
+                                  child: Text('不关联账户'),
+                                ),
+                                for (final a in assets)
+                                  DropdownMenuItem<int>(
+                                    value: a.id,
+                                    child: Text(a.name),
+                                  ),
+                              ],
+                              onChanged: _busy
+                                  ? null
+                                  : (v) => setState(
+                                      () => _cardAssetId = v ?? noRef,
+                                    ),
                             ),
                           ),
                         ),
-                    ],
+                        const SizedBox(height: 16),
+                        Text(
+                          '卡片配色',
+                          style: Theme.of(context).textTheme.labelLarge,
+                        ),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            ChoiceChip(
+                              key: const Key('card_color_default'),
+                              label: const Text('默认'),
+                              selected: _cardColor == null,
+                              onSelected: _busy
+                                  ? null
+                                  : (_) => setState(() => _cardColor = null),
+                            ),
+                            for (final (hex, label) in presetBankCardColors)
+                              ChoiceChip(
+                                key: Key('card_color_$hex'),
+                                avatar: CircleAvatar(
+                                  backgroundColor: parseCardColorOrNull(hex),
+                                  radius: 8,
+                                ),
+                                label: Text(label),
+                                selected: _cardColor?.toUpperCase() == hex,
+                                onSelected: _busy
+                                    ? null
+                                    : (_) => setState(() => _cardColor = hex),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        TextField(
+                          key: const Key('bank_card_remark_input'),
+                          controller: _remarkController,
+                          enabled: !_busy,
+                          maxLength: maxBankCardRemarkLength,
+                          maxLines: 2,
+                          decoration: const InputDecoration(
+                            labelText: '开户支行 / 备注（可选）',
+                            border: OutlineInputBorder(),
+                          ),
+                        ),
+                        if (_error != null)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 12),
+                            child: Text(
+                              _error!,
+                              key: const Key('bank_card_form_error'),
+                              style: TextStyle(
+                                color: Theme.of(context).colorScheme.error,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
                 ),
-              ),
+        ),
       ),
     );
   }

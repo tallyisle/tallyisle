@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -9,6 +11,7 @@ import '../features/automation/automation_providers.dart'
     show autoBillDraftCountProvider;
 import '../features/backup/backup_providers.dart';
 import '../features/books/book_switcher_modal.dart';
+import '../features/records/desktop_record_editor_dialog.dart';
 import '../features/security/app_lock_providers.dart';
 import 'adaptive.dart';
 import 'providers.dart';
@@ -58,6 +61,9 @@ class DesktopPopupRouteObserver extends NavigatorObserver {
 
 /// Shared entry point for opening "记一笔" using the user's configured default
 /// record type (`支出` / `收入` / `转账`).
+///
+/// On desktop (`DesktopAdaptive.isDesktop(context)`), opens the centered
+/// borderless `600px` modal dialog directly via [showDesktopRecordEditorDialog].
 void openNewRecordEntry(
   BuildContext context,
   WidgetRef ref, {
@@ -66,6 +72,17 @@ void openNewRecordEntry(
   final defaultType =
       ref.read(appSettingsProvider).value?.defaultRecordType ??
       RecordType.expense;
+  if (DesktopAdaptive.isDesktop(context)) {
+    final dialogContext = Navigator.maybeOf(context) != null
+        ? context
+        : routerOverride?.routerDelegate.navigatorKey.currentContext;
+    if (dialogContext != null) {
+      unawaited(
+        showDesktopRecordEditorDialog(dialogContext, initialType: defaultType),
+      );
+      return;
+    }
+  }
   final location = defaultType == RecordType.expense
       ? '/record/new'
       : '/record/new?type=$defaultType';

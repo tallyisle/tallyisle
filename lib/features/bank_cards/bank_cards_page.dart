@@ -7,6 +7,7 @@ import '../../data/db/database.dart';
 import '../../domain/model/codes.dart';
 import '../../domain/rules/template_card_rules.dart';
 import '../common/common.dart';
+import '../common/desktop_modal_page.dart';
 import 'bank_card_editor_page.dart';
 import 'bank_card_providers.dart';
 
@@ -23,16 +24,16 @@ class _BankCardsPageState extends ConsumerState<BankCardsPage> {
   bool _busy = false;
 
   Future<void> _openCreate() async {
-    await Navigator.of(
+    await pushDesktopModalOrMaterialRoute<int>(
       context,
-    ).push(MaterialPageRoute<int>(builder: (_) => const BankCardEditorPage()));
+      child: const BankCardEditorPage(),
+    );
   }
 
   Future<void> _openEdit(BankCard card) async {
-    await Navigator.of(context).push(
-      MaterialPageRoute<int>(
-        builder: (_) => BankCardEditorPage(cardId: card.id),
-      ),
+    await pushDesktopModalOrMaterialRoute<int>(
+      context,
+      child: BankCardEditorPage(cardId: card.id),
     );
   }
 

@@ -5,6 +5,7 @@ import 'package:uuid/uuid.dart';
 import '../../data/db/database.dart';
 import '../../domain/rules/wish_note_rules.dart';
 import '../common/common.dart';
+import '../common/desktop_modal_page.dart';
 import 'note_editor_page.dart';
 import 'note_providers.dart';
 import 'note_trash_page.dart';
@@ -37,8 +38,9 @@ class _NotesPageState extends ConsumerState<NotesPage> {
   }
 
   Future<void> _openEditor({int? noteId}) async {
-    await Navigator.of(context).push<void>(
-      MaterialPageRoute(builder: (_) => NoteEditorPage(noteId: noteId)),
+    await pushDesktopModalOrMaterialRoute<void>(
+      context,
+      child: NoteEditorPage(noteId: noteId),
     );
   }
 

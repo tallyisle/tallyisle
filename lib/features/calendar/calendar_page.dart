@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../app/adaptive.dart';
 import '../../app/providers.dart';
 import '../../data/db/database.dart';
 import '../../domain/model/codes.dart';
@@ -56,6 +57,13 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
     }
 
     final repaymentDays = _getRepaymentDays(month.year, month.month, assets);
+    final isExpandedDesktop = DesktopAdaptive.isExpandedDesktop(context);
+    final selectedDayNoonMs = DateTime(
+      month.year,
+      month.month,
+      clampedSelectedDay,
+      12,
+    ).millisecondsSinceEpoch;
 
     return Scaffold(
       appBar: AppBar(
@@ -68,43 +76,114 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
           ),
         ],
       ),
-      body: Column(
-        children: [
-          _buildMonthSwitcher(context, month),
-          _buildMonthSummaryCard(context, monthSummaryAsync),
-          _buildWeekdayHeader(context),
-          summariesAsync.when(
-            data: (dailyMap) => _buildCalendarGrid(
-              context,
-              month,
-              dailyMap,
-              repaymentDays,
-              clampedSelectedDay,
+      body: isExpandedDesktop
+          ? Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 1440),
+                child: Row(
+                  key: const Key('calendar-desktop-split'),
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    SizedBox(
+                      width: 480,
+                      child: SingleChildScrollView(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        child: Column(
+                          children: [
+                            _buildMonthSwitcher(context, month),
+                            const SizedBox(height: 4),
+                            _buildMonthSummaryCard(context, monthSummaryAsync),
+                            const SizedBox(height: 6),
+                            _buildWeekdayHeader(context),
+                            summariesAsync.when(
+                              data: (dailyMap) => _buildCalendarGrid(
+                                context,
+                                month,
+                                dailyMap,
+                                repaymentDays,
+                                clampedSelectedDay,
+                                isDesktopPane: true,
+                              ),
+                              loading: () => const SizedBox(
+                                height: 280,
+                                child: Center(
+                                  child: CircularProgressIndicator(),
+                                ),
+                              ),
+                              error: (err, _) =>
+                                  SizedBox(height: 280, child: ErrorView(err)),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const VerticalDivider(width: 1),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          _buildDesktopSelectedDayHeader(
+                            context,
+                            month,
+                            summariesAsync,
+                            clampedSelectedDay,
+                            selectedDayNoonMs,
+                          ),
+                          const Divider(height: 1),
+                          Expanded(
+                            child: _buildSelectedDayRecords(
+                              context,
+                              summariesAsync,
+                              clampedSelectedDay,
+                              categories,
+                              assets,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          : Column(
+              children: [
+                _buildMonthSwitcher(context, month),
+                _buildMonthSummaryCard(context, monthSummaryAsync),
+                _buildWeekdayHeader(context),
+                summariesAsync.when(
+                  data: (dailyMap) => _buildCalendarGrid(
+                    context,
+                    month,
+                    dailyMap,
+                    repaymentDays,
+                    clampedSelectedDay,
+                  ),
+                  loading: () => const SizedBox(
+                    height: 240,
+                    child: Center(child: CircularProgressIndicator()),
+                  ),
+                  error: (err, _) =>
+                      SizedBox(height: 240, child: ErrorView(err)),
+                ),
+                const Divider(height: 1),
+                _buildSelectedDayHeader(
+                  context,
+                  month,
+                  summariesAsync,
+                  clampedSelectedDay,
+                ),
+                Expanded(
+                  child: _buildSelectedDayRecords(
+                    context,
+                    summariesAsync,
+                    clampedSelectedDay,
+                    categories,
+                    assets,
+                  ),
+                ),
+              ],
             ),
-            loading: () => const SizedBox(
-              height: 240,
-              child: Center(child: CircularProgressIndicator()),
-            ),
-            error: (err, _) => SizedBox(height: 240, child: ErrorView(err)),
-          ),
-          const Divider(height: 1),
-          _buildSelectedDayHeader(
-            context,
-            month,
-            summariesAsync,
-            clampedSelectedDay,
-          ),
-          Expanded(
-            child: _buildSelectedDayRecords(
-              context,
-              summariesAsync,
-              clampedSelectedDay,
-              categories,
-              assets,
-            ),
-          ),
-        ],
-      ),
     );
   }
 
@@ -266,8 +345,9 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
     CalendarMonth month,
     Map<int, CalendarDailySummary<LedgerRecord>> dailyMap,
     Set<int> repaymentDays,
-    int selectedDay,
-  ) {
+    int selectedDay, {
+    bool isDesktopPane = false,
+  }) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final isDark = theme.brightness == Brightness.dark;
@@ -284,12 +364,18 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
     final textScale = MediaQuery.textScalerOf(
       context,
     ).scale(1.0).clamp(1.0, 1.35);
-    final baseCellHeight = viewportHeight < 700 ? 46.0 : 54.0;
-    final maxGridHeight = (viewportHeight - 285.0).clamp(192.0, 390.0);
-    final cellHeight = (baseCellHeight * textScale).clamp(
-      42.0,
-      maxGridHeight / rowCount,
-    );
+    final double cellHeight;
+    if (isDesktopPane) {
+      final baseDesktopHeight = viewportHeight < 740 ? 52.0 : 58.0;
+      cellHeight = (baseDesktopHeight * textScale).clamp(48.0, 68.0);
+    } else {
+      final baseCellHeight = viewportHeight < 700 ? 46.0 : 54.0;
+      final maxGridHeight = (viewportHeight - 285.0).clamp(192.0, 390.0);
+      cellHeight = (baseCellHeight * textScale).clamp(
+        42.0,
+        maxGridHeight / rowCount,
+      );
+    }
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -465,6 +551,91 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
             ),
           );
         },
+      ),
+    );
+  }
+
+  Widget _buildDesktopSelectedDayHeader(
+    BuildContext context,
+    CalendarMonth month,
+    AsyncValue<Map<int, CalendarDailySummary<LedgerRecord>>> summariesAsync,
+    int selectedDay,
+    int selectedDayNoonMs,
+  ) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final expenseColor = isDark ? Colors.red.shade300 : Colors.red.shade700;
+    final incomeColor = isDark ? Colors.green.shade300 : Colors.green.shade700;
+    final dayDt = DateTime(month.year, month.month, selectedDay);
+    const weekdays = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+    final weekdayName = weekdays[(dayDt.weekday - 1) % 7];
+
+    final summary =
+        summariesAsync.value?[selectedDay]?.incomeExpense ?? IncomeExpense.zero;
+    final hasDaySummary =
+        summary.expense != BigInt.zero || summary.income != BigInt.zero;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+      color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.25),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  '${month.year}年${month.month}月$selectedDay日 $weekdayName',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                if (hasDaySummary) ...[
+                  const SizedBox(height: 2),
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (summary.expense != BigInt.zero)
+                          Text(
+                            '支出 ¥${formatMinor(summary.expense)}',
+                            maxLines: 1,
+                            style: TextStyle(fontSize: 12, color: expenseColor),
+                          ),
+                        if (summary.expense != BigInt.zero &&
+                            summary.income != BigInt.zero)
+                          const SizedBox(width: 10),
+                        if (summary.income != BigInt.zero)
+                          Text(
+                            '收入 ¥${formatMinor(summary.income)}',
+                            maxLines: 1,
+                            style: TextStyle(fontSize: 12, color: incomeColor),
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          FilledButton.tonal(
+            key: const Key('calendar-add-for-day'),
+            style: FilledButton.styleFrom(
+              visualDensity: VisualDensity.compact,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            onPressed: () =>
+                context.push('/record/new?time=$selectedDayNoonMs'),
+            child: const Text('+ 补记该日账单', maxLines: 1, softWrap: false),
+          ),
+        ],
       ),
     );
   }

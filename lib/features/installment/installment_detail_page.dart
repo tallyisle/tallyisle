@@ -8,6 +8,7 @@ import '../../data/repo/installment_queries.dart';
 import '../../domain/model/codes.dart';
 import '../../domain/rules/installment_rules.dart';
 import '../common/common.dart';
+import '../common/desktop_modal_page.dart';
 import '../records/record_detail_page.dart';
 import '../records/record_editor_page.dart'
     show amountInputFormatters, parseAmount;
@@ -216,11 +217,10 @@ class _InstallmentDetailPageState extends ConsumerState<InstallmentDetailPage> {
               tooltip: '编辑分期',
               onPressed: _busy
                   ? null
-                  : () => Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: (_) => InstallmentEditorPage(
-                          installmentId: loaded.summary.installment.id,
-                        ),
+                  : () => pushDesktopModalOrMaterialRoute<Object?>(
+                      context,
+                      child: InstallmentEditorPage(
+                        installmentId: loaded.summary.installment.id,
                       ),
                     ),
               icon: const Icon(Icons.edit_outlined),

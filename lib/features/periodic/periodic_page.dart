@@ -8,6 +8,7 @@ import '../../data/periodic/periodic_service.dart';
 import '../../domain/model/codes.dart';
 import '../../domain/rules/periodic_records.dart';
 import '../common/common.dart';
+import '../common/desktop_modal_page.dart';
 import '../records/record_labels.dart';
 import 'periodic_editor_page.dart';
 import 'periodic_providers.dart';
@@ -82,10 +83,9 @@ class _PeriodicPageState extends ConsumerState<PeriodicPage>
   }
 
   Future<void> _openEditor({int? periodId}) async {
-    final savedId = await Navigator.of(context).push<int>(
-      MaterialPageRoute<int>(
-        builder: (_) => PeriodicEditorPage(periodId: periodId),
-      ),
+    final savedId = await pushDesktopModalOrMaterialRoute<int>(
+      context,
+      child: PeriodicEditorPage(periodId: periodId),
     );
     if (savedId != null && mounted) {
       await _triggerCatchUp(force: true);

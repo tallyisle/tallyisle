@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../domain/model/codes.dart';
 import '../common/common.dart';
+import '../common/desktop_modal_page.dart';
 import 'debt_detail_page.dart';
 import 'debt_editor_page.dart';
 import 'debt_providers.dart';
@@ -178,8 +179,9 @@ class DebtPage extends ConsumerWidget {
         key: const Key('add_debt_button'),
         heroTag: 'fab-debt',
         onPressed: () async {
-          await Navigator.of(context).push<bool>(
-            MaterialPageRoute(builder: (_) => const DebtEditorPage()),
+          await pushDesktopModalOrMaterialRoute<bool>(
+            context,
+            child: const DebtEditorPage(),
           );
         },
         icon: const Icon(Icons.add),

@@ -57,12 +57,105 @@ String creditBalanceLabel(BigInt balance) => balance > BigInt.zero
 /// Account detail (`/assets/:id`): header, actions, credit statements and the
 /// account's bill list with optional running balances.
 class AssetDetailPage extends ConsumerWidget {
-  const AssetDetailPage({super.key, required this.assetId});
+  const AssetDetailPage({
+    super.key,
+    required this.assetId,
+    this.embeddedInPane = false,
+    this.onDeleted,
+  });
+
   final int assetId;
+  final bool embeddedInPane;
+  final VoidCallback? onDeleted;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final asset = ref.watch(assetProvider(assetId));
+    final fallbackAsset = embeddedInPane
+        ? ref
+              .watch(assetsProvider)
+              .value
+              ?.where((x) => x.id == assetId)
+              .firstOrNull
+        : null;
+    final currentAsset = asset.value ?? fallbackAsset;
+    final theme = Theme.of(context);
+
+    Widget buildScrollableDetail(Asset a) {
+      return CustomScrollView(
+        slivers: [
+          SliverToBoxAdapter(
+            key: const ValueKey('asset-header'),
+            child: _Header(asset: a),
+          ),
+          if (a.type == AssetType.credit)
+            SliverToBoxAdapter(
+              key: const ValueKey('asset-credit-section'),
+              child: CreditSection(asset: a),
+            ),
+          AssetFlowSection(key: const ValueKey('asset-flow-section'), asset: a),
+          SliverToBoxAdapter(
+            key: const ValueKey('asset-bottom-pad'),
+            child: SizedBox(height: embeddedInPane ? 64 : 96),
+          ),
+        ],
+      );
+    }
+
+    final Widget detailBody;
+    if (embeddedInPane && currentAsset != null) {
+      detailBody = buildScrollableDetail(currentAsset);
+    } else {
+      detailBody = asyncBody(asset, (a) {
+        if (a == null) return const Center(child: Text('账户不存在或已删除'));
+        return buildScrollableDetail(a);
+      });
+    }
+
+    if (embeddedInPane) {
+      return Material(
+        color: theme.colorScheme.surface,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SizedBox(
+              height: 52,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 8, 0),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        currentAsset?.name ?? '账户详情',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    if (currentAsset != null)
+                      _AssetMenu(
+                        asset: currentAsset,
+                        key: const Key('asset-menu'),
+                        embeddedInPane: true,
+                        onDeleted: onDeleted,
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            Divider(
+              height: 1,
+              thickness: 0.6,
+              color: theme.colorScheme.outlineVariant.withValues(alpha: 0.45),
+            ),
+            Expanded(child: detailBody),
+          ],
+        ),
+      );
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: Text(asset.value?.name ?? '账户详情'),
@@ -71,18 +164,7 @@ class AssetDetailPage extends ConsumerWidget {
             _AssetMenu(asset: asset.value!, key: const Key('asset-menu')),
         ],
       ),
-      body: asyncBody(asset, (a) {
-        if (a == null) return const Center(child: Text('账户不存在或已删除'));
-        return CustomScrollView(
-          slivers: [
-            SliverToBoxAdapter(child: _Header(asset: a)),
-            if (a.type == AssetType.credit)
-              SliverToBoxAdapter(child: CreditSection(asset: a)),
-            AssetFlowSection(asset: a),
-            const SliverToBoxAdapter(child: SizedBox(height: 96)),
-          ],
-        );
-      }),
+      body: detailBody,
     );
   }
 }
@@ -289,8 +371,17 @@ String repayRoute(Asset card, BigInt amount) {
 enum _Action { trend, edit, adjust, hide, unhide, settle, unsettle, delete }
 
 class _AssetMenu extends ConsumerStatefulWidget {
-  const _AssetMenu({super.key, required this.asset});
+  const _AssetMenu({
+    super.key,
+    required this.asset,
+    this.embeddedInPane = false,
+    this.onDeleted,
+  });
+
   final Asset asset;
+  final bool embeddedInPane;
+  final VoidCallback? onDeleted;
+
   @override
   ConsumerState<_AssetMenu> createState() => _AssetMenuState();
 }
@@ -341,7 +432,15 @@ class _AssetMenuState extends ConsumerState<_AssetMenu> {
             commandId: ids.forPayload(['delete', a.id]),
             assetId: a.id,
           );
-          if (mounted) context.pop();
+          if (mounted) {
+            if (widget.embeddedInPane) {
+              widget.onDeleted?.call();
+            } else if (GoRouter.maybeOf(context) != null && context.canPop()) {
+              context.pop();
+            } else {
+              await Navigator.of(context).maybePop();
+            }
+          }
       }
     } catch (e) {
       _toast(safeMessage(e));

@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/adaptive.dart';
 import '../../core/money.dart';
 import '../../domain/model/codes.dart';
 import '../../domain/rules/asset_overview.dart' show normalizeCurrency;
@@ -80,6 +81,29 @@ class _AssetTrendPageState extends ConsumerState<AssetTrendPage> {
         normalizeCurrency(singleAccount.currency) != 'CNY';
 
     final pageTitle = _buildPageTitle(filter, singleAccount);
+    final isExpandedDesktop = DesktopAdaptive.isExpandedDesktop(context);
+
+    final distributionWidget = distribution != null
+        ? _buildDistributionCard(context, distribution)
+        : const Center(
+            child: Padding(
+              padding: EdgeInsets.all(16),
+              child: CircularProgressIndicator(),
+            ),
+          );
+
+    final chartWidget = trendResult != null
+        ? _buildTrendChartCard(context, trendResult, perspective)
+        : const Center(
+            child: Padding(
+              padding: EdgeInsets.all(16),
+              child: CircularProgressIndicator(),
+            ),
+          );
+
+    final flowTableWidget = trendResult != null
+        ? _buildFlowTableCard(context, trendResult)
+        : const SizedBox.shrink();
 
     return Scaffold(
       appBar: AppBar(
@@ -93,58 +117,125 @@ class _AssetTrendPageState extends ConsumerState<AssetTrendPage> {
           ),
         ],
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        child: Column(
-          children: [
-            // 1. Top Year Filter Row
-            _buildYearSelector(context, selectedYear),
-            const SizedBox(height: 12),
-
-            // 2. Perspective SegmentedButton or Foreign Currency Switch
-            if (filter is! AssetTrendFilterSingleAsset)
-              _buildPerspectiveSegment(context, perspective)
-            else if (isForeignCurrency)
-              _buildCurrencySwitchRow(
-                context,
-                singleAccount,
-                useOriginalCurrency,
-              ),
-            const SizedBox(height: 16),
-
-            // 3. Card 1: Real-time Asset Distribution
-            if (distribution != null)
-              _buildDistributionCard(context, distribution)
-            else
-              const Center(
-                child: Padding(
-                  padding: EdgeInsets.all(16),
-                  child: CircularProgressIndicator(),
+      body: isExpandedDesktop
+          ? Column(
+              children: [
+                Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 1440),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 20,
+                        vertical: 8,
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: _buildYearSelector(context, selectedYear),
+                          ),
+                          if (filter is! AssetTrendFilterSingleAsset) ...[
+                            const SizedBox(width: 16),
+                            SizedBox(
+                              width: 280,
+                              child: _buildPerspectiveSegment(
+                                context,
+                                perspective,
+                              ),
+                            ),
+                          ] else if (isForeignCurrency) ...[
+                            const SizedBox(width: 16),
+                            ConstrainedBox(
+                              constraints: const BoxConstraints(maxWidth: 340),
+                              child: _buildCurrencySwitchRow(
+                                context,
+                                singleAccount,
+                                useOriginalCurrency,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
                 ),
-              ),
-            const SizedBox(height: 16),
-
-            // 4. Card 2: Trend Line Chart
-            if (trendResult != null)
-              _buildTrendChartCard(context, trendResult, perspective)
-            else
-              const Center(
-                child: Padding(
-                  padding: EdgeInsets.all(16),
-                  child: CircularProgressIndicator(),
+                const Divider(height: 1),
+                Expanded(
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 1440),
+                      child: Row(
+                        key: const Key('asset-trend-desktop-split'),
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Expanded(
+                            flex: 48,
+                            child: ListView(
+                              padding: const EdgeInsets.fromLTRB(
+                                20,
+                                14,
+                                12,
+                                24,
+                              ),
+                              children: [
+                                distributionWidget,
+                                const SizedBox(height: 16),
+                                chartWidget,
+                              ],
+                            ),
+                          ),
+                          const VerticalDivider(width: 1),
+                          Expanded(
+                            flex: 52,
+                            child: ListView(
+                              padding: const EdgeInsets.fromLTRB(
+                                12,
+                                14,
+                                20,
+                                24,
+                              ),
+                              children: [flowTableWidget],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
                 ),
-              ),
-            const SizedBox(height: 16),
+              ],
+            )
+          : SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Column(
+                children: [
+                  // 1. Top Year Filter Row
+                  _buildYearSelector(context, selectedYear),
+                  const SizedBox(height: 12),
 
-            // 5. Card 3: Monthly Flow Table
-            if (trendResult != null)
-              _buildFlowTableCard(context, trendResult)
-            else
-              const SizedBox.shrink(),
-            const SizedBox(height: 24),
-          ],
-        ),
-      ),
+                  // 2. Perspective SegmentedButton or Foreign Currency Switch
+                  if (filter is! AssetTrendFilterSingleAsset)
+                    _buildPerspectiveSegment(context, perspective)
+                  else if (isForeignCurrency)
+                    _buildCurrencySwitchRow(
+                      context,
+                      singleAccount,
+                      useOriginalCurrency,
+                    ),
+                  const SizedBox(height: 16),
+
+                  // 3. Card 1: Real-time Asset Distribution
+                  distributionWidget,
+                  const SizedBox(height: 16),
+
+                  // 4. Card 2: Trend Line Chart
+                  chartWidget,
+                  const SizedBox(height: 16),
+
+                  // 5. Card 3: Monthly Flow Table
+                  flowTableWidget,
+                  const SizedBox(height: 24),
+                ],
+              ),
+            ),
     );
   }
 
@@ -547,27 +638,57 @@ class _AssetTrendPageState extends ConsumerState<AssetTrendPage> {
               ],
             ),
             const SizedBox(height: 16),
-            SizedBox(
-              height: 220,
-              width: double.infinity,
-              child: GestureDetector(
-                onTapDown: (details) =>
-                    _handleChartTouch(details.localPosition, points),
-                onHorizontalDragUpdate: (details) =>
-                    _handleChartTouch(details.localPosition, points),
-                child: CustomPaint(
-                  painter: _LineChartPainter(
-                    points: points,
-                    selectedIndex: _selectedChartIndex,
-                    isCredit: result.isCredit,
-                    symbol: result.currencySymbol,
-                    lineColor: theme.colorScheme.primary,
-                    gridColor: theme.colorScheme.outlineVariant,
-                    textColor: theme.colorScheme.onSurfaceVariant,
-                    surfaceColor: theme.colorScheme.surface,
+            LayoutBuilder(
+              builder: (chartContext, constraints) {
+                final boxWidth = constraints.maxWidth.isFinite
+                    ? constraints.maxWidth
+                    : null;
+                return SizedBox(
+                  height: 220,
+                  width: double.infinity,
+                  child: MouseRegion(
+                    onHover: (e) {
+                      if (DesktopAdaptive.isDesktop(context)) {
+                        _handleChartTouch(
+                          e.localPosition,
+                          points,
+                          chartBoxWidth: boxWidth,
+                        );
+                      }
+                    },
+                    onExit: (_) {
+                      if (DesktopAdaptive.isDesktop(context) &&
+                          _selectedChartIndex != null) {
+                        setState(() => _selectedChartIndex = null);
+                      }
+                    },
+                    child: GestureDetector(
+                      onTapDown: (details) => _handleChartTouch(
+                        details.localPosition,
+                        points,
+                        chartBoxWidth: boxWidth,
+                      ),
+                      onHorizontalDragUpdate: (details) => _handleChartTouch(
+                        details.localPosition,
+                        points,
+                        chartBoxWidth: boxWidth,
+                      ),
+                      child: CustomPaint(
+                        painter: _LineChartPainter(
+                          points: points,
+                          selectedIndex: _selectedChartIndex,
+                          isCredit: result.isCredit,
+                          symbol: result.currencySymbol,
+                          lineColor: theme.colorScheme.primary,
+                          gridColor: theme.colorScheme.outlineVariant,
+                          textColor: theme.colorScheme.onSurfaceVariant,
+                          surfaceColor: theme.colorScheme.surface,
+                        ),
+                      ),
+                    ),
                   ),
-                ),
-              ),
+                );
+              },
             ),
           ],
         ),
@@ -575,12 +696,19 @@ class _AssetTrendPageState extends ConsumerState<AssetTrendPage> {
     );
   }
 
-  void _handleChartTouch(Offset pos, List<TrendPoint> points) {
+  void _handleChartTouch(
+    Offset pos,
+    List<TrendPoint> points, {
+    double? chartBoxWidth,
+  }) {
     if (points.isEmpty) return;
-    const paddingLeft = 40.0;
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    final paddingLeft = isDesktop ? 48.0 : 40.0;
     const paddingRight = 16.0;
-    final chartWidth = context.size?.width ?? 320.0;
-    final availableWidth = chartWidth - paddingLeft - paddingRight - 32;
+    final availableWidth = (isDesktop && chartBoxWidth != null)
+        ? (chartBoxWidth - paddingLeft - paddingRight)
+        : ((context.size?.width ?? 320.0) - paddingLeft - paddingRight - 32);
+    if (availableWidth <= 0) return;
 
     if (pos.dx < paddingLeft) {
       setState(() => _selectedChartIndex = 0);
@@ -740,201 +868,234 @@ class _AssetTrendPageState extends ConsumerState<AssetTrendPage> {
         .toSet()
         .toList();
 
+    Widget buildPickerList(
+      BuildContext pickerContext, {
+      ScrollController? scrollController,
+      required bool showHandle,
+    }) {
+      final sheetTheme = Theme.of(pickerContext);
+      final sheetIsDark = sheetTheme.brightness == Brightness.dark;
+      return ListView(
+        controller: scrollController,
+        shrinkWrap: !showHandle,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        children: [
+          if (showHandle) ...[
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: sheetTheme.colorScheme.outlineVariant,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Flexible(
+                child: Text(
+                  '选择目标账户范围',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+              ),
+              if (!showHandle)
+                IconButton(
+                  tooltip: '关闭',
+                  visualDensity: VisualDensity.compact,
+                  icon: const Icon(Icons.close),
+                  onPressed: () => Navigator.pop(pickerContext),
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+
+          // 1. 全部有效净资产
+          ListTile(
+            leading: const Icon(Icons.account_balance),
+            title: const Text('全部有效净资产 (默认)'),
+            selected: currentFilter is AssetTrendFilterAllEffective,
+            onTap: () {
+              ref
+                  .read(trendFilterProvider.notifier)
+                  .setFilter(const AssetTrendFilter.allEffective());
+              Navigator.pop(pickerContext);
+            },
+          ),
+          const Divider(),
+
+          // 2. 内置分类
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+            child: Text('按内置分类', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+          ListTile(
+            leading: const Icon(Icons.account_balance_wallet),
+            title: const Text('普通资金账户'),
+            selected:
+                currentFilter is AssetTrendFilterCategory &&
+                currentFilter.categoryCode == AssetType.normal,
+            onTap: () {
+              ref
+                  .read(trendFilterProvider.notifier)
+                  .setFilter(
+                    const AssetTrendFilter.assetCategory(AssetType.normal),
+                  );
+              Navigator.pop(pickerContext);
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.credit_card),
+            title: const Text('信用卡'),
+            selected:
+                currentFilter is AssetTrendFilterCategory &&
+                currentFilter.categoryCode == AssetType.credit,
+            onTap: () {
+              ref
+                  .read(trendFilterProvider.notifier)
+                  .setFilter(
+                    const AssetTrendFilter.assetCategory(AssetType.credit),
+                  );
+              Navigator.pop(pickerContext);
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.arrow_upward),
+            title: const Text('借出债权'),
+            selected:
+                currentFilter is AssetTrendFilterCategory &&
+                currentFilter.categoryCode == AssetType.debtLend,
+            onTap: () {
+              ref
+                  .read(trendFilterProvider.notifier)
+                  .setFilter(
+                    const AssetTrendFilter.assetCategory(AssetType.debtLend),
+                  );
+              Navigator.pop(pickerContext);
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.arrow_downward),
+            title: const Text('借入债务'),
+            selected:
+                currentFilter is AssetTrendFilterCategory &&
+                currentFilter.categoryCode == AssetType.debtBorrow,
+            onTap: () {
+              ref
+                  .read(trendFilterProvider.notifier)
+                  .setFilter(
+                    const AssetTrendFilter.assetCategory(AssetType.debtBorrow),
+                  );
+              Navigator.pop(pickerContext);
+            },
+          ),
+          const Divider(),
+
+          // 3. 自定义分组
+          if (customGroups.isNotEmpty) ...[
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+              child: Text(
+                '按自定义分组',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ),
+            for (final g in customGroups)
+              ListTile(
+                leading: const Icon(Icons.folder_outlined),
+                title: Text(g),
+                selected:
+                    currentFilter is AssetTrendFilterCustomGroup &&
+                    currentFilter.groupName == g,
+                onTap: () {
+                  ref
+                      .read(trendFilterProvider.notifier)
+                      .setFilter(AssetTrendFilter.customGroup(g));
+                  Navigator.pop(pickerContext);
+                },
+              ),
+            const Divider(),
+          ],
+
+          // 4. 单个账户（含隐藏账户）
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+            child: Text('单个账户', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+          for (final a in accounts)
+            ListTile(
+              leading: Icon(
+                a.isCredit
+                    ? Icons.credit_card
+                    : Icons.account_balance_wallet_outlined,
+              ),
+              title: Text(a.name),
+              subtitle: a.status == AssetStatus.hidden
+                  ? Text(
+                      '已隐藏',
+                      style: TextStyle(
+                        color: sheetIsDark
+                            ? Colors.orange.shade300
+                            : Colors.orange.shade800,
+                      ),
+                    )
+                  : (a.currency != null ? Text(a.currency!) : null),
+              trailing: Text(
+                a.isCredit
+                    ? formatTrendBalance(a.balanceMinor, isCredit: true)
+                    : '¥${Money.minor(a.balanceMinor).decimal}',
+              ),
+              selected:
+                  currentFilter is AssetTrendFilterSingleAsset &&
+                  currentFilter.assetId == a.id,
+              onTap: () {
+                ref
+                    .read(trendFilterProvider.notifier)
+                    .setFilter(AssetTrendFilter.singleAsset(a.id));
+                Navigator.pop(pickerContext);
+              },
+            ),
+        ],
+      );
+    }
+
+    if (DesktopAdaptive.isDesktop(context)) {
+      showDialog<void>(
+        context: context,
+        builder: (dialogContext) => Dialog(
+          key: const Key('trend-scope-picker-dialog'),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 460, maxHeight: 620),
+            child: buildPickerList(dialogContext, showHandle: false),
+          ),
+        ),
+      );
+      return;
+    }
+
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      builder: (context) {
+      builder: (sheetContext) {
         return DraggableScrollableSheet(
           expand: false,
           initialChildSize: 0.6,
           maxChildSize: 0.9,
           minChildSize: 0.4,
-          builder: (context, scrollController) {
-            final sheetTheme = Theme.of(context);
-            final sheetIsDark = sheetTheme.brightness == Brightness.dark;
-            return ListView(
-              controller: scrollController,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              children: [
-                Center(
-                  child: Container(
-                    width: 40,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: sheetTheme.colorScheme.outlineVariant,
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                const Text(
-                  '选择目标账户范围',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 12),
-
-                // 1. 全部有效净资产
-                ListTile(
-                  leading: const Icon(Icons.account_balance),
-                  title: const Text('全部有效净资产 (默认)'),
-                  selected: currentFilter is AssetTrendFilterAllEffective,
-                  onTap: () {
-                    ref
-                        .read(trendFilterProvider.notifier)
-                        .setFilter(const AssetTrendFilter.allEffective());
-                    Navigator.pop(context);
-                  },
-                ),
-                const Divider(),
-
-                // 2. 内置分类
-                const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                  child: Text(
-                    '按内置分类',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                ),
-                ListTile(
-                  leading: const Icon(Icons.account_balance_wallet),
-                  title: const Text('普通资金账户'),
-                  selected:
-                      currentFilter is AssetTrendFilterCategory &&
-                      currentFilter.categoryCode == AssetType.normal,
-                  onTap: () {
-                    ref
-                        .read(trendFilterProvider.notifier)
-                        .setFilter(
-                          const AssetTrendFilter.assetCategory(
-                            AssetType.normal,
-                          ),
-                        );
-                    Navigator.pop(context);
-                  },
-                ),
-                ListTile(
-                  leading: const Icon(Icons.credit_card),
-                  title: const Text('信用卡'),
-                  selected:
-                      currentFilter is AssetTrendFilterCategory &&
-                      currentFilter.categoryCode == AssetType.credit,
-                  onTap: () {
-                    ref
-                        .read(trendFilterProvider.notifier)
-                        .setFilter(
-                          const AssetTrendFilter.assetCategory(
-                            AssetType.credit,
-                          ),
-                        );
-                    Navigator.pop(context);
-                  },
-                ),
-                ListTile(
-                  leading: const Icon(Icons.arrow_upward),
-                  title: const Text('借出债权'),
-                  selected:
-                      currentFilter is AssetTrendFilterCategory &&
-                      currentFilter.categoryCode == AssetType.debtLend,
-                  onTap: () {
-                    ref
-                        .read(trendFilterProvider.notifier)
-                        .setFilter(
-                          const AssetTrendFilter.assetCategory(
-                            AssetType.debtLend,
-                          ),
-                        );
-                    Navigator.pop(context);
-                  },
-                ),
-                ListTile(
-                  leading: const Icon(Icons.arrow_downward),
-                  title: const Text('借入债务'),
-                  selected:
-                      currentFilter is AssetTrendFilterCategory &&
-                      currentFilter.categoryCode == AssetType.debtBorrow,
-                  onTap: () {
-                    ref
-                        .read(trendFilterProvider.notifier)
-                        .setFilter(
-                          const AssetTrendFilter.assetCategory(
-                            AssetType.debtBorrow,
-                          ),
-                        );
-                    Navigator.pop(context);
-                  },
-                ),
-                const Divider(),
-
-                // 3. 自定义分组
-                if (customGroups.isNotEmpty) ...[
-                  const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                    child: Text(
-                      '按自定义分组',
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                  for (final g in customGroups)
-                    ListTile(
-                      leading: const Icon(Icons.folder_outlined),
-                      title: Text(g),
-                      selected:
-                          currentFilter is AssetTrendFilterCustomGroup &&
-                          currentFilter.groupName == g,
-                      onTap: () {
-                        ref
-                            .read(trendFilterProvider.notifier)
-                            .setFilter(AssetTrendFilter.customGroup(g));
-                        Navigator.pop(context);
-                      },
-                    ),
-                  const Divider(),
-                ],
-
-                // 4. 单个账户（含隐藏账户）
-                const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                  child: Text(
-                    '单个账户',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                ),
-                for (final a in accounts)
-                  ListTile(
-                    leading: Icon(
-                      a.isCredit
-                          ? Icons.credit_card
-                          : Icons.account_balance_wallet_outlined,
-                    ),
-                    title: Text(a.name),
-                    subtitle: a.status == AssetStatus.hidden
-                        ? Text(
-                            '已隐藏',
-                            style: TextStyle(
-                              color: sheetIsDark
-                                  ? Colors.orange.shade300
-                                  : Colors.orange.shade800,
-                            ),
-                          )
-                        : (a.currency != null ? Text(a.currency!) : null),
-                    trailing: Text(
-                      a.isCredit
-                          ? formatTrendBalance(a.balanceMinor, isCredit: true)
-                          : '¥${Money.minor(a.balanceMinor).decimal}',
-                    ),
-                    selected:
-                        currentFilter is AssetTrendFilterSingleAsset &&
-                        currentFilter.assetId == a.id,
-                    onTap: () {
-                      ref
-                          .read(trendFilterProvider.notifier)
-                          .setFilter(AssetTrendFilter.singleAsset(a.id));
-                      Navigator.pop(context);
-                    },
-                  ),
-              ],
-            );
-          },
+          builder: (innerContext, scrollController) => buildPickerList(
+            innerContext,
+            scrollController: scrollController,
+            showHandle: true,
+          ),
         );
       },
     );

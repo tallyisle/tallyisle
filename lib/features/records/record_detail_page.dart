@@ -37,9 +37,58 @@ Money _parseAmount(String text) {
   return money;
 }
 
+/// Returns `true` when [r] is an auto-generated transfer fee child bill.
+bool isGeneratedTransferFeeRecord(LedgerRecord r) {
+  if (r.type != RecordType.fee) return false;
+  final parentId = RecordRelations.parse(r.relInfo).transferFee?.parentId;
+  return parentId != null && parentId.isNotEmpty;
+}
+
+/// Returns `true` when [r] can be opened in `RecordEditorPage` (`/record/:id/edit`).
+bool isRecordEditable(LedgerRecord r) {
+  final rel = RecordRelations.parse(r.relInfo);
+  final childOf = rel.refunds?.originId ?? rel.reimbursements?.originId;
+  final isChild = childOf != null && childOf.isNotEmpty;
+  final isAdvance =
+      r.type == RecordType.advanceIncome || r.type == RecordType.advanceExpense;
+  final advanceSettled =
+      isAdvance && RecordExtra.parse(r.extraInfo).advance != null;
+  const specializedM4Types = {
+    RecordType.borrowIn,
+    RecordType.lendOut,
+    RecordType.repay,
+    RecordType.collect,
+    RecordType.debtInterest,
+    RecordType.installmentPrincipal,
+    RecordType.depositInterest,
+  };
+  return !isChild &&
+      !advanceSettled &&
+      !specializedM4Types.contains(r.type) &&
+      const {
+        RecordType.expense,
+        RecordType.income,
+        RecordType.transfer,
+        RecordType.reimbursable,
+        RecordType.advanceIncome,
+        RecordType.advanceExpense,
+      }.contains(r.type);
+}
+
 class RecordDetailPage extends ConsumerStatefulWidget {
-  const RecordDetailPage({super.key, required this.recordId});
+  const RecordDetailPage({
+    super.key,
+    required this.recordId,
+    this.embeddedInPane = false,
+    this.onClosePane,
+    this.onSelectRelatedRecord,
+  });
+
   final String recordId;
+  final bool embeddedInPane;
+  final VoidCallback? onClosePane;
+  final ValueChanged<String>? onSelectRelatedRecord;
+
   @override
   ConsumerState<RecordDetailPage> createState() => _RecordDetailPageState();
 }
@@ -48,6 +97,15 @@ class _RecordDetailPageState extends ConsumerState<RecordDetailPage> {
   final ids = CommandIds();
   bool busy = false;
   String? error;
+
+  @override
+  void didUpdateWidget(covariant RecordDetailPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.recordId != widget.recordId) {
+      busy = false;
+      error = null;
+    }
+  }
 
   Future<List<Asset>> _loadEligibleAssets() async {
     final cached = ref.read(assetsProvider).value;
@@ -89,7 +147,9 @@ class _RecordDetailPageState extends ConsumerState<RecordDetailPage> {
         recordId: r.recordId,
       );
       if (mounted) {
-        if (GoRouter.maybeOf(context) != null && context.canPop()) {
+        if (widget.embeddedInPane) {
+          widget.onClosePane?.call();
+        } else if (GoRouter.maybeOf(context) != null && context.canPop()) {
           context.pop();
         } else {
           await Navigator.of(context).maybePop();
@@ -183,7 +243,13 @@ class _RecordDetailPageState extends ConsumerState<RecordDetailPage> {
         recordTime: DateTime.now().millisecondsSinceEpoch,
         finish: finish,
       );
-      if (mounted) await context.push('/record/$settledId');
+      if (mounted) {
+        if (widget.embeddedInPane && widget.onSelectRelatedRecord != null) {
+          widget.onSelectRelatedRecord!(settledId);
+        } else {
+          await context.push('/record/$settledId');
+        }
+      }
     } catch (e) {
       if (mounted) setState(() => error = safeMessage(e));
     } finally {
@@ -234,364 +300,396 @@ class _RecordDetailPageState extends ConsumerState<RecordDetailPage> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final record = ref.watch(recordProvider(widget.recordId));
     final assets = ref.watch(assetsProvider).value ?? const <Asset>[];
     final tags =
         ref.watch(recordTagsProvider(widget.recordId)).value ?? const [];
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('账单详情'),
-        actions: [
-          if (record.value != null)
-            IconButton(
-              key: const Key('open-receipt-button'),
-              tooltip: '生成小票',
-              icon: const Icon(Icons.receipt_long_outlined),
-              onPressed: busy
-                  ? null
-                  : () => showRecordReceiptDialog(
-                      context,
-                      recordId: record.value!.recordId,
-                      initialRecord: record.value,
-                    ),
-            ),
-        ],
-      ),
-      body: asyncBody(record, (r) {
-        if (r == null) return const Center(child: Text('账单不存在或已删除'));
-        final categories =
-            ref.watch(categoriesProvider(r.accountBookId)).value ?? const [];
-        final label = recordLabel(r, categories, assets);
-        final feeParent = r.type == RecordType.fee
-            ? RecordRelations.parse(r.relInfo).transferFee?.parentId
-            : null;
-        final generated = feeParent != null && feeParent.isNotEmpty;
-        final rel = RecordRelations.parse(r.relInfo);
-        final childOf = rel.refunds?.originId ?? rel.reimbursements?.originId;
-        final isChild = childOf != null && childOf.isNotEmpty;
-        final isAdvance =
-            r.type == RecordType.advanceIncome ||
-            r.type == RecordType.advanceExpense;
-        final advanceSettled =
-            isAdvance && RecordExtra.parse(r.extraInfo).advance != null;
-        const specializedM4Types = {
-          RecordType.borrowIn,
-          RecordType.lendOut,
-          RecordType.repay,
-          RecordType.collect,
-          RecordType.debtInterest,
-          RecordType.installmentPrincipal,
-          RecordType.depositInterest,
-        };
-        final editable =
-            !isChild &&
-            !advanceSettled &&
-            !specializedM4Types.contains(r.type) &&
-            const {
-              RecordType.expense,
-              RecordType.income,
-              RecordType.transfer,
-              RecordType.reimbursable,
-              RecordType.advanceIncome,
-              RecordType.advanceExpense,
-            }.contains(r.type);
-        final refundable =
-            !isChild &&
-            r.moneyMinor > BigInt.zero &&
-            const {
-              RecordType.expense,
-              RecordType.income,
-              RecordType.reimbursable,
-            }.contains(r.type);
-        final refunded = (rel.refunds?.children ?? const <LinkedBill>[]).fold(
-          BigInt.zero,
-          (s, c) => s + c.amount,
-        );
-        final reimbursed =
-            (rel.reimbursements?.children ?? const <LinkedBill>[]).fold(
-              BigInt.zero,
-              (s, c) => s + c.amount,
-            );
-        final cat = r.recordCatId == noRef
-            ? null
-            : categories.where((c) => c.id == r.recordCatId).firstOrNull;
-        final parentCat = (cat != null && cat.parentCatId != noRef)
-            ? categories.where((c) => c.id == cat.parentCatId).firstOrNull
-            : null;
-        final catDisplayName = cat == null
-            ? null
-            : (parentCat != null
-                  ? '${parentCat.name} · ${cat.name}'
-                  : cat.name);
-        final catColor =
-            (cat?.colorFill != null && cat!.colorFill!.trim().isNotEmpty)
-            ? cat.colorFill
-            : parentCat?.colorFill;
-        final isRefund =
-            (r.type == RecordType.expense || r.type == RecordType.income) &&
-            r.moneyMinor < BigInt.zero;
 
-        return ListView(
-          padding: const EdgeInsets.all(24),
-          children: [
-            Row(
-              children: [
-                RecordTypeIconAvatar(
-                  recordType: r.type,
-                  subType: r.subType,
-                  isRefund: isRefund,
-                  categoryName: catDisplayName,
-                  categoryIcon: cat?.icon,
-                  parentCategoryIcon: parentCat?.icon,
-                  categoryColor: catColor,
-                  size: 46,
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(RecordType.names[r.type] ?? '账单'),
-                      FittedBox(
-                        fit: BoxFit.scaleDown,
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          label.amount,
-                          key: const Key('detail-amount'),
-                          maxLines: 1,
-                          softWrap: false,
-                          style: Theme.of(context).textTheme.displaySmall,
-                        ),
+    Widget? buildReceiptAction() {
+      if (record.value == null) return null;
+      return IconButton(
+        key: const Key('open-receipt-button'),
+        tooltip: '生成小票',
+        icon: const Icon(Icons.receipt_long_outlined),
+        onPressed: busy
+            ? null
+            : () => showRecordReceiptDialog(
+                context,
+                recordId: record.value!.recordId,
+                initialRecord: record.value,
+              ),
+      );
+    }
+
+    final detailBody = asyncBody(record, (r) {
+      if (r == null) return const Center(child: Text('账单不存在或已删除'));
+      final categories =
+          ref.watch(categoriesProvider(r.accountBookId)).value ?? const [];
+      final label = recordLabel(r, categories, assets);
+      final feeParent = r.type == RecordType.fee
+          ? RecordRelations.parse(r.relInfo).transferFee?.parentId
+          : null;
+      final generated = feeParent != null && feeParent.isNotEmpty;
+      final rel = RecordRelations.parse(r.relInfo);
+      final childOf = rel.refunds?.originId ?? rel.reimbursements?.originId;
+      final isChild = childOf != null && childOf.isNotEmpty;
+      final isAdvance =
+          r.type == RecordType.advanceIncome ||
+          r.type == RecordType.advanceExpense;
+      final advanceSettled =
+          isAdvance && RecordExtra.parse(r.extraInfo).advance != null;
+      final editable = isRecordEditable(r);
+      final refundable =
+          !isChild &&
+          r.moneyMinor > BigInt.zero &&
+          const {
+            RecordType.expense,
+            RecordType.income,
+            RecordType.reimbursable,
+          }.contains(r.type);
+      final refunded = (rel.refunds?.children ?? const <LinkedBill>[]).fold(
+        BigInt.zero,
+        (s, c) => s + c.amount,
+      );
+      final reimbursed = (rel.reimbursements?.children ?? const <LinkedBill>[])
+          .fold(BigInt.zero, (s, c) => s + c.amount);
+      final cat = r.recordCatId == noRef
+          ? null
+          : categories.where((c) => c.id == r.recordCatId).firstOrNull;
+      final parentCat = (cat != null && cat.parentCatId != noRef)
+          ? categories.where((c) => c.id == cat.parentCatId).firstOrNull
+          : null;
+      final catDisplayName = cat == null
+          ? null
+          : (parentCat != null ? '${parentCat.name} · ${cat.name}' : cat.name);
+      final catColor =
+          (cat?.colorFill != null && cat!.colorFill!.trim().isNotEmpty)
+          ? cat.colorFill
+          : parentCat?.colorFill;
+      final isRefund =
+          (r.type == RecordType.expense || r.type == RecordType.income) &&
+          r.moneyMinor < BigInt.zero;
+
+      return ListView(
+        padding: widget.embeddedInPane
+            ? const EdgeInsets.fromLTRB(16, 16, 16, 24)
+            : const EdgeInsets.all(24),
+        children: [
+          Row(
+            children: [
+              RecordTypeIconAvatar(
+                recordType: r.type,
+                subType: r.subType,
+                isRefund: isRefund,
+                categoryName: catDisplayName,
+                categoryIcon: cat?.icon,
+                parentCategoryIcon: parentCat?.icon,
+                categoryColor: catColor,
+                size: 46,
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(RecordType.names[r.type] ?? '账单'),
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        label.amount,
+                        key: const Key('detail-amount'),
+                        maxLines: 1,
+                        softWrap: false,
+                        style: theme.textTheme.displaySmall,
                       ),
-                    ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          ListTile(
+            title: const Text('分类/说明'),
+            trailing: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 180),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  RecordTypeIconAvatar(
+                    recordType: r.type,
+                    subType: r.subType,
+                    isRefund: isRefund,
+                    categoryName: catDisplayName,
+                    categoryIcon: cat?.icon,
+                    parentCategoryIcon: parentCat?.icon,
+                    categoryColor: catColor,
+                    size: 24,
+                  ),
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: Text(label.title, overflow: TextOverflow.ellipsis),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (r.type == RecordType.transfer) ...[
+            ListTile(
+              title: const Text('转出'),
+              trailing: _buildAccountTrailing(assets, r.fromAssetId),
+            ),
+            ListTile(
+              title: const Text('转入'),
+              trailing: _buildAccountTrailing(assets, r.toAssetId),
+            ),
+          ] else if (r.type == RecordType.borrowIn ||
+              r.type == RecordType.collect ||
+              (r.type == RecordType.debtInterest &&
+                  r.subType == RecordDirection.income)) ...[
+            ListTile(
+              title: const Text('借贷项目'),
+              trailing: _buildAccountTrailing(assets, r.fromAssetId),
+            ),
+            ListTile(
+              title: const Text('资金账户'),
+              trailing: _buildAccountTrailing(assets, r.toAssetId),
+            ),
+          ] else if (r.type == RecordType.lendOut ||
+              r.type == RecordType.repay ||
+              (r.type == RecordType.debtInterest &&
+                  r.subType == RecordDirection.expense)) ...[
+            ListTile(
+              title: const Text('资金账户'),
+              trailing: _buildAccountTrailing(assets, r.fromAssetId),
+            ),
+            ListTile(
+              title: const Text('借贷项目'),
+              trailing: _buildAccountTrailing(assets, r.toAssetId),
+            ),
+          ] else
+            ListTile(
+              title: const Text('账户'),
+              trailing: _buildAccountTrailing(
+                assets,
+                r.type == RecordType.reimbursable ||
+                        r.type == RecordType.balanceAdjust
+                    ? r.fromAssetId
+                    : r.assetId,
+              ),
+            ),
+          ListTile(
+            title: const Text('时间'),
+            trailing: Text(
+              formatDateTime(DateTime.fromMillisecondsSinceEpoch(r.recordTime)),
+            ),
+          ),
+          if (isAdvance)
+            _DetailRow(
+              label: '状态',
+              value: advanceSettled ? '已结算' : '待结算（暂不计入收支与余额）',
+            ),
+          if (tags.isNotEmpty)
+            ListTile(
+              title: const Text('标签'),
+              subtitle: Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: [
+                    for (final t in tags) _buildTagActionChip(context, t),
+                  ],
+                ),
+              ),
+            ),
+          if (r.discountMinor != null && r.discountMinor! > BigInt.zero)
+            ListTile(
+              key: const Key('detail-discount-tile'),
+              title: const Text('优惠'),
+              trailing: Text(formatMinor(r.discountMinor!)),
+            ),
+          if (r.remark.isNotEmpty)
+            ListTile(title: const Text('备注'), subtitle: Text(r.remark)),
+          ...() {
+            BillLocationInfo? loc;
+            try {
+              loc = RecordExtra.parse(r.extraInfo).location;
+            } on Failure {
+              loc = null;
+            }
+            List<String> attached = const <String>[];
+            try {
+              attached = parseRecordImages(r.images);
+            } on Failure {
+              attached = const <String>[];
+            }
+            return <Widget>[
+              if (loc != null && !loc.isEmpty)
+                ListTile(
+                  key: const Key('detail-location-tile'),
+                  title: const Text('地点'),
+                  subtitle: Text(
+                    loc.detailAddress == null
+                        ? loc.displayLabel
+                        : '${loc.displayLabel}（${loc.detailAddress}）',
                   ),
                 ),
-              ],
-            ),
-            const SizedBox(height: 16),
+              if (attached.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
+                  child: BillAttachmentStrip(
+                    key: const Key('detail-attachment-strip'),
+                    recordId: r.recordId,
+                    readOnly: true,
+                  ),
+                ),
+            ];
+          }(),
+          if (r.excludeExIn) const ListTile(title: Text('不计入收支')),
+          if (r.excludeBudget) const ListTile(title: Text('不计入预算')),
+          if (refunded > BigInt.zero)
             ListTile(
-              title: const Text('分类/说明'),
-              trailing: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 180),
+              title: const Text('已退款'),
+              trailing: Text(formatMinor(refunded), key: const Key('refunded')),
+            ),
+          if (r.type == RecordType.reimbursable)
+            ListTile(
+              title: const Text('已报销'),
+              subtitle: Text(
+                '待报销 ${formatMinor((r.moneyMinor - refunded - reimbursed) < BigInt.zero ? BigInt.zero : r.moneyMinor - refunded - reimbursed)}',
+              ),
+              trailing: Text(
+                formatMinor(reimbursed),
+                key: const Key('reimbursed'),
+              ),
+            ),
+          if (isChild)
+            OutlinedButton(
+              onPressed: () {
+                if (widget.embeddedInPane &&
+                    widget.onSelectRelatedRecord != null) {
+                  widget.onSelectRelatedRecord!(childOf);
+                } else {
+                  context.push('/record/$childOf');
+                }
+              },
+              child: const Text('查看原账单'),
+            ),
+          if (error != null)
+            Text(error!, style: TextStyle(color: theme.colorScheme.error)),
+          const SizedBox(height: 16),
+          if (generated)
+            OutlinedButton(
+              onPressed: () {
+                if (widget.embeddedInPane &&
+                    widget.onSelectRelatedRecord != null) {
+                  widget.onSelectRelatedRecord!(feeParent);
+                } else {
+                  context.pushReplacement('/record/$feeParent');
+                }
+              },
+              child: const Text('这是转账手续费，查看所属转账'),
+            )
+          else ...[
+            if (isAdvance && !advanceSettled) ...[
+              FilledButton.tonal(
+                key: const Key('settle-advance'),
+                onPressed: busy ? null : () => _settleAdvance(r),
+                child: const Text('结算转为正式账单'),
+              ),
+              const SizedBox(height: 10),
+            ],
+            if (refundable) ...[
+              OutlinedButton(
+                key: const Key('add-refund'),
+                onPressed: busy ? null : () => _addLink(r, refund: true),
+                child: const Text('退款'),
+              ),
+              const SizedBox(height: 10),
+            ],
+            if (r.type == RecordType.reimbursable) ...[
+              OutlinedButton(
+                key: const Key('add-reimbursement'),
+                onPressed: busy ? null : () => _addLink(r, refund: false),
+                child: const Text('登记报销款'),
+              ),
+              const SizedBox(height: 10),
+            ],
+            if (editable) ...[
+              FilledButton(
+                key: const Key('edit'),
+                onPressed: busy
+                    ? null
+                    : () => context.push('/record/${r.recordId}/edit'),
+                child: const Text('编辑'),
+              ),
+              const SizedBox(height: 10),
+            ],
+            TextButton(
+              key: const Key('delete'),
+              onPressed: busy ? null : () => _delete(r),
+              child: Text(busy ? '删除中…' : '删除'),
+            ),
+          ],
+        ],
+      );
+    });
+
+    if (widget.embeddedInPane) {
+      final receiptAction = buildReceiptAction();
+      return Material(
+        color: theme.colorScheme.surface,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SizedBox(
+              height: 52,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 8, 0),
                 child: Row(
-                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    RecordTypeIconAvatar(
-                      recordType: r.type,
-                      subType: r.subType,
-                      isRefund: isRefund,
-                      categoryName: catDisplayName,
-                      categoryIcon: cat?.icon,
-                      parentCategoryIcon: parentCat?.icon,
-                      categoryColor: catColor,
-                      size: 24,
+                    Expanded(
+                      child: Text(
+                        '账单详情',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
                     ),
-                    const SizedBox(width: 8),
-                    Flexible(
-                      child: Text(label.title, overflow: TextOverflow.ellipsis),
+                    ?receiptAction,
+                    IconButton(
+                      key: const Key('close-record-detail-pane'),
+                      tooltip: '关闭详情 (Esc)',
+                      icon: const Icon(Icons.close_rounded),
+                      onPressed: widget.onClosePane,
                     ),
                   ],
                 ),
               ),
             ),
-            if (r.type == RecordType.transfer) ...[
-              ListTile(
-                title: const Text('转出'),
-                trailing: _buildAccountTrailing(assets, r.fromAssetId),
-              ),
-              ListTile(
-                title: const Text('转入'),
-                trailing: _buildAccountTrailing(assets, r.toAssetId),
-              ),
-            ] else if (r.type == RecordType.borrowIn ||
-                r.type == RecordType.collect ||
-                (r.type == RecordType.debtInterest &&
-                    r.subType == RecordDirection.income)) ...[
-              ListTile(
-                title: const Text('借贷项目'),
-                trailing: _buildAccountTrailing(assets, r.fromAssetId),
-              ),
-              ListTile(
-                title: const Text('资金账户'),
-                trailing: _buildAccountTrailing(assets, r.toAssetId),
-              ),
-            ] else if (r.type == RecordType.lendOut ||
-                r.type == RecordType.repay ||
-                (r.type == RecordType.debtInterest &&
-                    r.subType == RecordDirection.expense)) ...[
-              ListTile(
-                title: const Text('资金账户'),
-                trailing: _buildAccountTrailing(assets, r.fromAssetId),
-              ),
-              ListTile(
-                title: const Text('借贷项目'),
-                trailing: _buildAccountTrailing(assets, r.toAssetId),
-              ),
-            ] else
-              ListTile(
-                title: const Text('账户'),
-                trailing: _buildAccountTrailing(
-                  assets,
-                  r.type == RecordType.reimbursable ||
-                          r.type == RecordType.balanceAdjust
-                      ? r.fromAssetId
-                      : r.assetId,
-                ),
-              ),
-            ListTile(
-              title: const Text('时间'),
-              trailing: Text(
-                formatDateTime(
-                  DateTime.fromMillisecondsSinceEpoch(r.recordTime),
-                ),
-              ),
+            Divider(
+              height: 1,
+              thickness: 0.6,
+              color: theme.colorScheme.outlineVariant.withValues(alpha: 0.45),
             ),
-            if (isAdvance)
-              _DetailRow(
-                label: '状态',
-                value: advanceSettled ? '已结算' : '待结算（暂不计入收支与余额）',
-              ),
-            if (tags.isNotEmpty)
-              ListTile(
-                title: const Text('标签'),
-                subtitle: Padding(
-                  padding: const EdgeInsets.only(top: 6),
-                  child: Wrap(
-                    spacing: 6,
-                    runSpacing: 6,
-                    children: [
-                      for (final t in tags) _buildTagActionChip(context, t),
-                    ],
-                  ),
-                ),
-              ),
-            if (r.discountMinor != null && r.discountMinor! > BigInt.zero)
-              ListTile(
-                key: const Key('detail-discount-tile'),
-                title: const Text('优惠'),
-                trailing: Text(formatMinor(r.discountMinor!)),
-              ),
-            if (r.remark.isNotEmpty)
-              ListTile(title: const Text('备注'), subtitle: Text(r.remark)),
-            ...() {
-              BillLocationInfo? loc;
-              try {
-                loc = RecordExtra.parse(r.extraInfo).location;
-              } on Failure {
-                loc = null;
-              }
-              List<String> attached = const <String>[];
-              try {
-                attached = parseRecordImages(r.images);
-              } on Failure {
-                attached = const <String>[];
-              }
-              return <Widget>[
-                if (loc != null && !loc.isEmpty)
-                  ListTile(
-                    key: const Key('detail-location-tile'),
-                    title: const Text('地点'),
-                    subtitle: Text(
-                      loc.detailAddress == null
-                          ? loc.displayLabel
-                          : '${loc.displayLabel}（${loc.detailAddress}）',
-                    ),
-                  ),
-                if (attached.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 8,
-                    ),
-                    child: BillAttachmentStrip(
-                      key: const Key('detail-attachment-strip'),
-                      recordId: r.recordId,
-                      readOnly: true,
-                    ),
-                  ),
-              ];
-            }(),
-            if (r.excludeExIn) const ListTile(title: Text('不计入收支')),
-            if (r.excludeBudget) const ListTile(title: Text('不计入预算')),
-            if (refunded > BigInt.zero)
-              ListTile(
-                title: const Text('已退款'),
-                trailing: Text(
-                  formatMinor(refunded),
-                  key: const Key('refunded'),
-                ),
-              ),
-            if (r.type == RecordType.reimbursable)
-              ListTile(
-                title: const Text('已报销'),
-                subtitle: Text(
-                  '待报销 ${formatMinor((r.moneyMinor - refunded - reimbursed) < BigInt.zero ? BigInt.zero : r.moneyMinor - refunded - reimbursed)}',
-                ),
-                trailing: Text(
-                  formatMinor(reimbursed),
-                  key: const Key('reimbursed'),
-                ),
-              ),
-            if (isChild)
-              OutlinedButton(
-                onPressed: () => context.push('/record/$childOf'),
-                child: const Text('查看原账单'),
-              ),
-            if (error != null)
-              Text(
-                error!,
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
-              ),
-            const SizedBox(height: 16),
-            if (generated)
-              OutlinedButton(
-                onPressed: () => context.pushReplacement('/record/$feeParent'),
-                child: const Text('这是转账手续费，查看所属转账'),
-              )
-            else ...[
-              if (isAdvance && !advanceSettled) ...[
-                FilledButton.tonal(
-                  key: const Key('settle-advance'),
-                  onPressed: busy ? null : () => _settleAdvance(r),
-                  child: const Text('结算转为正式账单'),
-                ),
-                const SizedBox(height: 10),
-              ],
-              if (refundable) ...[
-                OutlinedButton(
-                  key: const Key('add-refund'),
-                  onPressed: busy ? null : () => _addLink(r, refund: true),
-                  child: const Text('退款'),
-                ),
-                const SizedBox(height: 10),
-              ],
-              if (r.type == RecordType.reimbursable) ...[
-                OutlinedButton(
-                  key: const Key('add-reimbursement'),
-                  onPressed: busy ? null : () => _addLink(r, refund: false),
-                  child: const Text('登记报销款'),
-                ),
-                const SizedBox(height: 10),
-              ],
-              if (editable) ...[
-                FilledButton(
-                  key: const Key('edit'),
-                  onPressed: busy
-                      ? null
-                      : () => context.push('/record/${r.recordId}/edit'),
-                  child: const Text('编辑'),
-                ),
-                const SizedBox(height: 10),
-              ],
-              TextButton(
-                key: const Key('delete'),
-                onPressed: busy ? null : () => _delete(r),
-                child: Text(busy ? '删除中…' : '删除'),
-              ),
-            ],
+            Expanded(child: detailBody),
           ],
-        );
-      }),
+        ),
+      );
+    }
+
+    final receiptAction = buildReceiptAction();
+    return Scaffold(
+      appBar: AppBar(title: const Text('账单详情'), actions: [?receiptAction]),
+      body: detailBody,
     );
   }
 }

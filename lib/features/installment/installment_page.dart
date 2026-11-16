@@ -8,6 +8,7 @@ import '../../data/db/database.dart';
 import '../../data/repo/installment_queries.dart';
 import '../../domain/model/codes.dart';
 import '../common/common.dart';
+import '../common/desktop_modal_page.dart';
 import '../records/record_labels.dart' show assetName, categoryName;
 import 'installment_detail_page.dart';
 import 'installment_editor_page.dart';
@@ -127,10 +128,9 @@ class _InstallmentPageState extends ConsumerState<InstallmentPage> {
         ),
         floatingActionButton: FloatingActionButton.extended(
           key: const Key('add_installment_fab'),
-          onPressed: () => Navigator.of(context).push(
-            MaterialPageRoute<void>(
-              builder: (_) => const InstallmentEditorPage(),
-            ),
+          onPressed: () => pushDesktopModalOrMaterialRoute<Object?>(
+            context,
+            child: const InstallmentEditorPage(),
           ),
           icon: const Icon(Icons.add),
           label: const Text('新建分期'),

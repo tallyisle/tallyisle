@@ -8,6 +8,7 @@ import '../../data/repo/fixed_deposit_queries.dart';
 import '../../domain/model/codes.dart';
 import '../../domain/rules/fixed_deposit.dart';
 import '../common/common.dart';
+import '../common/desktop_modal_page.dart';
 import '../records/record_detail_page.dart';
 import 'fixed_deposit_editor_page.dart';
 import 'fixed_deposit_providers.dart';
@@ -61,11 +62,9 @@ class _FixedDepositPageState extends ConsumerState<FixedDepositPage> {
   }
 
   Future<void> _openCreate() async {
-    await Navigator.of(context).push<void>(
-      MaterialPageRoute(
-        builder: (_) =>
-            FixedDepositEditorPage(initialAssetId: _selectedAssetId),
-      ),
+    await pushDesktopModalOrMaterialRoute<void>(
+      context,
+      child: FixedDepositEditorPage(initialAssetId: _selectedAssetId),
     );
     if (mounted) {
       ref.invalidate(fixedDepositOverviewProvider);
@@ -74,12 +73,11 @@ class _FixedDepositPageState extends ConsumerState<FixedDepositPage> {
   }
 
   Future<void> _openEdit(FixedDepositEntry entry) async {
-    await Navigator.of(context).push<void>(
-      MaterialPageRoute(
-        builder: (_) => FixedDepositEditorPage(
-          assetId: entry.asset.id,
-          depositIndex: entry.index,
-        ),
+    await pushDesktopModalOrMaterialRoute<void>(
+      context,
+      child: FixedDepositEditorPage(
+        assetId: entry.asset.id,
+        depositIndex: entry.index,
       ),
     );
     if (mounted) {

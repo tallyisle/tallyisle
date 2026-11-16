@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../app/adaptive.dart';
 import '../../core/failure.dart';
 import '../../domain/rules/wish_note_rules.dart';
 import '../common/common.dart';
+import '../common/desktop_modal_page.dart';
 import 'wish_providers.dart';
 
 const _uuid = Uuid();
@@ -191,148 +193,160 @@ class _WishEditorPageState extends ConsumerState<WishEditorPage> {
         _selectedIcon!.trim().isNotEmpty &&
         !presetWishIcons.any((o) => o.key == _selectedIcon!.trim());
 
-    return Scaffold(
-      key: const Key('wish_editor_page'),
-      appBar: AppBar(
-        title: Text(_editing ? '编辑心愿' : '新建心愿'),
-        actions: [
-          if (_editing)
-            IconButton(
-              key: const Key('editor_delete_wish'),
-              tooltip: '删除心愿',
-              onPressed: _busy ? null : _deleteCurrent,
-              icon: const Icon(Icons.delete_outline),
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    final formBody = ListView(
+      padding: isDesktop
+          ? const EdgeInsets.fromLTRB(20, 12, 20, 16)
+          : const EdgeInsets.all(16),
+      children: [
+        if (_error != null) ...[
+          Container(
+            key: const Key('wish_editor_error'),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.errorContainer,
+              borderRadius: BorderRadius.circular(12),
             ),
+            child: Text(
+              _error!,
+              style: TextStyle(color: theme.colorScheme.onErrorContainer),
+            ),
+          ),
+          const SizedBox(height: 16),
         ],
-      ),
-      body: _loading
-          ? const Loading()
-          : ListView(
-              padding: const EdgeInsets.all(16),
+        TextField(
+          key: const Key('wish_content_input'),
+          controller: _contentCtrl,
+          maxLength: maxWishContentLength,
+          decoration: const InputDecoration(
+            labelText: '心愿内容',
+            hintText: '例如：降噪耳机、海岛旅行',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          key: const Key('wish_amount_input'),
+          controller: _amountCtrl,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          decoration: const InputDecoration(
+            labelText: '目标金额（元）',
+            prefixText: '¥ ',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        const SizedBox(height: 16),
+        Text('心愿图标', style: theme.textTheme.titleSmall),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final option in presetWishIcons)
+              ChoiceChip(
+                key: Key('wish_icon_chip_${option.key}'),
+                avatar: Icon(wishIconData(option.key), size: 18),
+                label: Text(option.label),
+                selected: _selectedIcon == option.key,
+                onSelected: (_) => setState(() => _selectedIcon = option.key),
+              ),
+            if (hasCustomLegacyIcon)
+              ChoiceChip(
+                key: const Key('wish_icon_chip_legacy'),
+                avatar: const Icon(Icons.auto_awesome, size: 18),
+                label: Text('原图标 (${_selectedIcon!})'),
+                selected: true,
+                onSelected: (_) {},
+              ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        Card(
+          margin: EdgeInsets.zero,
+          child: ListTile(
+            leading: const Icon(Icons.event_outlined),
+            title: const Text('目标日期（可选）'),
+            subtitle: Text(
+              _targetDate == null ? '未设置' : formatDate(_targetDate!),
+              key: const Key('wish_target_date_text'),
+            ),
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                if (_error != null) ...[
-                  Container(
-                    key: const Key('wish_editor_error'),
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: theme.colorScheme.errorContainer,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Text(
-                      _error!,
-                      style: TextStyle(
-                        color: theme.colorScheme.onErrorContainer,
-                      ),
-                    ),
+                if (_targetDate != null)
+                  IconButton(
+                    key: const Key('wish_clear_target_date'),
+                    tooltip: '清除目标日期',
+                    onPressed: () => setState(() => _targetDate = null),
+                    icon: const Icon(Icons.clear),
                   ),
-                  const SizedBox(height: 16),
-                ],
-                TextField(
-                  key: const Key('wish_content_input'),
-                  controller: _contentCtrl,
-                  maxLength: maxWishContentLength,
-                  decoration: const InputDecoration(
-                    labelText: '心愿内容',
-                    hintText: '例如：降噪耳机、海岛旅行',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  key: const Key('wish_amount_input'),
-                  controller: _amountCtrl,
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
-                  ),
-                  decoration: const InputDecoration(
-                    labelText: '目标金额（元）',
-                    prefixText: '¥ ',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Text('心愿图标', style: theme.textTheme.titleSmall),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    for (final option in presetWishIcons)
-                      ChoiceChip(
-                        key: Key('wish_icon_chip_${option.key}'),
-                        avatar: Icon(wishIconData(option.key), size: 18),
-                        label: Text(option.label),
-                        selected: _selectedIcon == option.key,
-                        onSelected: (_) =>
-                            setState(() => _selectedIcon = option.key),
-                      ),
-                    if (hasCustomLegacyIcon)
-                      ChoiceChip(
-                        key: const Key('wish_icon_chip_legacy'),
-                        avatar: const Icon(Icons.auto_awesome, size: 18),
-                        label: Text('原图标 (${_selectedIcon!})'),
-                        selected: true,
-                        onSelected: (_) {},
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                Card(
-                  margin: EdgeInsets.zero,
-                  child: ListTile(
-                    leading: const Icon(Icons.event_outlined),
-                    title: const Text('目标日期（可选）'),
-                    subtitle: Text(
-                      _targetDate == null ? '未设置' : formatDate(_targetDate!),
-                      key: const Key('wish_target_date_text'),
-                    ),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        if (_targetDate != null)
-                          IconButton(
-                            key: const Key('wish_clear_target_date'),
-                            tooltip: '清除目标日期',
-                            onPressed: () => setState(() => _targetDate = null),
-                            icon: const Icon(Icons.clear),
-                          ),
-                        TextButton(
-                          key: const Key('wish_pick_target_date'),
-                          onPressed: _pickTargetDate,
-                          child: Text(_targetDate == null ? '选择日期' : '修改'),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  key: const Key('wish_sort_input'),
-                  controller: _sortCtrl,
-                  keyboardType: const TextInputType.numberWithOptions(
-                    signed: true,
-                  ),
-                  decoration: const InputDecoration(
-                    labelText: '排序权重（可选，数值越小越靠前）',
-                    hintText: '留空则默认置顶',
-                    border: OutlineInputBorder(),
-                  ),
+                TextButton(
+                  key: const Key('wish_pick_target_date'),
+                  onPressed: _pickTargetDate,
+                  child: Text(_targetDate == null ? '选择日期' : '修改'),
                 ),
               ],
             ),
-      bottomNavigationBar: _loading
-          ? null
-          : SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-                child: FilledButton.icon(
-                  key: const Key('save_wish_button'),
-                  onPressed: _busy ? null : _save,
-                  icon: const Icon(Icons.check),
-                  label: Text(_busy ? '保存中…' : '保存心愿'),
+          ),
+        ),
+        const SizedBox(height: 16),
+        TextField(
+          key: const Key('wish_sort_input'),
+          controller: _sortCtrl,
+          keyboardType: const TextInputType.numberWithOptions(signed: true),
+          decoration: const InputDecoration(
+            labelText: '排序权重（可选，数值越小越靠前）',
+            hintText: '留空则默认置顶',
+            border: OutlineInputBorder(),
+          ),
+        ),
+      ],
+    );
+
+    return DesktopModalEscapeScope(
+      enabled: isDesktop,
+      child: Scaffold(
+        key: const Key('wish_editor_page'),
+        appBar: AppBar(
+          leading: isDesktop ? const CloseButton() : null,
+          scrolledUnderElevation: isDesktop ? 0 : null,
+          title: Text(_editing ? '编辑心愿' : '新建心愿'),
+          actions: [
+            if (_editing)
+              IconButton(
+                key: const Key('editor_delete_wish'),
+                tooltip: '删除心愿',
+                onPressed: _busy ? null : _deleteCurrent,
+                icon: const Icon(Icons.delete_outline),
+              ),
+          ],
+        ),
+        body: _loading
+            ? const Loading()
+            : (isDesktop
+                  ? Center(
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 640),
+                        child: formBody,
+                      ),
+                    )
+                  : formBody),
+        bottomNavigationBar: _loading
+            ? null
+            : SafeArea(
+                child: Padding(
+                  padding: isDesktop
+                      ? const EdgeInsets.fromLTRB(20, 8, 20, 14)
+                      : const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                  child: FilledButton.icon(
+                    key: const Key('save_wish_button'),
+                    onPressed: _busy ? null : _save,
+                    icon: const Icon(Icons.check),
+                    label: Text(_busy ? '保存中…' : '保存心愿'),
+                  ),
                 ),
               ),
-            ),
+      ),
     );
   }
 }

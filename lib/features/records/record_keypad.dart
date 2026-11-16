@@ -102,14 +102,23 @@ bool _areAllOperandsValid(String expr) {
   return true;
 }
 
+/// Alias for [hasPendingOperator] in `record_keypad_calc.dart`.
+bool hasOperator(String expr) => hasPendingOperator(expr);
+
 /// Applies a single custom keypad key (`'0'`..`'9'`, `'00'`, `'.'`, `'+'`,
-/// `'-'`, `'×'`, `'÷'`, `'BACKSPACE'`, `'CLEAR'`) to [current], enforcing:
+/// `'-'`, `'×'`/`'*'`, `'÷'`/`'/'`, `'BACKSPACE'`/`'⌫'`, `'CLEAR'`) to [current],
+/// enforcing:
 /// - 2-decimal scale per operand segment,
 /// - leading-zero & leading-dot normalization (`'' + '.' -> '0.'`, `'12+' + '.' -> '12+0.'`),
 /// - `maxKeypadAmount` (`88888888888.00`) per operand segment via exact [BigRational]/[BigInt],
 /// - cursor-aware backspace and range replacement.
-TextEditingValue applyCustomKeypadValue(TextEditingValue current, String key) {
-  final upper = key.trim().toUpperCase();
+TextEditingValue applyCustomKeypadValue(
+  TextEditingValue current,
+  String key, {
+  bool allowMultiplyDivide = true,
+}) {
+  final trimmed = key.trim();
+  final upper = trimmed.toUpperCase();
   if (upper == 'CLEAR') {
     return const TextEditingValue(
       text: '',
@@ -120,7 +129,7 @@ TextEditingValue applyCustomKeypadValue(TextEditingValue current, String key) {
   final raw = current.text;
   final sel = current.selection;
 
-  if (upper == 'BACKSPACE') {
+  if (upper == 'BACKSPACE' || trimmed == '⌫') {
     if (raw.isEmpty) {
       return const TextEditingValue(
         text: '',
@@ -169,11 +178,23 @@ TextEditingValue applyCustomKeypadValue(TextEditingValue current, String key) {
   }
 
   if (key == '00') {
-    final once = applyCustomKeypadValue(current, '0');
-    return applyCustomKeypadValue(once, '0');
+    final once = applyCustomKeypadValue(
+      current,
+      '0',
+      allowMultiplyDivide: allowMultiplyDivide,
+    );
+    return applyCustomKeypadValue(
+      once,
+      '0',
+      allowMultiplyDivide: allowMultiplyDivide,
+    );
   }
 
-  final isOp = canonicalKeypadOperator(key.trim()) != null;
+  final canonOp = canonicalKeypadOperator(trimmed);
+  if (!allowMultiplyDivide && (canonOp == '×' || canonOp == '÷')) {
+    return current;
+  }
+  final isOp = canonOp != null;
 
   // Replace active range selection when typing a digit or decimal point.
   var baseText = raw;
