@@ -1,5 +1,6 @@
 #include "win32_window.h"
 
+#include <cwchar>
 #include <dwmapi.h>
 #include <flutter_windows.h>
 
@@ -134,10 +135,31 @@ bool Win32Window::Create(const std::wstring& title,
   UINT dpi = FlutterDesktopGetDpiForMonitor(monitor);
   double scale_factor = dpi / 96.0;
 
+  RECT window_rect = {0, 0, Scale(size.width, scale_factor),
+                      Scale(size.height, scale_factor)};
+  AdjustWindowRectEx(&window_rect, WS_OVERLAPPEDWINDOW, FALSE, 0);
+  const int outer_width = window_rect.right - window_rect.left;
+  const int outer_height = window_rect.bottom - window_rect.top;
+
+  int window_x = Scale(origin.x, scale_factor);
+  int window_y = Scale(origin.y, scale_factor);
+  MONITORINFO monitor_info = {};
+  monitor_info.cbSize = sizeof(monitor_info);
+  if (GetMonitorInfo(monitor, &monitor_info)) {
+    const RECT& work = monitor_info.rcWork;
+    const int work_width = work.right - work.left;
+    const int work_height = work.bottom - work.top;
+    window_x = work_width > outer_width
+                   ? work.left + (work_width - outer_width) / 2
+                   : work.left;
+    window_y = work_height > outer_height
+                   ? work.top + (work_height - outer_height) / 2
+                   : work.top;
+  }
+
   HWND window = CreateWindow(
       window_class, title.c_str(), WS_OVERLAPPEDWINDOW,
-      Scale(origin.x, scale_factor), Scale(origin.y, scale_factor),
-      Scale(size.width, scale_factor), Scale(size.height, scale_factor),
+      window_x, window_y, outer_width, outer_height,
       nullptr, nullptr, GetModuleHandle(nullptr), this);
 
   if (!window) {
@@ -192,8 +214,11 @@ Win32Window::MessageHandler(HWND hwnd,
       HMONITOR monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
       UINT dpi = FlutterDesktopGetDpiForMonitor(monitor);
       double scale_factor = dpi / 96.0;
-      info->ptMinTrackSize.x = Scale(420, scale_factor);
-      info->ptMinTrackSize.y = Scale(600, scale_factor);
+      RECT min_rect = {0, 0, Scale(420, scale_factor),
+                       Scale(600, scale_factor)};
+      AdjustWindowRectEx(&min_rect, WS_OVERLAPPEDWINDOW, FALSE, 0);
+      info->ptMinTrackSize.x = min_rect.right - min_rect.left;
+      info->ptMinTrackSize.y = min_rect.bottom - min_rect.top;
       return 0;
     }
 
@@ -226,6 +251,14 @@ Win32Window::MessageHandler(HWND hwnd,
     case WM_DWMCOLORIZATIONCOLORCHANGED:
       UpdateTheme(hwnd);
       return 0;
+
+    case WM_SETTINGCHANGE:
+      if (lparam != 0 &&
+          std::wcscmp(reinterpret_cast<LPCWSTR>(lparam),
+                      L"ImmersiveColorSet") == 0) {
+        UpdateTheme(hwnd);
+      }
+      break;
   }
 
   return DefWindowProc(window_handle_, message, wparam, lparam);

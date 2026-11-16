@@ -324,17 +324,23 @@ class _SavingsEditorPageState extends ConsumerState<SavingsEditorPage> {
 
     if (_loading) {
       if (!isDesktop) {
-        return const Scaffold(body: Loading());
+        return PopScope(
+          canPop: !_busy,
+          child: const Scaffold(body: Loading()),
+        );
       }
-      return DesktopModalEscapeScope(
-        enabled: true,
-        child: Scaffold(
-          appBar: AppBar(
-            leading: const CloseButton(),
-            scrolledUnderElevation: 0,
-            title: Text(_editing ? '编辑存钱计划' : '新建存钱计划'),
+      return PopScope(
+        canPop: !_busy,
+        child: DesktopModalEscapeScope(
+          enabled: true,
+          child: Scaffold(
+            appBar: AppBar(
+              leading: const CloseButton(),
+              scrolledUnderElevation: 0,
+              title: Text(_editing ? '编辑存钱计划' : '新建存钱计划'),
+            ),
+            body: const Loading(),
           ),
-          body: const Loading(),
         ),
       );
     }
@@ -456,10 +462,13 @@ class _SavingsEditorPageState extends ConsumerState<SavingsEditorPage> {
           key: const Key('savings_name_input'),
           controller: _nameCtrl,
           enabled: !_busy,
-          decoration: const InputDecoration(
+          decoration: InputDecoration(
             labelText: '计划名称',
             hintText: '例如：旅行基金、365天存钱',
-            border: OutlineInputBorder(),
+            border: const OutlineInputBorder(),
+            contentPadding: isDesktop
+                ? const EdgeInsets.symmetric(horizontal: 12, vertical: 16)
+                : null,
           ),
         ),
         const SizedBox(height: 12),
@@ -535,6 +544,9 @@ class _SavingsEditorPageState extends ConsumerState<SavingsEditorPage> {
                   : '每期定额金额',
               prefixText: '$currSymbol ',
               border: const OutlineInputBorder(),
+              contentPadding: isDesktop
+                  ? const EdgeInsets.symmetric(horizontal: 12, vertical: 16)
+                  : null,
             ),
           ),
           if (_planType == SavingsPlanType.incremental) ...[
@@ -551,6 +563,9 @@ class _SavingsEditorPageState extends ConsumerState<SavingsEditorPage> {
                 labelText: '每期递增金额',
                 prefixText: '$currSymbol ',
                 border: const OutlineInputBorder(),
+                contentPadding: isDesktop
+                    ? const EdgeInsets.symmetric(horizontal: 12, vertical: 16)
+                    : null,
               ),
             ),
           ],
@@ -596,6 +611,9 @@ class _SavingsEditorPageState extends ConsumerState<SavingsEditorPage> {
               labelText: '目标总金额',
               prefixText: '$currSymbol ',
               border: const OutlineInputBorder(),
+              contentPadding: isDesktop
+                  ? const EdgeInsets.symmetric(horizontal: 12, vertical: 16)
+                  : null,
             ),
           ),
           const SizedBox(height: 12),
@@ -652,16 +670,20 @@ class _SavingsEditorPageState extends ConsumerState<SavingsEditorPage> {
         ],
         const SizedBox(height: 16),
         InputDecorator(
-          decoration: const InputDecoration(
+          decoration: InputDecoration(
             labelText: '转出扣款账户（可选）',
-            border: OutlineInputBorder(),
-            contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            border: const OutlineInputBorder(),
+            contentPadding: EdgeInsets.symmetric(
+              horizontal: 12,
+              vertical: isDesktop ? 16 : 4,
+            ),
           ),
           child: DropdownButtonHideUnderline(
             child: DropdownButton<int>(
               key: const Key('savings_from_asset_dropdown'),
               value: effectiveFromValue,
               isExpanded: true,
+              isDense: isDesktop,
               items: [
                 const DropdownMenuItem(value: noRef, child: Text('不绑定转出账户')),
                 for (final a in activeFromAssets)
@@ -682,9 +704,9 @@ class _SavingsEditorPageState extends ConsumerState<SavingsEditorPage> {
             labelText: '转入存钱账户（可选）',
             helperText: _editing ? '编辑计划时币种已锁定为 $currCode' : null,
             border: const OutlineInputBorder(),
-            contentPadding: const EdgeInsets.symmetric(
+            contentPadding: EdgeInsets.symmetric(
               horizontal: 12,
-              vertical: 4,
+              vertical: isDesktop ? 16 : 4,
             ),
           ),
           child: DropdownButtonHideUnderline(
@@ -692,6 +714,7 @@ class _SavingsEditorPageState extends ConsumerState<SavingsEditorPage> {
               key: const Key('savings_to_asset_dropdown'),
               value: effectiveToValue,
               isExpanded: true,
+              isDense: isDesktop,
               items: [
                 const DropdownMenuItem(value: noRef, child: Text('不绑定转入账户')),
                 for (final a in activeToAssets)
@@ -709,16 +732,20 @@ class _SavingsEditorPageState extends ConsumerState<SavingsEditorPage> {
         if (books.isNotEmpty) ...[
           const SizedBox(height: 12),
           InputDecorator(
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
               labelText: '转账入账账本',
-              border: OutlineInputBorder(),
-              contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              border: const OutlineInputBorder(),
+              contentPadding: EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: isDesktop ? 16 : 4,
+              ),
             ),
             child: DropdownButtonHideUnderline(
               child: DropdownButton<int>(
                 key: const Key('savings_book_dropdown'),
                 value: effectiveBookValue,
                 isExpanded: true,
+                isDense: isDesktop,
                 items: [
                   const DropdownMenuItem(value: noRef, child: Text('跟随当前账本')),
                   for (final b in books)
@@ -748,45 +775,65 @@ class _SavingsEditorPageState extends ConsumerState<SavingsEditorPage> {
           controller: _remarkCtrl,
           enabled: !_busy,
           maxLines: 2,
-          decoration: const InputDecoration(
+          decoration: InputDecoration(
             labelText: '备注（可选）',
-            border: OutlineInputBorder(),
+            border: const OutlineInputBorder(),
+            contentPadding: isDesktop
+                ? const EdgeInsets.symmetric(horizontal: 12, vertical: 16)
+                : null,
           ),
         ),
       ],
     );
 
-    return DesktopModalEscapeScope(
-      enabled: isDesktop,
-      child: Scaffold(
-        key: const Key('savings_editor_page'),
-        appBar: AppBar(
-          leading: isDesktop ? const CloseButton() : null,
-          scrolledUnderElevation: isDesktop ? 0 : null,
-          title: Text(_editing ? '编辑存钱计划' : '新建存钱计划'),
-          actions: [
-            TextButton(
-              key: const Key('save_savings_plan_button'),
-              onPressed: _busy
-                  ? null
-                  : () => _submit(
-                      allAssets,
-                      fromAssetId: effectiveFromValue,
-                      toAssetId: effectiveToValue,
-                      bookId: effectiveBookValue,
+    void onSave() => _submit(
+      allAssets,
+      fromAssetId: effectiveFromValue,
+      toAssetId: effectiveToValue,
+      bookId: effectiveBookValue,
+    );
+
+    return PopScope(
+      canPop: !_busy,
+      child: DesktopModalEscapeScope(
+        enabled: isDesktop,
+        child: Scaffold(
+          key: const Key('savings_editor_page'),
+          appBar: AppBar(
+            leading: isDesktop ? const CloseButton() : null,
+            scrolledUnderElevation: isDesktop ? 0 : null,
+            title: Text(_editing ? '编辑存钱计划' : '新建存钱计划'),
+            actions: isDesktop
+                ? null
+                : [
+                    TextButton(
+                      key: const Key('save_savings_plan_button'),
+                      onPressed: _busy ? null : onSave,
+                      child: const Text('保存'),
                     ),
-              child: const Text('保存'),
-            ),
-          ],
+                  ],
+          ),
+          bottomNavigationBar: isDesktop
+              ? SafeArea(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 8, 20, 14),
+                    child: FilledButton(
+                      key: const Key('save_savings_plan_button'),
+                      onPressed: _busy ? null : onSave,
+                      child: Text(_busy ? '保存中…' : '保存'),
+                    ),
+                  ),
+                )
+              : null,
+          body: isDesktop
+              ? Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 640),
+                    child: formList,
+                  ),
+                )
+              : formList,
         ),
-        body: isDesktop
-            ? Center(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 640),
-                  child: formList,
-                ),
-              )
-            : formList,
       ),
     );
   }

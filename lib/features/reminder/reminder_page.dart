@@ -99,118 +99,140 @@ class _ReminderPageState extends ConsumerState<ReminderPage>
           orElse: () => false,
         );
 
-    return Scaffold(
-      key: const Key('reminder_page'),
-      appBar: AppBar(title: const Text('记账提醒')),
-      body: Column(
-        children: [
-          if (isDesktop)
-            const _DesktopReminderSyncBanner()
-          else if (showPermissionBanner)
-            _PermissionBanner(onEnablePressed: _handleEnablePermission),
-          Expanded(
-            child: asyncBody(remindersAsync, (items) {
-              if (items.isEmpty) {
-                final mutedColor = Theme.of(
-                  context,
-                ).colorScheme.onSurfaceVariant;
-                return Center(
-                  key: const Key('reminder_empty_state'),
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Column(
+    final bodyContent = Column(
+      children: [
+        if (isDesktop)
+          const _DesktopReminderSyncBanner()
+        else if (showPermissionBanner)
+          _PermissionBanner(onEnablePressed: _handleEnablePermission),
+        Expanded(
+          child: asyncBody(remindersAsync, (items) {
+            if (items.isEmpty) {
+              final mutedColor = Theme.of(context).colorScheme.onSurfaceVariant;
+              return Center(
+                key: const Key('reminder_empty_state'),
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.notifications_none_outlined,
+                        size: 56,
+                        color: mutedColor,
+                      ),
+                      const SizedBox(height: 12),
+                      const Text(
+                        '暂无记账提醒',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        isDesktop ? '点击右上角“新建提醒”添加每日定时提醒' : '点击右下角按钮添加每日定时提醒',
+                        style: TextStyle(color: mutedColor),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }
+
+            return ListView.separated(
+              padding: EdgeInsets.fromLTRB(16, 12, 16, isDesktop ? 24 : 96),
+              itemCount: items.length,
+              separatorBuilder: (_, _) => const SizedBox(height: 8),
+              itemBuilder: (context, index) {
+                final item = items[index];
+                return Card(
+                  key: Key('reminder_item_${item.id}'),
+                  margin: EdgeInsets.zero,
+                  child: ListTile(
+                    contentPadding: const EdgeInsets.fromLTRB(16, 4, 8, 4),
+                    onTap: () => unawaited(_openEditor(existing: item)),
+                    leading: CircleAvatar(
+                      backgroundColor: Theme.of(
+                        context,
+                      ).colorScheme.primaryContainer,
+                      child: Icon(
+                        Icons.alarm,
+                        color: Theme.of(context).colorScheme.onPrimaryContainer,
+                      ),
+                    ),
+                    title: Text(
+                      item.displayTime,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                    ),
+                    subtitle: Text(item.displayTip),
+                    trailing: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(
-                          Icons.notifications_none_outlined,
-                          size: 56,
-                          color: mutedColor,
+                        IconButton(
+                          key: Key('edit_reminder_${item.id}'),
+                          visualDensity: VisualDensity.compact,
+                          icon: const Icon(Icons.edit_outlined),
+                          tooltip: '编辑',
+                          onPressed: () =>
+                              unawaited(_openEditor(existing: item)),
                         ),
-                        const SizedBox(height: 12),
-                        const Text(
-                          '暂无记账提醒',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          '点击右下角按钮添加每日定时提醒',
-                          style: TextStyle(color: mutedColor),
+                        IconButton(
+                          key: Key('delete_reminder_${item.id}'),
+                          visualDensity: VisualDensity.compact,
+                          icon: const Icon(Icons.delete_outline),
+                          tooltip: '删除',
+                          onPressed: () => unawaited(_confirmAndDelete(item)),
                         ),
                       ],
                     ),
                   ),
                 );
-              }
+              },
+            );
+          }),
+        ),
+      ],
+    );
 
-              return ListView.separated(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
-                itemCount: items.length,
-                separatorBuilder: (_, _) => const SizedBox(height: 8),
-                itemBuilder: (context, index) {
-                  final item = items[index];
-                  return Card(
-                    key: Key('reminder_item_${item.id}'),
-                    margin: EdgeInsets.zero,
-                    child: ListTile(
-                      contentPadding: const EdgeInsets.fromLTRB(16, 4, 8, 4),
-                      onTap: () => unawaited(_openEditor(existing: item)),
-                      leading: CircleAvatar(
-                        backgroundColor: Theme.of(
-                          context,
-                        ).colorScheme.primaryContainer,
-                        child: Icon(
-                          Icons.alarm,
-                          color: Theme.of(
-                            context,
-                          ).colorScheme.onPrimaryContainer,
-                        ),
-                      ),
-                      title: Text(
-                        item.displayTime,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16,
-                        ),
-                      ),
-                      subtitle: Text(item.displayTip),
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          IconButton(
-                            key: Key('edit_reminder_${item.id}'),
-                            visualDensity: VisualDensity.compact,
-                            icon: const Icon(Icons.edit_outlined),
-                            tooltip: '编辑',
-                            onPressed: () =>
-                                unawaited(_openEditor(existing: item)),
-                          ),
-                          IconButton(
-                            key: Key('delete_reminder_${item.id}'),
-                            visualDensity: VisualDensity.compact,
-                            icon: const Icon(Icons.delete_outline),
-                            tooltip: '删除',
-                            onPressed: () => unawaited(_confirmAndDelete(item)),
-                          ),
-                        ],
-                      ),
-                    ),
-                  );
-                },
-              );
-            }),
-          ),
-        ],
+    return Scaffold(
+      key: const Key('reminder_page'),
+      appBar: AppBar(
+        title: const Text('记账提醒'),
+        actions: isDesktop
+            ? [
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: FilledButton.tonalIcon(
+                    key: const Key('add_reminder_fab'),
+                    onPressed: () => unawaited(_openEditor()),
+                    icon: const Icon(Icons.add, size: 18),
+                    label: const Text('新建提醒'),
+                  ),
+                ),
+              ]
+            : null,
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        key: const Key('add_reminder_fab'),
-        heroTag: 'fab-add-reminder',
-        onPressed: () => unawaited(_openEditor()),
-        icon: const Icon(Icons.add),
-        label: const Text('新建提醒'),
-      ),
+      body: isDesktop
+          ? Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 780),
+                child: bodyContent,
+              ),
+            )
+          : bodyContent,
+      floatingActionButton: isDesktop
+          ? null
+          : FloatingActionButton.extended(
+              key: const Key('add_reminder_fab'),
+              heroTag: 'fab-add-reminder',
+              onPressed: () => unawaited(_openEditor()),
+              icon: const Icon(Icons.add),
+              label: const Text('新建提醒'),
+            ),
     );
   }
 }
@@ -417,47 +439,70 @@ class _ReminderEditorDialogState extends ConsumerState<_ReminderEditorDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final isDesktop = DesktopAdaptive.isDesktop(context);
     final isEdit = widget.existing != null;
-    return AlertDialog(
-      title: Text(isEdit ? '编辑记账提醒' : '新建记账提醒'),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              '提醒时间（每天 24 小时制）',
-              style: TextStyle(
-                fontSize: 13,
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
+    final scrollContent = SingleChildScrollView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '提醒时间（每天 24 小时制）',
+            style: TextStyle(
+              fontSize: 13,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                SizedBox(
-                  width: 68,
-                  child: TextField(
-                    key: const Key('reminder_hour_input'),
-                    controller: _hourController,
-                    enabled: !_submitting,
-                    keyboardType: TextInputType.number,
-                    textAlign: TextAlign.center,
-                    inputFormatters: [
-                      FilteringTextInputFormatter.digitsOnly,
-                      LengthLimitingTextInputFormatter(2),
-                    ],
-                    decoration: const InputDecoration(
-                      labelText: '时',
-                      isDense: true,
-                    ),
-                    onChanged: (_) {
-                      if (_errorMessage != null) {
-                        setState(() => _errorMessage = null);
-                      }
-                    },
-                  ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              SizedBox(
+                width: isDesktop ? 84 : 68,
+                child: TextField(
+                  key: const Key('reminder_hour_input'),
+                  controller: _hourController,
+                  enabled: !_submitting,
+                  keyboardType: TextInputType.number,
+                  textAlign: TextAlign.center,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.digitsOnly,
+                    LengthLimitingTextInputFormatter(2),
+                  ],
+                  decoration: isDesktop
+                      ? const InputDecoration(
+                          labelText: '时',
+                          border: OutlineInputBorder(),
+                          contentPadding: EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 16,
+                          ),
+                        )
+                      : const InputDecoration(labelText: '时', isDense: true),
+                  onChanged: (_) {
+                    if (_errorMessage != null) {
+                      setState(() => _errorMessage = null);
+                    }
+                  },
                 ),
+              ),
+              if (isDesktop)
+                const SizedBox(
+                  height: 48,
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 10),
+                    child: Center(
+                      child: Text(
+                        ':',
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ),
+                )
+              else
                 const Padding(
                   padding: EdgeInsets.symmetric(horizontal: 8),
                   child: Text(
@@ -465,71 +510,97 @@ class _ReminderEditorDialogState extends ConsumerState<_ReminderEditorDialog> {
                     style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                   ),
                 ),
-                SizedBox(
-                  width: 68,
-                  child: TextField(
-                    key: const Key('reminder_minute_input'),
-                    controller: _minuteController,
-                    enabled: !_submitting,
-                    keyboardType: TextInputType.number,
-                    textAlign: TextAlign.center,
-                    inputFormatters: [
-                      FilteringTextInputFormatter.digitsOnly,
-                      LengthLimitingTextInputFormatter(2),
-                    ],
-                    decoration: const InputDecoration(
-                      labelText: '分',
-                      isDense: true,
-                    ),
-                    onChanged: (_) {
-                      if (_errorMessage != null) {
-                        setState(() => _errorMessage = null);
-                      }
-                    },
-                  ),
+              SizedBox(
+                width: isDesktop ? 84 : 68,
+                child: TextField(
+                  key: const Key('reminder_minute_input'),
+                  controller: _minuteController,
+                  enabled: !_submitting,
+                  keyboardType: TextInputType.number,
+                  textAlign: TextAlign.center,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.digitsOnly,
+                    LengthLimitingTextInputFormatter(2),
+                  ],
+                  decoration: isDesktop
+                      ? const InputDecoration(
+                          labelText: '分',
+                          border: OutlineInputBorder(),
+                          contentPadding: EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 16,
+                          ),
+                        )
+                      : const InputDecoration(labelText: '分', isDense: true),
+                  onChanged: (_) {
+                    if (_errorMessage != null) {
+                      setState(() => _errorMessage = null);
+                    }
+                  },
                 ),
-                const Spacer(),
-                IconButton(
-                  key: const Key('reminder_clock_picker_button'),
-                  icon: const Icon(Icons.access_time),
-                  tooltip: '拨盘选择时间',
-                  onPressed: _submitting
-                      ? null
-                      : () => unawaited(_pickViaSystemClock()),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              key: const Key('reminder_tip_input'),
-              controller: _tipController,
-              enabled: !_submitting,
-              maxLength: 60,
-              decoration: const InputDecoration(
-                labelText: '提醒文案（可选）',
-                hintText: defaultReminderTip,
-                counterText: '',
               ),
-              onChanged: (_) {
-                if (_errorMessage != null) {
-                  setState(() => _errorMessage = null);
-                }
-              },
-            ),
-            if (_errorMessage != null) ...[
-              const SizedBox(height: 10),
-              Text(
-                _errorMessage!,
-                key: const Key('reminder_dialog_error'),
-                style: TextStyle(
-                  color: Theme.of(context).colorScheme.error,
-                  fontSize: 13,
-                ),
+              const Spacer(),
+              IconButton(
+                key: const Key('reminder_clock_picker_button'),
+                icon: const Icon(Icons.access_time),
+                tooltip: '拨盘选择时间',
+                onPressed: _submitting
+                    ? null
+                    : () => unawaited(_pickViaSystemClock()),
               ),
             ],
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            key: const Key('reminder_tip_input'),
+            controller: _tipController,
+            enabled: !_submitting,
+            maxLength: 60,
+            decoration: isDesktop
+                ? const InputDecoration(
+                    labelText: '提醒文案（可选）',
+                    hintText: defaultReminderTip,
+                    counterText: '',
+                    border: OutlineInputBorder(),
+                    contentPadding: EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 16,
+                    ),
+                  )
+                : const InputDecoration(
+                    labelText: '提醒文案（可选）',
+                    hintText: defaultReminderTip,
+                    counterText: '',
+                  ),
+            onChanged: (_) {
+              if (_errorMessage != null) {
+                setState(() => _errorMessage = null);
+              }
+            },
+          ),
+          if (_errorMessage != null) ...[
+            const SizedBox(height: 10),
+            Text(
+              _errorMessage!,
+              key: const Key('reminder_dialog_error'),
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.error,
+                fontSize: 13,
+              ),
+            ),
           ],
-        ),
+        ],
       ),
+    );
+
+    return AlertDialog(
+      title: Text(isEdit ? '编辑记账提醒' : '新建记账提醒'),
+      content: isDesktop
+          ? ConstrainedBox(
+              constraints: const BoxConstraints(minWidth: 380, maxWidth: 420),
+              child: scrollContent,
+            )
+          : scrollContent,
       actions: [
         TextButton(
           key: const Key('cancel_reminder_button'),

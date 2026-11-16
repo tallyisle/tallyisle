@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../app/adaptive.dart';
 import '../../core/failure.dart';
 import '../../data/db/database.dart';
 import '../../domain/rules/record_keypad_calc.dart';
@@ -792,9 +793,13 @@ class RecordSubcategoryStrip extends StatelessWidget {
     if (parentCategory == null || subCategories.isEmpty) {
       return const SizedBox.shrink();
     }
+    final isDesktop = DesktopAdaptive.isDesktop(context);
     final cs = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final parentVisual = resolveCategoryVisual(parentCategory!);
+    final chipDensity = isDesktop
+        ? VisualDensity.compact
+        : const VisualDensity(horizontal: -2, vertical: -3);
 
     return Container(
       margin: const EdgeInsets.only(top: 6),
@@ -815,7 +820,10 @@ class RecordSubcategoryStrip extends StatelessWidget {
             shape: const StadiumBorder(),
             backgroundColor: isDark ? cs.surfaceContainerHigh : cs.surface,
             selectedColor: parentVisual.color.withAlpha(isDark ? 64 : 50),
-            visualDensity: const VisualDensity(horizontal: -2, vertical: -3),
+            visualDensity: chipDensity,
+            padding: isDesktop
+                ? const EdgeInsets.symmetric(horizontal: 8, vertical: 2)
+                : null,
             materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
             label: const Text('不选二级', style: TextStyle(fontSize: 12)),
             selected: selectedCategoryId == parentCategory!.id,
@@ -840,10 +848,10 @@ class RecordSubcategoryStrip extends StatelessWidget {
                   backgroundColor: isDark
                       ? cs.surfaceContainerHigh
                       : cs.surface,
-                  visualDensity: const VisualDensity(
-                    horizontal: -2,
-                    vertical: -3,
-                  ),
+                  visualDensity: chipDensity,
+                  padding: isDesktop
+                      ? const EdgeInsets.symmetric(horizontal: 8, vertical: 2)
+                      : null,
                   materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   avatar: Icon(
                     subVisual.icon,

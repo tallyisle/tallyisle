@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../app/adaptive.dart';
 import '../../app/providers.dart';
 import '../../core/money.dart';
 import '../../data/db/database.dart';
@@ -237,324 +238,344 @@ class _DebtDetailPageState extends ConsumerState<DebtDetailPage> {
 
   @override
   Widget build(BuildContext context) {
+    final isDesktop = DesktopAdaptive.isDesktop(context);
     final viewAsync = ref.watch(debtDetailViewProvider(widget.debtId));
     ref.watch(debtFundingAccountsProvider);
     ref.watch(booksProvider);
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
 
-    return Scaffold(
-      key: const Key('debt_detail_page'),
-      appBar: AppBar(
-        title: Text(viewAsync.value?.debt.name ?? '借贷详情'),
-        actions: [
-          if (viewAsync.value != null)
-            PopupMenuButton<_DetailMenuAction>(
-              key: const Key('debt_detail_menu'),
-              onSelected: (a) => _onMenuAction(a, viewAsync.value!.debt),
-              itemBuilder: (_) {
-                final settled =
-                    viewAsync.value!.debt.status == AssetStatus.settled;
-                return [
-                  const PopupMenuItem(
-                    key: Key('debt_menu_edit'),
-                    value: _DetailMenuAction.edit,
-                    child: Text('编辑信息'),
-                  ),
-                  const PopupMenuItem(
-                    key: Key('debt_menu_recalibrate'),
-                    value: _DetailMenuAction.recalibrate,
-                    child: Text('自动校准余额'),
-                  ),
-                  if (!settled)
+    return DesktopModalEscapeScope(
+      enabled: isDesktop,
+      child: Scaffold(
+        key: const Key('debt_detail_page'),
+        appBar: AppBar(
+          leading:
+              isDesktop &&
+                  ModalRoute.of(context) is PopupRoute &&
+                  Navigator.of(context).canPop()
+              ? const CloseButton()
+              : null,
+          scrolledUnderElevation: isDesktop ? 0 : null,
+          title: Text(viewAsync.value?.debt.name ?? '借贷详情'),
+          actions: [
+            if (viewAsync.value != null)
+              PopupMenuButton<_DetailMenuAction>(
+                key: const Key('debt_detail_menu'),
+                onSelected: (a) => _onMenuAction(a, viewAsync.value!.debt),
+                itemBuilder: (_) {
+                  final settled =
+                      viewAsync.value!.debt.status == AssetStatus.settled;
+                  return [
                     const PopupMenuItem(
-                      key: Key('debt_menu_settle'),
-                      value: _DetailMenuAction.settle,
-                      child: Text('手动结清'),
-                    )
-                  else
-                    const PopupMenuItem(
-                      key: Key('debt_menu_reopen'),
-                      value: _DetailMenuAction.reopen,
-                      child: Text('重新开启'),
+                      key: Key('debt_menu_edit'),
+                      value: _DetailMenuAction.edit,
+                      child: Text('编辑信息'),
                     ),
-                  const PopupMenuItem(
-                    key: Key('debt_menu_delete'),
-                    value: _DetailMenuAction.delete,
-                    child: Text('删除借贷'),
-                  ),
-                ];
-              },
-            ),
-        ],
-      ),
-      body: asyncBody(viewAsync, (view) {
-        if (view == null) {
-          return const Center(child: Text('借贷项目不存在或已删除'));
-        }
-        final debt = view.debt;
-        final m = view.metrics;
-        final isBorrow = debt.subType == AssetType.debtBorrow;
-        final settled = debt.status == AssetStatus.settled;
-        final permille = m.progressPermille;
+                    const PopupMenuItem(
+                      key: Key('debt_menu_recalibrate'),
+                      value: _DetailMenuAction.recalibrate,
+                      child: Text('自动校准余额'),
+                    ),
+                    if (!settled)
+                      const PopupMenuItem(
+                        key: Key('debt_menu_settle'),
+                        value: _DetailMenuAction.settle,
+                        child: Text('手动结清'),
+                      )
+                    else
+                      const PopupMenuItem(
+                        key: Key('debt_menu_reopen'),
+                        value: _DetailMenuAction.reopen,
+                        child: Text('重新开启'),
+                      ),
+                    const PopupMenuItem(
+                      key: Key('debt_menu_delete'),
+                      value: _DetailMenuAction.delete,
+                      child: Text('删除借贷'),
+                    ),
+                  ];
+                },
+              ),
+          ],
+        ),
+        body: asyncBody(viewAsync, (view) {
+          if (view == null) {
+            return const Center(child: Text('借贷项目不存在或已删除'));
+          }
+          final debt = view.debt;
+          final m = view.metrics;
+          final isBorrow = debt.subType == AssetType.debtBorrow;
+          final settled = debt.status == AssetStatus.settled;
+          final permille = m.progressPermille;
 
-        return ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            Card(
-              key: const Key('debt_detail_summary_card'),
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: [
-                        _buildSummaryPill(
-                          theme: theme,
-                          label: isBorrow ? '借入（应付）' : '借出（应收）',
-                          backgroundColor: colorScheme.primaryContainer,
-                          foregroundColor: colorScheme.onPrimaryContainer,
-                        ),
-                        _buildSummaryPill(
-                          key: const Key('debt_status_chip'),
-                          theme: theme,
-                          label: settled ? '已结清' : '进行中',
-                          backgroundColor: settled
-                              ? colorScheme.tertiaryContainer
-                              : colorScheme.secondaryContainer,
-                          foregroundColor: settled
-                              ? colorScheme.onTertiaryContainer
-                              : colorScheme.onSecondaryContainer,
-                        ),
-                        if (debt.currency != null)
+          final list = ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              Card(
+                key: const Key('debt_detail_summary_card'),
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
                           _buildSummaryPill(
                             theme: theme,
-                            label: debt.currency!,
-                            backgroundColor:
-                                colorScheme.surfaceContainerHighest,
-                            foregroundColor: colorScheme.onSurfaceVariant,
+                            label: isBorrow ? '借入（应付）' : '借出（应收）',
+                            backgroundColor: colorScheme.primaryContainer,
+                            foregroundColor: colorScheme.onPrimaryContainer,
                           ),
-                        if (!m.countedInNetWorth)
                           _buildSummaryPill(
+                            key: const Key('debt_status_chip'),
                             theme: theme,
-                            label: '不计入资产/负债',
-                            backgroundColor:
-                                colorScheme.surfaceContainerHighest,
-                            foregroundColor: colorScheme.onSurfaceVariant,
+                            label: settled ? '已结清' : '进行中',
+                            backgroundColor: settled
+                                ? colorScheme.tertiaryContainer
+                                : colorScheme.secondaryContainer,
+                            foregroundColor: settled
+                                ? colorScheme.onTertiaryContainer
+                                : colorScheme.onSecondaryContainer,
                           ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      isBorrow ? '剩余待还本金' : '剩余应收本金',
-                      style: theme.textTheme.labelMedium,
-                    ),
-                    const SizedBox(height: 4),
-                    FittedBox(
-                      fit: BoxFit.scaleDown,
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        formatMinor(m.remainingPrincipalMinor),
-                        key: const Key('debt_remaining_principal'),
-                        maxLines: 1,
-                        softWrap: false,
-                        style: theme.textTheme.headlineMedium,
+                          if (debt.currency != null)
+                            _buildSummaryPill(
+                              theme: theme,
+                              label: debt.currency!,
+                              backgroundColor:
+                                  colorScheme.surfaceContainerHighest,
+                              foregroundColor: colorScheme.onSurfaceVariant,
+                            ),
+                          if (!m.countedInNetWorth)
+                            _buildSummaryPill(
+                              theme: theme,
+                              label: '不计入资产/负债',
+                              backgroundColor:
+                                  colorScheme.surfaceContainerHighest,
+                              foregroundColor: colorScheme.onSurfaceVariant,
+                            ),
+                        ],
                       ),
-                    ),
-                    const SizedBox(height: 16),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          isBorrow ? '还款进度' : '收回进度',
-                          style: theme.textTheme.bodySmall,
-                        ),
-                        Text(
-                          m.progressLabel,
-                          key: const Key('debt_progress_label'),
-                          style: theme.textTheme.labelLarge,
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 6),
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(4),
-                      child: SizedBox(
-                        key: const Key('debt_progress_bar'),
-                        height: 8,
-                        child: Row(
-                          children: [
-                            if (permille > 0)
-                              Expanded(
-                                flex: permille,
-                                child: ColoredBox(
-                                  color: theme.colorScheme.primary,
-                                ),
-                              ),
-                            if (permille < 1000)
-                              Expanded(
-                                flex: 1000 - permille,
-                                child: ColoredBox(
-                                  color:
-                                      theme.colorScheme.surfaceContainerHighest,
-                                ),
-                              ),
-                          ],
+                      const SizedBox(height: 12),
+                      Text(
+                        isBorrow ? '剩余待还本金' : '剩余应收本金',
+                        style: theme.textTheme.labelMedium,
+                      ),
+                      const SizedBox(height: 4),
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          formatMinor(m.remainingPrincipalMinor),
+                          key: const Key('debt_remaining_principal'),
+                          maxLines: 1,
+                          softWrap: false,
+                          style: theme.textTheme.headlineMedium,
                         ),
                       ),
-                    ),
-                    const SizedBox(height: 16),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _MetricColumn(
-                            label: '总本金',
-                            value: formatMinor(m.totalPrincipalMinor),
-                            valueKey: const Key('debt_total_principal'),
+                      const SizedBox(height: 16),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            isBorrow ? '还款进度' : '收回进度',
+                            style: theme.textTheme.bodySmall,
+                          ),
+                          Text(
+                            m.progressLabel,
+                            key: const Key('debt_progress_label'),
+                            style: theme.textTheme.labelLarge,
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(4),
+                        child: SizedBox(
+                          key: const Key('debt_progress_bar'),
+                          height: 8,
+                          child: Row(
+                            children: [
+                              if (permille > 0)
+                                Expanded(
+                                  flex: permille,
+                                  child: ColoredBox(
+                                    color: theme.colorScheme.primary,
+                                  ),
+                                ),
+                              if (permille < 1000)
+                                Expanded(
+                                  flex: 1000 - permille,
+                                  child: ColoredBox(
+                                    color: theme
+                                        .colorScheme
+                                        .surfaceContainerHighest,
+                                  ),
+                                ),
+                            ],
                           ),
                         ),
-                        Expanded(
-                          child: _MetricColumn(
-                            label: isBorrow ? '已还本金' : '已收本金',
-                            value: formatMinor(m.repaidPrincipalMinor),
-                            valueKey: const Key('debt_repaid_principal'),
+                      ),
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _MetricColumn(
+                              label: '总本金',
+                              value: formatMinor(m.totalPrincipalMinor),
+                              valueKey: const Key('debt_total_principal'),
+                            ),
                           ),
-                        ),
-                        Expanded(
-                          child: _MetricColumn(
-                            label: '累计利息',
-                            value: formatMinor(m.totalInterestMinor),
-                            valueKey: const Key('debt_total_interest'),
+                          Expanded(
+                            child: _MetricColumn(
+                              label: isBorrow ? '已还本金' : '已收本金',
+                              value: formatMinor(m.repaidPrincipalMinor),
+                              valueKey: const Key('debt_repaid_principal'),
+                            ),
                           ),
-                        ),
-                      ],
-                    ),
-                    if (m.loanInfo.startDate > 0 ||
-                        m.loanInfo.endDate != noRef ||
-                        (debt.remark != null && debt.remark!.isNotEmpty)) ...[
-                      const Divider(height: 24),
-                      if (m.loanInfo.startDate > 0)
-                        Text(
-                          '借款日期：${formatDate(DateTime.fromMillisecondsSinceEpoch(m.loanInfo.startDate))}'
-                          '${m.loanInfo.endDate != noRef && m.loanInfo.endDate > 0 ? ' · 到期日期：${formatDate(DateTime.fromMillisecondsSinceEpoch(m.loanInfo.endDate))}' : ''}',
-                          style: theme.textTheme.bodySmall,
-                        ),
-                      if (debt.remark != null && debt.remark!.isNotEmpty) ...[
-                        const SizedBox(height: 4),
-                        Text(debt.remark!, style: theme.textTheme.bodySmall),
+                          Expanded(
+                            child: _MetricColumn(
+                              label: '累计利息',
+                              value: formatMinor(m.totalInterestMinor),
+                              valueKey: const Key('debt_total_interest'),
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (m.loanInfo.startDate > 0 ||
+                          m.loanInfo.endDate != noRef ||
+                          (debt.remark != null && debt.remark!.isNotEmpty)) ...[
+                        const Divider(height: 24),
+                        if (m.loanInfo.startDate > 0)
+                          Text(
+                            '借款日期：${formatDate(DateTime.fromMillisecondsSinceEpoch(m.loanInfo.startDate))}'
+                            '${m.loanInfo.endDate != noRef && m.loanInfo.endDate > 0 ? ' · 到期日期：${formatDate(DateTime.fromMillisecondsSinceEpoch(m.loanInfo.endDate))}' : ''}',
+                            style: theme.textTheme.bodySmall,
+                          ),
+                        if (debt.remark != null && debt.remark!.isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          Text(debt.remark!, style: theme.textTheme.bodySmall),
+                        ],
                       ],
                     ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              if (!settled) ...[
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.icon(
+                    key: const Key('debt_action_repay'),
+                    icon: const Icon(Icons.payments_outlined, size: 18),
+                    label: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        isBorrow ? '还款' : '收款',
+                        maxLines: 1,
+                        softWrap: false,
+                      ),
+                    ),
+                    onPressed: () => _showRepayDialog(view),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        key: const Key('debt_action_add_principal'),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 10),
+                        ),
+                        icon: const Icon(Icons.add_circle_outline, size: 18),
+                        label: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text(
+                            isBorrow ? '追加借入' : '追加借出',
+                            maxLines: 1,
+                            softWrap: false,
+                          ),
+                        ),
+                        onPressed: () => _showAddPrincipalDialog(view),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        key: const Key('debt_action_interest_only'),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 10),
+                        ),
+                        icon: const Icon(Icons.percent, size: 18),
+                        label: const FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text('记纯利息', maxLines: 1, softWrap: false),
+                        ),
+                        onPressed: () =>
+                            _showRepayDialog(view, pureInterestOnly: true),
+                      ),
+                    ),
                   ],
                 ),
-              ),
-            ),
-            const SizedBox(height: 12),
-            if (!settled) ...[
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton.icon(
-                  key: const Key('debt_action_repay'),
-                  icon: const Icon(Icons.payments_outlined, size: 18),
-                  label: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: Text(
-                      isBorrow ? '还款' : '收款',
-                      maxLines: 1,
-                      softWrap: false,
+              ] else
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    key: const Key('debt_action_interest_only'),
+                    icon: const Icon(Icons.percent, size: 18),
+                    label: const FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text('记纯利息', maxLines: 1, softWrap: false),
                     ),
+                    onPressed: () =>
+                        _showRepayDialog(view, pureInterestOnly: true),
                   ),
-                  onPressed: () => _showRepayDialog(view),
                 ),
-              ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 16),
               Row(
                 children: [
                   Expanded(
-                    child: OutlinedButton.icon(
-                      key: const Key('debt_action_add_principal'),
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(horizontal: 10),
-                      ),
-                      icon: const Icon(Icons.add_circle_outline, size: 18),
-                      label: FittedBox(
-                        fit: BoxFit.scaleDown,
-                        child: Text(
-                          isBorrow ? '追加借入' : '追加借出',
-                          maxLines: 1,
-                          softWrap: false,
-                        ),
-                      ),
-                      onPressed: () => _showAddPrincipalDialog(view),
+                    child: Text(
+                      '关联流水 (${view.records.length})',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleSmall,
                     ),
                   ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      key: const Key('debt_action_interest_only'),
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(horizontal: 10),
-                      ),
-                      icon: const Icon(Icons.percent, size: 18),
-                      label: const FittedBox(
-                        fit: BoxFit.scaleDown,
-                        child: Text('记纯利息', maxLines: 1, softWrap: false),
-                      ),
-                      onPressed: () =>
-                          _showRepayDialog(view, pureInterestOnly: true),
-                    ),
+                  TextButton.icon(
+                    key: const Key('debt_group_mode_toggle'),
+                    onPressed: () =>
+                        setState(() => _groupByType = !_groupByType),
+                    icon: const Icon(Icons.sort, size: 18),
+                    label: Text(_groupByType ? '按类型分组' : '按时间排序'),
                   ),
                 ],
               ),
-            ] else
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  key: const Key('debt_action_interest_only'),
-                  icon: const Icon(Icons.percent, size: 18),
-                  label: const FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: Text('记纯利息', maxLines: 1, softWrap: false),
-                  ),
-                  onPressed: () =>
-                      _showRepayDialog(view, pureInterestOnly: true),
-                ),
-              ),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    '关联流水 (${view.records.length})',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.titleSmall,
-                  ),
-                ),
-                TextButton.icon(
-                  key: const Key('debt_group_mode_toggle'),
-                  onPressed: () => setState(() => _groupByType = !_groupByType),
-                  icon: const Icon(Icons.sort, size: 18),
-                  label: Text(_groupByType ? '按类型分组' : '按时间排序'),
-                ),
-              ],
+              if (view.records.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.all(24),
+                  child: Center(child: Text('暂无关联流水')),
+                )
+              else if (!_groupByType)
+                for (final r in view.records) _buildRecordTile(view, r)
+              else
+                ..._buildGroupedByType(view),
+              const SizedBox(height: 64),
+            ],
+          );
+          if (!isDesktop) return list;
+          return Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 680),
+              child: list,
             ),
-            if (view.records.isEmpty)
-              const Padding(
-                padding: EdgeInsets.all(24),
-                child: Center(child: Text('暂无关联流水')),
-              )
-            else if (!_groupByType)
-              for (final r in view.records) _buildRecordTile(view, r)
-            else
-              ..._buildGroupedByType(view),
-            const SizedBox(height: 64),
-          ],
-        );
-      }),
+          );
+        }),
+      ),
     );
   }
 
@@ -736,154 +757,210 @@ class _RepayDialogState extends ConsumerState<_RepayDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final isDesktop = DesktopAdaptive.isDesktop(context);
     final debt = widget.view.debt;
     final isBorrow = debt.subType == AssetType.debtBorrow;
     final debtCurr = normalizeCurrency(debt.currency) ?? baseCurrency;
 
-    return AlertDialog(
-      title: Text(
-        widget.pureInterestOnly ? '记录纯利息' : (isBorrow ? '记录还款' : '记录收款'),
-      ),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (!widget.pureInterestOnly) ...[
-              TextField(
-                key: const Key('repay_principal_input'),
-                controller: _principalCtrl,
-                enabled: !_submitting,
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
-                ),
-                inputFormatters: debtAmountInputFormatters,
-                decoration: InputDecoration(
-                  labelText: isBorrow
-                      ? '归还本金 ($debtCurr，填 0 为纯利息)'
-                      : '收回本金 ($debtCurr，填 0 为纯利息)',
-                ),
-              ),
-              const SizedBox(height: 12),
-            ],
+    final scrollBody = SingleChildScrollView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (!widget.pureInterestOnly) ...[
             TextField(
-              key: Key(
-                widget.pureInterestOnly
-                    ? 'pure_interest_input'
-                    : 'repay_interest_input',
-              ),
-              controller: _interestCtrl,
+              key: const Key('repay_principal_input'),
+              controller: _principalCtrl,
               enabled: !_submitting,
               keyboardType: const TextInputType.numberWithOptions(
                 decimal: true,
               ),
               inputFormatters: debtAmountInputFormatters,
-              decoration: InputDecoration(
-                labelText: isBorrow
-                    ? '利息支出 ($debtCurr${widget.pureInterestOnly ? '' : '，可选'})'
-                    : '利息收入 ($debtCurr${widget.pureInterestOnly ? '' : '，可选'})',
-              ),
+              decoration: isDesktop
+                  ? InputDecoration(
+                      labelText: isBorrow
+                          ? '归还本金 ($debtCurr)'
+                          : '收回本金 ($debtCurr)',
+                      helperText: '填 0 表示仅记录纯利息',
+                      border: const OutlineInputBorder(),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 16,
+                      ),
+                    )
+                  : InputDecoration(
+                      labelText: isBorrow
+                          ? '归还本金 ($debtCurr，填 0 为纯利息)'
+                          : '收回本金 ($debtCurr，填 0 为纯利息)',
+                    ),
             ),
             const SizedBox(height: 12),
+          ],
+          TextField(
+            key: Key(
+              widget.pureInterestOnly
+                  ? 'pure_interest_input'
+                  : 'repay_interest_input',
+            ),
+            controller: _interestCtrl,
+            enabled: !_submitting,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            inputFormatters: debtAmountInputFormatters,
+            decoration: isDesktop
+                ? InputDecoration(
+                    labelText: isBorrow
+                        ? '利息支出 ($debtCurr${widget.pureInterestOnly ? '' : '，可选'})'
+                        : '利息收入 ($debtCurr${widget.pureInterestOnly ? '' : '，可选'})',
+                    border: const OutlineInputBorder(),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 16,
+                    ),
+                  )
+                : InputDecoration(
+                    labelText: isBorrow
+                        ? '利息支出 ($debtCurr${widget.pureInterestOnly ? '' : '，可选'})'
+                        : '利息收入 ($debtCurr${widget.pureInterestOnly ? '' : '，可选'})',
+                  ),
+          ),
+          const SizedBox(height: 12),
+          InputDecorator(
+            decoration: isDesktop
+                ? const InputDecoration(
+                    labelText: '资金账户',
+                    border: OutlineInputBorder(),
+                    contentPadding: EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 16,
+                    ),
+                  )
+                : const InputDecoration(labelText: '资金账户'),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<int>(
+                key: const Key('repay_funding_selector'),
+                value: _selectedFundingId,
+                isExpanded: true,
+                isDense: true,
+                items: [
+                  const DropdownMenuItem<int>(
+                    value: noRef,
+                    child: Text('不关联资金账户'),
+                  ),
+                  for (final a in widget.fundingAccounts)
+                    DropdownMenuItem<int>(value: a.id, child: Text(a.name)),
+                ],
+                onChanged: _submitting
+                    ? null
+                    : (v) => setState(() => _selectedFundingId = v ?? noRef),
+              ),
+            ),
+          ),
+          if (widget.books.length > 1) ...[
+            const SizedBox(height: 12),
             InputDecorator(
-              decoration: const InputDecoration(labelText: '资金账户'),
+              decoration: isDesktop
+                  ? const InputDecoration(
+                      labelText: '记入账本',
+                      border: OutlineInputBorder(),
+                      contentPadding: EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 16,
+                      ),
+                    )
+                  : const InputDecoration(labelText: '记入账本'),
               child: DropdownButtonHideUnderline(
                 child: DropdownButton<int>(
-                  key: const Key('repay_funding_selector'),
-                  value: _selectedFundingId,
+                  key: const Key('repay_book_selector'),
+                  value: _selectedBookId,
                   isExpanded: true,
                   isDense: true,
                   items: [
-                    const DropdownMenuItem<int>(
-                      value: noRef,
-                      child: Text('不关联资金账户'),
-                    ),
-                    for (final a in widget.fundingAccounts)
-                      DropdownMenuItem<int>(value: a.id, child: Text(a.name)),
+                    for (final b in widget.books)
+                      DropdownMenuItem<int>(value: b.id, child: Text(b.name)),
                   ],
                   onChanged: _submitting
                       ? null
-                      : (v) => setState(() => _selectedFundingId = v ?? noRef),
+                      : (v) {
+                          if (v != null) {
+                            setState(() => _selectedBookId = v);
+                          }
+                        },
                 ),
               ),
             ),
-            if (widget.books.length > 1) ...[
-              const SizedBox(height: 12),
-              InputDecorator(
-                decoration: const InputDecoration(labelText: '记入账本'),
-                child: DropdownButtonHideUnderline(
-                  child: DropdownButton<int>(
-                    key: const Key('repay_book_selector'),
-                    value: _selectedBookId,
-                    isExpanded: true,
-                    isDense: true,
-                    items: [
-                      for (final b in widget.books)
-                        DropdownMenuItem<int>(value: b.id, child: Text(b.name)),
-                    ],
-                    onChanged: _submitting
-                        ? null
-                        : (v) {
-                            if (v != null) {
-                              setState(() => _selectedBookId = v);
-                            }
-                          },
-                  ),
-                ),
-              ),
-            ],
-            if (isBorrow) ...[
-              const SizedBox(height: 8),
-              SwitchListTile(
-                key: const Key('repay_interest_exclude_budget'),
-                contentPadding: EdgeInsets.zero,
-                title: const Text('利息不计入预算'),
-                value: _excludeBudget,
-                onChanged: _submitting
-                    ? null
-                    : (v) => setState(() => _excludeBudget = v),
-              ),
-            ],
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('操作日期'),
-              trailing: Text(formatDate(_operateDate)),
-              onTap: _submitting
-                  ? null
-                  : () async {
-                      final picked = await showDatePicker(
-                        context: context,
-                        initialDate: _operateDate,
-                        firstDate: DateTime(2000),
-                        lastDate: DateTime(2100),
-                      );
-                      if (picked != null && mounted) {
-                        setState(() {
-                          _operateDate = DateTime(
-                            picked.year,
-                            picked.month,
-                            picked.day,
-                          );
-                        });
-                      }
-                    },
-            ),
-            TextField(
-              key: const Key('repay_remark_input'),
-              controller: _remarkCtrl,
-              enabled: !_submitting,
-              decoration: const InputDecoration(labelText: '备注（可选）'),
-            ),
-            if (_dialogError != null) ...[
-              const SizedBox(height: 8),
-              Text(
-                _dialogError!,
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
-              ),
-            ],
           ],
-        ),
+          if (isBorrow) ...[
+            const SizedBox(height: 8),
+            SwitchListTile(
+              key: const Key('repay_interest_exclude_budget'),
+              contentPadding: EdgeInsets.zero,
+              title: const Text('利息不计入预算'),
+              value: _excludeBudget,
+              onChanged: _submitting
+                  ? null
+                  : (v) => setState(() => _excludeBudget = v),
+            ),
+          ],
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('操作日期'),
+            trailing: Text(formatDate(_operateDate)),
+            onTap: _submitting
+                ? null
+                : () async {
+                    final picked = await showDatePicker(
+                      context: context,
+                      initialDate: _operateDate,
+                      firstDate: DateTime(2000),
+                      lastDate: DateTime(2100),
+                    );
+                    if (picked != null && mounted) {
+                      setState(() {
+                        _operateDate = DateTime(
+                          picked.year,
+                          picked.month,
+                          picked.day,
+                        );
+                      });
+                    }
+                  },
+          ),
+          TextField(
+            key: const Key('repay_remark_input'),
+            controller: _remarkCtrl,
+            enabled: !_submitting,
+            decoration: isDesktop
+                ? const InputDecoration(
+                    labelText: '备注（可选）',
+                    border: OutlineInputBorder(),
+                    contentPadding: EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 16,
+                    ),
+                  )
+                : const InputDecoration(labelText: '备注（可选）'),
+          ),
+          if (_dialogError != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              _dialogError!,
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+          ],
+        ],
       ),
+    );
+
+    return AlertDialog(
+      title: Text(
+        widget.pureInterestOnly ? '记录纯利息' : (isBorrow ? '记录还款' : '记录收款'),
+      ),
+      content: isDesktop
+          ? ConstrainedBox(
+              constraints: const BoxConstraints(minWidth: 380, maxWidth: 420),
+              child: scrollBody,
+            )
+          : scrollBody,
       actions: [
         TextButton(
           onPressed: _submitting ? null : () => Navigator.pop(context),
@@ -1003,118 +1080,162 @@ class _AddPrincipalDialogState extends ConsumerState<_AddPrincipalDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final isDesktop = DesktopAdaptive.isDesktop(context);
     final debt = widget.view.debt;
     final isBorrow = debt.subType == AssetType.debtBorrow;
     final debtCurr = normalizeCurrency(debt.currency) ?? baseCurrency;
 
-    return AlertDialog(
-      title: Text(isBorrow ? '追加借入' : '追加借出'),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              key: const Key('add_principal_input'),
-              controller: _amountCtrl,
-              enabled: !_submitting,
-              keyboardType: const TextInputType.numberWithOptions(
-                decimal: true,
-              ),
-              inputFormatters: debtAmountInputFormatters,
-              decoration: InputDecoration(
-                labelText: isBorrow
-                    ? '追加借入本金 ($debtCurr)'
-                    : '追加借出本金 ($debtCurr)',
+    final scrollBody = SingleChildScrollView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+            key: const Key('add_principal_input'),
+            controller: _amountCtrl,
+            enabled: !_submitting,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            inputFormatters: debtAmountInputFormatters,
+            decoration: isDesktop
+                ? InputDecoration(
+                    labelText: isBorrow
+                        ? '追加借入本金 ($debtCurr)'
+                        : '追加借出本金 ($debtCurr)',
+                    border: const OutlineInputBorder(),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 16,
+                    ),
+                  )
+                : InputDecoration(
+                    labelText: isBorrow
+                        ? '追加借入本金 ($debtCurr)'
+                        : '追加借出本金 ($debtCurr)',
+                  ),
+          ),
+          const SizedBox(height: 12),
+          InputDecorator(
+            decoration: isDesktop
+                ? const InputDecoration(
+                    labelText: '资金账户',
+                    border: OutlineInputBorder(),
+                    contentPadding: EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 16,
+                    ),
+                  )
+                : const InputDecoration(labelText: '资金账户'),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<int>(
+                key: const Key('add_principal_funding_selector'),
+                value: _selectedFundingId,
+                isExpanded: true,
+                isDense: true,
+                items: [
+                  const DropdownMenuItem<int>(
+                    value: noRef,
+                    child: Text('不关联资金账户'),
+                  ),
+                  for (final a in widget.fundingAccounts)
+                    DropdownMenuItem<int>(value: a.id, child: Text(a.name)),
+                ],
+                onChanged: _submitting
+                    ? null
+                    : (v) => setState(() => _selectedFundingId = v ?? noRef),
               ),
             ),
+          ),
+          if (widget.books.length > 1) ...[
             const SizedBox(height: 12),
             InputDecorator(
-              decoration: const InputDecoration(labelText: '资金账户'),
+              decoration: isDesktop
+                  ? const InputDecoration(
+                      labelText: '记入账本',
+                      border: OutlineInputBorder(),
+                      contentPadding: EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 16,
+                      ),
+                    )
+                  : const InputDecoration(labelText: '记入账本'),
               child: DropdownButtonHideUnderline(
                 child: DropdownButton<int>(
-                  key: const Key('add_principal_funding_selector'),
-                  value: _selectedFundingId,
+                  key: const Key('add_principal_book_selector'),
+                  value: _selectedBookId,
                   isExpanded: true,
                   isDense: true,
                   items: [
-                    const DropdownMenuItem<int>(
-                      value: noRef,
-                      child: Text('不关联资金账户'),
-                    ),
-                    for (final a in widget.fundingAccounts)
-                      DropdownMenuItem<int>(value: a.id, child: Text(a.name)),
+                    for (final b in widget.books)
+                      DropdownMenuItem<int>(value: b.id, child: Text(b.name)),
                   ],
                   onChanged: _submitting
                       ? null
-                      : (v) => setState(() => _selectedFundingId = v ?? noRef),
+                      : (v) {
+                          if (v != null) {
+                            setState(() => _selectedBookId = v);
+                          }
+                        },
                 ),
               ),
             ),
-            if (widget.books.length > 1) ...[
-              const SizedBox(height: 12),
-              InputDecorator(
-                decoration: const InputDecoration(labelText: '记入账本'),
-                child: DropdownButtonHideUnderline(
-                  child: DropdownButton<int>(
-                    key: const Key('add_principal_book_selector'),
-                    value: _selectedBookId,
-                    isExpanded: true,
-                    isDense: true,
-                    items: [
-                      for (final b in widget.books)
-                        DropdownMenuItem<int>(value: b.id, child: Text(b.name)),
-                    ],
-                    onChanged: _submitting
-                        ? null
-                        : (v) {
-                            if (v != null) {
-                              setState(() => _selectedBookId = v);
-                            }
-                          },
-                  ),
-                ),
-              ),
-            ],
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('操作日期'),
-              trailing: Text(formatDate(_operateDate)),
-              onTap: _submitting
-                  ? null
-                  : () async {
-                      final picked = await showDatePicker(
-                        context: context,
-                        initialDate: _operateDate,
-                        firstDate: DateTime(2000),
-                        lastDate: DateTime(2100),
-                      );
-                      if (picked != null && mounted) {
-                        setState(() {
-                          _operateDate = DateTime(
-                            picked.year,
-                            picked.month,
-                            picked.day,
-                          );
-                        });
-                      }
-                    },
-            ),
-            TextField(
-              key: const Key('add_principal_remark_input'),
-              controller: _remarkCtrl,
-              enabled: !_submitting,
-              decoration: const InputDecoration(labelText: '备注（可选）'),
-            ),
-            if (_dialogError != null) ...[
-              const SizedBox(height: 8),
-              Text(
-                _dialogError!,
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
-              ),
-            ],
           ],
-        ),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('操作日期'),
+            trailing: Text(formatDate(_operateDate)),
+            onTap: _submitting
+                ? null
+                : () async {
+                    final picked = await showDatePicker(
+                      context: context,
+                      initialDate: _operateDate,
+                      firstDate: DateTime(2000),
+                      lastDate: DateTime(2100),
+                    );
+                    if (picked != null && mounted) {
+                      setState(() {
+                        _operateDate = DateTime(
+                          picked.year,
+                          picked.month,
+                          picked.day,
+                        );
+                      });
+                    }
+                  },
+          ),
+          TextField(
+            key: const Key('add_principal_remark_input'),
+            controller: _remarkCtrl,
+            enabled: !_submitting,
+            decoration: isDesktop
+                ? const InputDecoration(
+                    labelText: '备注（可选）',
+                    border: OutlineInputBorder(),
+                    contentPadding: EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 16,
+                    ),
+                  )
+                : const InputDecoration(labelText: '备注（可选）'),
+          ),
+          if (_dialogError != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              _dialogError!,
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+          ],
+        ],
       ),
+    );
+
+    return AlertDialog(
+      title: Text(isBorrow ? '追加借入' : '追加借出'),
+      content: isDesktop
+          ? ConstrainedBox(
+              constraints: const BoxConstraints(minWidth: 380, maxWidth: 420),
+              child: scrollBody,
+            )
+          : scrollBody,
       actions: [
         TextButton(
           onPressed: _submitting ? null : () => Navigator.pop(context),
@@ -1224,76 +1345,109 @@ class _EditRecordDialogState extends ConsumerState<_EditRecordDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final isDesktop = DesktopAdaptive.isDesktop(context);
     final debtCurr =
         normalizeCurrency(widget.view.debt.currency) ?? baseCurrency;
     final hasInitialInActive =
         widget.initialFundingId == noRef ||
         widget.fundingAccounts.any((a) => a.id == widget.initialFundingId);
 
+    final scrollBody = SingleChildScrollView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+            key: const Key('edit_debt_record_amount_input'),
+            controller: _amountCtrl,
+            enabled: !_submitting,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            inputFormatters: debtAmountInputFormatters,
+            decoration: isDesktop
+                ? InputDecoration(
+                    labelText: '金额 ($debtCurr)',
+                    border: const OutlineInputBorder(),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 16,
+                    ),
+                  )
+                : InputDecoration(labelText: '金额 ($debtCurr)'),
+          ),
+          const SizedBox(height: 12),
+          InputDecorator(
+            decoration: isDesktop
+                ? const InputDecoration(
+                    labelText: '资金账户',
+                    border: OutlineInputBorder(),
+                    contentPadding: EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 16,
+                    ),
+                  )
+                : const InputDecoration(labelText: '资金账户'),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<int>(
+                key: const Key('edit_debt_record_funding_selector'),
+                value: _selectedFundingId,
+                isExpanded: true,
+                isDense: true,
+                items: [
+                  const DropdownMenuItem<int>(
+                    value: noRef,
+                    child: Text('不关联资金账户'),
+                  ),
+                  if (!hasInitialInActive)
+                    DropdownMenuItem<int>(
+                      value: widget.initialFundingId,
+                      child: Text(
+                        widget.view.accountNames[widget.initialFundingId] ??
+                            '账户#${widget.initialFundingId}',
+                      ),
+                    ),
+                  for (final a in widget.fundingAccounts)
+                    DropdownMenuItem<int>(value: a.id, child: Text(a.name)),
+                ],
+                onChanged: _submitting
+                    ? null
+                    : (v) => setState(() => _selectedFundingId = v ?? noRef),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            key: const Key('edit_debt_record_remark_input'),
+            controller: _remarkCtrl,
+            enabled: !_submitting,
+            decoration: isDesktop
+                ? const InputDecoration(
+                    labelText: '备注',
+                    border: OutlineInputBorder(),
+                    contentPadding: EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 16,
+                    ),
+                  )
+                : const InputDecoration(labelText: '备注'),
+          ),
+          if (_dialogError != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              _dialogError!,
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+          ],
+        ],
+      ),
+    );
+
     return AlertDialog(
       title: Text('编辑${widget.recordLabel}'),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              key: const Key('edit_debt_record_amount_input'),
-              controller: _amountCtrl,
-              enabled: !_submitting,
-              keyboardType: const TextInputType.numberWithOptions(
-                decimal: true,
-              ),
-              inputFormatters: debtAmountInputFormatters,
-              decoration: InputDecoration(labelText: '金额 ($debtCurr)'),
-            ),
-            const SizedBox(height: 12),
-            InputDecorator(
-              decoration: const InputDecoration(labelText: '资金账户'),
-              child: DropdownButtonHideUnderline(
-                child: DropdownButton<int>(
-                  key: const Key('edit_debt_record_funding_selector'),
-                  value: _selectedFundingId,
-                  isExpanded: true,
-                  isDense: true,
-                  items: [
-                    const DropdownMenuItem<int>(
-                      value: noRef,
-                      child: Text('不关联资金账户'),
-                    ),
-                    if (!hasInitialInActive)
-                      DropdownMenuItem<int>(
-                        value: widget.initialFundingId,
-                        child: Text(
-                          widget.view.accountNames[widget.initialFundingId] ??
-                              '账户#${widget.initialFundingId}',
-                        ),
-                      ),
-                    for (final a in widget.fundingAccounts)
-                      DropdownMenuItem<int>(value: a.id, child: Text(a.name)),
-                  ],
-                  onChanged: _submitting
-                      ? null
-                      : (v) => setState(() => _selectedFundingId = v ?? noRef),
-                ),
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              key: const Key('edit_debt_record_remark_input'),
-              controller: _remarkCtrl,
-              enabled: !_submitting,
-              decoration: const InputDecoration(labelText: '备注'),
-            ),
-            if (_dialogError != null) ...[
-              const SizedBox(height: 8),
-              Text(
-                _dialogError!,
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
-              ),
-            ],
-          ],
-        ),
-      ),
+      content: isDesktop
+          ? ConstrainedBox(
+              constraints: const BoxConstraints(minWidth: 380, maxWidth: 420),
+              child: scrollBody,
+            )
+          : scrollBody,
       actions: [
         TextButton(
           onPressed: _submitting ? null : () => Navigator.pop(context),

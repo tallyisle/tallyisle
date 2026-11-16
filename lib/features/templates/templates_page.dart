@@ -2,12 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../app/adaptive.dart';
 import '../../app/providers.dart';
 import '../../data/db/database.dart';
 import '../../domain/model/codes.dart';
 import '../../domain/rules/template_card_rules.dart';
 import '../common/common.dart';
 import '../common/desktop_modal_page.dart';
+import '../me/me_page.dart' show MeEmbeddedNavigationScope;
 import 'remarks_page.dart';
 import 'template_editor_page.dart';
 import 'template_providers.dart';
@@ -106,6 +108,13 @@ class _TemplateQuickBarState extends ConsumerState<TemplateQuickBar> {
   void _openManage() {
     if (widget.onManageTemplates != null) {
       widget.onManageTemplates!();
+      return;
+    }
+    if (DesktopAdaptive.isDesktop(context)) {
+      pushDesktopModalOrMaterialRoute<void>(
+        context,
+        child: const TemplatesPage(),
+      );
       return;
     }
     Navigator.of(
@@ -328,139 +337,185 @@ class _TemplatesPageState extends ConsumerState<TemplatesPage> {
       )),
     );
 
-    return Scaffold(
-      key: const Key('templates_page'),
-      appBar: AppBar(
-        title: const Text('账单模板'),
-        actions: [
-          TextButton.icon(
-            key: const Key('open_remarks_page_button'),
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute<void>(builder: (_) => const RemarksPage()),
-            ),
-            icon: const Icon(Icons.comment_outlined, size: 18),
-            label: const Text('常用备注'),
-          ),
-        ],
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        key: const Key('add_template_fab'),
-        onPressed: _openCreate,
-        icon: const Icon(Icons.add),
-        label: const Text('新建模板'),
-      ),
-      body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 720),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-                child: InputDecorator(
-                  decoration: const InputDecoration(
-                    labelText: '筛选账本',
-                    border: OutlineInputBorder(),
-                    isDense: true,
-                    contentPadding: EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 4,
-                    ),
-                  ),
-                  child: DropdownButtonHideUnderline(
-                    child: DropdownButton<int>(
-                      key: const Key('templates_book_filter'),
-                      isExpanded: true,
-                      isDense: true,
-                      value: controlledBookFilter,
-                      items: [
-                        const DropdownMenuItem<int>(
-                          value: _allBooksSentinel,
-                          child: Text('全部账本'),
-                        ),
-                        for (final b in books)
-                          DropdownMenuItem<int>(
-                            value: b.id,
-                            child: Text(b.name),
-                          ),
-                      ],
-                      onChanged: (v) {
-                        if (v != null) {
-                          setState(() => _selectedBookFilter = v);
-                        }
-                      },
-                    ),
-                  ),
-                ),
-              ),
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 8,
-                ),
-                child: Row(
-                  children: [
-                    for (final (value, label) in const <(int?, String)>[
-                      (null, '全部'),
-                      (RecordType.expense, '支出'),
-                      (RecordType.income, '收入'),
-                      (RecordType.transfer, '转账'),
-                      (RecordType.reimbursable, '报销'),
-                      (RecordType.advanceExpense, '预支'),
-                      (RecordType.advanceIncome, '预收'),
-                    ])
-                      Padding(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: ChoiceChip(
-                          key: Key('template_filter_${value ?? "all"}'),
-                          label: Text(label),
-                          selected: selectedType == value,
-                          onSelected: (_) => ref
-                              .read(templateTypeFilterProvider.notifier)
-                              .select(value),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-              Expanded(
-                child: asyncBody(templatesAsync, (rows) {
-                  if (rows.isEmpty) {
-                    return Center(
-                      key: const Key('templates_empty_state'),
-                      child: Padding(
-                        padding: const EdgeInsets.all(24),
-                        child: Text(
-                          '暂无账单模板，点击右下角“新建模板”添加常用记账项',
-                          style: Theme.of(context).textTheme.bodyMedium,
-                        ),
-                      ),
-                    );
-                  }
-                  return ListView.separated(
-                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 88),
-                    itemCount: rows.length,
-                    separatorBuilder: (_, _) => const SizedBox(height: 8),
-                    itemBuilder: (context, index) {
-                      final t = rows[index];
-                      return _TemplateCardTile(
-                        template: t,
-                        bookMap: bookMap,
-                        catMap: catMap,
-                        assetMap: assetMap,
-                        tagMap: tagMap,
-                        busy: _busy,
-                        onEdit: () => _openEdit(t),
-                        onDelete: () => _deleteTemplate(t),
-                        onApplyInstant: () => _applyInstant(t),
-                        onToggleAutoSave: (v) => _toggleAutoSave(t, v),
-                      );
-                    },
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    final meScope = MeEmbeddedNavigationScope.maybeOf(context);
+    final isPopupModal = isDesktop && ModalRoute.of(context) is PopupRoute;
+
+    return DesktopModalEscapeScope(
+      enabled: isPopupModal,
+      child: Scaffold(
+        key: const Key('templates_page'),
+        appBar: AppBar(
+          leading: isPopupModal ? const CloseButton() : null,
+          scrolledUnderElevation: isDesktop ? 0 : null,
+          title: const Text('账单模板'),
+          actions: [
+            TextButton.icon(
+              key: const Key('open_remarks_page_button'),
+              onPressed: () {
+                if (meScope != null) {
+                  meScope.onSelectRoute('/remarks');
+                  return;
+                }
+                if (isDesktop) {
+                  pushDesktopModalOrMaterialRoute<void>(
+                    context,
+                    child: const RemarksPage(),
                   );
-                }),
+                  return;
+                }
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(builder: (_) => const RemarksPage()),
+                );
+              },
+              icon: const Icon(Icons.comment_outlined, size: 18),
+              label: const Text('常用备注'),
+            ),
+            if (isDesktop) ...[
+              const SizedBox(width: 8),
+              FilledButton.icon(
+                key: const Key('add_template_fab'),
+                style: FilledButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
+                ),
+                onPressed: _openCreate,
+                icon: const Icon(Icons.add, size: 18),
+                label: const Text('新建模板'),
               ),
+              const SizedBox(width: 12),
             ],
+          ],
+        ),
+        floatingActionButton: isDesktop
+            ? null
+            : FloatingActionButton.extended(
+                key: const Key('add_template_fab'),
+                onPressed: _openCreate,
+                icon: const Icon(Icons.add),
+                label: const Text('新建模板'),
+              ),
+        body: Center(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: isDesktop ? 800 : 720),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                  child: InputDecorator(
+                    decoration: const InputDecoration(
+                      labelText: '筛选账本',
+                      border: OutlineInputBorder(),
+                      contentPadding: EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 14,
+                      ),
+                    ),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<int>(
+                        key: const Key('templates_book_filter'),
+                        isExpanded: true,
+                        isDense: true,
+                        value: controlledBookFilter,
+                        items: [
+                          const DropdownMenuItem<int>(
+                            value: _allBooksSentinel,
+                            child: Text('全部账本'),
+                          ),
+                          for (final b in books)
+                            DropdownMenuItem<int>(
+                              value: b.id,
+                              child: Text(b.name),
+                            ),
+                        ],
+                        onChanged: (v) {
+                          if (v != null) {
+                            setState(() => _selectedBookFilter = v);
+                          }
+                        },
+                      ),
+                    ),
+                  ),
+                ),
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
+                  child: Row(
+                    children: [
+                      for (final (value, label) in const <(int?, String)>[
+                        (null, '全部'),
+                        (RecordType.expense, '支出'),
+                        (RecordType.income, '收入'),
+                        (RecordType.transfer, '转账'),
+                        (RecordType.reimbursable, '报销'),
+                        (RecordType.advanceExpense, '预支'),
+                        (RecordType.advanceIncome, '预收'),
+                      ])
+                        Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: ChoiceChip(
+                            key: Key('template_filter_${value ?? "all"}'),
+                            label: Text(label),
+                            selected: selectedType == value,
+                            onSelected: (_) => ref
+                                .read(templateTypeFilterProvider.notifier)
+                                .select(value),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  child: asyncBody(templatesAsync, (rows) {
+                    if (rows.isEmpty) {
+                      return Center(
+                        key: const Key('templates_empty_state'),
+                        child: Padding(
+                          padding: const EdgeInsets.all(24),
+                          child: Text(
+                            isDesktop
+                                ? '暂无账单模板，点击右上角“新建模板”添加常用记账项'
+                                : '暂无账单模板，点击右下角“新建模板”添加常用记账项',
+                            style: Theme.of(context).textTheme.bodyMedium,
+                          ),
+                        ),
+                      );
+                    }
+                    return ListView.separated(
+                      padding: EdgeInsets.fromLTRB(
+                        16,
+                        4,
+                        16,
+                        isDesktop ? 24 : 88,
+                      ),
+                      itemCount: rows.length,
+                      separatorBuilder: (_, _) => const SizedBox(height: 8),
+                      itemBuilder: (context, index) {
+                        final t = rows[index];
+                        return _TemplateCardTile(
+                          template: t,
+                          bookMap: bookMap,
+                          catMap: catMap,
+                          assetMap: assetMap,
+                          tagMap: tagMap,
+                          busy: _busy,
+                          onEdit: () => _openEdit(t),
+                          onDelete: () => _deleteTemplate(t),
+                          onApplyInstant: () => _applyInstant(t),
+                          onToggleAutoSave: (v) => _toggleAutoSave(t, v),
+                        );
+                      },
+                    );
+                  }),
+                ),
+              ],
+            ),
           ),
         ),
       ),

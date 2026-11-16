@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/adaptive.dart';
 import '../../app/providers.dart';
 import '../../core/failure.dart';
 import '../../data/catalog/currency_service.dart';
@@ -159,20 +160,46 @@ class _CurrenciesPageState extends ConsumerState<CurrenciesPage> {
     final settings =
         ref.watch(onlineRateSettingsProvider).value ??
         OnlineRateSettings.defaults;
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    final isPopupModal = isDesktop && ModalRoute.of(context) is PopupRoute;
+
+    void openAddCurrency() {
+      _edit(
+        used: {for (final c in currencies.value ?? const <Currency>[]) c.code},
+      );
+    }
 
     return Scaffold(
-      appBar: AppBar(title: const Text('币种与汇率')),
-      floatingActionButton: FloatingActionButton.extended(
-        key: const Key('add-currency'),
-        heroTag: 'fab-currency',
-        icon: const Icon(Icons.add),
-        label: const Text('添加币种'),
-        onPressed: () => _edit(
-          used: {
-            for (final c in currencies.value ?? const <Currency>[]) c.code,
-          },
-        ),
+      appBar: AppBar(
+        leading: isPopupModal ? const CloseButton() : null,
+        title: const Text('币种与汇率'),
+        actions: isDesktop
+            ? [
+                FilledButton.icon(
+                  key: const Key('add-currency'),
+                  style: FilledButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                  ),
+                  onPressed: openAddCurrency,
+                  icon: const Icon(Icons.add, size: 18),
+                  label: const Text('添加币种'),
+                ),
+                const SizedBox(width: 12),
+              ]
+            : null,
       ),
+      floatingActionButton: isDesktop
+          ? null
+          : FloatingActionButton.extended(
+              key: const Key('add-currency'),
+              heroTag: 'fab-currency',
+              icon: const Icon(Icons.add),
+              label: const Text('添加币种'),
+              onPressed: openAddCurrency,
+            ),
       body: asyncBody(currencies, (list) {
         final sorted = [...list]
           ..sort((a, b) {
@@ -181,7 +208,7 @@ class _CurrenciesPageState extends ConsumerState<CurrenciesPage> {
             return a.code.compareTo(b.code);
           });
         final used = {for (final c in list) c.code};
-        return ListView(
+        final listView = ListView(
           children: [
             _buildOnlineRateCard(context, settings),
             for (final c in sorted)
@@ -206,8 +233,15 @@ class _CurrenciesPageState extends ConsumerState<CurrenciesPage> {
                     ? null
                     : () => _edit(existing: c, used: used),
               ),
-            const SizedBox(height: 96),
+            SizedBox(height: isDesktop ? 24 : 96),
           ],
+        );
+        if (!isDesktop) return listView;
+        return Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 820),
+            child: listView,
+          ),
         );
       }),
     );
@@ -361,30 +395,41 @@ class _CustomRateSourceDialogState extends State<_CustomRateSourceDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    final dialogContent = SingleChildScrollView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            '留空则使用内置公共免密钥多源容灾；填写 https:// 或 http:// 地址则优先请求该 CNY 基准 JSON 接口。',
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            key: const Key('online-rate-custom-url-input'),
+            controller: _urlController,
+            keyboardType: TextInputType.url,
+            decoration: InputDecoration(
+              labelText: 'JSON 接口地址（留空使用默认公共源）',
+              hintText: 'https://open.er-api.com/v6/latest/CNY',
+              errorText: _error,
+              border: isDesktop ? const OutlineInputBorder() : null,
+              contentPadding: isDesktop
+                  ? const EdgeInsets.symmetric(horizontal: 12, vertical: 15)
+                  : null,
+            ),
+          ),
+        ],
+      ),
+    );
     return AlertDialog(
       title: const Text('自定义汇率源'),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              '留空则使用内置公共免密钥多源容灾；填写 https:// 或 http:// 地址则优先请求该 CNY 基准 JSON 接口。',
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              key: const Key('online-rate-custom-url-input'),
-              controller: _urlController,
-              keyboardType: TextInputType.url,
-              decoration: InputDecoration(
-                labelText: 'JSON 接口地址（留空使用默认公共源）',
-                hintText: 'https://open.er-api.com/v6/latest/CNY',
-                errorText: _error,
-              ),
-            ),
-          ],
-        ),
-      ),
+      content: isDesktop
+          ? ConstrainedBox(
+              constraints: const BoxConstraints(minWidth: 360, maxWidth: 440),
+              child: dialogContent,
+            )
+          : dialogContent,
       actions: [
         if (_urlController.text.trim().isNotEmpty)
           TextButton(
@@ -971,10 +1016,19 @@ class _CurrencyDialogState extends ConsumerState<_CurrencyDialog> {
         ? '实时汇率来源：$_fetchedSourceLabel'
         : _statusHelper;
 
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    const desktopFieldPadding = EdgeInsets.symmetric(
+      horizontal: 12,
+      vertical: 15,
+    );
+
     return AlertDialog(
+      insetPadding: isDesktop
+          ? const EdgeInsets.symmetric(horizontal: 24, vertical: 16)
+          : const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
       title: Text(editing ? '修改汇率' : '添加币种'),
       content: SizedBox(
-        width: 360,
+        width: isDesktop ? 400 : 360,
         child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -987,7 +1041,14 @@ class _CurrencyDialogState extends ConsumerState<_CurrencyDialog> {
                   enabled: !_saving,
                   onChanged: (v) => setState(() => _searchQuery = v),
                   decoration: InputDecoration(
-                    isDense: true,
+                    isDense: !isDesktop,
+                    border: isDesktop ? const OutlineInputBorder() : null,
+                    contentPadding: isDesktop
+                        ? const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 12,
+                          )
+                        : null,
                     prefixIcon: const Icon(Icons.search, size: 18),
                     prefixIconConstraints: const BoxConstraints(
                       minWidth: 34,
@@ -1010,7 +1071,7 @@ class _CurrencyDialogState extends ConsumerState<_CurrencyDialog> {
                     hintText: '搜索全球 150+ 币种（如：土耳其 / 里拉 / TRY）',
                   ),
                 ),
-                const SizedBox(height: 8),
+                SizedBox(height: isDesktop ? 10 : 8),
                 if (chipItems.isEmpty && isSearching)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 6),
@@ -1025,7 +1086,9 @@ class _CurrencyDialogState extends ConsumerState<_CurrencyDialog> {
                 else if (chipItems.isNotEmpty) ...[
                   ConstrainedBox(
                     constraints: BoxConstraints(
-                      maxHeight: isSearching ? 112 : 72,
+                      maxHeight: isSearching
+                          ? (isDesktop ? 124 : 112)
+                          : (isDesktop ? 84 : 72),
                     ),
                     child: SingleChildScrollView(
                       child: Wrap(
@@ -1041,8 +1104,9 @@ class _CurrencyDialogState extends ConsumerState<_CurrencyDialog> {
                               visualDensity: VisualDensity.compact,
                               materialTapTargetSize:
                                   MaterialTapTargetSize.shrinkWrap,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 6,
+                              padding: EdgeInsets.symmetric(
+                                horizontal: isDesktop ? 8 : 6,
+                                vertical: isDesktop ? 4 : 0,
                               ),
                               labelStyle: theme.textTheme.labelSmall,
                               onSelected: _saving
@@ -1053,17 +1117,23 @@ class _CurrencyDialogState extends ConsumerState<_CurrencyDialog> {
                       ),
                     ),
                   ),
-                  const SizedBox(height: 4),
+                  SizedBox(height: isDesktop ? 10 : 4),
                 ],
-                if (allUnused.isNotEmpty)
+                if (allUnused.isNotEmpty) ...[
                   DropdownButtonFormField<String>(
                     key: const Key('currency-preset'),
                     isExpanded: true,
                     menuMaxHeight: 320,
-                    decoration: const InputDecoration(
-                      labelText: '更多常用币种',
-                      isDense: true,
-                    ),
+                    decoration: isDesktop
+                        ? const InputDecoration(
+                            labelText: '更多常用币种',
+                            border: OutlineInputBorder(),
+                            contentPadding: desktopFieldPadding,
+                          )
+                        : const InputDecoration(
+                            labelText: '更多常用币种',
+                            isDense: true,
+                          ),
                     items: [
                       for (final p in allUnused)
                         DropdownMenuItem(
@@ -1076,6 +1146,8 @@ class _CurrencyDialogState extends ConsumerState<_CurrencyDialog> {
                     ],
                     onChanged: _saving ? null : _pickPreset,
                   ),
+                  if (isDesktop) const SizedBox(height: 10),
+                ],
               ],
               TextField(
                 key: const Key('currency-code'),
@@ -1083,11 +1155,18 @@ class _CurrencyDialogState extends ConsumerState<_CurrencyDialog> {
                 enabled: !editing && !_saving,
                 textCapitalization: TextCapitalization.characters,
                 onChanged: _onCodeChanged,
-                decoration: const InputDecoration(
-                  labelText: '代码（如 USD / TRY）',
-                  isDense: true,
-                ),
+                decoration: isDesktop
+                    ? const InputDecoration(
+                        labelText: '代码（如 USD / TRY）',
+                        border: OutlineInputBorder(),
+                        contentPadding: desktopFieldPadding,
+                      )
+                    : const InputDecoration(
+                        labelText: '代码（如 USD / TRY）',
+                        isDense: true,
+                      ),
               ),
+              if (isDesktop) const SizedBox(height: 10),
               TextField(
                 key: const Key('currency-name'),
                 controller: name,
@@ -1096,11 +1175,15 @@ class _CurrencyDialogState extends ConsumerState<_CurrencyDialog> {
                   _nameManuallyEdited = v.trim().isNotEmpty;
                   if (error != null) setState(() => error = null);
                 },
-                decoration: const InputDecoration(
-                  labelText: '名称',
-                  isDense: true,
-                ),
+                decoration: isDesktop
+                    ? const InputDecoration(
+                        labelText: '名称',
+                        border: OutlineInputBorder(),
+                        contentPadding: desktopFieldPadding,
+                      )
+                    : const InputDecoration(labelText: '名称', isDense: true),
               ),
+              if (isDesktop) const SizedBox(height: 10),
               TextField(
                 key: const Key('currency-symbol'),
                 controller: symbol,
@@ -1108,11 +1191,15 @@ class _CurrencyDialogState extends ConsumerState<_CurrencyDialog> {
                 onChanged: (v) {
                   _symbolManuallyEdited = v.trim().isNotEmpty;
                 },
-                decoration: const InputDecoration(
-                  labelText: '符号（可选）',
-                  isDense: true,
-                ),
+                decoration: isDesktop
+                    ? const InputDecoration(
+                        labelText: '符号（可选）',
+                        border: OutlineInputBorder(),
+                        contentPadding: desktopFieldPadding,
+                      )
+                    : const InputDecoration(labelText: '符号（可选）', isDense: true),
               ),
+              if (isDesktop) const SizedBox(height: 10),
               TextField(
                 key: const Key('currency-price'),
                 controller: price,
@@ -1122,7 +1209,9 @@ class _CurrencyDialogState extends ConsumerState<_CurrencyDialog> {
                 ),
                 onChanged: _onPriceChanged,
                 decoration: InputDecoration(
-                  isDense: true,
+                  isDense: !isDesktop,
+                  border: isDesktop ? const OutlineInputBorder() : null,
+                  contentPadding: isDesktop ? desktopFieldPadding : null,
                   labelText: editing ? '汇率' : '汇率（留空或点下方可自动联网获取）',
                   prefixText: '1 $displayCode = ',
                   suffixText: 'CNY',
@@ -1132,7 +1221,7 @@ class _CurrencyDialogState extends ConsumerState<_CurrencyDialog> {
                   errorMaxLines: 2,
                 ),
               ),
-              const SizedBox(height: 8),
+              SizedBox(height: isDesktop ? 10 : 8),
               OutlinedButton.icon(
                 key: const Key('currency-fetch-online-btn'),
                 onPressed: (_fetching || _saving)
@@ -1143,9 +1232,11 @@ class _CurrencyDialogState extends ConsumerState<_CurrencyDialog> {
                     horizontal: 12,
                     vertical: 8,
                   ),
-                  minimumSize: const Size(0, 34),
+                  minimumSize: Size(0, isDesktop ? 38 : 34),
                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  visualDensity: VisualDensity.compact,
+                  visualDensity: isDesktop
+                      ? VisualDensity.standard
+                      : VisualDensity.compact,
                 ),
                 icon: _fetching
                     ? const SizedBox(

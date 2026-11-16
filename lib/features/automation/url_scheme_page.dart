@@ -3,10 +3,41 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../app/adaptive.dart';
 import '../../data/automation/url_scheme_service.dart';
 import '../../domain/rules/url_scheme_rules.dart';
 import '../common/common.dart';
 import 'automation_providers.dart';
+
+const List<String> _monoFontFallbackChain = <String>[
+  'SF Mono',
+  'Menlo',
+  'Cascadia Mono',
+  'Consolas',
+  'JetBrains Mono',
+  'DejaVu Sans Mono',
+  'Liberation Mono',
+  'Noto Sans Mono',
+  'PingFang SC',
+  'Hiragino Sans GB',
+  'Microsoft YaHei UI',
+  'Microsoft YaHei',
+  'Noto Sans CJK SC',
+  'Source Han Sans SC',
+  'monospace',
+  'sans-serif',
+];
+
+String _platformMonoFontFamily(BuildContext context) {
+  if (!DesktopAdaptive.isDesktop(context)) {
+    return 'monospace';
+  }
+  return switch (Theme.of(context).platform) {
+    TargetPlatform.macOS || TargetPlatform.iOS => 'Menlo',
+    TargetPlatform.windows => 'Consolas',
+    _ => 'DejaVu Sans Mono',
+  };
+}
 
 /// Documentation, copyable templates, and live in-app URL Scheme tester (`F-033`).
 class UrlSchemePage extends ConsumerStatefulWidget {
@@ -88,10 +119,12 @@ class _UrlSchemePageState extends ConsumerState<UrlSchemePage> {
     }
     final router = GoRouter.maybeOf(context);
     if (router != null) {
-      if (route.startsWith('/record/new')) {
-        router.push(route);
-      } else {
+      const rootShellPaths = <String>{'/', '/stats', '/assets', '/me'};
+      final path = Uri.tryParse(route)?.path ?? route;
+      if (rootShellPaths.contains(path)) {
         router.go(route);
+      } else {
+        router.push(route);
       }
     }
   }
@@ -99,161 +132,174 @@ class _UrlSchemePageState extends ConsumerState<UrlSchemePage> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Scaffold(
-      key: const Key('url_scheme_page'),
-      appBar: AppBar(title: const Text('URL Scheme 外部调用')),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(Icons.link, color: theme.colorScheme.primary),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          '双协议兼容支持',
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    '帐屿同时支持主协议头 tallyisle:// 与兼容协议头 yyjz://，'
-                    '可通过快捷指令、桌面自动化脚本或外部应用一键跳转页面或直接静默记账。',
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-          Card(
-            key: const Key('url_scheme_tester_card'),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '在线调试器',
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    key: const Key('url_scheme_test_input'),
-                    controller: _uriController,
-                    maxLines: 2,
-                    decoration: const InputDecoration(
-                      labelText: '输入或选择待执行的 URL 链接',
-                      hintText: 'tallyisle://addbill?type=0&money=18.50',
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: FilledButton.icon(
-                          key: const Key('url_scheme_execute_button'),
-                          style: FilledButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(horizontal: 10),
-                          ),
-                          onPressed: _executing ? null : _executeTestUri,
-                          icon: const Icon(Icons.play_arrow, size: 18),
-                          label: FittedBox(
-                            fit: BoxFit.scaleDown,
-                            child: Text(
-                              _executing ? '执行中…' : '立即执行',
-                              maxLines: 1,
-                              softWrap: false,
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          key: const Key('url_scheme_copy_current_button'),
-                          style: OutlinedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(horizontal: 10),
-                          ),
-                          onPressed: () =>
-                              _copyText(_uriController.text.trim(), '当前调试'),
-                          icon: const Icon(Icons.copy, size: 18),
-                          label: const FittedBox(
-                            fit: BoxFit.scaleDown,
-                            child: Text('复制链接', maxLines: 1, softWrap: false),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  if (_lastError != null) ...[
-                    const SizedBox(height: 12),
-                    Container(
-                      key: const Key('url_scheme_result_error'),
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: theme.colorScheme.errorContainer,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    final listView = ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.link, color: theme.colorScheme.primary),
+                    const SizedBox(width: 8),
+                    Expanded(
                       child: Text(
-                        _lastError!,
-                        style: TextStyle(
-                          color: theme.colorScheme.onErrorContainer,
+                        '双协议兼容支持',
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
                     ),
                   ],
-                  if (_lastResult != null) ...[
-                    const SizedBox(height: 12),
-                    _ExecutionResultBanner(
-                      result: _lastResult!,
-                      onOpenRoute: _lastResult!.targetRoute == null
-                          ? null
-                          : () => _openTargetRoute(_lastResult!.targetRoute!),
-                    ),
-                  ],
-                ],
-              ),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  '帐屿同时支持主协议头 tallyisle:// 与兼容协议头 yyjz://，'
+                  '可通过快捷指令、桌面自动化脚本或外部应用一键跳转页面或直接静默记账。',
+                ),
+              ],
             ),
           ),
-          const SizedBox(height: 20),
-          Text(
-            '常用调用模板',
-            style: theme.textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.bold,
+        ),
+        const SizedBox(height: 16),
+        Card(
+          key: const Key('url_scheme_tester_card'),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '在线调试器',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  key: const Key('url_scheme_test_input'),
+                  controller: _uriController,
+                  maxLines: 2,
+                  decoration: const InputDecoration(
+                    labelText: '输入或选择待执行的 URL 链接',
+                    hintText: 'tallyisle://addbill?type=0&money=18.50',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: FilledButton.icon(
+                        key: const Key('url_scheme_execute_button'),
+                        style: FilledButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 10),
+                        ),
+                        onPressed: _executing ? null : _executeTestUri,
+                        icon: const Icon(Icons.play_arrow, size: 18),
+                        label: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text(
+                            _executing ? '执行中…' : '立即执行',
+                            maxLines: 1,
+                            softWrap: false,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        key: const Key('url_scheme_copy_current_button'),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 10),
+                        ),
+                        onPressed: () =>
+                            _copyText(_uriController.text.trim(), '当前调试'),
+                        icon: const Icon(Icons.copy, size: 18),
+                        label: const FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text('复制链接', maxLines: 1, softWrap: false),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                if (_lastError != null) ...[
+                  const SizedBox(height: 12),
+                  Container(
+                    key: const Key('url_scheme_result_error'),
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.errorContainer,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      _lastError!,
+                      style: TextStyle(
+                        color: theme.colorScheme.onErrorContainer,
+                      ),
+                    ),
+                  ),
+                ],
+                if (_lastResult != null) ...[
+                  const SizedBox(height: 12),
+                  _ExecutionResultBanner(
+                    result: _lastResult!,
+                    onOpenRoute: _lastResult!.targetRoute == null
+                        ? null
+                        : () => _openTargetRoute(_lastResult!.targetRoute!),
+                  ),
+                ],
+              ],
             ),
+          ),
+        ),
+        const SizedBox(height: 20),
+        Text(
+          '常用调用模板',
+          style: theme.textTheme.titleMedium?.copyWith(
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 8),
+        for (var i = 0; i < urlSchemeTemplates.length; i++) ...[
+          _TemplateCard(
+            index: i,
+            template: urlSchemeTemplates[i],
+            onFill: (uri) => setState(() {
+              _uriController.text = uri;
+              _lastError = null;
+              _lastResult = null;
+            }),
+            onCopy: _copyText,
           ),
           const SizedBox(height: 8),
-          for (var i = 0; i < urlSchemeTemplates.length; i++) ...[
-            _TemplateCard(
-              index: i,
-              template: urlSchemeTemplates[i],
-              onFill: (uri) => setState(() {
-                _uriController.text = uri;
-                _lastError = null;
-                _lastResult = null;
-              }),
-              onCopy: _copyText,
-            ),
-            const SizedBox(height: 8),
-          ],
-          const SizedBox(height: 12),
-          const _ParameterDocsCard(),
         ],
+        const SizedBox(height: 12),
+        const _ParameterDocsCard(),
+      ],
+    );
+
+    return Scaffold(
+      key: const Key('url_scheme_page'),
+      appBar: AppBar(
+        scrolledUnderElevation: isDesktop ? 0 : null,
+        title: const Text('URL Scheme 外部调用'),
       ),
+      body: isDesktop
+          ? Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 820),
+                child: listView,
+              ),
+            )
+          : listView,
     );
   }
 }
@@ -328,6 +374,8 @@ class _TemplateCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    final monoFamily = _platformMonoFontFamily(context);
     return Card(
       key: Key('url_template_card_$index'),
       child: Padding(
@@ -347,7 +395,8 @@ class _TemplateCard extends StatelessWidget {
             SelectableText(
               template.tallyIsleUri,
               style: theme.textTheme.bodySmall?.copyWith(
-                fontFamily: 'monospace',
+                fontFamily: monoFamily,
+                fontFamilyFallback: _monoFontFallbackChain,
                 color: theme.colorScheme.primary,
               ),
             ),
@@ -358,9 +407,9 @@ class _TemplateCard extends StatelessWidget {
               children: [
                 ActionChip(
                   key: Key('url_template_fill_$index'),
-                  visualDensity: VisualDensity.compact,
+                  visualDensity: isDesktop ? null : VisualDensity.compact,
                   materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  padding: EdgeInsets.symmetric(horizontal: isDesktop ? 8 : 4),
                   labelStyle: theme.textTheme.labelSmall,
                   avatar: const Icon(Icons.bolt_outlined, size: 15),
                   label: const Text('填入调试'),
@@ -368,9 +417,9 @@ class _TemplateCard extends StatelessWidget {
                 ),
                 ActionChip(
                   key: Key('url_template_copy_primary_$index'),
-                  visualDensity: VisualDensity.compact,
+                  visualDensity: isDesktop ? null : VisualDensity.compact,
                   materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  padding: EdgeInsets.symmetric(horizontal: isDesktop ? 8 : 4),
                   labelStyle: theme.textTheme.labelSmall,
                   avatar: const Icon(Icons.copy, size: 15),
                   label: const Text('复制 tallyisle://'),
@@ -378,9 +427,9 @@ class _TemplateCard extends StatelessWidget {
                 ),
                 ActionChip(
                   key: Key('url_template_copy_legacy_$index'),
-                  visualDensity: VisualDensity.compact,
+                  visualDensity: isDesktop ? null : VisualDensity.compact,
                   materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  padding: EdgeInsets.symmetric(horizontal: isDesktop ? 8 : 4),
                   labelStyle: theme.textTheme.labelSmall,
                   avatar: const Icon(Icons.history, size: 15),
                   label: const Text('复制 yyjz://'),
@@ -417,6 +466,7 @@ class _ParameterDocsCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final monoFamily = _platformMonoFontFamily(context);
     return Card(
       key: const Key('url_scheme_docs_card'),
       child: Padding(
@@ -443,7 +493,8 @@ class _ParameterDocsCard extends StatelessWidget {
                         name,
                         style: theme.textTheme.bodySmall?.copyWith(
                           fontWeight: FontWeight.bold,
-                          fontFamily: 'monospace',
+                          fontFamily: monoFamily,
+                          fontFamilyFallback: _monoFontFallbackChain,
                         ),
                       ),
                     ),

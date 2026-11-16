@@ -11,6 +11,8 @@ import '../../domain/model/codes.dart';
 import '../../domain/rules/category_stats.dart';
 import '../common/catalog_icons.dart';
 import '../common/common.dart';
+import '../common/desktop_modal_page.dart';
+import '../records/record_detail_page.dart';
 import 'category_stats_providers.dart';
 
 /// Main category statistics page (F-008 / SCR-005, original `/anz/ADAct`).
@@ -34,6 +36,7 @@ class _CategoryStatsPageState extends ConsumerState<CategoryStatsPage> {
     final resultAsync = ref.watch(categoryStatsResultProvider);
 
     final theme = Theme.of(context);
+    final isDesktop = DesktopAdaptive.isDesktop(context);
     final isExpandedDesktop = DesktopAdaptive.isExpandedDesktop(context);
 
     final dimensionSwitch = SegmentedButton<StatDimension>(
@@ -229,33 +232,45 @@ class _CategoryStatsPageState extends ConsumerState<CategoryStatsPage> {
                 ),
               ],
             )
-          : ListView(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              children: [
-                // 1. Dimension Switch: Expense / Income
-                SizedBox(width: double.infinity, child: dimensionSwitch),
-                const SizedBox(height: 12),
-
-                // 2. Period Navigation Bar
-                _PeriodNavigationBar(
-                  rangeKind: rangeKind,
-                  periodAsync: periodAsync,
+          : () {
+              final stackedList = ListView(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 8,
                 ),
-                const SizedBox(height: 12),
+                children: [
+                  // 1. Dimension Switch: Expense / Income
+                  SizedBox(width: double.infinity, child: dimensionSwitch),
+                  const SizedBox(height: 12),
 
-                // 3. Header Summary Card
-                headerSummaryWidget,
-                const SizedBox(height: 16),
+                  // 2. Period Navigation Bar
+                  _PeriodNavigationBar(
+                    rangeKind: rangeKind,
+                    periodAsync: periodAsync,
+                  ),
+                  const SizedBox(height: 12),
 
-                // 4. Trend Line Chart
-                trendChartWidget,
-                const SizedBox(height: 16),
+                  // 3. Header Summary Card
+                  headerSummaryWidget,
+                  const SizedBox(height: 16),
 
-                // 5. Category Rankings Card
-                rankingsWidget,
-                const SizedBox(height: 24),
-              ],
-            ),
+                  // 4. Trend Line Chart
+                  trendChartWidget,
+                  const SizedBox(height: 16),
+
+                  // 5. Category Rankings Card
+                  rankingsWidget,
+                  const SizedBox(height: 24),
+                ],
+              );
+              if (!isDesktop) return stackedList;
+              return Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 760),
+                  child: stackedList,
+                ),
+              );
+            }(),
     );
   }
 
@@ -1423,18 +1438,27 @@ class _CategoryRankingsCard extends ConsumerWidget {
     CategoryRowItem row,
     Map<int, RecordCategory> catById,
   ) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) => CategoryDrilldownPage(
-          categoryId: row.categoryId,
-          categoryName: row.name,
-          categoryIcon: row.icon,
-          isDirectChild: row.isDirectChild,
-          isFirstLevel: row.isFirstLevel,
-          rowItem: row,
-          result: result,
-          categoriesById: catById,
-        ),
+    if (GoRouter.maybeOf(context) != null &&
+        ModalRoute.of(context)?.settings is Page) {
+      try {
+        context.push('/stats/category/${row.categoryId}');
+        return;
+      } catch (_) {}
+    }
+    pushDesktopModalOrMaterialRoute<void>(
+      context,
+      maxWidth: 860,
+      maxHeight: 720,
+      barrierDismissible: true,
+      child: CategoryDrilldownPage(
+        categoryId: row.categoryId,
+        categoryName: row.name,
+        categoryIcon: row.icon,
+        isDirectChild: row.isDirectChild,
+        isFirstLevel: row.isFirstLevel,
+        rowItem: row,
+        result: result,
+        categoriesById: catById,
       ),
     );
   }
@@ -1443,17 +1467,26 @@ class _CategoryRankingsCard extends ConsumerWidget {
     BuildContext context,
     Map<int, RecordCategory> catById,
   ) {
+    if (GoRouter.maybeOf(context) != null &&
+        ModalRoute.of(context)?.settings is Page) {
+      try {
+        context.push('/stats/category/-1');
+        return;
+      } catch (_) {}
+    }
     final uncat = result.uncategorizedRow!;
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) => CategoryDrilldownPage(
-          categoryId: -1,
-          categoryName: uncat.name,
-          isFirstLevel: true,
-          uncategorizedRow: uncat,
-          result: result,
-          categoriesById: catById,
-        ),
+    pushDesktopModalOrMaterialRoute<void>(
+      context,
+      maxWidth: 860,
+      maxHeight: 720,
+      barrierDismissible: true,
+      child: CategoryDrilldownPage(
+        categoryId: -1,
+        categoryName: uncat.name,
+        isFirstLevel: true,
+        uncategorizedRow: uncat,
+        result: result,
+        categoriesById: catById,
       ),
     );
   }
@@ -1908,6 +1941,9 @@ class _CategoryStatsFilterDrawerState
                   // Include Exclude Budget switch
                   SwitchListTile(
                     key: const Key('filter-include-exclude-budget-switch'),
+                    contentPadding: DesktopAdaptive.isDesktop(context)
+                        ? EdgeInsets.zero
+                        : null,
                     title: const Text('包含不计入预算账单'),
                     subtitle: const Text('默认包含；取消则剔除已标记排除的账单'),
                     value: config.includeExcludeBudget,
@@ -2427,14 +2463,53 @@ class _CategoryDrilldownPageState extends State<CategoryDrilldownPage> {
             ),
           ),
           onTap: () {
-            context.push('/record/${bill.recordId}');
+            if (GoRouter.maybeOf(context) != null &&
+                ModalRoute.of(context)?.settings is Page) {
+              try {
+                context.push('/record/${bill.recordId}');
+                return;
+              } catch (_) {}
+            }
+            pushDesktopModalOrMaterialRoute<void>(
+              context,
+              maxWidth: 560,
+              maxHeight: 740,
+              barrierDismissible: true,
+              child: RecordDetailPage(recordId: bill.recordId),
+            );
           },
         ),
       );
     }
 
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    final isPopupModal = isDesktop && ModalRoute.of(context) is PopupRoute;
+    final stackedDrilldownList = ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        summaryCard,
+        const SizedBox(height: 16),
+        if (subcategoryCard != null) ...[
+          subcategoryCard,
+          const SizedBox(height: 16),
+        ],
+        billListHeader,
+        const SizedBox(height: 8),
+        if (bills.isEmpty)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 32),
+            child: Center(child: Text('无明细账单')),
+          )
+        else
+          for (final bill in bills) buildBillCard(bill),
+      ],
+    );
+
     return Scaffold(
-      appBar: AppBar(title: Text(widget.categoryName)),
+      appBar: AppBar(
+        leading: isPopupModal ? const CloseButton() : null,
+        title: Text(widget.categoryName),
+      ),
       body: isExpandedDesktop
           ? Center(
               child: ConstrainedBox(
@@ -2483,26 +2558,14 @@ class _CategoryDrilldownPageState extends State<CategoryDrilldownPage> {
                 ),
               ),
             )
-          : ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                summaryCard,
-                const SizedBox(height: 16),
-                if (subcategoryCard != null) ...[
-                  subcategoryCard,
-                  const SizedBox(height: 16),
-                ],
-                billListHeader,
-                const SizedBox(height: 8),
-                if (bills.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 32),
-                    child: Center(child: Text('无明细账单')),
+          : (isDesktop
+                ? Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 760),
+                      child: stackedDrilldownList,
+                    ),
                   )
-                else
-                  for (final bill in bills) buildBillCard(bill),
-              ],
-            ),
+                : stackedDrilldownList),
     );
   }
 }

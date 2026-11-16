@@ -330,7 +330,7 @@ class _DesktopNavigationScaffoldState
                         onSelectBranch: _goBranch,
                         onOpenSearch: () => context.push('/search'),
                         onOpenCalendar: () => context.push('/calendar'),
-                        onOpenBackup: () => context.push('/backup'),
+                        onOpenBackup: () => context.go('/me?section=%2Fbackup'),
                       )
                     : _CompactDesktopRail(
                         bookName: bookName,

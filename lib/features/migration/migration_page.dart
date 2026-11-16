@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../app/adaptive.dart';
 import '../../app/providers.dart';
 import '../../core/failure.dart';
 import '../../data/migration/cross_migration_service.dart';
@@ -197,7 +198,9 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
     _setBusy(true);
     try {
       final fileAccess = ref.read(migrationFileAccessProvider);
-      final selected = await fileAccess.pickBytes();
+      final selected = await fileAccess.pickBytes(
+        allowedExtensions: const <String>['yi2a'],
+      );
       final service = await ref.read(crossMigrationServiceProvider.future);
       final preview = service.preflightYi2a(
         fileName: selected.name,
@@ -317,9 +320,22 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
     );
   }
 
+  bool _isInMeDualPane(GoRouter router) {
+    if (!DesktopAdaptive.isExpandedDesktop(context)) return false;
+    try {
+      return GoRouterState.of(context).uri.path == '/me';
+    } on Object {
+      return router.routerDelegate.currentConfiguration.uri.path == '/me';
+    }
+  }
+
   void _openCsvImport() {
     final router = GoRouter.maybeOf(context);
     if (router != null) {
+      if (_isInMeDualPane(router)) {
+        context.go('/me?section=${Uri.encodeComponent('/import/csv')}');
+        return;
+      }
       unawaited(router.push('/import/csv'));
       return;
     }
@@ -333,6 +349,10 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
   void _openImportBatches() {
     final router = GoRouter.maybeOf(context);
     if (router != null) {
+      if (_isInMeDualPane(router)) {
+        context.go('/me?section=${Uri.encodeComponent('/import/batches')}');
+        return;
+      }
       unawaited(router.push('/import/batches'));
       return;
     }
@@ -345,46 +365,160 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
 
   @override
   Widget build(BuildContext context) {
+    final isDesktop = DesktopAdaptive.isDesktop(context);
     final summaryAsync = ref.watch(migrationLocalSummaryProvider);
     final theme = Theme.of(context);
 
-    return Scaffold(
-      key: const Key('migration_page'),
-      appBar: AppBar(title: const Text('第三方数据导入')),
-      body: Column(
-        children: [
-          if (_busy)
-            const LinearProgressIndicator(key: Key('migration_progress_bar')),
-          if (_statusMessage != null)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-              child: Card(
-                key: const Key('migration_status_banner'),
-                margin: EdgeInsets.zero,
-                color: _statusIsError
-                    ? theme.colorScheme.errorContainer
-                    : theme.colorScheme.secondaryContainer,
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Row(
-                    children: [
-                      Icon(
-                        _statusIsError
-                            ? Icons.error_outline
-                            : Icons.check_circle_outline,
-                        color: _statusIsError
-                            ? theme.colorScheme.onErrorContainer
-                            : theme.colorScheme.onSecondaryContainer,
+    final mainColumn = Column(
+      children: [
+        if (_busy)
+          const LinearProgressIndicator(key: Key('migration_progress_bar')),
+        if (_statusMessage != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+            child: Card(
+              key: const Key('migration_status_banner'),
+              margin: EdgeInsets.zero,
+              color: _statusIsError
+                  ? theme.colorScheme.errorContainer
+                  : theme.colorScheme.secondaryContainer,
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Row(
+                  children: [
+                    Icon(
+                      _statusIsError
+                          ? Icons.error_outline
+                          : Icons.check_circle_outline,
+                      color: _statusIsError
+                          ? theme.colorScheme.onErrorContainer
+                          : theme.colorScheme.onSecondaryContainer,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        _statusMessage!,
+                        key: const Key('migration_status_text'),
+                        style: TextStyle(
+                          color: _statusIsError
+                              ? theme.colorScheme.onErrorContainer
+                              : theme.colorScheme.onSecondaryContainer,
+                        ),
                       ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          _statusMessage!,
-                          key: const Key('migration_status_text'),
-                          style: TextStyle(
-                            color: _statusIsError
-                                ? theme.colorScheme.onErrorContainer
-                                : theme.colorScheme.onSecondaryContainer,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              // Cross-platform schema unity & third-party import guidance banner
+              Card(
+                key: const Key('migration_unity_banner_card'),
+                color: theme.colorScheme.primaryContainer.withValues(
+                  alpha: 0.45,
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.devices_outlined,
+                            color: theme.colorScheme.primary,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              '全平台数据格式统一说明',
+                              style: theme.textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        '1. 帐屿各端（Android / iOS / Windows / Linux / macOS）数据格式 100% 统一，'
+                        '日常多设备流转请使用「云同步与备份（.tally / WebDAV / S3）」；\n'
+                        '2. 本页专用于第三方记账软件与外部平台历史数据迁入'
+                        '（全量迁入采用单事务安全替换，并自动保留本机已有便签与自定义汇率）。',
+                        style: theme.textTheme.bodyMedium,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+
+              // Local data overview card
+              summaryAsync.when(
+                data: (summary) => Card(
+                  key: const Key('migration_local_summary_card'),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('当前本地数据概况', style: theme.textTheme.titleMedium),
+                        const SizedBox(height: 8),
+                        Text(
+                          '账本 ${summary.bookCount} · 账户 ${summary.assetCount} · 账单 ${summary.recordCount} · 便签 ${summary.noteCount}',
+                          key: const Key('migration_local_summary_text'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                loading: () => const SizedBox.shrink(),
+                error: (_, _) => const SizedBox.shrink(),
+              ),
+              const SizedBox(height: 16),
+
+              // Section 1: Full original-app backup migration
+              const _MigrationSectionHeader(
+                icon: Icons.history_toggle_off_outlined,
+                title: '一羽记账备份全量迁入',
+              ),
+              const SizedBox(height: 8),
+
+              // 1. Original Android encrypted backup (`.penny` / `.yy`)
+              Card(
+                key: const Key('legacy_import_penny_card'),
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '原版 Android 备份导入 (.penny / .yy)',
+                        style: theme.textTheme.titleMedium,
+                      ),
+                      const SizedBox(height: 6),
+                      const Text(
+                        '支持导入原版导出的加密 .penny 备份文件（兼容历史 .yy 备份）。'
+                        '独立内存暂存校验并自动过滤软删除墓碑，在单事务内原子替换 20 张账务业务表，完整保留本机便签与自定义汇率。',
+                      ),
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton.icon(
+                          key: const Key('legacy_import_penny_button'),
+                          onPressed: _busy ? null : _pickAndImportPenny,
+                          icon: const Icon(Icons.archive_outlined, size: 18),
+                          label: const FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text(
+                              '选择 .penny / .yy 备份文件',
+                              maxLines: 1,
+                              softWrap: false,
+                            ),
                           ),
                         ),
                       ),
@@ -392,346 +526,236 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
                   ),
                 ),
               ),
-            ),
-          Expanded(
-            child: ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                // Cross-platform schema unity & third-party import guidance banner
-                Card(
-                  key: const Key('migration_unity_banner_card'),
-                  color: theme.colorScheme.primaryContainer.withValues(
-                    alpha: 0.45,
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Icon(
-                              Icons.devices_outlined,
-                              color: theme.colorScheme.primary,
+              const SizedBox(height: 12),
+
+              // 2. Original iOS migration package (`.yi2a`)
+              Card(
+                key: const Key('legacy_import_yi2a_card'),
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '原版 iOS 迁移包导入 (.yi2a)',
+                        style: theme.textTheme.titleMedium,
+                      ),
+                      const SizedBox(height: 6),
+                      const Text(
+                        '导入前自动执行非空与短键结构预检，并在单事务内原子替换 19 张跨端业务表；'
+                        '本机已有的便签、自定义汇率与自动记账规则将完整保留。',
+                      ),
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        key: const Key('migration_import_yi2a_button'),
+                        width: double.infinity,
+                        child: FilledButton.tonalIcon(
+                          key: const Key('import_yi2a_button'),
+                          onPressed: _busy ? null : _pickAndImportYi2a,
+                          icon: const Icon(Icons.file_open_outlined, size: 18),
+                          label: const FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text(
+                              '选择 .yi2a 迁移文件',
+                              maxLines: 1,
+                              softWrap: false,
                             ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                '全平台数据格式统一说明',
-                                style: theme.textTheme.titleMedium?.copyWith(
-                                  fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+
+              // 3. Original LAN `ServerBackup.zip` / `.db` restore
+              Card(
+                key: const Key('legacy_restore_lan_card'),
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '原版局域网备份恢复 (ServerBackup.zip / .db)',
+                        style: theme.textTheme.titleMedium,
+                      ),
+                      const SizedBox(height: 6),
+                      const Text(
+                        '支持原版局域网传输生成的 ServerBackup.zip（含 AES-256 历史兼容口令与自定义密码解密）'
+                        '及裸 SQLite .db 数据库恢复。',
+                      ),
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        key: const Key('migration_restore_lan_button'),
+                        width: double.infinity,
+                        child: FilledButton.tonalIcon(
+                          key: const Key('restore_lan_backup_button'),
+                          onPressed: _busy ? null : _pickAndRestoreLanBackup,
+                          icon: const Icon(Icons.folder_zip_outlined, size: 18),
+                          label: const FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text(
+                              '选择局域网备份 (.zip / .db)',
+                              maxLines: 1,
+                              softWrap: false,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+
+              // Section 2: Electronic bills & extensible third-party bookkeeping imports
+              const _MigrationSectionHeader(
+                icon: Icons.table_chart_outlined,
+                title: '电子账单与更多记账软件导入',
+              ),
+              const SizedBox(height: 8),
+
+              // Working shortcut card for WeChat Pay / Alipay / standard CSV incremental import
+              Card(
+                key: const Key('third_party_csv_shortcut_card'),
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '微信支付 / 支付宝 / 标准 CSV 表格导入',
+                        style: theme.textTheme.titleMedium,
+                      ),
+                      const SizedBox(height: 6),
+                      const Text(
+                        '支持微信支付账单、支付宝交易明细及 14/15 列标准 CSV/Excel 表格解析转换；'
+                        '采用增量方式并入所选账本（不清空现有数据），并支持按导入批次查看明细或一键撤回。',
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: FilledButton.tonalIcon(
+                              key: const Key('go_csv_import_button'),
+                              style: const ButtonStyle(
+                                padding: WidgetStatePropertyAll(
+                                  EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 10,
+                                  ),
+                                ),
+                              ),
+                              onPressed: _busy ? null : _openCsvImport,
+                              icon: const Icon(
+                                Icons.upload_file_outlined,
+                                size: 18,
+                              ),
+                              label: const FittedBox(
+                                fit: BoxFit.scaleDown,
+                                child: Text(
+                                  '前往表格账单导入',
+                                  maxLines: 1,
+                                  softWrap: false,
                                 ),
                               ),
                             ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          '1. 帐屿各端（Android / iOS / Windows / Linux / macOS）数据格式 100% 统一，'
-                          '日常多设备流转请使用「云同步与备份（.tally / WebDAV / S3）」；\n'
-                          '2. 本页专用于第三方记账软件与外部平台历史数据迁入'
-                          '（全量迁入采用单事务安全替换，并自动保留本机已有便签与自定义汇率）。',
-                          style: theme.textTheme.bodyMedium,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 12),
-
-                // Local data overview card
-                summaryAsync.when(
-                  data: (summary) => Card(
-                    key: const Key('migration_local_summary_card'),
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('当前本地数据概况', style: theme.textTheme.titleMedium),
-                          const SizedBox(height: 8),
-                          Text(
-                            '账本 ${summary.bookCount} · 账户 ${summary.assetCount} · 账单 ${summary.recordCount} · 便签 ${summary.noteCount}',
-                            key: const Key('migration_local_summary_text'),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              key: const Key('go_import_batches_button'),
+                              style: const ButtonStyle(
+                                padding: WidgetStatePropertyAll(
+                                  EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 10,
+                                  ),
+                                ),
+                              ),
+                              onPressed: _busy ? null : _openImportBatches,
+                              icon: const Icon(
+                                Icons.history_edu_outlined,
+                                size: 18,
+                              ),
+                              label: const FittedBox(
+                                fit: BoxFit.scaleDown,
+                                child: Text(
+                                  '导入批次管理',
+                                  maxLines: 1,
+                                  softWrap: false,
+                                ),
+                              ),
+                            ),
                           ),
                         ],
                       ),
-                    ),
-                  ),
-                  loading: () => const SizedBox.shrink(),
-                  error: (_, _) => const SizedBox.shrink(),
-                ),
-                const SizedBox(height: 16),
-
-                // Section 1: Full original-app backup migration
-                const _MigrationSectionHeader(
-                  icon: Icons.history_toggle_off_outlined,
-                  title: '一羽记账备份全量迁入',
-                ),
-                const SizedBox(height: 8),
-
-                // 1. Original Android encrypted backup (`.penny` / `.yy`)
-                Card(
-                  key: const Key('legacy_import_penny_card'),
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          '原版 Android 备份导入 (.penny / .yy)',
-                          style: theme.textTheme.titleMedium,
-                        ),
-                        const SizedBox(height: 6),
-                        const Text(
-                          '支持导入原版导出的加密 .penny 备份文件（兼容历史 .yy 备份）。'
-                          '独立内存暂存校验并自动过滤软删除墓碑，在单事务内原子替换 20 张账务业务表，完整保留本机便签与自定义汇率。',
-                        ),
-                        const SizedBox(height: 12),
-                        SizedBox(
-                          width: double.infinity,
-                          child: FilledButton.icon(
-                            key: const Key('legacy_import_penny_button'),
-                            onPressed: _busy ? null : _pickAndImportPenny,
-                            icon: const Icon(Icons.archive_outlined, size: 18),
-                            label: const FittedBox(
-                              fit: BoxFit.scaleDown,
-                              child: Text(
-                                '选择 .penny / .yy 备份文件',
-                                maxLines: 1,
-                                softWrap: false,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
+                    ],
                   ),
                 ),
-                const SizedBox(height: 12),
+              ),
+              const SizedBox(height: 12),
 
-                // 2. Original iOS migration package (`.yi2a`)
-                Card(
-                  key: const Key('legacy_import_yi2a_card'),
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          '原版 iOS 迁移包导入 (.yi2a)',
-                          style: theme.textTheme.titleMedium,
-                        ),
-                        const SizedBox(height: 6),
-                        const Text(
-                          '导入前自动执行非空与短键结构预检，并在单事务内原子替换 19 张跨端业务表；'
-                          '本机已有的便签、自定义汇率与自动记账规则将完整保留。',
-                        ),
-                        const SizedBox(height: 12),
-                        SizedBox(
-                          key: const Key('migration_import_yi2a_button'),
-                          width: double.infinity,
-                          child: FilledButton.tonalIcon(
-                            key: const Key('import_yi2a_button'),
-                            onPressed: _busy ? null : _pickAndImportYi2a,
-                            icon: const Icon(
-                              Icons.file_open_outlined,
-                              size: 18,
-                            ),
-                            label: const FittedBox(
-                              fit: BoxFit.scaleDown,
-                              child: Text(
-                                '选择 .yi2a 迁移文件',
-                                maxLines: 1,
-                                softWrap: false,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+              // Purely informational extensible adapter note (zero buttons)
+              Card(
+                key: const Key('third_party_extensible_note_card'),
+                color: theme.colorScheme.surfaceContainerHighest.withValues(
+                  alpha: 0.5,
                 ),
-                const SizedBox(height: 12),
-
-                // 3. Original LAN `ServerBackup.zip` / `.db` restore
-                Card(
-                  key: const Key('legacy_restore_lan_card'),
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          '原版局域网备份恢复 (ServerBackup.zip / .db)',
-                          style: theme.textTheme.titleMedium,
-                        ),
-                        const SizedBox(height: 6),
-                        const Text(
-                          '支持原版局域网传输生成的 ServerBackup.zip（含 AES-256 历史兼容口令与自定义密码解密）'
-                          '及裸 SQLite .db 数据库恢复。',
-                        ),
-                        const SizedBox(height: 12),
-                        SizedBox(
-                          key: const Key('migration_restore_lan_button'),
-                          width: double.infinity,
-                          child: FilledButton.tonalIcon(
-                            key: const Key('restore_lan_backup_button'),
-                            onPressed: _busy ? null : _pickAndRestoreLanBackup,
-                            icon: const Icon(
-                              Icons.folder_zip_outlined,
-                              size: 18,
-                            ),
-                            label: const FittedBox(
-                              fit: BoxFit.scaleDown,
-                              child: Text(
-                                '选择局域网备份 (.zip / .db)',
-                                maxLines: 1,
-                                softWrap: false,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 20),
-
-                // Section 2: Electronic bills & extensible third-party bookkeeping imports
-                const _MigrationSectionHeader(
-                  icon: Icons.table_chart_outlined,
-                  title: '电子账单与更多记账软件导入',
-                ),
-                const SizedBox(height: 8),
-
-                // Working shortcut card for WeChat Pay / Alipay / standard CSV incremental import
-                Card(
-                  key: const Key('third_party_csv_shortcut_card'),
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          '微信支付 / 支付宝 / 标准 CSV 表格导入',
-                          style: theme.textTheme.titleMedium,
-                        ),
-                        const SizedBox(height: 6),
-                        const Text(
-                          '支持微信支付账单、支付宝交易明细及 14/15 列标准 CSV/Excel 表格解析转换；'
-                          '采用增量方式并入所选账本（不清空现有数据），并支持按导入批次查看明细或一键撤回。',
-                        ),
-                        const SizedBox(height: 12),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: FilledButton.tonalIcon(
-                                key: const Key('go_csv_import_button'),
-                                style: const ButtonStyle(
-                                  padding: WidgetStatePropertyAll(
-                                    EdgeInsets.symmetric(
-                                      horizontal: 10,
-                                      vertical: 10,
-                                    ),
-                                  ),
-                                ),
-                                onPressed: _busy ? null : _openCsvImport,
-                                icon: const Icon(
-                                  Icons.upload_file_outlined,
-                                  size: 18,
-                                ),
-                                label: const FittedBox(
-                                  fit: BoxFit.scaleDown,
-                                  child: Text(
-                                    '前往表格账单导入',
-                                    maxLines: 1,
-                                    softWrap: false,
-                                  ),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: OutlinedButton.icon(
-                                key: const Key('go_import_batches_button'),
-                                style: const ButtonStyle(
-                                  padding: WidgetStatePropertyAll(
-                                    EdgeInsets.symmetric(
-                                      horizontal: 10,
-                                      vertical: 10,
-                                    ),
-                                  ),
-                                ),
-                                onPressed: _busy ? null : _openImportBatches,
-                                icon: const Icon(
-                                  Icons.history_edu_outlined,
-                                  size: 18,
-                                ),
-                                label: const FittedBox(
-                                  fit: BoxFit.scaleDown,
-                                  child: Text(
-                                    '导入批次管理',
-                                    maxLines: 1,
-                                    softWrap: false,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 12),
-
-                // Purely informational extensible adapter note (zero buttons)
-                Card(
-                  key: const Key('third_party_extensible_note_card'),
-                  color: theme.colorScheme.surfaceContainerHighest.withValues(
-                    alpha: 0.5,
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Icon(
-                              Icons.extension_outlined,
-                              size: 20,
-                              color: theme.colorScheme.onSurfaceVariant,
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                '更多第三方记账软件扩展说明',
-                                style: theme.textTheme.titleSmall?.copyWith(
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          '来自其他记账软件（如钱迹等）导出的 CSV/Excel 账单，当前可对照「标准 CSV 模板」映射表头后直接增量入账，'
-                          '并支持按导入批次核对与整批撤回；后续专版解析适配器也将在此分组持续扩展。',
-                          style: theme.textTheme.bodyMedium?.copyWith(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.extension_outlined,
+                            size: 20,
                             color: theme.colorScheme.onSurfaceVariant,
                           ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              '更多第三方记账软件扩展说明',
+                              style: theme.textTheme.titleSmall?.copyWith(
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        '来自其他记账软件（如钱迹等）导出的 CSV/Excel 账单，当前可对照「标准 CSV 模板」映射表头后直接增量入账，'
+                        '并支持按导入批次核对与整批撤回；后续专版解析适配器也将在此分组持续扩展。',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
-        ],
-      ),
+        ),
+      ],
+    );
+
+    return Scaffold(
+      key: const Key('migration_page'),
+      appBar: AppBar(title: const Text('第三方数据导入')),
+      body: isDesktop
+          ? Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 780),
+                child: mainColumn,
+              ),
+            )
+          : mainColumn,
     );
   }
 }
@@ -991,10 +1015,9 @@ class _LanPasswordDialogState extends State<_LanPasswordDialog> {
   }
 
   @override
-  Widget build(BuildContext context) => AlertDialog(
-    key: const Key('lan_password_dialog'),
-    title: const Text('输入局域网备份密码'),
-    content: Column(
+  Widget build(BuildContext context) {
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    final body = Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1012,8 +1035,13 @@ class _LanPasswordDialogState extends State<_LanPasswordDialog> {
             decoration: InputDecoration(
               labelText: '解密密码',
               errorText: _errorText,
+              border: isDesktop ? const OutlineInputBorder() : null,
+              contentPadding: isDesktop
+                  ? const EdgeInsets.symmetric(horizontal: 12, vertical: 16)
+                  : null,
               suffixIcon: IconButton(
                 key: const Key('lan_password_toggle_visibility'),
+                visualDensity: isDesktop ? VisualDensity.compact : null,
                 onPressed: () => setState(() => _obscure = !_obscure),
                 icon: Icon(
                   _obscure
@@ -1025,18 +1053,28 @@ class _LanPasswordDialogState extends State<_LanPasswordDialog> {
           ),
         ),
       ],
-    ),
-    actions: [
-      TextButton(
-        key: const Key('lan_password_cancel'),
-        onPressed: _submitting ? null : () => Navigator.of(context).pop(),
-        child: const Text('取消'),
-      ),
-      FilledButton(
-        key: const Key('lan_password_submit'),
-        onPressed: _submitting ? null : _submit,
-        child: const Text('解密并预检'),
-      ),
-    ],
-  );
+    );
+    return AlertDialog(
+      key: const Key('lan_password_dialog'),
+      title: const Text('输入局域网备份密码'),
+      content: isDesktop
+          ? ConstrainedBox(
+              constraints: const BoxConstraints(minWidth: 380, maxWidth: 420),
+              child: SingleChildScrollView(child: body),
+            )
+          : body,
+      actions: [
+        TextButton(
+          key: const Key('lan_password_cancel'),
+          onPressed: _submitting ? null : () => Navigator.of(context).pop(),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          key: const Key('lan_password_submit'),
+          onPressed: _submitting ? null : _submit,
+          child: const Text('解密并预检'),
+        ),
+      ],
+    );
+  }
 }

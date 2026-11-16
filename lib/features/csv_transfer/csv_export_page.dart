@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/adaptive.dart';
 import '../../app/providers.dart';
 import '../../core/failure.dart';
 import '../../domain/model/codes.dart';
@@ -144,6 +145,7 @@ class _CsvExportPageState extends ConsumerState<CsvExportPage> {
 
   @override
   Widget build(BuildContext context) {
+    final isDesktop = DesktopAdaptive.isDesktop(context);
     final booksAsync = ref.watch(booksProvider);
     final fileAccess = ref.watch(csvFileAccessProvider);
     final canShare =
@@ -159,7 +161,7 @@ class _CsvExportPageState extends ConsumerState<CsvExportPage> {
             ? _selectedBookId
             : noRef;
 
-        return ListView(
+        final list = ListView(
           padding: const EdgeInsets.all(16),
           children: [
             Card(
@@ -174,18 +176,19 @@ class _CsvExportPageState extends ConsumerState<CsvExportPage> {
                     ),
                     const SizedBox(height: 16),
                     InputDecorator(
-                      decoration: const InputDecoration(
+                      decoration: InputDecoration(
                         labelText: '选择账本',
-                        border: OutlineInputBorder(),
+                        border: const OutlineInputBorder(),
                         contentPadding: EdgeInsets.symmetric(
                           horizontal: 12,
-                          vertical: 4,
+                          vertical: isDesktop ? 16 : 4,
                         ),
                       ),
                       child: DropdownButtonHideUnderline(
                         child: DropdownButton<int>(
                           key: const Key('export_book_dropdown'),
                           isExpanded: true,
+                          isDense: isDesktop,
                           value: effectiveBookId,
                           items: [
                             const DropdownMenuItem<int>(
@@ -299,12 +302,21 @@ class _CsvExportPageState extends ConsumerState<CsvExportPage> {
                       child: SegmentedButton<bool>(
                         key: const Key('export_encoding_selector'),
                         showSelectedIcon: false,
-                        style: const ButtonStyle(
-                          visualDensity: VisualDensity.compact,
-                          padding: WidgetStatePropertyAll(
-                            EdgeInsets.symmetric(horizontal: 10),
-                          ),
-                        ),
+                        style: isDesktop
+                            ? const ButtonStyle(
+                                padding: WidgetStatePropertyAll(
+                                  EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 6,
+                                  ),
+                                ),
+                              )
+                            : const ButtonStyle(
+                                visualDensity: VisualDensity.compact,
+                                padding: WidgetStatePropertyAll(
+                                  EdgeInsets.symmetric(horizontal: 10),
+                                ),
+                              ),
                         segments: const [
                           ButtonSegment<bool>(
                             value: true,
@@ -369,6 +381,13 @@ class _CsvExportPageState extends ConsumerState<CsvExportPage> {
               ),
             ],
           ],
+        );
+        if (!isDesktop) return list;
+        return Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 780),
+            child: list,
+          ),
         );
       }),
     );

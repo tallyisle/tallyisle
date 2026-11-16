@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../app/adaptive.dart';
 import '../../app/providers.dart';
 import '../../data/db/database.dart';
 import '../../data/periodic/periodic_service.dart';
@@ -9,6 +12,7 @@ import '../../domain/model/codes.dart';
 import '../../domain/rules/periodic_records.dart';
 import '../common/common.dart';
 import '../common/desktop_modal_page.dart';
+import '../records/record_detail_page.dart';
 import '../records/record_labels.dart';
 import 'periodic_editor_page.dart';
 import 'periodic_providers.dart';
@@ -93,9 +97,10 @@ class _PeriodicPageState extends ConsumerState<PeriodicPage>
   }
 
   void _openHistory(int periodId) {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => PeriodicHistoryPage(
+    unawaited(
+      pushDesktopModalOrMaterialRoute<void>(
+        context,
+        child: PeriodicHistoryPage(
           periodId: periodId,
           onRecordTap: widget.onRecordTap,
         ),
@@ -193,10 +198,162 @@ class _PeriodicPageState extends ConsumerState<PeriodicPage>
     final allAssets = ref.watch(assetsProvider).value ?? const <Asset>[];
     final books = ref.watch(booksProvider).value ?? const <AccountBook>[];
 
+    final isDesktop = DesktopAdaptive.isDesktop(context);
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final counts = countsAsync.value;
     final skippedCount = _lastCatchUp?.skippedCount ?? 0;
+
+    final bodyContent = Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+          child: SizedBox(
+            width: double.infinity,
+            child: SegmentedButton<int>(
+              key: const Key('periodic_state_tabs'),
+              showSelectedIcon: false,
+              style: isDesktop
+                  ? const ButtonStyle(
+                      padding: WidgetStatePropertyAll(
+                        EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      ),
+                    )
+                  : const ButtonStyle(
+                      visualDensity: VisualDensity.compact,
+                      padding: WidgetStatePropertyAll(
+                        EdgeInsets.symmetric(horizontal: 8),
+                      ),
+                    ),
+              segments: [
+                ButtonSegment<int>(
+                  value: PeriodState.active,
+                  label: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      counts == null ? '进行中' : '进行中 (${counts.active})',
+                      key: const Key('periodic_tab_0'),
+                      maxLines: 1,
+                      softWrap: false,
+                    ),
+                  ),
+                ),
+                ButtonSegment<int>(
+                  value: PeriodState.ended,
+                  label: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      counts == null ? '已结束' : '已结束 (${counts.ended})',
+                      key: const Key('periodic_tab_1'),
+                      maxLines: 1,
+                      softWrap: false,
+                    ),
+                  ),
+                ),
+                ButtonSegment<int>(
+                  value: PeriodState.paused,
+                  label: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      counts == null ? '已停用' : '已停用 (${counts.paused})',
+                      key: const Key('periodic_tab_2'),
+                      maxLines: 1,
+                      softWrap: false,
+                    ),
+                  ),
+                ),
+              ],
+              selected: {selectedTab},
+              onSelectionChanged: (selection) {
+                ref.read(periodicTabProvider.notifier).select(selection.first);
+              },
+            ),
+          ),
+        ),
+        if (skippedCount > 0)
+          Container(
+            key: const Key('periodic_skipped_banner'),
+            width: double.infinity,
+            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: Colors.amber.withValues(alpha: isDark ? 0.16 : 0.16),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: isDark ? Colors.amber.shade300 : Colors.amber,
+              ),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.warning_amber_rounded,
+                  color: isDark
+                      ? Colors.amber.shade300
+                      : Colors.orange.shade800,
+                  size: 20,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    '有 $skippedCount 条到期周期规则因关联账户不可用或外币汇率缺失已跳过自动入账。',
+                    style: const TextStyle(fontSize: 13),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        Expanded(
+          child: rulesAsync.when(
+            loading: () => const Loading(),
+            error: (e, _) => ErrorView(e),
+            data: (rules) {
+              if (rules.isEmpty) {
+                final emptyText = switch (selectedTab) {
+                  PeriodState.active => '暂无进行中的周期记账',
+                  PeriodState.ended => '暂无已结束的周期记账',
+                  PeriodState.paused => '暂无已停用的周期记账',
+                  _ => '暂无周期记账',
+                };
+                return RefreshIndicator(
+                  onRefresh: () => _triggerCatchUp(force: true),
+                  child: ListView(
+                    children: [
+                      const SizedBox(height: 120),
+                      Center(
+                        child: Text(
+                          emptyText,
+                          style: TextStyle(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }
+
+              return RefreshIndicator(
+                onRefresh: () => _triggerCatchUp(force: true),
+                child: ListView.builder(
+                  padding: EdgeInsets.only(top: 4, bottom: isDesktop ? 24 : 88),
+                  itemCount: rules.length,
+                  itemBuilder: (context, index) {
+                    final rule = rules[index];
+                    return _buildRuleCard(
+                      context,
+                      rule: rule,
+                      categories: allCategories,
+                      assets: allAssets,
+                      books: books,
+                    );
+                  },
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
 
     return Scaffold(
       key: const Key('periodic_page'),
@@ -206,163 +363,40 @@ class _PeriodicPageState extends ConsumerState<PeriodicPage>
           IconButton(
             key: const Key('periodic_catchup_button'),
             tooltip: '立即检查补记',
-            icon: const Icon(Icons.sync),
             onPressed: () => _triggerCatchUp(force: true, notify: true),
+            icon: const Icon(Icons.sync),
           ),
-        ],
-      ),
-      floatingActionButton: FloatingActionButton(
-        key: const Key('add_periodic_button'),
-        tooltip: '新建周期记账',
-        onPressed: () => _openEditor(),
-        child: const Icon(Icons.add),
-      ),
-      body: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-            child: SizedBox(
-              width: double.infinity,
-              child: SegmentedButton<int>(
-                key: const Key('periodic_state_tabs'),
-                showSelectedIcon: false,
-                style: const ButtonStyle(
-                  visualDensity: VisualDensity.compact,
-                  padding: WidgetStatePropertyAll(
-                    EdgeInsets.symmetric(horizontal: 8),
-                  ),
-                ),
-                segments: [
-                  ButtonSegment<int>(
-                    value: PeriodState.active,
-                    label: FittedBox(
-                      fit: BoxFit.scaleDown,
-                      child: Text(
-                        counts == null ? '进行中' : '进行中 (${counts.active})',
-                        key: const Key('periodic_tab_0'),
-                        maxLines: 1,
-                        softWrap: false,
-                      ),
-                    ),
-                  ),
-                  ButtonSegment<int>(
-                    value: PeriodState.ended,
-                    label: FittedBox(
-                      fit: BoxFit.scaleDown,
-                      child: Text(
-                        counts == null ? '已结束' : '已结束 (${counts.ended})',
-                        key: const Key('periodic_tab_1'),
-                        maxLines: 1,
-                        softWrap: false,
-                      ),
-                    ),
-                  ),
-                  ButtonSegment<int>(
-                    value: PeriodState.paused,
-                    label: FittedBox(
-                      fit: BoxFit.scaleDown,
-                      child: Text(
-                        counts == null ? '已停用' : '已停用 (${counts.paused})',
-                        key: const Key('periodic_tab_2'),
-                        maxLines: 1,
-                        softWrap: false,
-                      ),
-                    ),
-                  ),
-                ],
-                selected: {selectedTab},
-                onSelectionChanged: (selection) {
-                  ref
-                      .read(periodicTabProvider.notifier)
-                      .select(selection.first);
-                },
-              ),
-            ),
-          ),
-          if (skippedCount > 0)
-            Container(
-              key: const Key('periodic_skipped_banner'),
-              width: double.infinity,
-              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              decoration: BoxDecoration(
-                color: Colors.amber.withValues(alpha: isDark ? 0.16 : 0.16),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: isDark ? Colors.amber.shade300 : Colors.amber,
+          if (isDesktop)
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: Tooltip(
+                message: '新建周期记账',
+                child: FilledButton.tonalIcon(
+                  key: const Key('add_periodic_button'),
+                  onPressed: () => _openEditor(),
+                  icon: const Icon(Icons.add, size: 18),
+                  label: const Text('新建周期'),
                 ),
               ),
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.warning_amber_rounded,
-                    color: isDark
-                        ? Colors.amber.shade300
-                        : Colors.orange.shade800,
-                    size: 20,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      '有 $skippedCount 条到期周期规则因关联账户不可用或外币汇率缺失已跳过自动入账。',
-                      style: const TextStyle(fontSize: 13),
-                    ),
-                  ),
-                ],
-              ),
             ),
-          Expanded(
-            child: rulesAsync.when(
-              loading: () => const Loading(),
-              error: (e, _) => ErrorView(e),
-              data: (rules) {
-                if (rules.isEmpty) {
-                  final emptyText = switch (selectedTab) {
-                    PeriodState.active => '暂无进行中的周期记账',
-                    PeriodState.ended => '暂无已结束的周期记账',
-                    PeriodState.paused => '暂无已停用的周期记账',
-                    _ => '暂无周期记账',
-                  };
-                  return RefreshIndicator(
-                    onRefresh: () => _triggerCatchUp(force: true),
-                    child: ListView(
-                      children: [
-                        const SizedBox(height: 120),
-                        Center(
-                          child: Text(
-                            emptyText,
-                            style: TextStyle(
-                              color: theme.colorScheme.onSurfaceVariant,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                }
-
-                return RefreshIndicator(
-                  onRefresh: () => _triggerCatchUp(force: true),
-                  child: ListView.builder(
-                    padding: const EdgeInsets.only(top: 4, bottom: 88),
-                    itemCount: rules.length,
-                    itemBuilder: (context, index) {
-                      final rule = rules[index];
-                      return _buildRuleCard(
-                        context,
-                        rule: rule,
-                        categories: allCategories,
-                        assets: allAssets,
-                        books: books,
-                      );
-                    },
-                  ),
-                );
-              },
-            ),
-          ),
         ],
       ),
+      floatingActionButton: isDesktop
+          ? null
+          : FloatingActionButton(
+              key: const Key('add_periodic_button'),
+              tooltip: '新建周期记账',
+              onPressed: () => _openEditor(),
+              child: const Icon(Icons.add),
+            ),
+      body: isDesktop
+          ? Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 800),
+                child: bodyContent,
+              ),
+            )
+          : bodyContent,
     );
   }
 
@@ -527,6 +561,7 @@ class PeriodicHistoryPage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final isDesktop = DesktopAdaptive.isDesktop(context);
     final ruleAsync = ref.watch(periodicRuleProvider(periodId));
     final historyAsync = ref.watch(periodicHistoryProvider(periodId));
     final categories =
@@ -534,76 +569,97 @@ class PeriodicHistoryPage extends ConsumerWidget {
         const <RecordCategory>[];
     final assets = ref.watch(assetsProvider).value ?? const <Asset>[];
 
-    return Scaffold(
-      key: const Key('periodic_history_page'),
-      appBar: AppBar(title: const Text('周期历史账单')),
-      body: historyAsync.when(
-        loading: () => const Loading(),
-        error: (e, _) => ErrorView(e),
-        data: (records) {
-          final rule = ruleAsync.value;
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 12,
+    return DesktopModalEscapeScope(
+      enabled: isDesktop,
+      child: Scaffold(
+        key: const Key('periodic_history_page'),
+        appBar: AppBar(
+          leading:
+              isDesktop &&
+                  ModalRoute.of(context) is PopupRoute &&
+                  Navigator.of(context).canPop()
+              ? const CloseButton()
+              : null,
+          scrolledUnderElevation: isDesktop ? 0 : null,
+          title: const Text('周期历史账单'),
+        ),
+        body: historyAsync.when(
+          loading: () => const Loading(),
+          error: (e, _) => ErrorView(e),
+          data: (records) {
+            final rule = ruleAsync.value;
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 12,
+                  ),
+                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                  child: Text(
+                    rule == null
+                        ? '规则已删除 · 历史保留 ${records.length} 笔记录'
+                        : '${formatPeriodCycleSummary(periodType: rule.periodType, periodTypeDateJson: rule.periodTypeDate, frequency: rule.frequency)} · 共生成 ${records.length} 笔记录',
+                    key: const Key('periodic_history_summary'),
+                    style: const TextStyle(fontSize: 13),
+                  ),
                 ),
-                color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                child: Text(
-                  rule == null
-                      ? '规则已删除 · 历史保留 ${records.length} 笔记录'
-                      : '${formatPeriodCycleSummary(periodType: rule.periodType, periodTypeDateJson: rule.periodTypeDate, frequency: rule.frequency)} · 共生成 ${records.length} 笔记录',
-                  key: const Key('periodic_history_summary'),
-                  style: const TextStyle(fontSize: 13),
-                ),
-              ),
-              Expanded(
-                child: records.isEmpty
-                    ? Center(
-                        child: Text(
-                          '暂无已生成的周期账单',
-                          style: TextStyle(
-                            color: Theme.of(
-                              context,
-                            ).colorScheme.onSurfaceVariant,
+                Expanded(
+                  child: records.isEmpty
+                      ? Center(
+                          child: Text(
+                            '暂无已生成的周期账单',
+                            style: TextStyle(
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.onSurfaceVariant,
+                            ),
                           ),
-                        ),
-                      )
-                    : ListView.separated(
-                        itemCount: records.length,
-                        separatorBuilder: (_, _) => const Divider(height: 1),
-                        itemBuilder: (context, index) {
-                          final r = records[index];
-                          final label = recordLabel(r, categories, assets);
-                          final timeStr = formatDateTime(
-                            DateTime.fromMillisecondsSinceEpoch(r.recordTime),
-                          );
-                          return ListTile(
-                            key: Key('periodic_history_item_${r.recordId}'),
-                            title: Text(label.title),
-                            subtitle: Text(
-                              label.subtitle.isEmpty
-                                  ? timeStr
-                                  : '${label.subtitle} · $timeStr',
-                            ),
-                            trailing: Text(
-                              label.amount,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
+                        )
+                      : ListView.separated(
+                          itemCount: records.length,
+                          separatorBuilder: (_, _) => const Divider(height: 1),
+                          itemBuilder: (context, index) {
+                            final r = records[index];
+                            final label = recordLabel(r, categories, assets);
+                            final timeStr = formatDateTime(
+                              DateTime.fromMillisecondsSinceEpoch(r.recordTime),
+                            );
+                            return ListTile(
+                              key: Key('periodic_history_item_${r.recordId}'),
+                              title: Text(label.title),
+                              subtitle: Text(
+                                label.subtitle.isEmpty
+                                    ? timeStr
+                                    : '${label.subtitle} · $timeStr',
                               ),
-                            ),
-                            onTap: onRecordTap == null
-                                ? null
-                                : () => onRecordTap!(r.recordId),
-                          );
-                        },
-                      ),
-              ),
-            ],
-          );
-        },
+                              trailing: Text(
+                                label.amount,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              onTap: onRecordTap != null
+                                  ? () => onRecordTap!(r.recordId)
+                                  : isDesktop
+                                  ? () => unawaited(
+                                      pushDesktopModalOrMaterialRoute<void>(
+                                        context,
+                                        child: RecordDetailPage(
+                                          recordId: r.recordId,
+                                        ),
+                                      ),
+                                    )
+                                  : null,
+                            );
+                          },
+                        ),
+                ),
+              ],
+            );
+          },
+        ),
       ),
     );
   }

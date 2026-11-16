@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/adaptive.dart';
 import '../attachments/attachment_providers.dart'
     show billAttachmentServiceProvider;
 import '../common/common.dart';
@@ -57,9 +58,15 @@ class _DiyToolbarSettingsPageState
   @override
   Widget build(BuildContext context) {
     final configAsync = ref.watch(diyToolbarConfigProvider);
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    final isDesktopModal =
+        isDesktop &&
+        ModalRoute.of(context) is PopupRoute &&
+        Navigator.of(context).canPop();
 
     return Scaffold(
       appBar: AppBar(
+        leading: isDesktopModal ? const CloseButton() : null,
         title: const Text('记账工具栏自定义'),
         actions: [
           TextButton(
@@ -73,7 +80,7 @@ class _DiyToolbarSettingsPageState
       ),
       body: asyncBody(configAsync, (config) {
         final visible = config.visibleActions;
-        return Column(
+        Widget content = Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Card(
@@ -111,7 +118,9 @@ class _DiyToolbarSettingsPageState
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
               child: Text(
-                '长按拖拽或点击上下箭头调整顺序，开关控制是否在记一笔页面展示：',
+                isDesktop
+                    ? '拖拽左侧手柄或点击上下箭头调整顺序，开关控制是否在记一笔弹窗展示：'
+                    : '长按拖拽或点击上下箭头调整顺序，开关控制是否在记一笔页面展示：',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
@@ -129,66 +138,98 @@ class _DiyToolbarSettingsPageState
                 itemBuilder: (context, index) {
                   final item = config.items[index];
                   final action = item.action;
+                  final tile = ListTile(
+                    contentPadding: const EdgeInsets.only(left: 16, right: 10),
+                    leading: isDesktop
+                        ? Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              MouseRegion(
+                                cursor: _busy
+                                    ? SystemMouseCursors.basic
+                                    : SystemMouseCursors.grab,
+                                child: Icon(
+                                  Icons.drag_handle_rounded,
+                                  size: 20,
+                                  color: Theme.of(context).colorScheme.outline,
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Icon(_iconFor(action)),
+                            ],
+                          )
+                        : Icon(_iconFor(action)),
+                    title: Text(action.label),
+                    subtitle: Text(action.description),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          key: Key('diy-up-${action.key}'),
+                          tooltip: '上移',
+                          visualDensity: VisualDensity.compact,
+                          style: IconButton.styleFrom(
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                          icon: const Icon(Icons.arrow_upward, size: 18),
+                          onPressed: _busy || index == 0
+                              ? null
+                              : () =>
+                                    _persist(config.moveItem(index, index - 1)),
+                        ),
+                        IconButton(
+                          key: Key('diy-down-${action.key}'),
+                          tooltip: '下移',
+                          visualDensity: VisualDensity.compact,
+                          style: IconButton.styleFrom(
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                          icon: const Icon(Icons.arrow_downward, size: 18),
+                          onPressed: _busy || index == config.items.length - 1
+                              ? null
+                              : () =>
+                                    _persist(config.moveItem(index, index + 1)),
+                        ),
+                        Switch(
+                          key: Key('diy-switch-${action.key}'),
+                          value: item.enabled,
+                          onChanged: _busy
+                              ? null
+                              : (enabled) => _persist(
+                                  config.setEnabled(action, enabled),
+                                ),
+                        ),
+                      ],
+                    ),
+                  );
+                  if (isDesktop) {
+                    return ReorderableDragStartListener(
+                      key: ValueKey('diy-row-${action.key}'),
+                      index: index,
+                      enabled: !_busy,
+                      child: tile,
+                    );
+                  }
                   return ReorderableDelayedDragStartListener(
                     key: ValueKey('diy-row-${action.key}'),
                     index: index,
                     enabled: !_busy,
-                    child: ListTile(
-                      contentPadding: const EdgeInsets.only(
-                        left: 16,
-                        right: 10,
-                      ),
-                      leading: Icon(_iconFor(action)),
-                      title: Text(action.label),
-                      subtitle: Text(action.description),
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          IconButton(
-                            key: Key('diy-up-${action.key}'),
-                            tooltip: '上移',
-                            visualDensity: VisualDensity.compact,
-                            style: IconButton.styleFrom(
-                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                            ),
-                            icon: const Icon(Icons.arrow_upward, size: 18),
-                            onPressed: _busy || index == 0
-                                ? null
-                                : () => _persist(
-                                    config.moveItem(index, index - 1),
-                                  ),
-                          ),
-                          IconButton(
-                            key: Key('diy-down-${action.key}'),
-                            tooltip: '下移',
-                            visualDensity: VisualDensity.compact,
-                            style: IconButton.styleFrom(
-                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                            ),
-                            icon: const Icon(Icons.arrow_downward, size: 18),
-                            onPressed: _busy || index == config.items.length - 1
-                                ? null
-                                : () => _persist(
-                                    config.moveItem(index, index + 1),
-                                  ),
-                          ),
-                          Switch(
-                            key: Key('diy-switch-${action.key}'),
-                            value: item.enabled,
-                            onChanged: _busy
-                                ? null
-                                : (enabled) => _persist(
-                                    config.setEnabled(action, enabled),
-                                  ),
-                          ),
-                        ],
-                      ),
-                    ),
+                    child: tile,
                   );
                 },
               ),
             ),
           ],
+        );
+        if (!isDesktop) {
+          return content;
+        }
+        return Align(
+          alignment: Alignment.topCenter,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 760),
+            child: content,
+          ),
         );
       }),
     );

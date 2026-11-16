@@ -30,9 +30,11 @@ import '../budget/budget_widgets.dart';
 import '../categories/categories_page.dart';
 import '../common/catalog_icons.dart';
 import '../common/common.dart';
+import '../common/desktop_modal_page.dart';
 import '../receipt/diy_toolbar_settings_page.dart';
 import '../receipt/receipt_diy_providers.dart';
 import '../receipt/record_receipt_dialog.dart' show BillLocationEditorDialog;
+import '../stats/tag_stats_page.dart' show TagColorDot, parseTagColor;
 import '../tags/tags_page.dart';
 import '../templates/template_providers.dart';
 import '../templates/templates_page.dart'
@@ -1599,6 +1601,17 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
   }
 
   void _openCategoriesManager() {
+    if (_isDesktopActive) {
+      unawaited(
+        pushDesktopModalOrMaterialRoute<void>(
+          context,
+          maxWidth: 820,
+          maxHeight: 720,
+          child: const CategoriesPage(),
+        ),
+      );
+      return;
+    }
     if (!_isImperativeDialogRoute && GoRouter.maybeOf(context) != null) {
       unawaited(context.push('/categories'));
     } else {
@@ -1611,6 +1624,17 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
   }
 
   void _openTagsManager() {
+    if (_isDesktopActive) {
+      unawaited(
+        pushDesktopModalOrMaterialRoute<void>(
+          context,
+          maxWidth: 780,
+          maxHeight: 700,
+          child: const TagsPage(),
+        ),
+      );
+      return;
+    }
     if (!_isImperativeDialogRoute && GoRouter.maybeOf(context) != null) {
       unawaited(context.push('/tags'));
     } else {
@@ -1623,6 +1647,17 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
   }
 
   void _openTemplatesManager() {
+    if (_isDesktopActive) {
+      unawaited(
+        pushDesktopModalOrMaterialRoute<void>(
+          context,
+          maxWidth: 820,
+          maxHeight: 720,
+          child: const TemplatesPage(),
+        ),
+      );
+      return;
+    }
     if (!_isImperativeDialogRoute && GoRouter.maybeOf(context) != null) {
       unawaited(context.push('/templates'));
     } else {
@@ -1636,6 +1671,17 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
 
   void _openRemarksManager() {
     _unfocusOsKeyboardFields();
+    if (_isDesktopActive) {
+      unawaited(
+        pushDesktopModalOrMaterialRoute<void>(
+          context,
+          maxWidth: 820,
+          maxHeight: 720,
+          child: RemarksPage(initialCategoryId: categoryId),
+        ),
+      );
+      return;
+    }
     if (!_isImperativeDialogRoute && GoRouter.maybeOf(context) != null) {
       unawaited(
         context.push(
@@ -1689,7 +1735,9 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
             child: ExcludeFocus(
               child: IconButton(
                 key: const Key('editor-remarks-toggle-btn'),
-                tooltip: inRemarksMode ? '切换数字键盘' : '常用备注',
+                tooltip: inRemarksMode
+                    ? (_isDesktopActive ? '收起常用备注' : '切换数字键盘')
+                    : '常用备注',
                 visualDensity: VisualDensity.compact,
                 padding: EdgeInsets.zero,
                 constraints: const BoxConstraints.tightFor(
@@ -1720,6 +1768,17 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
   }
 
   void _openAssetsManager() {
+    if (_isDesktopActive) {
+      unawaited(
+        pushDesktopModalOrMaterialRoute<void>(
+          context,
+          maxWidth: 860,
+          maxHeight: 740,
+          child: const AssetsPage(),
+        ),
+      );
+      return;
+    }
     if (!_isImperativeDialogRoute && GoRouter.maybeOf(context) != null) {
       unawaited(context.push('/assets'));
     } else {
@@ -1792,7 +1851,6 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                       children: [
                         if (allowNone)
                           ListTile(
-                            dense: true,
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(10),
                             ),
@@ -1818,7 +1876,6 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                           ),
                         for (final a in assets)
                           ListTile(
-                            dense: true,
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(10),
                             ),
@@ -2014,6 +2071,16 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                                   for (final t in tags)
                                     FilterChip(
                                       key: Key('tag-${t.name}'),
+                                      avatar:
+                                          t.color != null && t.color!.isNotEmpty
+                                          ? TagColorDot(
+                                              colorHex: t.color,
+                                              size: 8,
+                                            )
+                                          : null,
+                                      selectedColor: parseTagColor(
+                                        t.color,
+                                      )?.withValues(alpha: 0.22),
                                       label: Text(t.name),
                                       selected: selectedTagIds.contains(
                                         t.tagId,
@@ -2189,7 +2256,6 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                       children: [
                         ListTile(
                           key: const Key('currency-option-follow-account'),
-                          dense: true,
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(10),
                           ),
@@ -2218,7 +2284,6 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                         for (final c in currencies)
                           ListTile(
                             key: Key('currency-option-${c.code}'),
-                            dense: true,
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(10),
                             ),
@@ -2504,7 +2569,16 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
             onPressed: busy
                 ? null
                 : () {
-                    if (!_isImperativeDialogRoute &&
+                    if (_isDesktopActive) {
+                      unawaited(
+                        pushDesktopModalOrMaterialRoute<void>(
+                          context,
+                          maxWidth: 760,
+                          maxHeight: 700,
+                          child: const DiyToolbarSettingsPage(),
+                        ),
+                      );
+                    } else if (!_isImperativeDialogRoute &&
                         GoRouter.maybeOf(context) != null) {
                       unawaited(context.push('/settings/diy-toolbar'));
                     } else {
@@ -2565,10 +2639,18 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
         : cs.surfaceContainerLow;
 
     if (isDesktop) {
-      const desktopDockHeaderAndActionReserve = 168.0;
+      final minMiddleZoneHeight = math.min(
+        areaConstraints.maxHeight * 0.38,
+        math.max(150.0, areaConstraints.maxHeight * 0.30),
+      );
+      final maxDockHeight = math.max(
+        0.0,
+        areaConstraints.maxHeight - minMiddleZoneHeight,
+      );
+      const desktopDockHeaderAndActionReserve = 148.0;
       final maxOptionalPanelHeight = math.max(
         0.0,
-        areaConstraints.maxHeight - desktopDockHeaderAndActionReserve,
+        maxDockHeight - desktopDockHeaderAndActionReserve,
       );
       final desktopPanelSlotHeight = _desktopKeypadExpanded
           ? math.min(RecordCustomKeypad.panelHeight, maxOptionalPanelHeight)
@@ -2589,7 +2671,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
             ),
           ),
           ConstrainedBox(
-            constraints: BoxConstraints(maxHeight: areaConstraints.maxHeight),
+            constraints: BoxConstraints(maxHeight: maxDockHeight),
             child: _buildBottomDock(
               context,
               bookId: bookId,
@@ -2677,6 +2759,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     required List<RecordCategory> categories,
     required DiyToolbarConfig diyConfig,
   }) {
+    final isDesktop = DesktopAdaptive.isDesktop(context);
     final cs = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final unselectedBg = isDark
@@ -2688,17 +2771,21 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
       return ChoiceChip(
         key: Key('type-$value'),
         showCheckmark: false,
-        visualDensity: primary
-            ? const VisualDensity(horizontal: -1, vertical: -2)
-            : const VisualDensity(horizontal: -2, vertical: -3),
+        visualDensity: isDesktop
+            ? VisualDensity.compact
+            : (primary
+                  ? const VisualDensity(horizontal: -1, vertical: -2)
+                  : const VisualDensity(horizontal: -2, vertical: -3)),
         materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-        padding: EdgeInsets.symmetric(horizontal: primary ? 8 : 5, vertical: 0),
+        padding: isDesktop
+            ? const EdgeInsets.symmetric(horizontal: 10, vertical: 4)
+            : EdgeInsets.symmetric(horizontal: primary ? 8 : 5, vertical: 0),
         shape: const StadiumBorder(),
         side: BorderSide.none,
         selectedColor: primary ? cs.primary : cs.secondaryContainer,
         backgroundColor: unselectedBg,
         labelStyle: TextStyle(
-          fontSize: primary ? 13 : 11.5,
+          fontSize: isDesktop ? 13 : (primary ? 13 : 11.5),
           fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
           color: selected
               ? (primary ? cs.onPrimary : cs.onSecondaryContainer)
@@ -3032,7 +3119,9 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
           children: [
             Expanded(
               child: ConstrainedBox(
-                constraints: const BoxConstraints(minHeight: 42),
+                constraints: BoxConstraints(
+                  minHeight: DesktopAdaptive.isDesktop(context) ? 44 : 42,
+                ),
                 child: TextField(
                   key: const Key('fee'),
                   controller: fee,
@@ -3060,10 +3149,13 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                     labelText: '手续费（可选）',
                     prefixText:
                         '${feeFromTarget ? _currencies().$2 : _currencies().$1} ',
-                    isDense: true,
-                    contentPadding: const EdgeInsets.symmetric(
+                    isDense: !DesktopAdaptive.isDesktop(context),
+                    constraints: DesktopAdaptive.isDesktop(context)
+                        ? const BoxConstraints.tightFor(height: 44)
+                        : null,
+                    contentPadding: EdgeInsets.symmetric(
                       horizontal: 12,
-                      vertical: 10,
+                      vertical: DesktopAdaptive.isDesktop(context) ? 12 : 10,
                     ),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10),
@@ -3073,17 +3165,28 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
               ),
             ),
             const SizedBox(width: 8),
-            FilterChip(
-              key: const Key('transfer-fee-side-toggle'),
-              visualDensity: VisualDensity.compact,
-              label: Text(
-                feeFromTarget ? '转入方扣费' : '转出方扣费',
-                style: const TextStyle(fontSize: 12),
+            SizedBox(
+              height: DesktopAdaptive.isDesktop(context) ? 44 : null,
+              child: FilterChip(
+                key: const Key('transfer-fee-side-toggle'),
+                visualDensity: DesktopAdaptive.isDesktop(context)
+                    ? VisualDensity.standard
+                    : VisualDensity.compact,
+                materialTapTargetSize: DesktopAdaptive.isDesktop(context)
+                    ? MaterialTapTargetSize.shrinkWrap
+                    : null,
+                padding: DesktopAdaptive.isDesktop(context)
+                    ? const EdgeInsets.symmetric(horizontal: 10, vertical: 8)
+                    : null,
+                label: Text(
+                  feeFromTarget ? '转入方扣费' : '转出方扣费',
+                  style: const TextStyle(fontSize: 12),
+                ),
+                selected: feeFromTarget,
+                onSelected: busy
+                    ? null
+                    : (v) => setState(() => feeFromTarget = v),
               ),
-              selected: feeFromTarget,
-              onSelected: busy
-                  ? null
-                  : (v) => setState(() => feeFromTarget = v),
             ),
           ],
         ),
@@ -3625,7 +3728,22 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                                                 ],
                                               ),
                                               decoration: InputDecoration(
-                                                isDense: true,
+                                                isCollapsed:
+                                                    DesktopAdaptive.isDesktop(
+                                                      context,
+                                                    ),
+                                                isDense:
+                                                    !DesktopAdaptive.isDesktop(
+                                                      context,
+                                                    ),
+                                                constraints:
+                                                    DesktopAdaptive.isDesktop(
+                                                      context,
+                                                    )
+                                                    ? const BoxConstraints(
+                                                        minHeight: 36,
+                                                      )
+                                                    : null,
                                                 hintText: amount.text.isEmpty
                                                     ? '0.00'
                                                     : null,
@@ -3635,8 +3753,13 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                                                   color: cs.outlineVariant,
                                                 ),
                                                 contentPadding:
-                                                    const EdgeInsets.symmetric(
-                                                      vertical: 4,
+                                                    EdgeInsets.symmetric(
+                                                      vertical:
+                                                          DesktopAdaptive.isDesktop(
+                                                            context,
+                                                          )
+                                                          ? 6
+                                                          : 4,
                                                     ),
                                                 border: InputBorder.none,
                                               ),
@@ -3696,17 +3819,23 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                           }) => null,
                       onChanged: (_) =>
                           setState(() => _savedAndResetBanner = false),
+                      textAlignVertical: DesktopAdaptive.isDesktop(context)
+                          ? TextAlignVertical.center
+                          : null,
                       style: const TextStyle(fontSize: 13.5),
                       decoration: InputDecoration(
-                        isDense: true,
+                        isDense: !DesktopAdaptive.isDesktop(context),
+                        constraints: DesktopAdaptive.isDesktop(context)
+                            ? const BoxConstraints(minHeight: 38)
+                            : null,
                         hintText: '输入备注...',
                         hintStyle: TextStyle(
                           fontSize: 13,
                           color: cs.onSurfaceVariant.withAlpha(160),
                         ),
-                        contentPadding: const EdgeInsets.symmetric(
+                        contentPadding: EdgeInsets.symmetric(
                           horizontal: 4,
-                          vertical: 8,
+                          vertical: DesktopAdaptive.isDesktop(context) ? 10 : 8,
                         ),
                         border: InputBorder.none,
                         prefixIcon: Icon(
@@ -4104,9 +4233,16 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                     ),
                     IconButton(
                       key: const Key('editor-remarks-back-keypad-btn'),
-                      tooltip: '返回数字键盘',
+                      tooltip: DesktopAdaptive.isDesktop(context)
+                          ? '收起常用备注'
+                          : '返回数字键盘',
                       visualDensity: VisualDensity.compact,
-                      icon: const Icon(Icons.dialpad_rounded, size: 18),
+                      icon: Icon(
+                        DesktopAdaptive.isDesktop(context)
+                            ? Icons.keyboard_arrow_down_rounded
+                            : Icons.dialpad_rounded,
+                        size: 18,
+                      ),
                       onPressed: busy ? null : _activateCustomKeypad,
                     ),
                   ],

@@ -347,6 +347,70 @@ List<_MeSectionData> _buildMeSections({
   ),
 ];
 
+const Set<String> _supportedEmbeddedRoutes = <String>{
+  '/books',
+  '/categories',
+  '/tags',
+  '/currencies',
+  '/reimburse',
+  '/periodic',
+  '/installments',
+  '/debts',
+  '/savings',
+  '/deposits',
+  '/reminders',
+  '/backup',
+  '/import/csv',
+  '/import/batches',
+  '/export/csv',
+  '/migration',
+  '/wishes',
+  '/notes',
+  '/templates',
+  '/remarks',
+  '/bank-cards',
+  '/records/batch',
+  '/categories/transfer',
+  '/attachments',
+  '/stat-stories',
+  '/automation/auto-bill',
+  '/automation/ocr',
+  '/automation/widgets',
+  '/automation/url-scheme',
+  '/security/app-lock',
+  '/settings',
+  '/settings/diy-toolbar',
+  '/settings/data-health',
+  '/about',
+};
+
+/// Scope exposed by [MePage] when rendering its expanded two-column desktop
+/// workspace (`>= 1080px`), allowing embedded subpages to switch sibling
+/// directory routes in-place without pushing full-screen routes over the
+/// directory sidebar.
+class MeEmbeddedNavigationScope extends InheritedWidget {
+  const MeEmbeddedNavigationScope({
+    super.key,
+    required this.selectedRoute,
+    required this.onSelectRoute,
+    required super.child,
+  });
+
+  final String selectedRoute;
+  final ValueChanged<String> onSelectRoute;
+
+  static MeEmbeddedNavigationScope? maybeOf(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<MeEmbeddedNavigationScope>();
+
+  static bool isSupportedRoute(String route) =>
+      _supportedEmbeddedRoutes.contains(route);
+
+  @override
+  bool updateShouldNotify(MeEmbeddedNavigationScope oldWidget) =>
+      selectedRoute != oldWidget.selectedRoute ||
+      onSelectRoute != oldWidget.onSelectRoute;
+}
+
 Widget _buildEmbeddedMePage(BuildContext context, String route) =>
     switch (route) {
       '/books' => const BooksPage(),
@@ -403,7 +467,50 @@ class MePage extends ConsumerStatefulWidget {
 
 class _MePageState extends ConsumerState<MePage> {
   String _selectedRoute = '/books';
+  String? _lastSyncedSectionParam;
   final ScrollController _directoryScrollController = ScrollController();
+
+  static String? _normalizeSectionRoute(
+    String? raw, {
+    required bool isDesktop,
+  }) {
+    if (raw == null) return null;
+    final trimmed = raw.trim();
+    if (trimmed.isEmpty) return null;
+    final candidate = trimmed.startsWith('/') ? trimmed : '/$trimmed';
+    if (isDesktop && candidate == '/automation/widgets') {
+      return null;
+    }
+    return _supportedEmbeddedRoutes.contains(candidate) ? candidate : null;
+  }
+
+  static Uri? _currentRouterUri(BuildContext context) {
+    if (GoRouter.maybeOf(context) == null) return null;
+    try {
+      return GoRouterState.of(context).uri;
+    } catch (_) {
+      return GoRouter.maybeOf(context)?.routerDelegate.currentConfiguration.uri;
+    }
+  }
+
+  void _selectEmbeddedRoute(BuildContext context, String route) {
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    final normalized = _normalizeSectionRoute(route, isDesktop: isDesktop);
+    if (normalized == null) return;
+    if (_selectedRoute != normalized) {
+      setState(() => _selectedRoute = normalized);
+    }
+    final currentUri = _currentRouterUri(context);
+    final router = GoRouter.maybeOf(context);
+    if (router != null &&
+        currentUri != null &&
+        currentUri.path == '/me' &&
+        currentUri.queryParameters.containsKey('section') &&
+        currentUri.queryParameters['section'] != normalized) {
+      _lastSyncedSectionParam = normalized;
+      router.go('/me?section=${Uri.encodeComponent(normalized)}');
+    }
+  }
 
   @override
   void dispose() {
@@ -521,11 +628,7 @@ class _MePageState extends ConsumerState<MePage> {
               badgeBg: badgeBg,
               badgeIconColor: badgeIconColor,
               selected: _selectedRoute == entry.route,
-              onTap: () {
-                if (_selectedRoute != entry.route) {
-                  setState(() => _selectedRoute = entry.route);
-                }
-              },
+              onTap: () => _selectEmbeddedRoute(context, entry.route),
             ),
           ),
       ],
@@ -539,6 +642,14 @@ class _MePageState extends ConsumerState<MePage> {
     final isDark = theme.brightness == Brightness.dark;
     final draftCount = ref.watch(autoBillDraftCountProvider);
     final isDesktop = DesktopAdaptive.isDesktop(context);
+    final rawSection = _currentRouterUri(context)?.queryParameters['section'];
+    if (rawSection != _lastSyncedSectionParam) {
+      _lastSyncedSectionParam = rawSection;
+      final target = _normalizeSectionRoute(rawSection, isDesktop: isDesktop);
+      if (target != null && target != _selectedRoute) {
+        _selectedRoute = target;
+      }
+    }
     final sections = _buildMeSections(
       isDesktop: isDesktop,
       draftCount: draftCount,
@@ -549,76 +660,80 @@ class _MePageState extends ConsumerState<MePage> {
           ? scheme.surfaceContainerLowest
           : Color.lerp(scheme.surface, scheme.surfaceContainerLow, 0.65)!;
 
-      return Scaffold(
-        body: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            SizedBox(
-              key: const Key('me-desktop-directory'),
-              width: 236,
-              child: Material(
-                color: directoryBg,
-                child: SafeArea(
-                  right: false,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Container(
-                        height: kToolbarHeight,
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          '管理与设置',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w600,
+      return MeEmbeddedNavigationScope(
+        selectedRoute: _selectedRoute,
+        onSelectRoute: (route) => _selectEmbeddedRoute(context, route),
+        child: Scaffold(
+          body: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SizedBox(
+                key: const Key('me-desktop-directory'),
+                width: 236,
+                child: Material(
+                  color: directoryBg,
+                  child: SafeArea(
+                    right: false,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Container(
+                          height: kToolbarHeight,
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            '管理与设置',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
                         ),
-                      ),
-                      Divider(
-                        height: 1,
-                        thickness: 0.6,
-                        color: scheme.outlineVariant.withValues(alpha: 0.4),
-                      ),
-                      Expanded(
-                        child: SingleChildScrollView(
-                          controller: _directoryScrollController,
-                          padding: const EdgeInsets.fromLTRB(8, 6, 8, 20),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              for (var i = 0; i < sections.length; i++)
-                                _buildDirectorySection(
-                                  context,
-                                  section: sections[i],
-                                  isFirst: i == 0,
-                                ),
-                            ],
+                        Divider(
+                          height: 1,
+                          thickness: 0.6,
+                          color: scheme.outlineVariant.withValues(alpha: 0.4),
+                        ),
+                        Expanded(
+                          child: SingleChildScrollView(
+                            controller: _directoryScrollController,
+                            padding: const EdgeInsets.fromLTRB(8, 6, 8, 20),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                for (var i = 0; i < sections.length; i++)
+                                  _buildDirectorySection(
+                                    context,
+                                    section: sections[i],
+                                    isFirst: i == 0,
+                                  ),
+                              ],
+                            ),
                           ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               ),
-            ),
-            VerticalDivider(
-              width: 1,
-              thickness: 1,
-              color: scheme.outlineVariant.withValues(alpha: 0.45),
-            ),
-            Expanded(
-              key: const Key('me-desktop-content-pane'),
-              child: KeyedSubtree(
-                key: ValueKey<String>(_selectedRoute),
-                child: HeroMode(
-                  enabled: false,
-                  child: _buildEmbeddedMePage(context, _selectedRoute),
+              VerticalDivider(
+                width: 1,
+                thickness: 1,
+                color: scheme.outlineVariant.withValues(alpha: 0.45),
+              ),
+              Expanded(
+                key: const Key('me-desktop-content-pane'),
+                child: KeyedSubtree(
+                  key: ValueKey<String>(_selectedRoute),
+                  child: HeroMode(
+                    enabled: false,
+                    child: _buildEmbeddedMePage(context, _selectedRoute),
+                  ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       );
     }

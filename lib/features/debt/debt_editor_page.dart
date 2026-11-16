@@ -282,317 +282,396 @@ class _DebtEditorPageState extends ConsumerState<DebtEditorPage> {
 
     final isDesktop = DesktopAdaptive.isDesktop(context);
 
-    return DesktopModalEscapeScope(
-      enabled: isDesktop,
-      child: Scaffold(
-        key: const Key('debt_editor_page'),
-        appBar: AppBar(
-          leading: isDesktop ? const CloseButton() : null,
-          scrolledUnderElevation: isDesktop ? 0 : null,
-          title: Text(_editing ? '编辑借贷' : '新建借贷'),
-        ),
-        bottomNavigationBar: SafeArea(
-          child: Padding(
-            padding: isDesktop
-                ? const EdgeInsets.fromLTRB(20, 8, 20, 14)
-                : const EdgeInsets.fromLTRB(16, 8, 16, 12),
-            child: FilledButton(
-              key: const Key('save_debt_button'),
-              onPressed: _busy || _loading ? null : _save,
-              child: Text(_busy ? '保存中…' : '保存'),
+    return PopScope(
+      canPop: !_busy,
+      child: DesktopModalEscapeScope(
+        enabled: isDesktop,
+        child: Scaffold(
+          key: const Key('debt_editor_page'),
+          appBar: AppBar(
+            leading: isDesktop ? const CloseButton() : null,
+            scrolledUnderElevation: isDesktop ? 0 : null,
+            title: Text(_editing ? '编辑借贷' : '新建借贷'),
+          ),
+          bottomNavigationBar: SafeArea(
+            child: Padding(
+              padding: isDesktop
+                  ? const EdgeInsets.fromLTRB(20, 8, 20, 14)
+                  : const EdgeInsets.fromLTRB(16, 8, 16, 12),
+              child: FilledButton(
+                key: const Key('save_debt_button'),
+                onPressed: _busy || _loading ? null : _save,
+                child: Text(_busy ? '保存中…' : '保存'),
+              ),
             ),
           ),
-        ),
-        body: _loading
-            ? const Loading()
-            : Center(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 640),
-                  child: ListView(
-                    padding: isDesktop
-                        ? const EdgeInsets.fromLTRB(20, 12, 20, 16)
-                        : const EdgeInsets.all(16),
-                    children: [
-                      if (!_editing)
-                        SizedBox(
-                          width: double.infinity,
-                          child: SegmentedButton<int>(
-                            key: const Key('debt_direction_selector'),
-                            showSelectedIcon: false,
-                            style: const ButtonStyle(
-                              visualDensity: VisualDensity.compact,
-                              padding: WidgetStatePropertyAll(
-                                EdgeInsets.symmetric(horizontal: 10),
+          body: _loading
+              ? const Loading()
+              : Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 640),
+                    child: ListView(
+                      padding: isDesktop
+                          ? const EdgeInsets.fromLTRB(20, 12, 20, 16)
+                          : const EdgeInsets.all(16),
+                      children: [
+                        if (!_editing)
+                          SizedBox(
+                            width: double.infinity,
+                            child: SegmentedButton<int>(
+                              key: const Key('debt_direction_selector'),
+                              showSelectedIcon: false,
+                              style: isDesktop
+                                  ? const ButtonStyle(
+                                      padding: WidgetStatePropertyAll(
+                                        EdgeInsets.symmetric(
+                                          horizontal: 12,
+                                          vertical: 6,
+                                        ),
+                                      ),
+                                    )
+                                  : const ButtonStyle(
+                                      visualDensity: VisualDensity.compact,
+                                      padding: WidgetStatePropertyAll(
+                                        EdgeInsets.symmetric(horizontal: 10),
+                                      ),
+                                    ),
+                              segments: const [
+                                ButtonSegment(
+                                  value: AssetType.debtLend,
+                                  label: FittedBox(
+                                    fit: BoxFit.scaleDown,
+                                    child: Text(
+                                      '借出（应收）',
+                                      maxLines: 1,
+                                      softWrap: false,
+                                    ),
+                                  ),
+                                  icon: Icon(Icons.call_made, size: 18),
+                                ),
+                                ButtonSegment(
+                                  value: AssetType.debtBorrow,
+                                  label: FittedBox(
+                                    fit: BoxFit.scaleDown,
+                                    child: Text(
+                                      '借入（应付）',
+                                      maxLines: 1,
+                                      softWrap: false,
+                                    ),
+                                  ),
+                                  icon: Icon(Icons.call_received, size: 18),
+                                ),
+                              ],
+                              selected: {_subType},
+                              onSelectionChanged: _busy
+                                  ? null
+                                  : (s) => setState(() => _subType = s.first),
+                            ),
+                          )
+                        else
+                          ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: const Text('借贷方向'),
+                            trailing: Chip(
+                              label: Text(
+                                _subType == AssetType.debtBorrow
+                                    ? '借入（应付）'
+                                    : '借出（应收）',
                               ),
                             ),
-                            segments: const [
-                              ButtonSegment(
-                                value: AssetType.debtLend,
-                                label: FittedBox(
-                                  fit: BoxFit.scaleDown,
-                                  child: Text(
-                                    '借出（应收）',
-                                    maxLines: 1,
-                                    softWrap: false,
-                                  ),
-                                ),
-                                icon: Icon(Icons.call_made, size: 18),
-                              ),
-                              ButtonSegment(
-                                value: AssetType.debtBorrow,
-                                label: FittedBox(
-                                  fit: BoxFit.scaleDown,
-                                  child: Text(
-                                    '借入（应付）',
-                                    maxLines: 1,
-                                    softWrap: false,
-                                  ),
-                                ),
-                                icon: Icon(Icons.call_received, size: 18),
-                              ),
-                            ],
-                            selected: {_subType},
-                            onSelectionChanged: _busy
-                                ? null
-                                : (s) => setState(() => _subType = s.first),
                           ),
-                        )
-                      else
-                        ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          title: const Text('借贷方向'),
-                          trailing: Chip(
-                            label: Text(
-                              _subType == AssetType.debtBorrow
-                                  ? '借入（应付）'
-                                  : '借出（应收）',
-                            ),
-                          ),
-                        ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        key: const Key('debt_name_input'),
-                        controller: _nameCtrl,
-                        enabled: !_busy,
-                        decoration: InputDecoration(
-                          labelText: _subType == AssetType.debtBorrow
-                              ? '债权人 / 借入方名称'
-                              : '借款人 / 借出对象名称',
-                          hintText: '如：张三、朋友周转',
-                        ),
-                      ),
-                      if (!_editing) ...[
                         const SizedBox(height: 12),
                         TextField(
-                          key: const Key('debt_principal_input'),
-                          controller: _principalCtrl,
+                          key: const Key('debt_name_input'),
+                          controller: _nameCtrl,
                           enabled: !_busy,
-                          keyboardType: const TextInputType.numberWithOptions(
-                            decimal: true,
-                          ),
-                          inputFormatters: debtAmountInputFormatters,
-                          decoration: InputDecoration(
-                            labelText: _subType == AssetType.debtBorrow
-                                ? '借入总本金 ($debtCurr)'
-                                : '借出总本金 ($debtCurr)',
-                          ),
-                        ),
-                        if (currencies.length > 1 ||
-                            (_currency != null &&
-                                _currency != baseCurrency)) ...[
-                          const SizedBox(height: 12),
-                          InputDecorator(
-                            decoration: const InputDecoration(
-                              labelText: '借贷币种',
-                            ),
-                            child: DropdownButtonHideUnderline(
-                              child: DropdownButton<String?>(
-                                key: const Key('debt_currency_selector'),
-                                value: _currency,
-                                isExpanded: true,
-                                isDense: true,
-                                items: [
-                                  const DropdownMenuItem<String?>(
-                                    value: null,
-                                    child: Text('默认本位币 (CNY)'),
+                          decoration: isDesktop
+                              ? InputDecoration(
+                                  labelText: _subType == AssetType.debtBorrow
+                                      ? '债权人 / 借入方名称'
+                                      : '借款人 / 借出对象名称',
+                                  hintText: '如：张三、朋友周转',
+                                  border: const OutlineInputBorder(),
+                                  contentPadding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 16,
                                   ),
-                                  if (_currency != null &&
-                                      _currency != baseCurrency &&
-                                      !currencies.any(
-                                        (c) => c.code == _currency,
-                                      ))
-                                    DropdownMenuItem<String?>(
-                                      value: _currency,
-                                      child: Text(_currency!),
-                                    ),
-                                  for (final c in currencies)
-                                    if (c.code != baseCurrency)
-                                      DropdownMenuItem<String?>(
-                                        value: c.code,
-                                        child: Text('${c.name} (${c.code})'),
-                                      ),
-                                ],
-                                onChanged: _busy
-                                    ? null
-                                    : (v) => setState(() => _currency = v),
-                              ),
-                            ),
-                          ),
-                        ],
-                        const SizedBox(height: 12),
-                        InputDecorator(
-                          decoration: InputDecoration(
-                            labelText: _subType == AssetType.debtBorrow
-                                ? '收款资金账户（可选）'
-                                : '付款资金账户（可选）',
-                          ),
-                          child: DropdownButtonHideUnderline(
-                            child: DropdownButton<int>(
-                              key: const Key('debt_funding_selector'),
-                              value: _fundingAssetId,
-                              isExpanded: true,
-                              isDense: true,
-                              items: [
-                                const DropdownMenuItem<int>(
-                                  value: noRef,
-                                  child: Text('不关联资金账户'),
+                                )
+                              : InputDecoration(
+                                  labelText: _subType == AssetType.debtBorrow
+                                      ? '债权人 / 借入方名称'
+                                      : '借款人 / 借出对象名称',
+                                  hintText: '如：张三、朋友周转',
                                 ),
-                                if (_fundingAssetId != noRef &&
-                                    !fundingAccounts.any(
-                                      (a) => a.id == _fundingAssetId,
-                                    ))
-                                  DropdownMenuItem<int>(
-                                    value: _fundingAssetId,
-                                    child: Text('账户#$_fundingAssetId'),
-                                  ),
-                                for (final a in fundingAccounts)
-                                  DropdownMenuItem<int>(
-                                    value: a.id,
-                                    child: Text(
-                                      a.currency == null
-                                          ? a.name
-                                          : '${a.name} (${a.currency})',
-                                    ),
-                                  ),
-                              ],
-                              onChanged: _busy
-                                  ? null
-                                  : (v) => setState(
-                                      () => _fundingAssetId = v ?? noRef,
-                                    ),
-                            ),
-                          ),
                         ),
-                        if (crossCurrency) ...[
+                        if (!_editing) ...[
                           const SizedBox(height: 12),
                           TextField(
-                            key: const Key('debt_funding_amount_input'),
-                            controller: _fundingAmountCtrl,
+                            key: const Key('debt_principal_input'),
+                            controller: _principalCtrl,
                             enabled: !_busy,
                             keyboardType: const TextInputType.numberWithOptions(
                               decimal: true,
                             ),
                             inputFormatters: debtAmountInputFormatters,
-                            decoration: InputDecoration(
-                              labelText: '资金账户实际变动金额 ($fundingCurr，留空按汇率自动折算)',
+                            decoration: isDesktop
+                                ? InputDecoration(
+                                    labelText: _subType == AssetType.debtBorrow
+                                        ? '借入总本金 ($debtCurr)'
+                                        : '借出总本金 ($debtCurr)',
+                                    border: const OutlineInputBorder(),
+                                    contentPadding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 16,
+                                    ),
+                                  )
+                                : InputDecoration(
+                                    labelText: _subType == AssetType.debtBorrow
+                                        ? '借入总本金 ($debtCurr)'
+                                        : '借出总本金 ($debtCurr)',
+                                  ),
+                          ),
+                          if (currencies.length > 1 ||
+                              (_currency != null &&
+                                  _currency != baseCurrency)) ...[
+                            const SizedBox(height: 12),
+                            InputDecorator(
+                              decoration: isDesktop
+                                  ? const InputDecoration(
+                                      labelText: '借贷币种',
+                                      border: OutlineInputBorder(),
+                                      contentPadding: EdgeInsets.symmetric(
+                                        horizontal: 12,
+                                        vertical: 16,
+                                      ),
+                                    )
+                                  : const InputDecoration(labelText: '借贷币种'),
+                              child: DropdownButtonHideUnderline(
+                                child: DropdownButton<String?>(
+                                  key: const Key('debt_currency_selector'),
+                                  value: _currency,
+                                  isExpanded: true,
+                                  isDense: true,
+                                  items: [
+                                    const DropdownMenuItem<String?>(
+                                      value: null,
+                                      child: Text('默认本位币 (CNY)'),
+                                    ),
+                                    if (_currency != null &&
+                                        _currency != baseCurrency &&
+                                        !currencies.any(
+                                          (c) => c.code == _currency,
+                                        ))
+                                      DropdownMenuItem<String?>(
+                                        value: _currency,
+                                        child: Text(_currency!),
+                                      ),
+                                    for (final c in currencies)
+                                      if (c.code != baseCurrency)
+                                        DropdownMenuItem<String?>(
+                                          value: c.code,
+                                          child: Text('${c.name} (${c.code})'),
+                                        ),
+                                  ],
+                                  onChanged: _busy
+                                      ? null
+                                      : (v) => setState(() => _currency = v),
+                                ),
+                              ),
+                            ),
+                          ],
+                          const SizedBox(height: 12),
+                          InputDecorator(
+                            decoration: isDesktop
+                                ? InputDecoration(
+                                    labelText: _subType == AssetType.debtBorrow
+                                        ? '收款资金账户（可选）'
+                                        : '付款资金账户（可选）',
+                                    border: const OutlineInputBorder(),
+                                    contentPadding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 16,
+                                    ),
+                                  )
+                                : InputDecoration(
+                                    labelText: _subType == AssetType.debtBorrow
+                                        ? '收款资金账户（可选）'
+                                        : '付款资金账户（可选）',
+                                  ),
+                            child: DropdownButtonHideUnderline(
+                              child: DropdownButton<int>(
+                                key: const Key('debt_funding_selector'),
+                                value: _fundingAssetId,
+                                isExpanded: true,
+                                isDense: true,
+                                items: [
+                                  const DropdownMenuItem<int>(
+                                    value: noRef,
+                                    child: Text('不关联资金账户'),
+                                  ),
+                                  if (_fundingAssetId != noRef &&
+                                      !fundingAccounts.any(
+                                        (a) => a.id == _fundingAssetId,
+                                      ))
+                                    DropdownMenuItem<int>(
+                                      value: _fundingAssetId,
+                                      child: Text('账户#$_fundingAssetId'),
+                                    ),
+                                  for (final a in fundingAccounts)
+                                    DropdownMenuItem<int>(
+                                      value: a.id,
+                                      child: Text(
+                                        a.currency == null
+                                            ? a.name
+                                            : '${a.name} (${a.currency})',
+                                      ),
+                                    ),
+                                ],
+                                onChanged: _busy
+                                    ? null
+                                    : (v) => setState(
+                                        () => _fundingAssetId = v ?? noRef,
+                                      ),
+                              ),
                             ),
                           ),
-                        ],
-                      ],
-                      const SizedBox(height: 16),
-                      Text(
-                        '关联账本',
-                        style: Theme.of(context).textTheme.labelLarge,
-                      ),
-                      const SizedBox(height: 8),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          for (final b in books)
-                            FilterChip(
-                              key: Key('debt_book_chip_${b.id}'),
-                              label: Text(b.name),
-                              selected: _selectedBookIds.contains(b.id),
-                              onSelected: _busy
-                                  ? null
-                                  : (selected) {
-                                      setState(() {
-                                        if (selected) {
-                                          _selectedBookIds.add(b.id);
-                                        } else if (_selectedBookIds.length >
-                                            1) {
-                                          _selectedBookIds.remove(b.id);
-                                        }
-                                      });
-                                    },
+                          if (crossCurrency) ...[
+                            const SizedBox(height: 12),
+                            TextField(
+                              key: const Key('debt_funding_amount_input'),
+                              controller: _fundingAmountCtrl,
+                              enabled: !_busy,
+                              keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                    decimal: true,
+                                  ),
+                              inputFormatters: debtAmountInputFormatters,
+                              decoration: isDesktop
+                                  ? InputDecoration(
+                                      labelText: '资金账户实际变动金额 ($fundingCurr)',
+                                      helperText: '留空按汇率自动折算',
+                                      border: const OutlineInputBorder(),
+                                      contentPadding:
+                                          const EdgeInsets.symmetric(
+                                            horizontal: 12,
+                                            vertical: 16,
+                                          ),
+                                    )
+                                  : InputDecoration(
+                                      labelText:
+                                          '资金账户实际变动金额 ($fundingCurr，留空按汇率自动折算)',
+                                    ),
                             ),
+                          ],
                         ],
-                      ),
-                      const SizedBox(height: 12),
-                      ListTile(
-                        key: const Key('debt_start_date_tile'),
-                        contentPadding: EdgeInsets.zero,
-                        title: const Text('借款日期'),
-                        trailing: Text(formatDate(_startDate)),
-                        onTap: _busy ? null : _pickStartDate,
-                      ),
-                      ListTile(
-                        key: const Key('debt_end_date_tile'),
-                        contentPadding: EdgeInsets.zero,
-                        title: const Text('到期日期（可选）'),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
+                        const SizedBox(height: 16),
+                        Text(
+                          '关联账本',
+                          style: Theme.of(context).textTheme.labelLarge,
+                        ),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
                           children: [
-                            Text(
-                              _endDate == null ? '未设置' : formatDate(_endDate!),
-                            ),
-                            if (_endDate != null)
-                              IconButton(
-                                key: const Key('clear_debt_end_date'),
-                                tooltip: '清除到期日期',
-                                icon: const Icon(Icons.clear, size: 18),
-                                onPressed: _busy
+                            for (final b in books)
+                              FilterChip(
+                                key: Key('debt_book_chip_${b.id}'),
+                                label: Text(b.name),
+                                selected: _selectedBookIds.contains(b.id),
+                                onSelected: _busy
                                     ? null
-                                    : () => setState(() => _endDate = null),
+                                    : (selected) {
+                                        setState(() {
+                                          if (selected) {
+                                            _selectedBookIds.add(b.id);
+                                          } else if (_selectedBookIds.length >
+                                              1) {
+                                            _selectedBookIds.remove(b.id);
+                                          }
+                                        });
+                                      },
                               ),
                           ],
                         ),
-                        onTap: _busy ? null : _pickEndDate,
-                      ),
-                      SwitchListTile(
-                        key: const Key('debt_counted_switch'),
-                        contentPadding: EdgeInsets.zero,
-                        title: Text(
-                          _subType == AssetType.debtBorrow ? '计入总负债' : '计入总资产',
-                        ),
-                        subtitle: const Text('关闭后不计入净资产与借贷顶部汇总'),
-                        value: _countedInNetWorth,
-                        onChanged: _busy
-                            ? null
-                            : (v) => setState(() => _countedInNetWorth = v),
-                      ),
-                      const SizedBox(height: 8),
-                      TextField(
-                        key: const Key('debt_remark_input'),
-                        controller: _remarkCtrl,
-                        enabled: !_busy,
-                        decoration: const InputDecoration(labelText: '备注（可选）'),
-                      ),
-                      if (_error != null) ...[
                         const SizedBox(height: 12),
-                        Text(
-                          _error!,
-                          key: const Key('debt_editor_error'),
-                          style: TextStyle(
-                            color: Theme.of(context).colorScheme.error,
-                          ),
+                        ListTile(
+                          key: const Key('debt_start_date_tile'),
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('借款日期'),
+                          trailing: Text(formatDate(_startDate)),
+                          onTap: _busy ? null : _pickStartDate,
                         ),
+                        ListTile(
+                          key: const Key('debt_end_date_tile'),
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('到期日期（可选）'),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                _endDate == null
+                                    ? '未设置'
+                                    : formatDate(_endDate!),
+                              ),
+                              if (_endDate != null)
+                                IconButton(
+                                  key: const Key('clear_debt_end_date'),
+                                  tooltip: '清除到期日期',
+                                  icon: const Icon(Icons.clear, size: 18),
+                                  onPressed: _busy
+                                      ? null
+                                      : () => setState(() => _endDate = null),
+                                ),
+                            ],
+                          ),
+                          onTap: _busy ? null : _pickEndDate,
+                        ),
+                        SwitchListTile(
+                          key: const Key('debt_counted_switch'),
+                          contentPadding: EdgeInsets.zero,
+                          title: Text(
+                            _subType == AssetType.debtBorrow
+                                ? '计入总负债'
+                                : '计入总资产',
+                          ),
+                          subtitle: const Text('关闭后不计入净资产与借贷顶部汇总'),
+                          value: _countedInNetWorth,
+                          onChanged: _busy
+                              ? null
+                              : (v) => setState(() => _countedInNetWorth = v),
+                        ),
+                        const SizedBox(height: 8),
+                        TextField(
+                          key: const Key('debt_remark_input'),
+                          controller: _remarkCtrl,
+                          enabled: !_busy,
+                          decoration: isDesktop
+                              ? const InputDecoration(
+                                  labelText: '备注（可选）',
+                                  border: OutlineInputBorder(),
+                                  contentPadding: EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 16,
+                                  ),
+                                )
+                              : const InputDecoration(labelText: '备注（可选）'),
+                        ),
+                        if (_error != null) ...[
+                          const SizedBox(height: 12),
+                          Text(
+                            _error!,
+                            key: const Key('debt_editor_error'),
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.error,
+                            ),
+                          ),
+                        ],
                       ],
-                    ],
+                    ),
                   ),
                 ),
-              ),
+        ),
       ),
     );
   }

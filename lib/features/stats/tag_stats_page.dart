@@ -11,6 +11,8 @@ import '../../domain/rules/billing_period.dart';
 import '../../domain/rules/tag_stats.dart';
 import '../common/catalog_icons.dart';
 import '../common/common.dart';
+import '../common/desktop_modal_page.dart';
+import '../records/record_detail_page.dart';
 import '../records/record_labels.dart';
 import 'tag_stats_providers.dart';
 
@@ -49,7 +51,9 @@ class TagRankingsPage extends ConsumerWidget {
     final rollup = ref.watch(tagRankingsRollupProvider);
     final viewAsync = ref.watch(tagRankingsViewProvider);
     final theme = Theme.of(context);
+    final isDesktop = DesktopAdaptive.isDesktop(context);
     final isExpandedDesktop = DesktopAdaptive.isExpandedDesktop(context);
+    final isPopupModal = isDesktop && ModalRoute.of(context) is PopupRoute;
 
     final bucketSwitch = SegmentedButton<StatBucket>(
       key: const Key('tag-rankings-bucket-switch'),
@@ -281,8 +285,21 @@ class TagRankingsPage extends ConsumerWidget {
                 _TagRankingRow(
                   item: rankings.items[i],
                   fallbackBarColor: accentColor,
-                  onTap: () =>
-                      context.push('/stats/tag/${rankings.items[i].tagId}'),
+                  onTap: () {
+                    final targetTagId = rankings.items[i].tagId;
+                    if (GoRouter.maybeOf(context) != null &&
+                        ModalRoute.of(context)?.settings is Page) {
+                      context.push('/stats/tag/$targetTagId');
+                    } else {
+                      pushDesktopModalOrMaterialRoute<void>(
+                        context,
+                        maxWidth: 860,
+                        maxHeight: 720,
+                        barrierDismissible: true,
+                        child: TagDetailStatsPage(tagId: targetTagId),
+                      );
+                    }
+                  },
                 ),
               ],
             ],
@@ -294,13 +311,20 @@ class TagRankingsPage extends ConsumerWidget {
     return Scaffold(
       key: const Key('tag-rankings-page'),
       appBar: AppBar(
+        leading: isPopupModal ? const CloseButton() : null,
         title: const Text('标签统计'),
         actions: [
           IconButton(
             key: const Key('tag-rankings-open-tags-btn'),
             tooltip: '标签管理',
             icon: const Icon(Icons.label_outline),
-            onPressed: () => context.push('/tags'),
+            onPressed: () {
+              if (isPopupModal) {
+                Navigator.of(context).maybePop();
+              } else {
+                context.push('/tags');
+              }
+            },
           ),
         ],
       ),
@@ -401,45 +425,57 @@ class TagRankingsPage extends ConsumerWidget {
                 ),
               ],
             )
-          : ListView(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              children: [
-                // 1. Period Mode Selector (全部 | 按月 | 按年) + Prev/Next navigation
-                buildPeriodBar(),
-                const SizedBox(height: 12),
-
-                // 2. Bucket Switch (支出 | 收入)
-                SizedBox(width: double.infinity, child: bucketSwitch),
-                const SizedBox(height: 12),
-
-                // 3. Summary & Ranked List
-                viewAsync.when(
-                  loading: () => const Padding(
-                    padding: EdgeInsets.all(32),
-                    child: Loading(),
-                  ),
-                  error: (e, _) => ErrorView(e),
-                  data: (view) {
-                    final rankings = view.rankings;
-                    final isExpense = rankings.bucket == StatBucket.expense;
-                    final accentColor = isExpense
-                        ? theme.colorScheme.error
-                        : theme.colorScheme.primary;
-
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        buildSummaryCard(rankings, accentColor),
-                        const SizedBox(height: 12),
-                        buildRollupHeader(view),
-                        buildRankingsCardOrEmpty(view, accentColor),
-                      ],
-                    );
-                  },
+          : () {
+              final stackedList = ListView(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 10,
                 ),
-                const SizedBox(height: 24),
-              ],
-            ),
+                children: [
+                  // 1. Period Mode Selector (全部 | 按月 | 按年) + Prev/Next navigation
+                  buildPeriodBar(),
+                  const SizedBox(height: 12),
+
+                  // 2. Bucket Switch (支出 | 收入)
+                  SizedBox(width: double.infinity, child: bucketSwitch),
+                  const SizedBox(height: 12),
+
+                  // 3. Summary & Ranked List
+                  viewAsync.when(
+                    loading: () => const Padding(
+                      padding: EdgeInsets.all(32),
+                      child: Loading(),
+                    ),
+                    error: (e, _) => ErrorView(e),
+                    data: (view) {
+                      final rankings = view.rankings;
+                      final isExpense = rankings.bucket == StatBucket.expense;
+                      final accentColor = isExpense
+                          ? theme.colorScheme.error
+                          : theme.colorScheme.primary;
+
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          buildSummaryCard(rankings, accentColor),
+                          const SizedBox(height: 12),
+                          buildRollupHeader(view),
+                          buildRankingsCardOrEmpty(view, accentColor),
+                        ],
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 24),
+                ],
+              );
+              if (!isDesktop) return stackedList;
+              return Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 760),
+                  child: stackedList,
+                ),
+              );
+            }(),
     );
   }
 }
@@ -595,10 +631,28 @@ class _TagDetailStatsPageState extends ConsumerState<TagDetailStatsPage> {
     );
     final viewAsync = ref.watch(tagDetailViewProvider(query));
     final theme = Theme.of(context);
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    final isPopupModal = isDesktop && ModalRoute.of(context) is PopupRoute;
+
+    void openSiblingTag(String targetTagId) {
+      if (GoRouter.maybeOf(context) != null &&
+          ModalRoute.of(context)?.settings is Page) {
+        context.push('/stats/tag/$targetTagId');
+      } else {
+        pushDesktopModalOrMaterialRoute<void>(
+          context,
+          maxWidth: 860,
+          maxHeight: 720,
+          barrierDismissible: true,
+          child: TagDetailStatsPage(tagId: targetTagId),
+        );
+      }
+    }
 
     return Scaffold(
       key: const Key('tag-detail-stats-page'),
       appBar: AppBar(
+        leading: isPopupModal ? const CloseButton() : null,
         title: viewAsync.maybeWhen(
           data: (d) => Row(
             mainAxisSize: MainAxisSize.min,
@@ -676,8 +730,7 @@ class _TagDetailStatsPageState extends ConsumerState<TagDetailStatsPage> {
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
-              onPressed: () =>
-                  context.push('/stats/tag/${stats.parentTag!.tagId}'),
+              onPressed: () => openSiblingTag(stats.parentTag!.tagId),
             );
           }
 
@@ -776,9 +829,7 @@ class _TagDetailStatsPageState extends ConsumerState<TagDetailStatsPage> {
                                 item: child,
                                 onTap: child.isDirectOnGroup
                                     ? null
-                                    : () => context.push(
-                                        '/stats/tag/${child.tagId}',
-                                      ),
+                                    : () => openSiblingTag(child.tagId),
                               ),
                           ],
                         ),
@@ -1130,7 +1181,7 @@ class _TagDetailStatsPageState extends ConsumerState<TagDetailStatsPage> {
             );
           }
 
-          return ListView(
+          final stackedDetailList = ListView(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             children: [
               // Group or parent badge banner
@@ -1172,6 +1223,14 @@ class _TagDetailStatsPageState extends ConsumerState<TagDetailStatsPage> {
               ...billsSectionWidgets,
               const SizedBox(height: 24),
             ],
+          );
+
+          if (!isDesktop) return stackedDetailList;
+          return Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 760),
+              child: stackedDetailList,
+            ),
           );
         },
       ),
@@ -1276,7 +1335,22 @@ class _TagDetailStatsPageState extends ConsumerState<TagDetailStatsPage> {
                 ),
               ),
             ),
-            onTap: () => context.push('/record/${r.recordId}'),
+            onTap: () {
+              if (GoRouter.maybeOf(context) != null &&
+                  ModalRoute.of(context)?.settings is Page) {
+                try {
+                  context.push('/record/${r.recordId}');
+                  return;
+                } catch (_) {}
+              }
+              pushDesktopModalOrMaterialRoute<void>(
+                context,
+                maxWidth: 560,
+                maxHeight: 740,
+                barrierDismissible: true,
+                child: RecordDetailPage(recordId: r.recordId),
+              );
+            },
           ),
         ),
       );

@@ -186,39 +186,56 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
       ],
     );
 
-    return DesktopModalEscapeScope(
-      enabled: isDesktop,
-      child: Scaffold(
-        key: const Key('note_editor_page'),
-        appBar: AppBar(
-          leading: isDesktop ? const CloseButton() : null,
-          scrolledUnderElevation: isDesktop ? 0 : null,
-          title: Text(_editing ? '编辑便签' : '新建便签'),
-          actions: [
-            if (_editing)
-              IconButton(
-                key: const Key('editor_trash_note'),
-                tooltip: '移入回收站',
-                onPressed: _busy ? null : _moveToTrash,
-                icon: const Icon(Icons.delete_outline),
-              ),
-            TextButton(
-              key: const Key('save_note_button'),
-              onPressed: _busy || _loading ? null : _save,
-              child: Text(_busy ? '保存中' : '保存'),
-            ),
-          ],
+    return PopScope(
+      canPop: !_busy,
+      child: DesktopModalEscapeScope(
+        enabled: isDesktop,
+        child: Scaffold(
+          key: const Key('note_editor_page'),
+          appBar: AppBar(
+            leading: isDesktop ? const CloseButton() : null,
+            scrolledUnderElevation: isDesktop ? 0 : null,
+            title: Text(_editing ? '编辑便签' : '新建便签'),
+            actions: [
+              if (_editing)
+                IconButton(
+                  key: const Key('editor_trash_note'),
+                  tooltip: '移入回收站',
+                  onPressed: _busy ? null : _moveToTrash,
+                  icon: const Icon(Icons.delete_outline),
+                ),
+              if (!isDesktop)
+                TextButton(
+                  key: const Key('save_note_button'),
+                  onPressed: _busy || _loading ? null : _save,
+                  child: Text(_busy ? '保存中' : '保存'),
+                ),
+            ],
+          ),
+          body: _loading
+              ? const Loading()
+              : (isDesktop
+                    ? Center(
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 640),
+                          child: formBody,
+                        ),
+                      )
+                    : formBody),
+          bottomNavigationBar: !isDesktop || _loading
+              ? null
+              : SafeArea(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 8, 20, 14),
+                    child: FilledButton.icon(
+                      key: const Key('save_note_button'),
+                      onPressed: _busy ? null : _save,
+                      icon: const Icon(Icons.check),
+                      label: Text(_busy ? '保存中…' : '保存便签'),
+                    ),
+                  ),
+                ),
         ),
-        body: _loading
-            ? const Loading()
-            : (isDesktop
-                  ? Center(
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 640),
-                        child: formBody,
-                      ),
-                    )
-                  : formBody),
       ),
     );
   }

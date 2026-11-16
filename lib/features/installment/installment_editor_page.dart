@@ -394,10 +394,16 @@ class _InstallmentEditorPageState extends ConsumerState<InstallmentEditorPage> {
                           controller: _nameCtrl,
                           enabled: !_busy,
                           maxLength: 50,
-                          decoration: const InputDecoration(
+                          decoration: InputDecoration(
                             labelText: '分期名称',
                             hintText: '例如：笔记本电脑、账单分期',
-                            border: OutlineInputBorder(),
+                            border: const OutlineInputBorder(),
+                            contentPadding: isDesktop
+                                ? const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 16,
+                                  )
+                                : null,
                           ),
                         ),
                         const SizedBox(height: 12),
@@ -423,10 +429,16 @@ class _InstallmentEditorPageState extends ConsumerState<InstallmentEditorPage> {
                                       ),
                                   inputFormatters: amountInputFormatters,
                                   onChanged: (_) => setState(() {}),
-                                  decoration: const InputDecoration(
+                                  decoration: InputDecoration(
                                     labelText: '分期总本金',
                                     prefixText: '¥ ',
-                                    border: OutlineInputBorder(),
+                                    border: const OutlineInputBorder(),
+                                    contentPadding: isDesktop
+                                        ? const EdgeInsets.symmetric(
+                                            horizontal: 12,
+                                            vertical: 16,
+                                          )
+                                        : null,
                                   ),
                                 ),
                               ),
@@ -442,10 +454,16 @@ class _InstallmentEditorPageState extends ConsumerState<InstallmentEditorPage> {
                                     FilteringTextInputFormatter.digitsOnly,
                                   ],
                                   onChanged: (_) => setState(() {}),
-                                  decoration: const InputDecoration(
+                                  decoration: InputDecoration(
                                     labelText: '分期期数',
                                     suffixText: '期',
-                                    border: OutlineInputBorder(),
+                                    border: const OutlineInputBorder(),
+                                    contentPadding: isDesktop
+                                        ? const EdgeInsets.symmetric(
+                                            horizontal: 12,
+                                            vertical: 16,
+                                          )
+                                        : null,
                                   ),
                                 ),
                               ),
@@ -461,11 +479,17 @@ class _InstallmentEditorPageState extends ConsumerState<InstallmentEditorPage> {
                             ),
                             inputFormatters: amountInputFormatters,
                             onChanged: (_) => setState(() {}),
-                            decoration: const InputDecoration(
+                            decoration: InputDecoration(
                               labelText: '总手续费（选填）',
                               hintText: '0.00',
                               prefixText: '¥ ',
-                              border: OutlineInputBorder(),
+                              border: const OutlineInputBorder(),
+                              contentPadding: isDesktop
+                                  ? const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 16,
+                                    )
+                                  : null,
                             ),
                           ),
                           const SizedBox(height: 12),
@@ -751,23 +775,30 @@ class _LabeledDropdown<T> extends StatelessWidget {
   final String? hint;
 
   @override
-  Widget build(BuildContext context) => InputDecorator(
-    decoration: InputDecoration(
-      labelText: label,
-      border: const OutlineInputBorder(),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-    ),
-    child: DropdownButtonHideUnderline(
-      child: DropdownButton<T>(
-        key: fieldKey,
-        isExpanded: true,
-        value: value,
-        hint: hint == null ? null : Text(hint!),
-        items: items,
-        onChanged: enabled ? onChanged : null,
+  Widget build(BuildContext context) {
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    return InputDecorator(
+      decoration: InputDecoration(
+        labelText: label,
+        border: const OutlineInputBorder(),
+        contentPadding: EdgeInsets.symmetric(
+          horizontal: 12,
+          vertical: isDesktop ? 16 : 4,
+        ),
       ),
-    ),
-  );
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<T>(
+          key: fieldKey,
+          isExpanded: true,
+          isDense: isDesktop,
+          value: value,
+          hint: hint == null ? null : Text(hint!),
+          items: items,
+          onChanged: enabled ? onChanged : null,
+        ),
+      ),
+    );
+  }
 }
 
 class _ReadonlyScheduleSummaryCard extends StatelessWidget {

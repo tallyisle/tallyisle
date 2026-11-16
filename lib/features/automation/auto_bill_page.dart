@@ -255,11 +255,67 @@ class _AutoBillPageState extends ConsumerState<AutoBillPage> {
         )
         .toList(growable: false);
 
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    const tabBar = TabBar(
+      tabs: [
+        Tab(key: Key('auto_bill_tab_drafts'), text: '待确认草稿'),
+        Tab(key: Key('auto_bill_tab_rules'), text: '映射规则'),
+      ],
+    );
+    final bodyColumn = Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+          child: isDesktop
+              ? _DesktopAutoBillBanner(onPasteParse: _showPastePaymentDialog)
+              : _AccessibilityStatusCard(
+                  statusAsync: statusAsync,
+                  onOpenSettings: _openSystemAccessibilitySettings,
+                ),
+        ),
+        Expanded(
+          child: TabBarView(
+            children: [
+              _DraftsTabView(
+                draftsAsync: draftsAsync,
+                categories: categories,
+                assets: fundingAssets,
+                onPasteParse: _showPastePaymentDialog,
+                onClearAll: _clearAllDrafts,
+                onQuickConfirm: _quickConfirmDraft,
+                onEditConfirm: (d) =>
+                    _openEditConfirmDialog(d, categories, fundingAssets),
+                onDelete: _deleteDraft,
+              ),
+              _RulesTabView(
+                rulesAsync: rulesAsync,
+                categories: categories,
+                assets: fundingAssets,
+                onAddRule: () => _openRuleDialog(
+                  categories: categories,
+                  assets: fundingAssets,
+                  currentBookId: bookId,
+                ),
+                onEditRule: (rule) => _openRuleDialog(
+                  existing: rule,
+                  categories: categories,
+                  assets: fundingAssets,
+                  currentBookId: bookId,
+                ),
+                onDeleteRule: _deleteRule,
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+
     return DefaultTabController(
       length: 2,
       child: Scaffold(
         key: const Key('auto_bill_page'),
         appBar: AppBar(
+          scrolledUnderElevation: isDesktop ? 0 : null,
           title: const Text('自动记账'),
           actions: [
             IconButton(
@@ -269,62 +325,26 @@ class _AutoBillPageState extends ConsumerState<AutoBillPage> {
               icon: const Icon(Icons.refresh),
             ),
           ],
-          bottom: const TabBar(
-            tabs: [
-              Tab(key: Key('auto_bill_tab_drafts'), text: '待确认草稿'),
-              Tab(key: Key('auto_bill_tab_rules'), text: '映射规则'),
-            ],
-          ),
-        ),
-        body: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-              child: DesktopAdaptive.isDesktop(context)
-                  ? _DesktopAutoBillBanner(
-                      onPasteParse: _showPastePaymentDialog,
-                    )
-                  : _AccessibilityStatusCard(
-                      statusAsync: statusAsync,
-                      onOpenSettings: _openSystemAccessibilitySettings,
+          bottom: isDesktop
+              ? PreferredSize(
+                  preferredSize: tabBar.preferredSize,
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 820),
+                      child: tabBar,
                     ),
-            ),
-            Expanded(
-              child: TabBarView(
-                children: [
-                  _DraftsTabView(
-                    draftsAsync: draftsAsync,
-                    categories: categories,
-                    assets: fundingAssets,
-                    onPasteParse: _showPastePaymentDialog,
-                    onClearAll: _clearAllDrafts,
-                    onQuickConfirm: _quickConfirmDraft,
-                    onEditConfirm: (d) =>
-                        _openEditConfirmDialog(d, categories, fundingAssets),
-                    onDelete: _deleteDraft,
                   ),
-                  _RulesTabView(
-                    rulesAsync: rulesAsync,
-                    categories: categories,
-                    assets: fundingAssets,
-                    onAddRule: () => _openRuleDialog(
-                      categories: categories,
-                      assets: fundingAssets,
-                      currentBookId: bookId,
-                    ),
-                    onEditRule: (rule) => _openRuleDialog(
-                      existing: rule,
-                      categories: categories,
-                      assets: fundingAssets,
-                      currentBookId: bookId,
-                    ),
-                    onDeleteRule: _deleteRule,
-                  ),
-                ],
-              ),
-            ),
-          ],
+                )
+              : tabBar,
         ),
+        body: isDesktop
+            ? Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 820),
+                  child: bodyColumn,
+                ),
+              )
+            : bodyColumn,
       ),
     );
   }
@@ -501,23 +521,25 @@ class _DraftsTabView extends StatelessWidget {
       final catMap = {for (final c in categories) c.id: c.name};
       final assetMap = {for (final a in assets) a.id: a.name};
 
+      final isDesktop = DesktopAdaptive.isDesktop(context);
       return ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton.icon(
-              key: const Key('auto_bill_paste_parse_button'),
-              onPressed: onPasteParse,
-              icon: const Icon(Icons.content_paste_go, size: 18),
-              label: const FittedBox(
-                fit: BoxFit.scaleDown,
-                child: Text('粘贴支付文本识别', maxLines: 1, softWrap: false),
+          if (!isDesktop)
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                key: const Key('auto_bill_paste_parse_button'),
+                onPressed: onPasteParse,
+                icon: const Icon(Icons.content_paste_go, size: 18),
+                label: const FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text('粘贴支付文本识别', maxLines: 1, softWrap: false),
+                ),
               ),
             ),
-          ),
           if (drafts.isNotEmpty) ...[
-            const SizedBox(height: 8),
+            if (!isDesktop) const SizedBox(height: 8),
             Row(
               children: [
                 Expanded(
@@ -832,26 +854,28 @@ class _PastePaymentTextDialogState
     title: const Text('粘贴支付文本识别'),
     content: SizedBox(
       width: 420,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          TextField(
-            key: const Key('auto_bill_paste_input'),
-            controller: _textController,
-            maxLines: 5,
-            decoration: const InputDecoration(
-              hintText: '例如：【招商银行】您账户8888于11月11日12:30消费人民币36.50元，商户：瑞幸咖啡',
-              border: OutlineInputBorder(),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              key: const Key('auto_bill_paste_input'),
+              controller: _textController,
+              maxLines: 5,
+              decoration: const InputDecoration(
+                hintText: '例如：【招商银行】您账户8888于11月11日12:30消费人民币36.50元，商户：瑞幸咖啡',
+                border: OutlineInputBorder(),
+              ),
             ),
-          ),
-          if (_error != null) ...[
-            const SizedBox(height: 8),
-            Text(
-              _error!,
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
-            ),
+            if (_error != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                _error!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+            ],
           ],
-        ],
+        ),
       ),
     ),
     actions: [
@@ -1038,11 +1062,16 @@ class _ConfirmDraftDialogState extends ConsumerState<_ConfirmDraftDialog> {
                   decoration: const InputDecoration(
                     labelText: '分类',
                     border: OutlineInputBorder(),
+                    contentPadding: EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 14,
+                    ),
                   ),
                   child: DropdownButtonHideUnderline(
                     child: DropdownButton<int>(
                       isExpanded: true,
                       isDense: true,
+                      style: Theme.of(context).textTheme.bodyLarge,
                       value: validCatId,
                       items: [
                         for (final c in dirCategories)
@@ -1060,11 +1089,16 @@ class _ConfirmDraftDialogState extends ConsumerState<_ConfirmDraftDialog> {
                       ? '转出账户'
                       : '资金账户',
                   border: const OutlineInputBorder(),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 14,
+                  ),
                 ),
                 child: DropdownButtonHideUnderline(
                   child: DropdownButton<int?>(
                     isExpanded: true,
                     isDense: true,
+                    style: Theme.of(context).textTheme.bodyLarge,
                     value: validAssetId,
                     items: [
                       if (_recordType != RecordType.transfer)
@@ -1088,11 +1122,16 @@ class _ConfirmDraftDialogState extends ConsumerState<_ConfirmDraftDialog> {
                   decoration: const InputDecoration(
                     labelText: '转入账户',
                     border: OutlineInputBorder(),
+                    contentPadding: EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 14,
+                    ),
                   ),
                   child: DropdownButtonHideUnderline(
                     child: DropdownButton<int?>(
                       isExpanded: true,
                       isDense: true,
+                      style: Theme.of(context).textTheme.bodyLarge,
                       value: validToAssetId,
                       items: [
                         for (final a in widget.assets)
@@ -1301,12 +1340,17 @@ class _RuleEditorDialogState extends ConsumerState<_RuleEditorDialog> {
                 decoration: const InputDecoration(
                   labelText: '映射分类',
                   border: OutlineInputBorder(),
+                  contentPadding: EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 14,
+                  ),
                 ),
                 child: DropdownButtonHideUnderline(
                   child: DropdownButton<int?>(
                     key: const Key('auto_bill_rule_category_dropdown'),
                     isExpanded: true,
                     isDense: true,
+                    style: Theme.of(context).textTheme.bodyLarge,
                     value: validCatId,
                     items: [
                       const DropdownMenuItem<int?>(
@@ -1328,12 +1372,17 @@ class _RuleEditorDialogState extends ConsumerState<_RuleEditorDialog> {
                 decoration: const InputDecoration(
                   labelText: '映射资金账户',
                   border: OutlineInputBorder(),
+                  contentPadding: EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 14,
+                  ),
                 ),
                 child: DropdownButtonHideUnderline(
                   child: DropdownButton<int?>(
                     key: const Key('auto_bill_rule_asset_dropdown'),
                     isExpanded: true,
                     isDense: true,
+                    style: Theme.of(context).textTheme.bodyLarge,
                     value: validAssetId,
                     items: [
                       const DropdownMenuItem<int?>(

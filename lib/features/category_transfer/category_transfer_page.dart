@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/adaptive.dart';
 import '../../app/providers.dart';
 import '../../core/failure.dart';
 import '../../data/db/database.dart';
@@ -286,35 +287,49 @@ class _CategoryTransferPageState extends ConsumerState<CategoryTransferPage>
     final booksAsync = ref.watch(booksProvider);
     final activeBookId = ref.watch(currentBookIdProvider).value ?? 1;
 
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    final tabBar = TabBar(
+      controller: _tabController,
+      tabs: const [
+        Tab(
+          key: Key('cat-transfer-tab-json'),
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text('本地导入导出', maxLines: 1, softWrap: false),
+          ),
+        ),
+        Tab(
+          key: Key('cat-transfer-tab-copy'),
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text('跨账本复制', maxLines: 1, softWrap: false),
+          ),
+        ),
+        Tab(
+          key: Key('cat-transfer-tab-migrate'),
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text('分类迁移', maxLines: 1, softWrap: false),
+          ),
+        ),
+      ],
+    );
+
     return Scaffold(
       appBar: AppBar(
+        scrolledUnderElevation: isDesktop ? 0 : null,
         title: const Text('分类导入导出与迁移'),
-        bottom: TabBar(
-          controller: _tabController,
-          tabs: const [
-            Tab(
-              key: Key('cat-transfer-tab-json'),
-              child: FittedBox(
-                fit: BoxFit.scaleDown,
-                child: Text('本地导入导出', maxLines: 1, softWrap: false),
-              ),
-            ),
-            Tab(
-              key: Key('cat-transfer-tab-copy'),
-              child: FittedBox(
-                fit: BoxFit.scaleDown,
-                child: Text('跨账本复制', maxLines: 1, softWrap: false),
-              ),
-            ),
-            Tab(
-              key: Key('cat-transfer-tab-migrate'),
-              child: FittedBox(
-                fit: BoxFit.scaleDown,
-                child: Text('分类迁移', maxLines: 1, softWrap: false),
-              ),
-            ),
-          ],
-        ),
+        bottom: isDesktop
+            ? PreferredSize(
+                preferredSize: tabBar.preferredSize,
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 800),
+                    child: tabBar,
+                  ),
+                ),
+              )
+            : tabBar,
       ),
       body: asyncBody(booksAsync, (books) {
         if (books.isEmpty) {
@@ -341,7 +356,7 @@ class _CategoryTransferPageState extends ConsumerState<CategoryTransferPage>
             ? _migrateBookId!
             : fallbackBookId;
 
-        return Column(
+        final contentColumn = Column(
           children: [
             if (_lastStatusMessage != null)
               MaterialBanner(
@@ -371,6 +386,16 @@ class _CategoryTransferPageState extends ConsumerState<CategoryTransferPage>
             ),
           ],
         );
+
+        if (isDesktop) {
+          return Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 800),
+              child: contentColumn,
+            ),
+          );
+        }
+        return contentColumn;
       }),
     );
   }
@@ -450,21 +475,23 @@ class _CategoryTransferPageState extends ConsumerState<CategoryTransferPage>
           icon: const Icon(Icons.download_outlined),
           label: const Text('导出分类方案为 JSON 文件'),
         ),
-        const SizedBox(height: 12),
-        OutlinedButton.icon(
-          key: const Key('cat-export-share-btn'),
-          onPressed: _busy || shareCap.state != CapabilityState.available
-              ? null
-              : () => _exportShare(selectedBookId),
-          icon: const Icon(Icons.share_outlined),
-          label: Text(
-            shareCap.state == CapabilityState.available
-                ? '系统分享分类方案 JSON'
-                : '系统分享（${shareCap.reason}）',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
+        if (!DesktopAdaptive.isDesktop(context)) ...[
+          const SizedBox(height: 12),
+          OutlinedButton.icon(
+            key: const Key('cat-export-share-btn'),
+            onPressed: _busy || shareCap.state != CapabilityState.available
+                ? null
+                : () => _exportShare(selectedBookId),
+            icon: const Icon(Icons.share_outlined),
+            label: Text(
+              shareCap.state == CapabilityState.available
+                  ? '系统分享分类方案 JSON'
+                  : '系统分享（${shareCap.reason}）',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
           ),
-        ),
+        ],
         const Divider(height: 32),
         Text('从本地导入分类方案', style: Theme.of(context).textTheme.titleMedium),
         const SizedBox(height: 8),
@@ -567,7 +594,6 @@ class _CategoryTransferPageState extends ConsumerState<CategoryTransferPage>
                     for (final c in visible)
                       CheckboxListTile(
                         key: Key('cat-copy-check-${c.id}'),
-                        dense: true,
                         title: Text(_formatCategoryOption(c, byId)),
                         subtitle: Text(c.type == 0 ? '支出' : '收入'),
                         value: _selectedSourceCategoryIds.contains(c.id),
@@ -656,12 +682,14 @@ class _CategoryTransferPageState extends ConsumerState<CategoryTransferPage>
               width: double.infinity,
               child: SegmentedButton<int>(
                 showSelectedIcon: false,
-                style: const ButtonStyle(
-                  visualDensity: VisualDensity.compact,
-                  padding: WidgetStatePropertyAll(
-                    EdgeInsets.symmetric(horizontal: 10),
-                  ),
-                ),
+                style: DesktopAdaptive.isDesktop(context)
+                    ? null
+                    : const ButtonStyle(
+                        visualDensity: VisualDensity.compact,
+                        padding: WidgetStatePropertyAll(
+                          EdgeInsets.symmetric(horizontal: 10),
+                        ),
+                      ),
                 segments: const [
                   ButtonSegment(
                     value: 0,
@@ -829,12 +857,17 @@ class _ControlledDropdownField<T> extends StatelessWidget {
       decoration: InputDecoration(
         labelText: label,
         border: const OutlineInputBorder(),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 12,
+          vertical: 14,
+        ),
       ),
       child: DropdownButtonHideUnderline(
         child: DropdownButton<T>(
           key: fieldKey,
           isExpanded: true,
+          isDense: true,
+          style: Theme.of(context).textTheme.bodyLarge,
           value: effectiveValue,
           items: items,
           onChanged: onChanged,

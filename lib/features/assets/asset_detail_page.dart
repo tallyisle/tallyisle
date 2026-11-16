@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../app/adaptive.dart';
 import '../../app/providers.dart';
 import '../../core/failure.dart';
 import '../../core/money.dart';
@@ -156,15 +157,30 @@ class AssetDetailPage extends ConsumerWidget {
       );
     }
 
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    final isDesktopModal =
+        isDesktop &&
+        ModalRoute.of(context) is PopupRoute &&
+        Navigator.of(context).canPop();
+
     return Scaffold(
       appBar: AppBar(
+        leading: isDesktopModal ? const CloseButton() : null,
         title: Text(asset.value?.name ?? '账户详情'),
         actions: [
           if (asset.value != null)
             _AssetMenu(asset: asset.value!, key: const Key('asset-menu')),
         ],
       ),
-      body: detailBody,
+      body: isDesktop
+          ? Align(
+              alignment: Alignment.topCenter,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 820),
+                child: detailBody,
+              ),
+            )
+          : detailBody,
     );
   }
 }
@@ -541,22 +557,31 @@ class _AdjustBalanceDialogState extends State<_AdjustBalanceDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    Widget field = TextField(
+      key: const Key('adjust-amount'),
+      controller: _controller,
+      autofocus: true,
+      keyboardType: const TextInputType.numberWithOptions(
+        decimal: true,
+        signed: true,
+      ),
+      decoration: InputDecoration(
+        border: isDesktop ? const OutlineInputBorder() : null,
+        helperText: widget.isCredit
+            ? '填当前实际欠款（溢存款填负数）；会生成一条“余额变更”记录'
+            : '会生成一条“余额变更”记录',
+      ),
+    );
+    if (isDesktop) {
+      field = ConstrainedBox(
+        constraints: const BoxConstraints(minWidth: 360, maxWidth: 420),
+        child: field,
+      );
+    }
     return AlertDialog(
       title: Text('调整“${widget.assetName}”${widget.isCredit ? '欠款' : '余额'}'),
-      content: TextField(
-        key: const Key('adjust-amount'),
-        controller: _controller,
-        autofocus: true,
-        keyboardType: const TextInputType.numberWithOptions(
-          decimal: true,
-          signed: true,
-        ),
-        decoration: InputDecoration(
-          helperText: widget.isCredit
-              ? '填当前实际欠款（溢存款填负数）；会生成一条“余额变更”记录'
-              : '会生成一条“余额变更”记录',
-        ),
-      ),
+      content: field,
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context),

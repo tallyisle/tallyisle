@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../app/adaptive.dart';
 import '../../data/db/database.dart';
 import '../../domain/rules/wish_note_rules.dart';
 import '../common/common.dart';
@@ -45,9 +46,10 @@ class _NotesPageState extends ConsumerState<NotesPage> {
   }
 
   Future<void> _openTrash() async {
-    await Navigator.of(
+    await pushDesktopModalOrMaterialRoute<void>(
       context,
-    ).push<void>(MaterialPageRoute(builder: (_) => const NoteTrashPage()));
+      child: const NoteTrashPage(),
+    );
   }
 
   Future<void> _moveToTrash(Note note) async {
@@ -74,9 +76,82 @@ class _NotesPageState extends ConsumerState<NotesPage> {
     final notesAsync = ref.watch(filteredActiveNotesProvider);
     final trashCount = ref.watch(trashedNotesProvider).value?.length ?? 0;
 
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    final bodyColumn = Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+          child: TextField(
+            key: const Key('note_search_input'),
+            controller: _searchCtrl,
+            onChanged: (value) =>
+                ref.read(noteSearchQueryProvider.notifier).setQuery(value),
+            decoration: InputDecoration(
+              hintText: '搜索便签标题或正文…',
+              prefixIcon: const Icon(Icons.search),
+              suffixIcon: query.isEmpty
+                  ? null
+                  : IconButton(
+                      key: const Key('clear_note_search_button'),
+                      tooltip: '清除搜索',
+                      onPressed: () {
+                        _searchCtrl.clear();
+                        ref.read(noteSearchQueryProvider.notifier).clear();
+                      },
+                      icon: const Icon(Icons.clear),
+                    ),
+              border: const OutlineInputBorder(),
+              isDense: !isDesktop,
+              contentPadding: isDesktop
+                  ? const EdgeInsets.symmetric(horizontal: 12, vertical: 12)
+                  : null,
+            ),
+          ),
+        ),
+        Expanded(
+          child: asyncBody(notesAsync, (notes) {
+            if (notes.isEmpty) {
+              final searching = query.trim().isNotEmpty;
+              return Center(
+                key: Key(
+                  searching ? 'notes_search_empty_state' : 'notes_empty_state',
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Text(
+                    searching
+                        ? '未找到匹配的便签'
+                        : (isDesktop
+                              ? '还没有便签，点击右上角记录灵感或备忘'
+                              : '还没有便签，点击右下角记录灵感或备忘'),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              );
+            }
+
+            return ListView.separated(
+              padding: EdgeInsets.fromLTRB(16, 4, 16, isDesktop ? 24 : 88),
+              itemCount: notes.length,
+              separatorBuilder: (_, _) => const SizedBox(height: 8),
+              itemBuilder: (context, index) {
+                final note = notes[index];
+                return _NoteCard(
+                  note: note,
+                  onTap: () => _openEditor(noteId: note.id),
+                  onMoveToTrash: () => _moveToTrash(note),
+                );
+              },
+            );
+          }),
+        ),
+      ],
+    );
+
     return Scaffold(
       key: const Key('notes_page'),
       appBar: AppBar(
+        scrolledUnderElevation: isDesktop ? 0 : null,
         title: const Text('便签'),
         actions: [
           TextButton.icon(
@@ -85,79 +160,40 @@ class _NotesPageState extends ConsumerState<NotesPage> {
             icon: const Icon(Icons.delete_sweep_outlined),
             label: Text(trashCount > 0 ? '回收站 ($trashCount)' : '回收站'),
           ),
-        ],
-      ),
-      body: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-            child: TextField(
-              key: const Key('note_search_input'),
-              controller: _searchCtrl,
-              onChanged: (value) =>
-                  ref.read(noteSearchQueryProvider.notifier).setQuery(value),
-              decoration: InputDecoration(
-                hintText: '搜索便签标题或正文…',
-                prefixIcon: const Icon(Icons.search),
-                suffixIcon: query.isEmpty
-                    ? null
-                    : IconButton(
-                        key: const Key('clear_note_search_button'),
-                        tooltip: '清除搜索',
-                        onPressed: () {
-                          _searchCtrl.clear();
-                          ref.read(noteSearchQueryProvider.notifier).clear();
-                        },
-                        icon: const Icon(Icons.clear),
-                      ),
-                border: const OutlineInputBorder(),
-                isDense: true,
+          if (isDesktop) ...[
+            const SizedBox(width: 8),
+            FilledButton.icon(
+              key: const Key('add_note_fab'),
+              style: FilledButton.styleFrom(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
               ),
+              onPressed: _openEditor,
+              icon: const Icon(Icons.edit_note, size: 18),
+              label: const Text('新建便签'),
             ),
-          ),
-          Expanded(
-            child: asyncBody(notesAsync, (notes) {
-              if (notes.isEmpty) {
-                final searching = query.trim().isNotEmpty;
-                return Center(
-                  key: Key(
-                    searching
-                        ? 'notes_search_empty_state'
-                        : 'notes_empty_state',
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Text(
-                      searching ? '未找到匹配的便签' : '还没有便签，点击右下角记录灵感或备忘',
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                );
-              }
-
-              return ListView.separated(
-                padding: const EdgeInsets.fromLTRB(16, 4, 16, 88),
-                itemCount: notes.length,
-                separatorBuilder: (_, _) => const SizedBox(height: 8),
-                itemBuilder: (context, index) {
-                  final note = notes[index];
-                  return _NoteCard(
-                    note: note,
-                    onTap: () => _openEditor(noteId: note.id),
-                    onMoveToTrash: () => _moveToTrash(note),
-                  );
-                },
-              );
-            }),
-          ),
+            const SizedBox(width: 12),
+          ],
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        key: const Key('add_note_fab'),
-        onPressed: _openEditor,
-        icon: const Icon(Icons.edit_note),
-        label: const Text('新建便签'),
-      ),
+      body: isDesktop
+          ? Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 800),
+                child: bodyColumn,
+              ),
+            )
+          : bodyColumn,
+      floatingActionButton: isDesktop
+          ? null
+          : FloatingActionButton.extended(
+              key: const Key('add_note_fab'),
+              onPressed: _openEditor,
+              icon: const Icon(Icons.edit_note),
+              label: const Text('新建便签'),
+            ),
     );
   }
 }

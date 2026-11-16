@@ -367,6 +367,10 @@ class _TemplateEditorPageState extends ConsumerState<TemplateEditorPage> {
                                   labelText: '预设金额',
                                   prefixText: '$enteredCurr ',
                                   border: const OutlineInputBorder(),
+                                  contentPadding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 14,
+                                  ),
                                 ),
                               ),
                             ),
@@ -674,13 +678,14 @@ class _ControlledDropdown<T> extends StatelessWidget {
     decoration: InputDecoration(
       labelText: label,
       border: const OutlineInputBorder(),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
     ),
     child: DropdownButtonHideUnderline(
       child: DropdownButton<T>(
         key: fieldKey,
         isExpanded: true,
         isDense: true,
+        style: Theme.of(context).textTheme.bodyLarge,
         value: value,
         items: items,
         onChanged: enabled ? onChanged : null,

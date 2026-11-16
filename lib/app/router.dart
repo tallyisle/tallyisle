@@ -87,6 +87,36 @@ Page<Object?> _adaptiveFormPage(
   child: child,
 );
 
+Page<Object?> _adaptiveRecordDetailPage(
+  BuildContext context,
+  GoRouterState state,
+  Widget child,
+) {
+  final args = <String, String>{
+    ...state.pathParameters,
+    ...state.uri.queryParameters,
+  };
+  if (DesktopAdaptive.isExpandedDesktop(context)) {
+    return buildDesktopModalOrMaterialPage<Object?>(
+      context: context,
+      key: state.pageKey,
+      name: state.name ?? state.path,
+      arguments: args,
+      restorationId: state.pageKey.value,
+      maxWidth: 560,
+      maxHeight: 740,
+      child: child,
+    );
+  }
+  return NoTransitionPage<Object?>(
+    key: state.pageKey,
+    name: state.name ?? state.path,
+    arguments: args,
+    restorationId: state.pageKey.value,
+    child: child,
+  );
+}
+
 /// Semantic routes (ADR-015). Mapping to the original app's 73 routes is kept
 /// in docs/reference/ as modules are implemented.
 GoRouter buildRouter({List<NavigatorObserver>? observers}) => GoRouter(
@@ -202,8 +232,11 @@ GoRouter buildRouter({List<NavigatorObserver>? observers}) => GoRouter(
     ),
     GoRoute(
       path: '/record/:id',
-      builder: (_, state) =>
-          RecordDetailPage(recordId: state.pathParameters['id']!),
+      pageBuilder: (context, state) => _adaptiveRecordDetailPage(
+        context,
+        state,
+        RecordDetailPage(recordId: state.pathParameters['id']!),
+      ),
     ),
     GoRoute(
       path: '/record/:id/edit',
@@ -398,9 +431,14 @@ GoRouter buildRouter({List<NavigatorObserver>? observers}) => GoRouter(
     GoRoute(path: '/backup', builder: (_, _) => const BackupPage()),
     GoRoute(
       path: '/backup/webdav',
-      builder: (_, _) => const WebDavConfigPage(),
+      pageBuilder: (context, state) =>
+          _adaptiveFormPage(context, state, const WebDavConfigPage()),
     ),
-    GoRoute(path: '/backup/s3', builder: (_, _) => const S3ConfigPage()),
+    GoRoute(
+      path: '/backup/s3',
+      pageBuilder: (context, state) =>
+          _adaptiveFormPage(context, state, const S3ConfigPage()),
+    ),
     GoRoute(path: '/import/csv', builder: (_, _) => const CsvImportPage()),
     GoRoute(
       path: '/import/batches',

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/adaptive.dart';
 import '../../app/providers.dart';
 import '../../data/db/database.dart';
 import '../common/common.dart';
@@ -21,16 +22,25 @@ class _BooksPageState extends ConsumerState<BooksPage> {
     final dayController = TextEditingController(text: '1');
     final ok = await showDialog<bool>(
       context: context,
-      builder: (dialogCtx) => AlertDialog(
-        title: const Text('新建账本'),
-        content: Column(
+      builder: (dialogCtx) {
+        final isDesktop = DesktopAdaptive.isDesktop(dialogCtx);
+        final formFields = Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             TextField(
               key: const Key('book-name'),
               controller: nameController,
               autofocus: true,
-              decoration: const InputDecoration(labelText: '账本名称'),
+              decoration: isDesktop
+                  ? const InputDecoration(
+                      labelText: '账本名称',
+                      border: OutlineInputBorder(),
+                      contentPadding: EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 15,
+                      ),
+                    )
+                  : const InputDecoration(labelText: '账本名称'),
             ),
             const SizedBox(height: 12),
             TextField(
@@ -38,25 +48,47 @@ class _BooksPageState extends ConsumerState<BooksPage> {
               controller: dayController,
               keyboardType: TextInputType.number,
               inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-              decoration: const InputDecoration(
-                labelText: '月起始日 (1-28)',
-                helperText: '账期统计从每月该日开始',
-              ),
+              decoration: isDesktop
+                  ? const InputDecoration(
+                      labelText: '月起始日 (1-28)',
+                      helperText: '账期统计从每月该日开始',
+                      border: OutlineInputBorder(),
+                      contentPadding: EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 15,
+                      ),
+                    )
+                  : const InputDecoration(
+                      labelText: '月起始日 (1-28)',
+                      helperText: '账期统计从每月该日开始',
+                    ),
             ),
           ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogCtx, false),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            key: const Key('book-save'),
-            onPressed: () => Navigator.pop(dialogCtx, true),
-            child: const Text('创建'),
-          ),
-        ],
-      ),
+        );
+        return AlertDialog(
+          title: const Text('新建账本'),
+          content: isDesktop
+              ? ConstrainedBox(
+                  constraints: const BoxConstraints(
+                    minWidth: 360,
+                    maxWidth: 420,
+                  ),
+                  child: formFields,
+                )
+              : formFields,
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogCtx, false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              key: const Key('book-save'),
+              onPressed: () => Navigator.pop(dialogCtx, true),
+              child: const Text('创建'),
+            ),
+          ],
+        );
+      },
     );
 
     if (ok != true || !mounted) return;
@@ -82,16 +114,25 @@ class _BooksPageState extends ConsumerState<BooksPage> {
     final dayController = TextEditingController(text: '${book.startDay}');
     final ok = await showDialog<bool>(
       context: context,
-      builder: (dialogCtx) => AlertDialog(
-        title: Text('编辑“${book.name}”'),
-        content: Column(
+      builder: (dialogCtx) {
+        final isDesktop = DesktopAdaptive.isDesktop(dialogCtx);
+        final formFields = Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             TextField(
               key: const Key('edit-book-name'),
               controller: nameController,
               autofocus: true,
-              decoration: const InputDecoration(labelText: '账本名称'),
+              decoration: isDesktop
+                  ? const InputDecoration(
+                      labelText: '账本名称',
+                      border: OutlineInputBorder(),
+                      contentPadding: EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 15,
+                      ),
+                    )
+                  : const InputDecoration(labelText: '账本名称'),
             ),
             const SizedBox(height: 12),
             TextField(
@@ -99,25 +140,47 @@ class _BooksPageState extends ConsumerState<BooksPage> {
               controller: dayController,
               keyboardType: TextInputType.number,
               inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-              decoration: const InputDecoration(
-                labelText: '月起始日 (1-28)',
-                helperText: '账期统计从每月该日开始',
-              ),
+              decoration: isDesktop
+                  ? const InputDecoration(
+                      labelText: '月起始日 (1-28)',
+                      helperText: '账期统计从每月该日开始',
+                      border: OutlineInputBorder(),
+                      contentPadding: EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 15,
+                      ),
+                    )
+                  : const InputDecoration(
+                      labelText: '月起始日 (1-28)',
+                      helperText: '账期统计从每月该日开始',
+                    ),
             ),
           ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogCtx, false),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            key: const Key('edit-book-save'),
-            onPressed: () => Navigator.pop(dialogCtx, true),
-            child: const Text('保存'),
-          ),
-        ],
-      ),
+        );
+        return AlertDialog(
+          title: Text('编辑“${book.name}”'),
+          content: isDesktop
+              ? ConstrainedBox(
+                  constraints: const BoxConstraints(
+                    minWidth: 360,
+                    maxWidth: 420,
+                  ),
+                  child: formFields,
+                )
+              : formFields,
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogCtx, false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              key: const Key('edit-book-save'),
+              onPressed: () => Navigator.pop(dialogCtx, true),
+              child: const Text('保存'),
+            ),
+          ],
+        );
+      },
     );
 
     if (ok != true || !mounted) return;
@@ -209,17 +272,41 @@ class _BooksPageState extends ConsumerState<BooksPage> {
   Widget build(BuildContext context) {
     final booksAsync = ref.watch(booksProvider);
     final currentBookIdAsync = ref.watch(currentBookIdProvider);
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    final isPopupModal = isDesktop && ModalRoute.of(context) is PopupRoute;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('账本管理')),
+      appBar: AppBar(
+        leading: isPopupModal ? const CloseButton() : null,
+        title: const Text('账本管理'),
+        actions: isDesktop
+            ? [
+                FilledButton.icon(
+                  key: const Key('add-book'),
+                  style: FilledButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                  ),
+                  onPressed: _addBook,
+                  icon: const Icon(Icons.add, size: 18),
+                  label: const Text('新建账本'),
+                ),
+                const SizedBox(width: 12),
+              ]
+            : null,
+      ),
       body: asyncBody(booksAsync, (books) {
         final currentBookId = currentBookIdAsync.value ?? 1;
         if (books.isEmpty) {
           return const Center(child: Text('暂无账本'));
         }
 
-        return ReorderableListView.builder(
-          padding: const EdgeInsets.only(bottom: 96),
+        final listView = ReorderableListView.builder(
+          padding: isDesktop
+              ? const EdgeInsets.symmetric(vertical: 8)
+              : const EdgeInsets.only(bottom: 96),
           buildDefaultDragHandles: false,
           itemCount: books.length,
           onReorderItem: (oldIndex, newIndex) =>
@@ -309,14 +396,23 @@ class _BooksPageState extends ConsumerState<BooksPage> {
             );
           },
         );
+        if (!isDesktop) return listView;
+        return Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 820),
+            child: listView,
+          ),
+        );
       }),
-      floatingActionButton: FloatingActionButton.extended(
-        key: const Key('add-book'),
-        heroTag: 'fab-add-book',
-        onPressed: _addBook,
-        icon: const Icon(Icons.add),
-        label: const Text('新建账本'),
-      ),
+      floatingActionButton: isDesktop
+          ? null
+          : FloatingActionButton.extended(
+              key: const Key('add-book'),
+              heroTag: 'fab-add-book',
+              onPressed: _addBook,
+              icon: const Icon(Icons.add),
+              label: const Text('新建账本'),
+            ),
     );
   }
 }

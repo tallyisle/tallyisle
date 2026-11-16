@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/adaptive.dart';
 import '../../domain/model/codes.dart';
 import '../common/common.dart';
 import '../common/desktop_modal_page.dart';
@@ -14,6 +15,7 @@ class DebtPage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final isDesktop = DesktopAdaptive.isDesktop(context);
     final allBooks = ref.watch(debtAllBooksScopeProvider);
     final selectedStatus = ref.watch(debtStatusTabProvider);
     final viewAsync = ref.watch(debtListViewProvider);
@@ -26,11 +28,11 @@ class DebtPage extends ConsumerWidget {
         title: const Text('借贷管理'),
         actions: [
           Padding(
-            padding: const EdgeInsets.only(right: 12),
+            padding: EdgeInsets.only(right: isDesktop ? 8 : 12),
             child: Center(
               child: ActionChip(
                 key: const Key('debt_scope_toggle'),
-                visualDensity: VisualDensity.compact,
+                visualDensity: isDesktop ? null : VisualDensity.compact,
                 avatar: Icon(
                   allBooks ? Icons.library_books_rounded : Icons.book_outlined,
                   size: 16,
@@ -63,6 +65,21 @@ class DebtPage extends ConsumerWidget {
               ),
             ),
           ),
+          if (isDesktop)
+            Padding(
+              padding: const EdgeInsets.only(right: 12),
+              child: FilledButton.tonalIcon(
+                key: const Key('add_debt_button'),
+                onPressed: () async {
+                  await pushDesktopModalOrMaterialRoute<bool>(
+                    context,
+                    child: const DebtEditorPage(),
+                  );
+                },
+                icon: const Icon(Icons.add, size: 18),
+                label: const Text('新建借贷'),
+              ),
+            ),
         ],
       ),
       body: asyncBody(viewAsync, (view) {
@@ -73,7 +90,7 @@ class DebtPage extends ConsumerWidget {
             ? view.settledItems
             : view.activeItems;
 
-        return ListView(
+        final list = ListView(
           padding: const EdgeInsets.all(16),
           children: [
             Card(
@@ -116,12 +133,18 @@ class DebtPage extends ConsumerWidget {
               child: SegmentedButton<int>(
                 key: const Key('debt_state_tabs'),
                 showSelectedIcon: false,
-                style: const ButtonStyle(
-                  visualDensity: VisualDensity.compact,
-                  padding: WidgetStatePropertyAll(
-                    EdgeInsets.symmetric(horizontal: 10),
-                  ),
-                ),
+                style: isDesktop
+                    ? const ButtonStyle(
+                        padding: WidgetStatePropertyAll(
+                          EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        ),
+                      )
+                    : const ButtonStyle(
+                        visualDensity: VisualDensity.compact,
+                        padding: WidgetStatePropertyAll(
+                          EdgeInsets.symmetric(horizontal: 10),
+                        ),
+                      ),
                 segments: [
                   ButtonSegment<int>(
                     value: AssetStatus.active,
@@ -162,6 +185,8 @@ class DebtPage extends ConsumerWidget {
                   child: Text(
                     activeTab == AssetStatus.settled
                         ? '暂无已结清的借贷项目'
+                        : isDesktop
+                        ? '暂无进行中的借贷项目，点击右上角“新建借贷”添加'
                         : '暂无进行中的借贷项目，点击右下角新建',
                     style: theme.textTheme.bodyMedium?.copyWith(
                       color: colorScheme.onSurfaceVariant,
@@ -171,22 +196,31 @@ class DebtPage extends ConsumerWidget {
               )
             else
               for (final item in items) _DebtItemCard(item: item),
-            const SizedBox(height: 80),
+            SizedBox(height: isDesktop ? 24 : 80),
           ],
         );
+        if (!isDesktop) return list;
+        return Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 800),
+            child: list,
+          ),
+        );
       }),
-      floatingActionButton: FloatingActionButton.extended(
-        key: const Key('add_debt_button'),
-        heroTag: 'fab-debt',
-        onPressed: () async {
-          await pushDesktopModalOrMaterialRoute<bool>(
-            context,
-            child: const DebtEditorPage(),
-          );
-        },
-        icon: const Icon(Icons.add),
-        label: const Text('新建借贷'),
-      ),
+      floatingActionButton: isDesktop
+          ? null
+          : FloatingActionButton.extended(
+              key: const Key('add_debt_button'),
+              heroTag: 'fab-debt',
+              onPressed: () async {
+                await pushDesktopModalOrMaterialRoute<bool>(
+                  context,
+                  child: const DebtEditorPage(),
+                );
+              },
+              icon: const Icon(Icons.add),
+              label: const Text('新建借贷'),
+            ),
     );
   }
 }
@@ -253,8 +287,9 @@ class _DebtItemCard extends StatelessWidget {
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
         onTap: () async {
-          await Navigator.of(context).push<bool>(
-            MaterialPageRoute(builder: (_) => DebtDetailPage(debtId: debt.id)),
+          await pushDesktopModalOrMaterialRoute<bool>(
+            context,
+            child: DebtDetailPage(debtId: debt.id),
           );
         },
         child: Padding(

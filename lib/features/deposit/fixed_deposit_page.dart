@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/adaptive.dart';
 import '../../data/db/database.dart';
 import '../../data/repo/fixed_deposit_queries.dart';
 import '../../domain/model/codes.dart';
@@ -134,8 +135,9 @@ class _FixedDepositPageState extends ConsumerState<FixedDepositPage> {
       if (widget.onRecordTap != null) {
         widget.onRecordTap!(recId);
       } else {
-        await Navigator.of(context).push<void>(
-          MaterialPageRoute(builder: (_) => RecordDetailPage(recordId: recId)),
+        await pushDesktopModalOrMaterialRoute<void>(
+          context,
+          child: RecordDetailPage(recordId: recId),
         );
       }
     } catch (e) {
@@ -149,6 +151,7 @@ class _FixedDepositPageState extends ConsumerState<FixedDepositPage> {
 
   @override
   Widget build(BuildContext context) {
+    final isDesktop = DesktopAdaptive.isDesktop(context);
     final overviewAsync = ref.watch(
       fixedDepositOverviewProvider(_selectedAssetId),
     );
@@ -164,21 +167,33 @@ class _FixedDepositPageState extends ConsumerState<FixedDepositPage> {
             onPressed: _settling ? null : _triggerSettle,
             icon: const Icon(Icons.refresh),
           ),
+          if (isDesktop)
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: FilledButton.tonalIcon(
+                key: const Key('add_deposit_fab'),
+                onPressed: _openCreate,
+                icon: const Icon(Icons.add, size: 18),
+                label: const Text('新建定存'),
+              ),
+            ),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        key: const Key('add_deposit_fab'),
-        onPressed: _openCreate,
-        icon: const Icon(Icons.add),
-        label: const Text('新建定存'),
-      ),
+      floatingActionButton: isDesktop
+          ? null
+          : FloatingActionButton.extended(
+              key: const Key('add_deposit_fab'),
+              onPressed: _openCreate,
+              icon: const Icon(Icons.add),
+              label: const Text('新建定存'),
+            ),
       body: asyncBody(
         overviewAsync,
         (overview) => Center(
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 720),
+            constraints: BoxConstraints(maxWidth: isDesktop ? 780 : 720),
             child: ListView(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 88),
+              padding: EdgeInsets.fromLTRB(16, 12, 16, isDesktop ? 24 : 88),
               children: [
                 if (overview.eligibleAssets.isNotEmpty)
                   _AssetFilterBar(
@@ -227,18 +242,28 @@ class _AssetFilterBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDesktop = DesktopAdaptive.isDesktop(context);
     final validSelected =
         selectedAssetId != null &&
             eligibleAssets.any((a) => a.id == selectedAssetId)
         ? selectedAssetId!
         : noRef;
     return InputDecorator(
-      decoration: const InputDecoration(
-        labelText: '筛选账户',
-        isDense: true,
-        border: OutlineInputBorder(),
-        contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      ),
+      decoration: isDesktop
+          ? const InputDecoration(
+              labelText: '筛选账户',
+              border: OutlineInputBorder(),
+              contentPadding: EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 16,
+              ),
+            )
+          : const InputDecoration(
+              labelText: '筛选账户',
+              isDense: true,
+              border: OutlineInputBorder(),
+              contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            ),
       child: DropdownButtonHideUnderline(
         child: DropdownButton<int>(
           key: const Key('deposit_asset_filter'),
@@ -352,27 +377,32 @@ class _EmptyDepositView extends StatelessWidget {
   const _EmptyDepositView();
 
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 48),
-    child: Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(
-          Icons.savings_outlined,
-          size: 48,
-          color: Theme.of(context).colorScheme.outline,
-        ),
-        const SizedBox(height: 12),
-        Text('暂无定期存款记录', style: Theme.of(context).textTheme.titleMedium),
-        const SizedBox(height: 4),
-        Text(
-          '点击右下角“新建定存”登记本金与利率，到期自动结算收益',
-          style: Theme.of(context).textTheme.bodySmall,
-          textAlign: TextAlign.center,
-        ),
-      ],
-    ),
-  );
+  Widget build(BuildContext context) {
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 48),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.savings_outlined,
+            size: 48,
+            color: Theme.of(context).colorScheme.outline,
+          ),
+          const SizedBox(height: 12),
+          Text('暂无定期存款记录', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 4),
+          Text(
+            isDesktop
+                ? '点击右上角“新建定存”登记本金与利率，到期自动结算收益'
+                : '点击右下角“新建定存”登记本金与利率，到期自动结算收益',
+            style: Theme.of(context).textTheme.bodySmall,
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _DepositEntryCard extends StatelessWidget {
@@ -390,6 +420,7 @@ class _DepositEntryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDesktop = DesktopAdaptive.isDesktop(context);
     final theme = Theme.of(context);
     final item = entry.item;
     final curr = entry.effectiveCurrency;
@@ -480,23 +511,51 @@ class _DepositEntryCard extends StatelessWidget {
                   ),
                   const SizedBox(width: 8),
                   Flexible(
-                    child: ActionChip(
-                      key: Key(
-                        'deposit_income_chip_${entry.asset.id}_${entry.index}',
-                      ),
-                      visualDensity: VisualDensity.compact,
-                      label: FittedBox(
-                        fit: BoxFit.scaleDown,
-                        child: Text(
-                          item.isSettled
-                              ? '已结收益 $currPrefix${formatMinor(item.expectedIncomeMinor)}'
-                              : '预期收益 $currPrefix${formatMinor(item.expectedIncomeMinor)}',
-                          maxLines: 1,
-                          softWrap: false,
-                        ),
-                      ),
-                      onPressed: item.isSettled ? onTapIncomeChip : null,
-                    ),
+                    child: isDesktop && !item.isSettled
+                        ? Container(
+                            key: Key(
+                              'deposit_income_chip_${entry.asset.id}_${entry.index}',
+                            ),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 5,
+                            ),
+                            decoration: BoxDecoration(
+                              color: theme.colorScheme.secondaryContainer,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Text(
+                                '预期收益 $currPrefix${formatMinor(item.expectedIncomeMinor)}',
+                                maxLines: 1,
+                                softWrap: false,
+                                style: theme.textTheme.labelMedium?.copyWith(
+                                  color: theme.colorScheme.onSecondaryContainer,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          )
+                        : ActionChip(
+                            key: Key(
+                              'deposit_income_chip_${entry.asset.id}_${entry.index}',
+                            ),
+                            visualDensity: isDesktop
+                                ? null
+                                : VisualDensity.compact,
+                            label: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Text(
+                                item.isSettled
+                                    ? '已结收益 $currPrefix${formatMinor(item.expectedIncomeMinor)}'
+                                    : '预期收益 $currPrefix${formatMinor(item.expectedIncomeMinor)}',
+                                maxLines: 1,
+                                softWrap: false,
+                              ),
+                            ),
+                            onPressed: item.isSettled ? onTapIncomeChip : null,
+                          ),
                   ),
                 ],
               ),

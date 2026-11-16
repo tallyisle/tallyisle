@@ -57,6 +57,7 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
     }
 
     final repaymentDays = _getRepaymentDays(month.year, month.month, assets);
+    final isDesktop = DesktopAdaptive.isDesktop(context);
     final isExpandedDesktop = DesktopAdaptive.isExpandedDesktop(context);
     final selectedDayNoonMs = DateTime(
       month.year,
@@ -64,6 +65,45 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
       clampedSelectedDay,
       12,
     ).millisecondsSinceEpoch;
+
+    final singleColumnBody = Column(
+      children: [
+        _buildMonthSwitcher(context, month),
+        _buildMonthSummaryCard(context, monthSummaryAsync),
+        _buildWeekdayHeader(context),
+        summariesAsync.when(
+          data: (dailyMap) => _buildCalendarGrid(
+            context,
+            month,
+            dailyMap,
+            repaymentDays,
+            clampedSelectedDay,
+          ),
+          loading: () => const SizedBox(
+            height: 200,
+            child: Center(child: CircularProgressIndicator()),
+          ),
+          error: (err, _) => SizedBox(height: 200, child: ErrorView(err)),
+        ),
+        const Divider(height: 1),
+        _buildSelectedDayHeader(
+          context,
+          month,
+          summariesAsync,
+          clampedSelectedDay,
+          selectedDayNoonMs: selectedDayNoonMs,
+        ),
+        Expanded(
+          child: _buildSelectedDayRecords(
+            context,
+            summariesAsync,
+            clampedSelectedDay,
+            categories,
+            assets,
+          ),
+        ),
+      ],
+    );
 
     return Scaffold(
       appBar: AppBar(
@@ -146,44 +186,15 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
                 ),
               ),
             )
-          : Column(
-              children: [
-                _buildMonthSwitcher(context, month),
-                _buildMonthSummaryCard(context, monthSummaryAsync),
-                _buildWeekdayHeader(context),
-                summariesAsync.when(
-                  data: (dailyMap) => _buildCalendarGrid(
-                    context,
-                    month,
-                    dailyMap,
-                    repaymentDays,
-                    clampedSelectedDay,
-                  ),
-                  loading: () => const SizedBox(
-                    height: 240,
-                    child: Center(child: CircularProgressIndicator()),
-                  ),
-                  error: (err, _) =>
-                      SizedBox(height: 240, child: ErrorView(err)),
-                ),
-                const Divider(height: 1),
-                _buildSelectedDayHeader(
-                  context,
-                  month,
-                  summariesAsync,
-                  clampedSelectedDay,
-                ),
-                Expanded(
-                  child: _buildSelectedDayRecords(
-                    context,
-                    summariesAsync,
-                    clampedSelectedDay,
-                    categories,
-                    assets,
-                  ),
-                ),
-              ],
-            ),
+          : (isDesktop
+                ? Align(
+                    alignment: Alignment.topCenter,
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 760),
+                      child: singleColumnBody,
+                    ),
+                  )
+                : singleColumnBody),
     );
   }
 
@@ -368,6 +379,9 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
     if (isDesktopPane) {
       final baseDesktopHeight = viewportHeight < 740 ? 52.0 : 58.0;
       cellHeight = (baseDesktopHeight * textScale).clamp(48.0, 68.0);
+    } else if (DesktopAdaptive.isDesktop(context) && viewportHeight < 680) {
+      final maxCompactGridHeight = (viewportHeight - 365.0).clamp(180.0, 224.0);
+      cellHeight = (maxCompactGridHeight / rowCount).clamp(32.0, 40.0);
     } else {
       final baseCellHeight = viewportHeight < 700 ? 46.0 : 54.0;
       final maxGridHeight = (viewportHeight - 285.0).clamp(192.0, 390.0);
@@ -644,9 +658,11 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
     BuildContext context,
     CalendarMonth month,
     AsyncValue<Map<int, CalendarDailySummary<LedgerRecord>>> summariesAsync,
-    int selectedDay,
-  ) {
+    int selectedDay, {
+    required int selectedDayNoonMs,
+  }) {
     final theme = Theme.of(context);
+    final isDesktop = DesktopAdaptive.isDesktop(context);
     final isDark = theme.brightness == Brightness.dark;
     final expenseColor = isDark ? Colors.red.shade300 : Colors.red.shade700;
     final incomeColor = isDark ? Colors.green.shade300 : Colors.green.shade700;
@@ -703,6 +719,29 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
                     ],
                   ),
                 ),
+              ),
+            ),
+          ] else if (isDesktop)
+            const Spacer(),
+          if (isDesktop) ...[
+            const SizedBox(width: 8),
+            FilledButton.tonal(
+              key: const Key('calendar-compact-add-for-day'),
+              style: FilledButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 6,
+                ),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              onPressed: () =>
+                  context.push('/record/new?time=$selectedDayNoonMs'),
+              child: const Text(
+                '+ 补记该日账单',
+                maxLines: 1,
+                softWrap: false,
+                style: TextStyle(fontSize: 12),
               ),
             ),
           ],

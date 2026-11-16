@@ -81,6 +81,7 @@ class _AssetTrendPageState extends ConsumerState<AssetTrendPage> {
         normalizeCurrency(singleAccount.currency) != 'CNY';
 
     final pageTitle = _buildPageTitle(filter, singleAccount);
+    final isDesktop = DesktopAdaptive.isDesktop(context);
     final isExpandedDesktop = DesktopAdaptive.isExpandedDesktop(context);
 
     final distributionWidget = distribution != null
@@ -104,6 +105,40 @@ class _AssetTrendPageState extends ConsumerState<AssetTrendPage> {
     final flowTableWidget = trendResult != null
         ? _buildFlowTableCard(context, trendResult)
         : const SizedBox.shrink();
+
+    final stackedScrollContent = SingleChildScrollView(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Column(
+        children: [
+          // 1. Top Year Filter Row
+          _buildYearSelector(context, selectedYear),
+          const SizedBox(height: 12),
+
+          // 2. Perspective SegmentedButton or Foreign Currency Switch
+          if (filter is! AssetTrendFilterSingleAsset)
+            _buildPerspectiveSegment(context, perspective)
+          else if (isForeignCurrency)
+            _buildCurrencySwitchRow(
+              context,
+              singleAccount,
+              useOriginalCurrency,
+            ),
+          const SizedBox(height: 16),
+
+          // 3. Card 1: Real-time Asset Distribution
+          distributionWidget,
+          const SizedBox(height: 16),
+
+          // 4. Card 2: Trend Line Chart
+          chartWidget,
+          const SizedBox(height: 16),
+
+          // 5. Card 3: Monthly Flow Table
+          flowTableWidget,
+          const SizedBox(height: 24),
+        ],
+      ),
+    );
 
     return Scaffold(
       appBar: AppBar(
@@ -203,39 +238,14 @@ class _AssetTrendPageState extends ConsumerState<AssetTrendPage> {
                 ),
               ],
             )
-          : SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              child: Column(
-                children: [
-                  // 1. Top Year Filter Row
-                  _buildYearSelector(context, selectedYear),
-                  const SizedBox(height: 12),
-
-                  // 2. Perspective SegmentedButton or Foreign Currency Switch
-                  if (filter is! AssetTrendFilterSingleAsset)
-                    _buildPerspectiveSegment(context, perspective)
-                  else if (isForeignCurrency)
-                    _buildCurrencySwitchRow(
-                      context,
-                      singleAccount,
-                      useOriginalCurrency,
+          : (isDesktop
+                ? Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 760),
+                      child: stackedScrollContent,
                     ),
-                  const SizedBox(height: 16),
-
-                  // 3. Card 1: Real-time Asset Distribution
-                  distributionWidget,
-                  const SizedBox(height: 16),
-
-                  // 4. Card 2: Trend Line Chart
-                  chartWidget,
-                  const SizedBox(height: 16),
-
-                  // 5. Card 3: Monthly Flow Table
-                  flowTableWidget,
-                  const SizedBox(height: 24),
-                ],
-              ),
-            ),
+                  )
+                : stackedScrollContent),
     );
   }
 

@@ -303,49 +303,52 @@ class _WishEditorPageState extends ConsumerState<WishEditorPage> {
       ],
     );
 
-    return DesktopModalEscapeScope(
-      enabled: isDesktop,
-      child: Scaffold(
-        key: const Key('wish_editor_page'),
-        appBar: AppBar(
-          leading: isDesktop ? const CloseButton() : null,
-          scrolledUnderElevation: isDesktop ? 0 : null,
-          title: Text(_editing ? '编辑心愿' : '新建心愿'),
-          actions: [
-            if (_editing)
-              IconButton(
-                key: const Key('editor_delete_wish'),
-                tooltip: '删除心愿',
-                onPressed: _busy ? null : _deleteCurrent,
-                icon: const Icon(Icons.delete_outline),
-              ),
-          ],
-        ),
-        body: _loading
-            ? const Loading()
-            : (isDesktop
-                  ? Center(
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 640),
-                        child: formBody,
-                      ),
-                    )
-                  : formBody),
-        bottomNavigationBar: _loading
-            ? null
-            : SafeArea(
-                child: Padding(
-                  padding: isDesktop
-                      ? const EdgeInsets.fromLTRB(20, 8, 20, 14)
-                      : const EdgeInsets.fromLTRB(16, 8, 16, 16),
-                  child: FilledButton.icon(
-                    key: const Key('save_wish_button'),
-                    onPressed: _busy ? null : _save,
-                    icon: const Icon(Icons.check),
-                    label: Text(_busy ? '保存中…' : '保存心愿'),
+    return PopScope(
+      canPop: !_busy,
+      child: DesktopModalEscapeScope(
+        enabled: isDesktop,
+        child: Scaffold(
+          key: const Key('wish_editor_page'),
+          appBar: AppBar(
+            leading: isDesktop ? const CloseButton() : null,
+            scrolledUnderElevation: isDesktop ? 0 : null,
+            title: Text(_editing ? '编辑心愿' : '新建心愿'),
+            actions: [
+              if (_editing)
+                IconButton(
+                  key: const Key('editor_delete_wish'),
+                  tooltip: '删除心愿',
+                  onPressed: _busy ? null : _deleteCurrent,
+                  icon: const Icon(Icons.delete_outline),
+                ),
+            ],
+          ),
+          body: _loading
+              ? const Loading()
+              : (isDesktop
+                    ? Center(
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 640),
+                          child: formBody,
+                        ),
+                      )
+                    : formBody),
+          bottomNavigationBar: _loading
+              ? null
+              : SafeArea(
+                  child: Padding(
+                    padding: isDesktop
+                        ? const EdgeInsets.fromLTRB(20, 8, 20, 14)
+                        : const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                    child: FilledButton.icon(
+                      key: const Key('save_wish_button'),
+                      onPressed: _busy ? null : _save,
+                      icon: const Icon(Icons.check),
+                      label: Text(_busy ? '保存中…' : '保存心愿'),
+                    ),
                   ),
                 ),
-              ),
+        ),
       ),
     );
   }

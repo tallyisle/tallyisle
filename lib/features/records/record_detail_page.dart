@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../app/adaptive.dart';
 import '../../app/providers.dart';
 import '../../core/failure.dart';
 import '../../core/money.dart';
@@ -687,9 +688,26 @@ class _RecordDetailPageState extends ConsumerState<RecordDetailPage> {
     }
 
     final receiptAction = buildReceiptAction();
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    final isDesktopModal =
+        isDesktop &&
+        ModalRoute.of(context) is PopupRoute &&
+        Navigator.of(context).canPop();
     return Scaffold(
-      appBar: AppBar(title: const Text('账单详情'), actions: [?receiptAction]),
-      body: detailBody,
+      appBar: AppBar(
+        leading: isDesktopModal ? const CloseButton() : null,
+        title: const Text('账单详情'),
+        actions: [?receiptAction],
+      ),
+      body: isDesktop
+          ? Align(
+              alignment: Alignment.topCenter,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 680),
+                child: detailBody,
+              ),
+            )
+          : detailBody,
     );
   }
 }
@@ -754,9 +772,10 @@ class _LinkDialogState extends State<_LinkDialog> {
   }
 
   @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: Text(widget.title),
-    content: Column(
+  Widget build(BuildContext context) {
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    final fieldBorder = isDesktop ? const OutlineInputBorder() : null;
+    Widget content = Column(
       mainAxisSize: MainAxisSize.min,
       children: [
         TextField(
@@ -769,12 +788,14 @@ class _LinkDialogState extends State<_LinkDialog> {
             labelText: '金额',
             prefixText: '¥ ',
             errorText: error,
+            border: fieldBorder,
           ),
         ),
+        if (isDesktop) const SizedBox(height: 12),
         DropdownButtonFormField<int>(
           isExpanded: true,
           initialValue: assetId,
-          decoration: const InputDecoration(labelText: '入账账户'),
+          decoration: InputDecoration(labelText: '入账账户', border: fieldBorder),
           items: [
             const DropdownMenuItem(
               value: noRef,
@@ -789,30 +810,40 @@ class _LinkDialogState extends State<_LinkDialog> {
           onChanged: (v) => setState(() => assetId = v ?? noRef),
         ),
       ],
-    ),
-    actions: [
-      TextButton(
-        onPressed: () => Navigator.pop(context),
-        child: const Text('取消'),
-      ),
-      FilledButton(
-        key: const Key('link-save'),
-        onPressed: () {
-          try {
-            final money = _parseAmount(amount.text);
-            if (money.units <= BigInt.zero) {
-              setState(() => error = '金额须大于 0');
-              return;
+    );
+    if (isDesktop) {
+      content = ConstrainedBox(
+        constraints: const BoxConstraints(minWidth: 360, maxWidth: 420),
+        child: content,
+      );
+    }
+    return AlertDialog(
+      title: Text(widget.title),
+      content: content,
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          key: const Key('link-save'),
+          onPressed: () {
+            try {
+              final money = _parseAmount(amount.text);
+              if (money.units <= BigInt.zero) {
+                setState(() => error = '金额须大于 0');
+                return;
+              }
+              Navigator.pop(context, (money, assetId));
+            } catch (e) {
+              setState(() => error = safeMessage(e));
             }
-            Navigator.pop(context, (money, assetId));
-          } catch (e) {
-            setState(() => error = safeMessage(e));
-          }
-        },
-        child: const Text('保存'),
-      ),
-    ],
-  );
+          },
+          child: const Text('保存'),
+        ),
+      ],
+    );
+  }
 }
 
 class _SettleAdvanceDialog extends StatefulWidget {
@@ -845,9 +876,10 @@ class _SettleAdvanceDialogState extends State<_SettleAdvanceDialog> {
   }
 
   @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: Text(widget.isIncome ? '结算预收款' : '结算预支款'),
-    content: Column(
+  Widget build(BuildContext context) {
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    final fieldBorder = isDesktop ? const OutlineInputBorder() : null;
+    Widget content = Column(
       mainAxisSize: MainAxisSize.min,
       children: [
         TextField(
@@ -860,13 +892,16 @@ class _SettleAdvanceDialogState extends State<_SettleAdvanceDialog> {
             labelText: '实际结算金额',
             prefixText: '¥ ',
             errorText: error,
+            border: fieldBorder,
           ),
         ),
+        if (isDesktop) const SizedBox(height: 12),
         DropdownButtonFormField<int>(
           isExpanded: true,
           initialValue: assetId,
           decoration: InputDecoration(
             labelText: widget.isIncome ? '收款账户' : '扣款账户',
+            border: fieldBorder,
           ),
           items: [
             const DropdownMenuItem(
@@ -881,6 +916,7 @@ class _SettleAdvanceDialogState extends State<_SettleAdvanceDialog> {
           ],
           onChanged: (v) => setState(() => assetId = v ?? noRef),
         ),
+        if (isDesktop) const SizedBox(height: 6),
         CheckboxListTile(
           contentPadding: EdgeInsets.zero,
           title: const Text('结清本笔预收/预支'),
@@ -889,28 +925,38 @@ class _SettleAdvanceDialogState extends State<_SettleAdvanceDialog> {
           onChanged: (v) => setState(() => finish = v ?? true),
         ),
       ],
-    ),
-    actions: [
-      TextButton(
-        onPressed: () => Navigator.pop(context),
-        child: const Text('取消'),
-      ),
-      FilledButton(
-        key: const Key('settle-save'),
-        onPressed: () {
-          try {
-            final money = _parseAmount(amount.text);
-            if (money.units <= BigInt.zero) {
-              setState(() => error = '结算金额须大于 0');
-              return;
+    );
+    if (isDesktop) {
+      content = ConstrainedBox(
+        constraints: const BoxConstraints(minWidth: 360, maxWidth: 420),
+        child: content,
+      );
+    }
+    return AlertDialog(
+      title: Text(widget.isIncome ? '结算预收款' : '结算预支款'),
+      content: content,
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          key: const Key('settle-save'),
+          onPressed: () {
+            try {
+              final money = _parseAmount(amount.text);
+              if (money.units <= BigInt.zero) {
+                setState(() => error = '结算金额须大于 0');
+                return;
+              }
+              Navigator.pop(context, (money, assetId, finish));
+            } catch (e) {
+              setState(() => error = safeMessage(e));
             }
-            Navigator.pop(context, (money, assetId, finish));
-          } catch (e) {
-            setState(() => error = safeMessage(e));
-          }
-        },
-        child: const Text('确认结算'),
-      ),
-    ],
-  );
+          },
+          child: const Text('确认结算'),
+        ),
+      ],
+    );
+  }
 }

@@ -111,7 +111,7 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
             icon: Icon(hidden ? Icons.visibility_off : Icons.visibility),
             onPressed: () => setState(() => hidden = !hidden),
           ),
-          if (isExpandedDesktop)
+          if (isDesktop)
             Padding(
               padding: const EdgeInsets.only(right: 12, left: 4),
               child: FilledButton.tonalIcon(
@@ -302,9 +302,7 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(
-                      isExpandedDesktop ? '还没有账户，点右上角或下方添加' : '还没有账户，点右下角添加',
-                    ),
+                    Text(isDesktop ? '还没有账户，点右上角或下方添加' : '还没有账户，点右下角添加'),
                     const SizedBox(height: 16),
                     Row(
                       children: [
@@ -383,12 +381,21 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
                   showHiddenAccounts ? '收起已隐藏账户' : '显示已隐藏账户（$archivedCount）',
                 ),
               ),
-            SizedBox(height: isExpandedDesktop ? 32 : 96),
+            SizedBox(height: isDesktop ? 32 : 96),
           ],
         );
 
         if (!isExpandedDesktop) {
-          return accountTreeList;
+          if (!isDesktop) {
+            return accountTreeList;
+          }
+          return Align(
+            alignment: Alignment.topCenter,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 820),
+              child: accountTreeList,
+            ),
+          );
         }
 
         final scheme = theme.colorScheme;
@@ -425,7 +432,7 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
           ],
         );
       }),
-      floatingActionButton: isExpandedDesktop
+      floatingActionButton: isDesktop
           ? null
           : FloatingActionButton.extended(
               key: const Key('add-asset'),
@@ -554,7 +561,15 @@ class _CustomizableAssetAvatar extends StatelessWidget {
   }
 }
 
-enum _AssetContextAction { viewFlows, newRecord, editAsset, assetTrend }
+enum _AssetContextAction {
+  viewFlows,
+  newRecord,
+  editAsset,
+  assetTrend,
+  viewDebtDetail,
+  editDebt,
+  manageDebts,
+}
 
 class _DesktopAssetTile extends StatefulWidget {
   const _DesktopAssetTile({
@@ -582,7 +597,7 @@ class _DesktopAssetTileState extends State<_DesktopAssetTile> {
 
   Future<void> _showContextMenu(Offset globalPosition) async {
     final asset = widget.asset;
-    if (widget.isDebtSection || asset.type == AssetType.debt) return;
+    final isDebt = widget.isDebtSection || asset.type == AssetType.debt;
     final overlay =
         Overlay.of(context).context.findRenderObject() as RenderBox?;
     final position = RelativeRect.fromRect(
@@ -593,24 +608,39 @@ class _DesktopAssetTileState extends State<_DesktopAssetTile> {
     final action = await showMenu<_AssetContextAction>(
       context: context,
       position: position,
-      items: const <PopupMenuEntry<_AssetContextAction>>[
-        PopupMenuItem<_AssetContextAction>(
-          value: _AssetContextAction.viewFlows,
-          child: Text('查看账户流水'),
-        ),
-        PopupMenuItem<_AssetContextAction>(
-          value: _AssetContextAction.newRecord,
-          child: Text('记一笔到此账户'),
-        ),
-        PopupMenuItem<_AssetContextAction>(
-          value: _AssetContextAction.editAsset,
-          child: Text('编辑账户'),
-        ),
-        PopupMenuItem<_AssetContextAction>(
-          value: _AssetContextAction.assetTrend,
-          child: Text('资产趋势'),
-        ),
-      ],
+      items: isDebt
+          ? const <PopupMenuEntry<_AssetContextAction>>[
+              PopupMenuItem<_AssetContextAction>(
+                value: _AssetContextAction.viewDebtDetail,
+                child: Text('查看借贷详情'),
+              ),
+              PopupMenuItem<_AssetContextAction>(
+                value: _AssetContextAction.editDebt,
+                child: Text('编辑借贷项目'),
+              ),
+              PopupMenuItem<_AssetContextAction>(
+                value: _AssetContextAction.manageDebts,
+                child: Text('进入借贷管理'),
+              ),
+            ]
+          : const <PopupMenuEntry<_AssetContextAction>>[
+              PopupMenuItem<_AssetContextAction>(
+                value: _AssetContextAction.viewFlows,
+                child: Text('查看账户流水'),
+              ),
+              PopupMenuItem<_AssetContextAction>(
+                value: _AssetContextAction.newRecord,
+                child: Text('记一笔到此账户'),
+              ),
+              PopupMenuItem<_AssetContextAction>(
+                value: _AssetContextAction.editAsset,
+                child: Text('编辑账户'),
+              ),
+              PopupMenuItem<_AssetContextAction>(
+                value: _AssetContextAction.assetTrend,
+                child: Text('资产趋势'),
+              ),
+            ],
     );
     if (action == null || !mounted) return;
     switch (action) {
@@ -622,6 +652,12 @@ class _DesktopAssetTileState extends State<_DesktopAssetTile> {
         await context.push('/assets/${asset.id}/edit');
       case _AssetContextAction.assetTrend:
         await context.push('/stats/trend?assetId=${asset.id}');
+      case _AssetContextAction.viewDebtDetail:
+        widget.onOpenOrSelect();
+      case _AssetContextAction.editDebt:
+        await context.push('/debts/${asset.id}/edit');
+      case _AssetContextAction.manageDebts:
+        await context.push('/debts');
     }
   }
 
@@ -683,9 +719,8 @@ class _DesktopAssetTileState extends State<_DesktopAssetTile> {
         onExit: (_) => setState(() => _hovered = false),
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
-          onSecondaryTapUp: isDebt
-              ? null
-              : (details) => _showContextMenu(details.globalPosition),
+          onSecondaryTapUp: (details) =>
+              _showContextMenu(details.globalPosition),
           child: Material(
             color: bgColor,
             borderRadius: BorderRadius.circular(10),

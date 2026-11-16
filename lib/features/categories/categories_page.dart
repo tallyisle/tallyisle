@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../app/adaptive.dart';
 import '../../app/providers.dart';
 import '../../data/db/database.dart';
 import '../../domain/model/codes.dart';
@@ -201,9 +202,9 @@ class _CategoriesPageState extends ConsumerState<CategoriesPage>
         final ok = await showDialog<bool>(
           context: context,
           builder: (dialogCtx) => StatefulBuilder(
-            builder: (ctx, setDialogState) => AlertDialog(
-              title: const Text('迁移并删除分类'),
-              content: Column(
+            builder: (ctx, setDialogState) {
+              final isDesktop = DesktopAdaptive.isDesktop(ctx);
+              final migrateBody = Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -215,6 +216,16 @@ class _CategoriesPageState extends ConsumerState<CategoriesPage>
                     key: const Key('target-category-dropdown'),
                     isExpanded: true,
                     initialValue: selectedTarget,
+                    decoration: isDesktop
+                        ? const InputDecoration(
+                            labelText: '目标分类',
+                            border: OutlineInputBorder(),
+                            contentPadding: EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 15,
+                            ),
+                          )
+                        : const InputDecoration(),
                     items: [
                       for (final cand in candidates)
                         DropdownMenuItem(
@@ -249,19 +260,31 @@ class _CategoriesPageState extends ConsumerState<CategoriesPage>
                     },
                   ),
                 ],
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(dialogCtx, false),
-                  child: const Text('取消'),
-                ),
-                FilledButton(
-                  key: const Key('confirm-migrate-delete'),
-                  onPressed: () => Navigator.pop(dialogCtx, true),
-                  child: const Text('迁移并删除'),
-                ),
-              ],
-            ),
+              );
+              return AlertDialog(
+                title: const Text('迁移并删除分类'),
+                content: isDesktop
+                    ? ConstrainedBox(
+                        constraints: const BoxConstraints(
+                          minWidth: 360,
+                          maxWidth: 420,
+                        ),
+                        child: migrateBody,
+                      )
+                    : migrateBody,
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(dialogCtx, false),
+                    child: const Text('取消'),
+                  ),
+                  FilledButton(
+                    key: const Key('confirm-migrate-delete'),
+                    onPressed: () => Navigator.pop(dialogCtx, true),
+                    child: const Text('迁移并删除'),
+                  ),
+                ],
+              );
+            },
           ),
         );
         if (ok != true) return;
@@ -301,26 +324,80 @@ class _CategoriesPageState extends ConsumerState<CategoriesPage>
   Widget build(BuildContext context) {
     final bookId = ref.watch(currentBookIdProvider).value ?? 1;
     final categoriesAsync = ref.watch(allCategoriesProvider(bookId));
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    final isPopupModal = isDesktop && ModalRoute.of(context) is PopupRoute;
+
+    final tabBar = TabBar(
+      controller: _tabController,
+      tabs: const [
+        Tab(text: '支出分类'),
+        Tab(text: '收入分类'),
+      ],
+    );
 
     return Scaffold(
       appBar: AppBar(
+        leading: isPopupModal ? const CloseButton() : null,
         title: const Text('分类管理'),
         actions: [
           IconButton(
             key: const Key('categories-transfer-action'),
             tooltip: '分类导入导出与迁移',
             icon: const Icon(Icons.import_export_outlined),
-            onPressed: () =>
-                context.push('/categories/transfer?bookId=$bookId'),
+            onPressed: () {
+              var isEmbeddedInMe = false;
+              if (DesktopAdaptive.isExpandedDesktop(context) &&
+                  GoRouter.maybeOf(context) != null) {
+                try {
+                  isEmbeddedInMe = GoRouterState.of(context).uri.path == '/me';
+                } catch (_) {
+                  isEmbeddedInMe =
+                      GoRouter.maybeOf(
+                        context,
+                      )?.routerDelegate.currentConfiguration.uri.path ==
+                      '/me';
+                }
+              }
+              if (isEmbeddedInMe) {
+                context.go('/me?section=%2Fcategories%2Ftransfer');
+              } else {
+                context.push('/categories/transfer?bookId=$bookId');
+              }
+            },
           ),
-        ],
-        bottom: TabBar(
-          controller: _tabController,
-          tabs: const [
-            Tab(text: '支出分类'),
-            Tab(text: '收入分类'),
+          if (isDesktop) ...[
+            const SizedBox(width: 4),
+            FilledButton.icon(
+              key: const Key('add-category'),
+              style: FilledButton.styleFrom(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+              ),
+              onPressed: () => _addCategory(
+                bookId,
+                _tabController.index == 0
+                    ? RecordType.expense
+                    : RecordType.income,
+              ),
+              icon: const Icon(Icons.add, size: 18),
+              label: const Text('新建一级分类'),
+            ),
+            const SizedBox(width: 12),
           ],
-        ),
+        ],
+        bottom: isDesktop
+            ? PreferredSize(
+                preferredSize: const Size.fromHeight(kTextTabBarHeight),
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 820),
+                    child: tabBar,
+                  ),
+                ),
+              )
+            : tabBar,
       ),
       body: asyncBody(
         categoriesAsync,
@@ -332,16 +409,20 @@ class _CategoriesPageState extends ConsumerState<CategoriesPage>
           ],
         ),
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        key: const Key('add-category'),
-        heroTag: 'fab-add-category',
-        onPressed: () => _addCategory(
-          bookId,
-          _tabController.index == 0 ? RecordType.expense : RecordType.income,
-        ),
-        icon: const Icon(Icons.add),
-        label: const Text('新建一级分类'),
-      ),
+      floatingActionButton: isDesktop
+          ? null
+          : FloatingActionButton.extended(
+              key: const Key('add-category'),
+              heroTag: 'fab-add-category',
+              onPressed: () => _addCategory(
+                bookId,
+                _tabController.index == 0
+                    ? RecordType.expense
+                    : RecordType.income,
+              ),
+              icon: const Icon(Icons.add),
+              label: const Text('新建一级分类'),
+            ),
     );
   }
 
@@ -355,8 +436,11 @@ class _CategoriesPageState extends ConsumerState<CategoriesPage>
     }
 
     final theme = Theme.of(context);
-    return ListView(
-      padding: const EdgeInsets.only(bottom: 96),
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    final listView = ListView(
+      padding: isDesktop
+          ? const EdgeInsets.symmetric(vertical: 8)
+          : const EdgeInsets.only(bottom: 96),
       children: [
         for (final top in topLevels) ...[
           ListTile(
@@ -509,6 +593,13 @@ class _CategoriesPageState extends ConsumerState<CategoriesPage>
         ],
       ],
     );
+    if (!isDesktop) return listView;
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 820),
+        child: listView,
+      ),
+    );
   }
 }
 
@@ -593,66 +684,80 @@ class _CategoryEditorDialogState extends State<_CategoryEditorDialog> {
       type: widget.type,
     );
 
-    return AlertDialog(
-      title: Text(widget.title),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            TextField(
-              key: widget.nameFieldKey,
-              controller: _nameController,
-              autofocus: true,
-              decoration: const InputDecoration(labelText: '分类名称'),
-              onChanged: (_) => setState(() {}),
-            ),
-            const SizedBox(height: 16),
-            InkWell(
-              key: const Key('category-visual-picker-trigger'),
-              borderRadius: BorderRadius.circular(12),
-              onTap: _openPicker,
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 10,
-                ),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: theme.colorScheme.outlineVariant),
-                ),
-                child: Row(
-                  children: [
-                    CategoryIconAvatar(
-                      iconKey: visual.iconKey,
-                      colorHex: visual.colorHex,
-                      name: visual.label,
-                      type: widget.type,
-                      size: 38,
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    final editorScroll = SingleChildScrollView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          TextField(
+            key: widget.nameFieldKey,
+            controller: _nameController,
+            autofocus: true,
+            decoration: isDesktop
+                ? const InputDecoration(
+                    labelText: '分类名称',
+                    border: OutlineInputBorder(),
+                    contentPadding: EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 15,
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('图标与配色', style: theme.textTheme.bodyMedium),
-                          Text(
-                            '${visual.label} · 点击更换图标或颜色',
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: theme.colorScheme.outline,
-                            ),
+                  )
+                : const InputDecoration(labelText: '分类名称'),
+            onChanged: (_) => setState(() {}),
+          ),
+          const SizedBox(height: 16),
+          InkWell(
+            key: const Key('category-visual-picker-trigger'),
+            borderRadius: BorderRadius.circular(12),
+            onTap: _openPicker,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: theme.colorScheme.outlineVariant),
+              ),
+              child: Row(
+                children: [
+                  CategoryIconAvatar(
+                    iconKey: visual.iconKey,
+                    colorHex: visual.colorHex,
+                    name: visual.label,
+                    type: widget.type,
+                    size: 38,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('图标与配色', style: theme.textTheme.bodyMedium),
+                        Text(
+                          '${visual.label} · 点击更换图标或颜色',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.outline,
                           ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
-                    const Icon(Icons.chevron_right),
-                  ],
-                ),
+                  ),
+                  const Icon(Icons.chevron_right),
+                ],
               ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
+    );
+
+    return AlertDialog(
+      title: Text(widget.title),
+      content: isDesktop
+          ? ConstrainedBox(
+              constraints: const BoxConstraints(minWidth: 360, maxWidth: 420),
+              child: editorScroll,
+            )
+          : editorScroll,
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context),

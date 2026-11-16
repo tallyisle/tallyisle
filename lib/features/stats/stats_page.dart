@@ -38,6 +38,7 @@ class _StatsPageState extends ConsumerState<StatsPage> {
   @override
   Widget build(BuildContext context) {
     final book = ref.watch(currentBookProvider);
+    final isDesktop = DesktopAdaptive.isDesktop(context);
     final isExpandedDesktop = DesktopAdaptive.isExpandedDesktop(context);
 
     final annualCard = AnnualReportOverviewCard(
@@ -61,25 +62,57 @@ class _StatsPageState extends ConsumerState<StatsPage> {
       onTap: () => context.push('/stats/trend'),
     );
 
+    final stackedList = ListView(
+      key: const Key('stats-hub-list'),
+      padding: const EdgeInsets.only(top: 6, bottom: 32),
+      children: [
+        annualCard,
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+          child: categoryCard,
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+          child: tagCard,
+        ),
+        budgetCard,
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+          child: trendCard,
+        ),
+      ],
+    );
+
+    final bookTitleRow = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Flexible(
+          child: Text(
+            book.value?.name ?? '统计',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        const Icon(Icons.arrow_drop_down),
+      ],
+    );
+
     return Scaffold(
       key: const Key('stats-hub-page'),
       appBar: AppBar(
         title: InkWell(
           key: const Key('stats-book-switcher'),
+          borderRadius: isDesktop ? BorderRadius.circular(8) : null,
           onTap: _pickBook,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Flexible(
-                child: Text(
-                  book.value?.name ?? '统计',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              const Icon(Icons.arrow_drop_down),
-            ],
-          ),
+          child: isDesktop
+              ? Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 4,
+                  ),
+                  child: bookTitleRow,
+                )
+              : bookTitleRow,
         ),
         actions: [
           IconButton(
@@ -157,35 +190,14 @@ class _StatsPageState extends ConsumerState<StatsPage> {
                 ),
               ),
             )
-          : ListView(
-              key: const Key('stats-hub-list'),
-              padding: const EdgeInsets.only(top: 6, bottom: 32),
-              children: [
-                annualCard,
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 6,
-                  ),
-                  child: categoryCard,
-                ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 6,
-                  ),
-                  child: tagCard,
-                ),
-                budgetCard,
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 6,
-                  ),
-                  child: trendCard,
-                ),
-              ],
-            ),
+          : (isDesktop
+                ? Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 760),
+                      child: stackedList,
+                    ),
+                  )
+                : stackedList),
     );
   }
 
@@ -401,6 +413,7 @@ class CategoryRouteDrilldownPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final resultAsync = ref.watch(categoryStatsResultProvider);
+    final isFlatten = ref.watch(categoryStatsFlattenProvider);
     final bookId = ref.watch(currentBookIdProvider).value ?? 1;
     final categories =
         ref.watch(categoriesProvider(bookId)).value ?? const <RecordCategory>[];
@@ -426,23 +439,29 @@ class CategoryRouteDrilldownPage extends ConsumerWidget {
           );
         }
 
-        CategoryRowItem? matched;
-        for (final r in result.firstLevelRows) {
-          if (r.categoryId == categoryId) {
-            matched = r;
-            break;
-          }
-          for (final child in r.children) {
-            if (child.categoryId == categoryId) {
-              matched = child;
-              break;
+        CategoryRowItem? findInFirstLevel() {
+          for (final r in result.firstLevelRows) {
+            if (r.categoryId == categoryId) {
+              return r;
+            }
+            for (final child in r.children) {
+              if (child.categoryId == categoryId) {
+                return child;
+              }
             }
           }
-          if (matched != null) break;
+          return null;
         }
-        matched ??= result.flattenRows
-            .where((r) => r.categoryId == categoryId)
-            .firstOrNull;
+
+        final matched = isFlatten
+            ? (result.flattenRows
+                      .where((r) => r.categoryId == categoryId)
+                      .firstOrNull ??
+                  findInFirstLevel())
+            : (findInFirstLevel() ??
+                  result.flattenRows
+                      .where((r) => r.categoryId == categoryId)
+                      .firstOrNull);
 
         return CategoryDrilldownPage(
           categoryId: categoryId,

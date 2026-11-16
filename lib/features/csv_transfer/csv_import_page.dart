@@ -2,7 +2,9 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
+import '../../app/adaptive.dart';
 import '../../app/providers.dart';
 import '../../core/failure.dart';
 import '../../data/csv_import/csv_excel_service.dart';
@@ -212,13 +214,32 @@ class _CsvImportPageState extends ConsumerState<CsvImportPage> {
     }
   }
 
+  bool _canSwitchMeDualPane() {
+    if (!DesktopAdaptive.isExpandedDesktop(context)) return false;
+    final router = GoRouter.maybeOf(context);
+    if (router == null) return false;
+    try {
+      return GoRouterState.of(context).uri.path == '/me';
+    } on Object {
+      return router.routerDelegate.currentConfiguration.uri.path == '/me';
+    }
+  }
+
   void _openImportBatches() {
+    if (_canSwitchMeDualPane()) {
+      context.go('/me?section=${Uri.encodeComponent('/import/batches')}');
+      return;
+    }
     Navigator.of(
       context,
     ).push(MaterialPageRoute<void>(builder: (_) => const ImportBatchesPage()));
   }
 
   void _openCsvExport() {
+    if (widget.saveFile == null && _canSwitchMeDualPane()) {
+      context.go('/me?section=${Uri.encodeComponent('/export/csv')}');
+      return;
+    }
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => CsvExportPage(saveFile: widget.saveFile),
@@ -228,6 +249,7 @@ class _CsvImportPageState extends ConsumerState<CsvImportPage> {
 
   @override
   Widget build(BuildContext context) {
+    final isDesktop = DesktopAdaptive.isDesktop(context);
     final booksAsync = ref.watch(booksProvider);
     final currentBookId = ref.watch(currentBookIdProvider).value;
     final busy = _loadingPreview || _committing;
@@ -235,43 +257,49 @@ class _CsvImportPageState extends ConsumerState<CsvImportPage> {
     return Scaffold(
       key: const Key('csv_import_page'),
       appBar: AppBar(
-        titleSpacing: 8,
-        title: const FittedBox(
-          fit: BoxFit.scaleDown,
-          alignment: Alignment.centerLeft,
-          child: Text('表格账单导入与导出', maxLines: 1, softWrap: false),
-        ),
+        titleSpacing: isDesktop ? null : 8,
+        title: isDesktop
+            ? const Text('表格账单导入与导出')
+            : const FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text('表格账单导入与导出', maxLines: 1, softWrap: false),
+              ),
         actions: [
           TextButton.icon(
             key: const Key('open_csv_export_button'),
-            style: TextButton.styleFrom(
-              visualDensity: VisualDensity.compact,
-              padding: const EdgeInsets.symmetric(horizontal: 6),
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            ),
+            style: isDesktop
+                ? null
+                : TextButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
             onPressed: _openCsvExport,
-            icon: const Icon(Icons.upload_file_outlined, size: 16),
+            icon: Icon(Icons.upload_file_outlined, size: isDesktop ? 18 : 16),
             label: const Text('导出 CSV', maxLines: 1, softWrap: false),
           ),
           TextButton.icon(
             key: const Key('open_import_batches_button'),
-            style: TextButton.styleFrom(
-              visualDensity: VisualDensity.compact,
-              padding: const EdgeInsets.symmetric(horizontal: 6),
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            ),
+            style: isDesktop
+                ? null
+                : TextButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
             onPressed: _openImportBatches,
-            icon: const Icon(Icons.history, size: 16),
+            icon: Icon(Icons.history, size: isDesktop ? 18 : 16),
             label: const Text('导入记录', maxLines: 1, softWrap: false),
           ),
-          const SizedBox(width: 4),
+          SizedBox(width: isDesktop ? 8 : 4),
         ],
       ),
       body: asyncBody(booksAsync, (books) {
         final targetBookId = _effectiveBookId(books, currentBookId);
         final preview = _preview;
 
-        return ListView(
+        final list = ListView(
           padding: const EdgeInsets.all(16),
           children: [
             Card(
@@ -404,6 +432,13 @@ class _CsvImportPageState extends ConsumerState<CsvImportPage> {
             ],
           ],
         );
+        if (!isDesktop) return list;
+        return Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 780),
+            child: list,
+          ),
+        );
       }),
     );
   }
@@ -502,15 +537,16 @@ class _PreviewCard extends StatelessWidget {
                       ? '默认回退账本（文件账本列为空时使用）'
                       : '导入目标账本',
                   border: const OutlineInputBorder(),
-                  contentPadding: const EdgeInsets.symmetric(
+                  contentPadding: EdgeInsets.symmetric(
                     horizontal: 12,
-                    vertical: 4,
+                    vertical: DesktopAdaptive.isDesktop(context) ? 16 : 4,
                   ),
                 ),
                 child: DropdownButtonHideUnderline(
                   child: DropdownButton<int>(
                     key: const Key('import_target_book_dropdown'),
                     isExpanded: true,
+                    isDense: DesktopAdaptive.isDesktop(context),
                     value: targetBookId,
                     items: [
                       for (final b in books)

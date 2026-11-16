@@ -6,6 +6,8 @@ import '../../app/adaptive.dart';
 import '../../core/failure.dart';
 import '../../domain/model/codes.dart';
 import '../../domain/rules/app_settings_rules.dart';
+import '../common/desktop_modal_page.dart';
+import '../me/me_page.dart' show MeEmbeddedNavigationScope;
 import '../security/app_lock_settings_page.dart';
 import 'about_help_page.dart';
 import 'data_health_page.dart';
@@ -13,6 +15,25 @@ import 'settings_providers.dart';
 import 'stat_stories_page.dart';
 
 const _uuid = Uuid();
+
+const List<String> _shortcutMonoFallback = <String>[
+  'SF Mono',
+  'Menlo',
+  'Cascadia Mono',
+  'Consolas',
+  'JetBrains Mono',
+  'DejaVu Sans Mono',
+  'Liberation Mono',
+  'Noto Sans Mono',
+  'PingFang SC',
+  'Hiragino Sans GB',
+  'Microsoft YaHei UI',
+  'Microsoft YaHei',
+  'Noto Sans CJK SC',
+  'Source Han Sans SC',
+  'monospace',
+  'sans-serif',
+];
 
 /// System & Home Settings hub page (`F-038`, `P-03`), linking to App Lock
 /// (`F-024`), Data Health Check (`ADR-012`), Stat Stories, and Help/About.
@@ -100,13 +121,34 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     }
   }
 
+  void _navigateSibling(
+    BuildContext context, {
+    required String route,
+    required Widget page,
+  }) {
+    final meScope = MeEmbeddedNavigationScope.maybeOf(context);
+    if (meScope != null) {
+      meScope.onSelectRoute(route);
+      return;
+    }
+    if (DesktopAdaptive.isDesktop(context)) {
+      pushDesktopModalOrMaterialRoute<void>(context, child: page);
+      return;
+    }
+    Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => page));
+  }
+
   @override
   Widget build(BuildContext context) {
     final settingsAsync = ref.watch(appSettingsProvider);
     final theme = Theme.of(context);
+    final isDesktop = DesktopAdaptive.isDesktop(context);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('系统与首页设置')),
+      appBar: AppBar(
+        scrolledUnderElevation: isDesktop ? 0 : null,
+        title: const Text('系统与首页设置'),
+      ),
       body: settingsAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (err, _) => Center(child: Text('读取设置失败：$err')),
@@ -115,7 +157,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             (p) => p.hex == settings.themeSeedHex,
           );
 
-          return ListView(
+          final listView = ListView(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
             children: [
               const _SectionHeader(title: '首页与记账偏好'),
@@ -329,10 +371,10 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                       title: const Text('应用安全锁'),
                       subtitle: const Text('4/6 位加盐数字密码、生物识别与后台超时锁定'),
                       trailing: const Icon(Icons.chevron_right),
-                      onTap: () => Navigator.of(context).push(
-                        MaterialPageRoute<void>(
-                          builder: (_) => const AppLockSettingsPage(),
-                        ),
+                      onTap: () => _navigateSibling(
+                        context,
+                        route: '/security/app-lock',
+                        page: const AppLockSettingsPage(),
                       ),
                     ),
                     const Divider(height: 1),
@@ -342,10 +384,10 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                       title: const Text('数据体检'),
                       subtitle: const Text('全库账户余额对账、借贷本金核验、引用与 JSON 检查及一键校准'),
                       trailing: const Icon(Icons.chevron_right),
-                      onTap: () => Navigator.of(context).push(
-                        MaterialPageRoute<void>(
-                          builder: (_) => const DataHealthPage(),
-                        ),
+                      onTap: () => _navigateSibling(
+                        context,
+                        route: '/settings/data-health',
+                        page: const DataHealthPage(),
                       ),
                     ),
                     const Divider(height: 1),
@@ -355,10 +397,10 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                       title: const Text('统计故事'),
                       subtitle: const Text('按账期自动汇总收支摘要并编辑留存'),
                       trailing: const Icon(Icons.chevron_right),
-                      onTap: () => Navigator.of(context).push(
-                        MaterialPageRoute<void>(
-                          builder: (_) => const StatStoriesPage(),
-                        ),
+                      onTap: () => _navigateSibling(
+                        context,
+                        route: '/stat-stories',
+                        page: const StatStoriesPage(),
                       ),
                     ),
                     const Divider(height: 1),
@@ -368,16 +410,16 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                       title: const Text('帮助与关于帐屿'),
                       subtitle: const Text('本地离线隐私承诺、全免费无门控说明与常见问题'),
                       trailing: const Icon(Icons.chevron_right),
-                      onTap: () => Navigator.of(context).push(
-                        MaterialPageRoute<void>(
-                          builder: (_) => const AboutHelpPage(),
-                        ),
+                      onTap: () => _navigateSibling(
+                        context,
+                        route: '/about',
+                        page: const AboutHelpPage(),
                       ),
                     ),
                   ],
                 ),
               ),
-              if (DesktopAdaptive.isDesktop(context)) ...[
+              if (isDesktop) ...[
                 const SizedBox(height: 16),
                 const _SectionHeader(title: '桌面键盘快捷键'),
                 _DesktopShortcutsCard(
@@ -397,6 +439,16 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
               ),
             ],
           );
+
+          if (isDesktop) {
+            return Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 800),
+                child: listView,
+              ),
+            );
+          }
+          return listView;
         },
       ),
     );
@@ -413,6 +465,11 @@ class _DesktopShortcutsCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final monoFamily = switch (theme.platform) {
+      TargetPlatform.macOS || TargetPlatform.iOS => 'Menlo',
+      TargetPlatform.windows => 'Consolas',
+      _ => 'DejaVu Sans Mono',
+    };
     final items = <({String label, String keys})>[
       (label: '新建记一笔', keys: '$primaryMod + N'),
       (label: '搜索账单', keys: '$primaryMod + F / K'),
@@ -453,7 +510,8 @@ class _DesktopShortcutsCard extends StatelessWidget {
                       child: Text(
                         items[i].keys,
                         style: theme.textTheme.labelMedium?.copyWith(
-                          fontFamily: 'monospace',
+                          fontFamily: monoFamily,
+                          fontFamilyFallback: _shortcutMonoFallback,
                           color: scheme.onSurfaceVariant,
                           fontWeight: FontWeight.w600,
                         ),
@@ -528,9 +586,9 @@ class _CustomThemeHexDialogState extends State<_CustomThemeHexDialog> {
   }
 
   @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: const Text('自定义主题色'),
-    content: TextField(
+  Widget build(BuildContext context) {
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    final field = TextField(
       key: const Key('theme_custom_hex_input'),
       controller: _hexCtrl,
       maxLength: 7,
@@ -539,19 +597,34 @@ class _CustomThemeHexDialogState extends State<_CustomThemeHexDialog> {
         hintText: '例如 138EAA 或 #2E7D32',
         errorText: _errorText,
         border: const OutlineInputBorder(),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 12,
+          vertical: 14,
+        ),
       ),
       onSubmitted: (_) => _submit(),
-    ),
-    actions: [
-      TextButton(
-        onPressed: () => Navigator.of(context).pop(),
-        child: const Text('取消'),
+    );
+    return AlertDialog(
+      title: const Text('自定义主题色'),
+      content: SingleChildScrollView(
+        child: isDesktop
+            ? ConstrainedBox(
+                constraints: const BoxConstraints(minWidth: 320, maxWidth: 380),
+                child: field,
+              )
+            : field,
       ),
-      FilledButton(
-        key: const Key('theme_custom_hex_confirm_button'),
-        onPressed: _submit,
-        child: const Text('应用'),
-      ),
-    ],
-  );
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          key: const Key('theme_custom_hex_confirm_button'),
+          onPressed: _submit,
+          child: const Text('应用'),
+        ),
+      ],
+    );
+  }
 }

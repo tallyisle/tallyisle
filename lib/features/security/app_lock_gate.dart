@@ -147,19 +147,30 @@ class _AppLockGateState extends ConsumerState<AppLockGate>
     BuildContext context,
   ) => showDialog<void>(
     context: context,
-    builder: (dialogContext) => AlertDialog(
-      title: const Text('忘记安全锁密码？'),
-      content: const Text(
-        '帐屿采用纯本地无账号隐私架构，您的密码仅以加盐迭代哈希形式保存在本机，没有任何云端后门可跳过验证。\n\n'
-        '若确实遗忘密码且未开启生物识别，可在系统设置中清除应用数据后，重新导入您此前保存的 .tally 本地备份或 WebDAV 备份恢复账本。',
-      ),
-      actions: [
-        FilledButton(
-          onPressed: () => Navigator.of(dialogContext).pop(),
-          child: const Text('知道了'),
-        ),
-      ],
-    ),
+    builder: (dialogContext) {
+      final isDesktop = DesktopAdaptive.isDesktop(dialogContext);
+      return AlertDialog(
+        title: const Text('忘记安全锁密码？'),
+        content: isDesktop
+            ? ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 420),
+                child: const Text(
+                  '帐屿采用纯本地无账号隐私架构，您的密码仅以加盐迭代哈希形式保存在本机，没有任何云端后门可跳过验证。\n\n'
+                  '若确实遗忘密码，可退出程序并清理本机应用数据目录以重置数据库，随后重新导入您此前保存的 .tally 本地备份或通过 WebDAV / S3 云同步恢复账本。',
+                ),
+              )
+            : const Text(
+                '帐屿采用纯本地无账号隐私架构，您的密码仅以加盐迭代哈希形式保存在本机，没有任何云端后门可跳过验证。\n\n'
+                '若确实遗忘密码且未开启生物识别，可在系统设置中清除应用数据后，重新导入您此前保存的 .tally 本地备份或 WebDAV 备份恢复账本。',
+              ),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('知道了'),
+          ),
+        ],
+      );
+    },
   );
 
   @override

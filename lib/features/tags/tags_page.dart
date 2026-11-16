@@ -2,11 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../app/adaptive.dart';
 import '../../app/providers.dart';
 import '../../data/db/database.dart';
 import '../../domain/rules/tag_stats.dart' show kTagColorSwatches;
 import '../common/common.dart';
-import '../stats/tag_stats_page.dart' show parseTagColor;
+import '../common/desktop_modal_page.dart';
+import '../stats/tag_stats_page.dart'
+    show TagDetailStatsPage, TagRankingsPage, parseTagColor;
 import '../stats/tag_stats_providers.dart' show tagRecordCountsProvider;
 
 class TagsPage extends ConsumerStatefulWidget {
@@ -27,11 +30,9 @@ class _TagsPageState extends ConsumerState<TagsPage> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (dialogCtx) => StatefulBuilder(
-        builder: (ctx, setDialogState) => AlertDialog(
-          title: Text(
-            parentTagId != null ? '新建二级标签' : (asGroup ? '新建标签组' : '新建标签'),
-          ),
-          content: SingleChildScrollView(
+        builder: (ctx, setDialogState) {
+          final isDesktop = DesktopAdaptive.isDesktop(ctx);
+          final formScroll = SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -40,7 +41,16 @@ class _TagsPageState extends ConsumerState<TagsPage> {
                   key: const Key('tag-name'),
                   controller: nameController,
                   autofocus: true,
-                  decoration: const InputDecoration(labelText: '标签名称'),
+                  decoration: isDesktop
+                      ? const InputDecoration(
+                          labelText: '标签名称',
+                          border: OutlineInputBorder(),
+                          contentPadding: EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 15,
+                          ),
+                        )
+                      : const InputDecoration(labelText: '标签名称'),
                 ),
                 if (parentTagId == null) ...[
                   const SizedBox(height: 8),
@@ -61,19 +71,33 @@ class _TagsPageState extends ConsumerState<TagsPage> {
                 ),
               ],
             ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogCtx, false),
-              child: const Text('取消'),
+          );
+          return AlertDialog(
+            title: Text(
+              parentTagId != null ? '新建二级标签' : (asGroup ? '新建标签组' : '新建标签'),
             ),
-            FilledButton(
-              key: const Key('tag-save'),
-              onPressed: () => Navigator.pop(dialogCtx, true),
-              child: const Text('创建'),
-            ),
-          ],
-        ),
+            content: isDesktop
+                ? ConstrainedBox(
+                    constraints: const BoxConstraints(
+                      minWidth: 360,
+                      maxWidth: 420,
+                    ),
+                    child: formScroll,
+                  )
+                : formScroll,
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogCtx, false),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                key: const Key('tag-save'),
+                onPressed: () => Navigator.pop(dialogCtx, true),
+                child: const Text('创建'),
+              ),
+            ],
+          );
+        },
       ),
     );
 
@@ -111,9 +135,9 @@ class _TagsPageState extends ConsumerState<TagsPage> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (dialogCtx) => StatefulBuilder(
-        builder: (ctx, setDialogState) => AlertDialog(
-          title: Text('编辑标签“${tag.name}”'),
-          content: SingleChildScrollView(
+        builder: (ctx, setDialogState) {
+          final isDesktop = DesktopAdaptive.isDesktop(ctx);
+          final formScroll = SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -122,7 +146,16 @@ class _TagsPageState extends ConsumerState<TagsPage> {
                   key: const Key('edit-tag-name'),
                   controller: nameController,
                   autofocus: true,
-                  decoration: const InputDecoration(labelText: '标签名称'),
+                  decoration: isDesktop
+                      ? const InputDecoration(
+                          labelText: '标签名称',
+                          border: OutlineInputBorder(),
+                          contentPadding: EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 15,
+                          ),
+                        )
+                      : const InputDecoration(labelText: '标签名称'),
                 ),
                 const SizedBox(height: 12),
                 _TagColorPicker(
@@ -131,19 +164,31 @@ class _TagsPageState extends ConsumerState<TagsPage> {
                 ),
               ],
             ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogCtx, false),
-              child: const Text('取消'),
-            ),
-            FilledButton(
-              key: const Key('edit-tag-save'),
-              onPressed: () => Navigator.pop(dialogCtx, true),
-              child: const Text('保存'),
-            ),
-          ],
-        ),
+          );
+          return AlertDialog(
+            title: Text('编辑标签“${tag.name}”'),
+            content: isDesktop
+                ? ConstrainedBox(
+                    constraints: const BoxConstraints(
+                      minWidth: 360,
+                      maxWidth: 420,
+                    ),
+                    child: formScroll,
+                  )
+                : formScroll,
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogCtx, false),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                key: const Key('edit-tag-save'),
+                onPressed: () => Navigator.pop(dialogCtx, true),
+                child: const Text('保存'),
+              ),
+            ],
+          );
+        },
       ),
     );
 
@@ -212,7 +257,33 @@ class _TagsPageState extends ConsumerState<TagsPage> {
   }
 
   void _openTagStats(Tag tag) {
-    context.push('/stats/tag/${tag.tagId}');
+    if (GoRouter.maybeOf(context) != null &&
+        ModalRoute.of(context)?.settings is Page) {
+      context.push('/stats/tag/${tag.tagId}');
+      return;
+    }
+    pushDesktopModalOrMaterialRoute<void>(
+      context,
+      maxWidth: 860,
+      maxHeight: 720,
+      barrierDismissible: true,
+      child: TagDetailStatsPage(tagId: tag.tagId),
+    );
+  }
+
+  void _openTagRankings() {
+    if (GoRouter.maybeOf(context) != null &&
+        ModalRoute.of(context)?.settings is Page) {
+      context.push('/stats/tags');
+      return;
+    }
+    pushDesktopModalOrMaterialRoute<void>(
+      context,
+      maxWidth: 860,
+      maxHeight: 720,
+      barrierDismissible: true,
+      child: const TagRankingsPage(),
+    );
   }
 
   Widget _buildBillCountBadge(BuildContext context, String tagId, int count) {
@@ -245,22 +316,43 @@ class _TagsPageState extends ConsumerState<TagsPage> {
     final tagsAsync = ref.watch(tagsProvider);
     final counts =
         ref.watch(tagRecordCountsProvider).value ?? const <String, int>{};
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    final isPopupModal = isDesktop && ModalRoute.of(context) is PopupRoute;
 
     return Scaffold(
       appBar: AppBar(
+        leading: isPopupModal ? const CloseButton() : null,
         title: const Text('标签管理'),
         actions: [
           IconButton(
             key: const Key('tags-stats-btn'),
             icon: const Icon(Icons.bar_chart_outlined),
             tooltip: '标签统计排行',
-            onPressed: () => context.push('/stats/tags'),
+            onPressed: _openTagRankings,
           ),
+          if (isDesktop) ...[
+            const SizedBox(width: 4),
+            FilledButton.icon(
+              key: const Key('add-tag'),
+              style: FilledButton.styleFrom(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+              ),
+              onPressed: () => _addTag(),
+              icon: const Icon(Icons.add, size: 18),
+              label: const Text('新建标签'),
+            ),
+            const SizedBox(width: 12),
+          ],
         ],
       ),
       body: asyncBody(tagsAsync, (allTags) {
         if (allTags.isEmpty) {
-          return const Center(child: Text('暂无标签，点击右下角添加'));
+          return Center(
+            child: Text(isDesktop ? '暂无标签，点击右上角添加' : '暂无标签，点击右下角添加'),
+          );
         }
 
         final groups = allTags.where((t) => t.parent == 1).toList();
@@ -272,8 +364,10 @@ class _TagsPageState extends ConsumerState<TagsPage> {
             )
             .toList();
 
-        return ListView(
-          padding: const EdgeInsets.only(bottom: 96),
+        final listView = ListView(
+          padding: isDesktop
+              ? const EdgeInsets.symmetric(vertical: 8)
+              : const EdgeInsets.only(bottom: 96),
           children: [
             for (final grp in groups) ...[
               Builder(
@@ -570,14 +664,23 @@ class _TagsPageState extends ConsumerState<TagsPage> {
             ],
           ],
         );
+        if (!isDesktop) return listView;
+        return Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 820),
+            child: listView,
+          ),
+        );
       }),
-      floatingActionButton: FloatingActionButton.extended(
-        key: const Key('add-tag'),
-        heroTag: 'fab-add-tag',
-        onPressed: () => _addTag(),
-        icon: const Icon(Icons.add),
-        label: const Text('新建标签'),
-      ),
+      floatingActionButton: isDesktop
+          ? null
+          : FloatingActionButton.extended(
+              key: const Key('add-tag'),
+              heroTag: 'fab-add-tag',
+              onPressed: () => _addTag(),
+              icon: const Icon(Icons.add),
+              label: const Text('新建标签'),
+            ),
     );
   }
 }

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../app/adaptive.dart';
+import '../../app/desktop_shell.dart' show DesktopNavigationScaffold;
 import '../../app/providers.dart';
 import '../../data/db/database.dart';
 import '../../domain/model/codes.dart';
@@ -224,44 +225,54 @@ class _HomePageState extends ConsumerState<HomePage> {
       }
     }
 
+    final hasExpandedSidebar =
+        isExpandedDesktop &&
+        context.findAncestorWidgetOfExactType<DesktopNavigationScaffold>() !=
+            null;
+
     final scaffold = Scaffold(
-      appBar: AppBar(
-        title: InkWell(
-          key: const Key('book-picker'),
-          borderRadius: BorderRadius.circular(8),
-          onTap: _pickBook,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Flexible(
-                  child: Text(
-                    book.value?.name ?? '帐屿',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+      appBar: hasExpandedSidebar
+          ? AppBar(title: const Text('账单明细'))
+          : AppBar(
+              title: InkWell(
+                key: const Key('book-picker'),
+                borderRadius: BorderRadius.circular(8),
+                onTap: _pickBook,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 4,
+                    vertical: 2,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Flexible(
+                        child: Text(
+                          book.value?.name ?? '帐屿',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      const Icon(Icons.arrow_drop_down),
+                    ],
                   ),
                 ),
-                const Icon(Icons.arrow_drop_down),
+              ),
+              actions: [
+                IconButton(
+                  key: const Key('home-calendar-button'),
+                  tooltip: '日历',
+                  icon: const Icon(Icons.calendar_month),
+                  onPressed: () => context.push('/calendar'),
+                ),
+                IconButton(
+                  key: const Key('home-search-button'),
+                  tooltip: '搜索',
+                  icon: const Icon(Icons.search),
+                  onPressed: () => context.push('/search'),
+                ),
               ],
             ),
-          ),
-        ),
-        actions: [
-          IconButton(
-            key: const Key('home-calendar-button'),
-            tooltip: '日历',
-            icon: const Icon(Icons.calendar_month),
-            onPressed: () => context.push('/calendar'),
-          ),
-          IconButton(
-            key: const Key('home-search-button'),
-            tooltip: '搜索',
-            icon: const Icon(Icons.search),
-            onPressed: () => context.push('/search'),
-          ),
-        ],
-      ),
       body: body,
     );
 
@@ -763,18 +774,20 @@ class _DesktopExpandedOverviewHeader extends ConsumerWidget {
               ),
               const SizedBox(height: 8),
               if (sideBySideBudget && budgetCardWidget != null)
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      flex: 11,
-                      child: _DesktopCompactSummaryCard(
-                        summary: summary,
-                        margin: const EdgeInsets.fromLTRB(16, 6, 0, 6),
+                IntrinsicHeight(
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Expanded(
+                        flex: 11,
+                        child: _DesktopCompactSummaryCard(
+                          summary: summary,
+                          margin: const EdgeInsets.fromLTRB(16, 6, 0, 6),
+                        ),
                       ),
-                    ),
-                    Expanded(flex: 10, child: budgetCardWidget),
-                  ],
+                      Expanded(flex: 10, child: budgetCardWidget),
+                    ],
+                  ),
                 )
               else ...[
                 _DesktopCompactSummaryCard(
@@ -903,30 +916,33 @@ class _DesktopCompactSummaryCard extends StatelessWidget {
 
     return Card(
       margin: margin,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 14),
-        child: Row(
-          children: [
-            metricCell('结余', summary.balance, const Key('sum-balance')),
-            SizedBox(
-              height: 32,
-              child: VerticalDivider(
-                width: 1,
-                thickness: 0.6,
-                color: scheme.outlineVariant.withValues(alpha: 0.45),
+      child: Center(
+        heightFactor: 1.0,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 14),
+          child: Row(
+            children: [
+              metricCell('结余', summary.balance, const Key('sum-balance')),
+              SizedBox(
+                height: 32,
+                child: VerticalDivider(
+                  width: 1,
+                  thickness: 0.6,
+                  color: scheme.outlineVariant.withValues(alpha: 0.45),
+                ),
               ),
-            ),
-            metricCell('支出', summary.expense, const Key('sum-expense')),
-            SizedBox(
-              height: 32,
-              child: VerticalDivider(
-                width: 1,
-                thickness: 0.6,
-                color: scheme.outlineVariant.withValues(alpha: 0.45),
+              metricCell('支出', summary.expense, const Key('sum-expense')),
+              SizedBox(
+                height: 32,
+                child: VerticalDivider(
+                  width: 1,
+                  thickness: 0.6,
+                  color: scheme.outlineVariant.withValues(alpha: 0.45),
+                ),
               ),
-            ),
-            metricCell('收入', summary.income, const Key('sum-income')),
-          ],
+              metricCell('收入', summary.income, const Key('sum-income')),
+            ],
+          ),
         ),
       ),
     );

@@ -156,7 +156,6 @@ class _DesktopBookSwitcherDialog extends StatelessWidget {
                     padding: const EdgeInsets.symmetric(vertical: 2),
                     child: ListTile(
                       key: Key('book-option-${b.id}'),
-                      dense: true,
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(10),
                       ),

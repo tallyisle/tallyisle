@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../app/adaptive.dart';
 import '../../app/providers.dart' show ledgerServiceProvider;
 import '../../core/failure.dart';
 import '../../core/money.dart';
@@ -13,6 +14,8 @@ import '../../domain/model/codes.dart';
 import '../../domain/rules/reimburse_overview.dart';
 import '../common/catalog_icons.dart';
 import '../common/common.dart';
+import '../common/desktop_modal_page.dart';
+import '../records/record_detail_page.dart';
 import 'reimburse_providers.dart';
 
 final _maxReimburseAmount = Money.parse('88888888888.00');
@@ -115,6 +118,15 @@ class _ReimbursePageState extends ConsumerState<ReimbursePage>
       widget.onRecordTap!(recordId);
       return;
     }
+    if (DesktopAdaptive.isDesktop(context)) {
+      unawaited(
+        pushDesktopModalOrMaterialRoute<void>(
+          context,
+          child: RecordDetailPage(recordId: recordId),
+        ),
+      );
+      return;
+    }
     if (GoRouter.maybeOf(context) != null) {
       unawaited(context.push('/record/$recordId'));
     }
@@ -165,17 +177,32 @@ class _ReimbursePageState extends ConsumerState<ReimbursePage>
     ReimburseBillRowView row,
     ReimburseViewData view,
   ) async {
-    final saved = await showModalBottomSheet<bool>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      showDragHandle: true,
-      builder: (_) => _SingleReimburseSheet(
-        row: row,
-        eligibleAssets: view.eligibleReceivingAssets,
-        defaultAssetId: view.defaultReceivingAssetId,
-      ),
-    );
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    final saved = isDesktop
+        ? await showDialog<bool>(
+            context: context,
+            builder: (_) => Dialog(
+              constraints: const BoxConstraints(maxWidth: 460),
+              clipBehavior: Clip.antiAlias,
+              child: _SingleReimburseSheet(
+                row: row,
+                eligibleAssets: view.eligibleReceivingAssets,
+                defaultAssetId: view.defaultReceivingAssetId,
+                isDesktopDialog: true,
+              ),
+            ),
+          )
+        : await showModalBottomSheet<bool>(
+            context: context,
+            isScrollControlled: true,
+            useSafeArea: true,
+            showDragHandle: true,
+            builder: (_) => _SingleReimburseSheet(
+              row: row,
+              eligibleAssets: view.eligibleReceivingAssets,
+              defaultAssetId: view.defaultReceivingAssetId,
+            ),
+          );
     if (saved == true && mounted) {
       ScaffoldMessenger.of(
         context,
@@ -193,18 +220,34 @@ class _ReimbursePageState extends ConsumerState<ReimbursePage>
       (sum, r) => sum + r.item.remainingMinor,
     );
     final count = selectedRows.length;
-    final saved = await showModalBottomSheet<bool>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      showDragHandle: true,
-      builder: (_) => _BatchReimburseSheet(
-        rows: selectedRows,
-        eligibleAssets: view.eligibleReceivingAssets,
-        defaultAssetId: view.defaultReceivingAssetId,
-        currencySymbol: view.baseCurrencySymbol,
-      ),
-    );
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    final saved = isDesktop
+        ? await showDialog<bool>(
+            context: context,
+            builder: (_) => Dialog(
+              constraints: const BoxConstraints(maxWidth: 460),
+              clipBehavior: Clip.antiAlias,
+              child: _BatchReimburseSheet(
+                rows: selectedRows,
+                eligibleAssets: view.eligibleReceivingAssets,
+                defaultAssetId: view.defaultReceivingAssetId,
+                currencySymbol: view.baseCurrencySymbol,
+                isDesktopDialog: true,
+              ),
+            ),
+          )
+        : await showModalBottomSheet<bool>(
+            context: context,
+            isScrollControlled: true,
+            useSafeArea: true,
+            showDragHandle: true,
+            builder: (_) => _BatchReimburseSheet(
+              rows: selectedRows,
+              eligibleAssets: view.eligibleReceivingAssets,
+              defaultAssetId: view.defaultReceivingAssetId,
+              currencySymbol: view.baseCurrencySymbol,
+            ),
+          );
     if (saved == true && mounted) {
       setState(() {
         _batchMode = false;
@@ -222,6 +265,7 @@ class _ReimbursePageState extends ConsumerState<ReimbursePage>
 
   @override
   Widget build(BuildContext context) {
+    final isDesktop = DesktopAdaptive.isDesktop(context);
     final allBooks = ref.watch(reimburseScopeAllBooksProvider);
     final viewAsync = ref.watch(reimburseViewProvider);
     final colorScheme = Theme.of(context).colorScheme;
@@ -234,7 +278,7 @@ class _ReimbursePageState extends ConsumerState<ReimbursePage>
             padding: const EdgeInsets.symmetric(vertical: 8),
             child: ActionChip(
               key: const Key('reimburse-scope-toggle'),
-              visualDensity: VisualDensity.compact,
+              visualDensity: isDesktop ? null : VisualDensity.compact,
               avatar: Icon(
                 allBooks ? Icons.library_books_rounded : Icons.book_outlined,
                 size: 16,
@@ -292,7 +336,7 @@ class _ReimbursePageState extends ConsumerState<ReimbursePage>
           });
         }
 
-        return Column(
+        final content = Column(
           children: [
             _SummaryDashboardCard(view: view),
             Material(
@@ -329,6 +373,13 @@ class _ReimbursePageState extends ConsumerState<ReimbursePage>
                     : () => _openBatchReimburse(activeSelectedRows, view),
               ),
           ],
+        );
+        if (!isDesktop) return content;
+        return Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 820),
+            child: content,
+          ),
         );
       }),
     );
@@ -765,15 +816,24 @@ class _PendingBillCard extends StatelessWidget {
                 const SizedBox(width: 6),
                 FilledButton.tonal(
                   key: Key('reimburse-action-${item.recordId}'),
-                  style: FilledButton.styleFrom(
-                    visualDensity: VisualDensity.compact,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 5,
-                    ),
-                    minimumSize: const Size(44, 30),
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
+                  style: DesktopAdaptive.isDesktop(context)
+                      ? FilledButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 6,
+                          ),
+                          minimumSize: const Size(52, 34),
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        )
+                      : FilledButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 5,
+                          ),
+                          minimumSize: const Size(44, 30),
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
                   onPressed: onReimburseTap,
                   child: const Text('报销'),
                 ),
@@ -1056,11 +1116,13 @@ class _SingleReimburseSheet extends ConsumerStatefulWidget {
     required this.row,
     required this.eligibleAssets,
     required this.defaultAssetId,
+    this.isDesktopDialog = false,
   });
 
   final ReimburseBillRowView row;
   final List<Asset> eligibleAssets;
   final int defaultAssetId;
+  final bool isDesktopDialog;
 
   @override
   ConsumerState<_SingleReimburseSheet> createState() =>
@@ -1182,24 +1244,46 @@ class _SingleReimburseSheetState extends ConsumerState<_SingleReimburseSheet> {
       ReimbursePreviewKind.partial || null => cs.onSurfaceVariant,
     };
 
+    final isDialog = widget.isDesktopDialog;
     return Padding(
-      padding: EdgeInsets.fromLTRB(
-        20,
-        0,
-        20,
-        MediaQuery.viewInsetsOf(context).bottom + 20,
-      ),
+      padding: isDialog
+          ? const EdgeInsets.fromLTRB(20, 16, 20, 20)
+          : EdgeInsets.fromLTRB(
+              20,
+              0,
+              20,
+              MediaQuery.viewInsetsOf(context).bottom + 20,
+            ),
       child: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text(
-              '登记报销款',
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w700,
+            if (isDialog)
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      '登记报销款',
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  CloseButton(
+                    onPressed: _submitting
+                        ? null
+                        : () => Navigator.of(context).pop(false),
+                  ),
+                ],
+              )
+            else
+              Text(
+                '登记报销款',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
               ),
-            ),
             const SizedBox(height: 4),
             Text(
               '${widget.row.title} · 待报 $sym${formatMinor(item.remainingMinor)}'
@@ -1220,6 +1304,9 @@ class _SingleReimburseSheetState extends ConsumerState<_SingleReimburseSheet> {
                 labelText: '报销金额',
                 prefixText: '$sym ',
                 border: const OutlineInputBorder(),
+                contentPadding: isDialog
+                    ? const EdgeInsets.symmetric(horizontal: 12, vertical: 16)
+                    : null,
                 helperText: preview?.hintText,
                 helperStyle: TextStyle(
                   color: previewColor,
@@ -1244,6 +1331,11 @@ class _SingleReimburseSheetState extends ConsumerState<_SingleReimburseSheet> {
                 Expanded(
                   child: OutlinedButton.icon(
                     key: const Key('reimburse-dialog-date'),
+                    style: isDialog
+                        ? OutlinedButton.styleFrom(
+                            minimumSize: const Size.fromHeight(44),
+                          )
+                        : null,
                     onPressed: _submitting ? null : _pickDate,
                     icon: const Icon(Icons.calendar_today_rounded, size: 16),
                     label: Text('收款日期 ${formatDate(_selectedDate)}'),
@@ -1255,9 +1347,12 @@ class _SingleReimburseSheetState extends ConsumerState<_SingleReimburseSheet> {
             TextField(
               key: const Key('reimburse-dialog-remark'),
               controller: _remarkCtrl,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 labelText: '备注（选填）',
-                border: OutlineInputBorder(),
+                border: const OutlineInputBorder(),
+                contentPadding: isDialog
+                    ? const EdgeInsets.symmetric(horizontal: 12, vertical: 16)
+                    : null,
               ),
             ),
             const SizedBox(height: 16),
@@ -1291,12 +1386,14 @@ class _BatchReimburseSheet extends ConsumerStatefulWidget {
     required this.eligibleAssets,
     required this.defaultAssetId,
     required this.currencySymbol,
+    this.isDesktopDialog = false,
   });
 
   final List<ReimburseBillRowView> rows;
   final List<Asset> eligibleAssets;
   final int defaultAssetId;
   final String currencySymbol;
+  final bool isDesktopDialog;
 
   @override
   ConsumerState<_BatchReimburseSheet> createState() =>
@@ -1395,24 +1492,46 @@ class _BatchReimburseSheetState extends ConsumerState<_BatchReimburseSheet> {
       (sum, r) => sum + r.item.remainingMinor,
     );
 
+    final isDialog = widget.isDesktopDialog;
     return Padding(
-      padding: EdgeInsets.fromLTRB(
-        20,
-        0,
-        20,
-        MediaQuery.viewInsetsOf(context).bottom + 20,
-      ),
+      padding: isDialog
+          ? const EdgeInsets.fromLTRB(20, 16, 20, 20)
+          : EdgeInsets.fromLTRB(
+              20,
+              0,
+              20,
+              MediaQuery.viewInsetsOf(context).bottom + 20,
+            ),
       child: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text(
-              '合并报销（${widget.rows.length} 笔）',
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w700,
+            if (isDialog)
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      '合并报销（${widget.rows.length} 笔）',
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  CloseButton(
+                    onPressed: _submitting
+                        ? null
+                        : () => Navigator.of(context).pop(false),
+                  ),
+                ],
+              )
+            else
+              Text(
+                '合并报销（${widget.rows.length} 笔）',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
               ),
-            ),
             const SizedBox(height: 4),
             Text(
               '按各笔剩余待报金额全额结清，合计入账 '
@@ -1434,6 +1553,11 @@ class _BatchReimburseSheetState extends ConsumerState<_BatchReimburseSheet> {
             const SizedBox(height: 12),
             OutlinedButton.icon(
               key: const Key('reimburse-batch-date'),
+              style: isDialog
+                  ? OutlinedButton.styleFrom(
+                      minimumSize: const Size.fromHeight(44),
+                    )
+                  : null,
               onPressed: _submitting ? null : _pickDate,
               icon: const Icon(Icons.calendar_today_rounded, size: 16),
               label: Text('收款日期 ${formatDate(_selectedDate)}'),
@@ -1442,9 +1566,12 @@ class _BatchReimburseSheetState extends ConsumerState<_BatchReimburseSheet> {
             TextField(
               key: const Key('reimburse-batch-remark'),
               controller: _remarkCtrl,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 labelText: '统一备注（选填）',
-                border: OutlineInputBorder(),
+                border: const OutlineInputBorder(),
+                contentPadding: isDialog
+                    ? const EdgeInsets.symmetric(horizontal: 12, vertical: 16)
+                    : null,
               ),
             ),
             if (_errorText != null) ...[
@@ -1496,6 +1623,7 @@ class _AccountDropdownField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDesktop = DesktopAdaptive.isDesktop(context);
     return DropdownButtonFormField<int>(
       key: fieldKey,
       initialValue: selectedAssetId,
@@ -1503,6 +1631,9 @@ class _AccountDropdownField extends StatelessWidget {
       decoration: InputDecoration(
         labelText: labelText,
         border: const OutlineInputBorder(),
+        contentPadding: isDesktop
+            ? const EdgeInsets.symmetric(horizontal: 12, vertical: 16)
+            : null,
       ),
       items: [
         for (final a in assets)

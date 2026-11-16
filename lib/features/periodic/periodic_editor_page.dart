@@ -369,72 +369,100 @@ class _PeriodicEditorPageState extends ConsumerState<PeriodicEditorPage> {
       context: context,
       builder: (dialogCtx) => StatefulBuilder(
         builder: (context, setDialogState) {
+          final isDesktop = DesktopAdaptive.isDesktop(context);
           final maxDay = daysInMonth(2024, selectedMonth);
           if (selectedDay > maxDay) selectedDay = maxDay;
+          final row = Row(
+            children: [
+              Expanded(
+                child: InputDecorator(
+                  decoration: isDesktop
+                      ? const InputDecoration(
+                          labelText: '月份',
+                          border: OutlineInputBorder(),
+                          contentPadding: EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 16,
+                          ),
+                        )
+                      : const InputDecoration(labelText: '月份'),
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<int>(
+                      key: const Key('yearly_month_picker'),
+                      value: selectedMonth,
+                      isDense: true,
+                      isExpanded: true,
+                      items: [
+                        for (var m = 1; m <= 12; m++)
+                          DropdownMenuItem(value: m, child: Text('$m 月')),
+                      ],
+                      onChanged: (val) {
+                        if (val != null) {
+                          setDialogState(() {
+                            selectedMonth = val;
+                            final nextMax = daysInMonth(2024, selectedMonth);
+                            if (selectedDay > nextMax) {
+                              selectedDay = nextMax;
+                            }
+                          });
+                        }
+                      },
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: InputDecorator(
+                  decoration: isDesktop
+                      ? const InputDecoration(
+                          labelText: '日期',
+                          border: OutlineInputBorder(),
+                          contentPadding: EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 16,
+                          ),
+                        )
+                      : const InputDecoration(labelText: '日期'),
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<int>(
+                      key: const Key('yearly_day_picker'),
+                      value: selectedDay,
+                      isDense: true,
+                      isExpanded: true,
+                      items: [
+                        for (var d = 1; d <= maxDay; d++)
+                          DropdownMenuItem(
+                            value: d,
+                            child: Text(
+                              selectedMonth == 2 && d == 29
+                                  ? '29 日(闰)'
+                                  : '$d 日',
+                            ),
+                          ),
+                      ],
+                      onChanged: (val) {
+                        if (val != null) {
+                          setDialogState(() => selectedDay = val);
+                        }
+                      },
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          );
           return AlertDialog(
             title: const Text('添加每年记账月日'),
-            content: Row(
-              children: [
-                Expanded(
-                  child: InputDecorator(
-                    decoration: const InputDecoration(labelText: '月份'),
-                    child: DropdownButtonHideUnderline(
-                      child: DropdownButton<int>(
-                        key: const Key('yearly_month_picker'),
-                        value: selectedMonth,
-                        isDense: true,
-                        isExpanded: true,
-                        items: [
-                          for (var m = 1; m <= 12; m++)
-                            DropdownMenuItem(value: m, child: Text('$m 月')),
-                        ],
-                        onChanged: (val) {
-                          if (val != null) {
-                            setDialogState(() {
-                              selectedMonth = val;
-                              final nextMax = daysInMonth(2024, selectedMonth);
-                              if (selectedDay > nextMax) {
-                                selectedDay = nextMax;
-                              }
-                            });
-                          }
-                        },
-                      ),
+            content: isDesktop
+                ? ConstrainedBox(
+                    constraints: const BoxConstraints(
+                      minWidth: 380,
+                      maxWidth: 420,
                     ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: InputDecorator(
-                    decoration: const InputDecoration(labelText: '日期'),
-                    child: DropdownButtonHideUnderline(
-                      child: DropdownButton<int>(
-                        key: const Key('yearly_day_picker'),
-                        value: selectedDay,
-                        isDense: true,
-                        isExpanded: true,
-                        items: [
-                          for (var d = 1; d <= maxDay; d++)
-                            DropdownMenuItem(
-                              value: d,
-                              child: Text(
-                                selectedMonth == 2 && d == 29
-                                    ? '29 日(闰)'
-                                    : '$d 日',
-                              ),
-                            ),
-                        ],
-                        onChanged: (val) {
-                          if (val != null) {
-                            setDialogState(() => selectedDay = val);
-                          }
-                        },
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
+                    child: row,
+                  )
+                : row,
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(dialogCtx),
@@ -572,7 +600,16 @@ class _PeriodicEditorPageState extends ConsumerState<PeriodicEditorPage> {
                           controller: _remarkCtrl,
                           enabled: !_busy,
                           maxLength: 200,
-                          decoration: const InputDecoration(labelText: '备注'),
+                          decoration: isDesktop
+                              ? const InputDecoration(
+                                  labelText: '备注',
+                                  border: OutlineInputBorder(),
+                                  contentPadding: EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 16,
+                                  ),
+                                )
+                              : const InputDecoration(labelText: '备注'),
                         ),
                         SwitchListTile(
                           key: const Key('periodic_exclude_exin_switch'),
@@ -729,7 +766,16 @@ class _PeriodicEditorPageState extends ConsumerState<PeriodicEditorPage> {
       ],
       const SizedBox(height: 16),
       InputDecorator(
-        decoration: const InputDecoration(labelText: '关联账户'),
+        decoration: DesktopAdaptive.isDesktop(context)
+            ? const InputDecoration(
+                labelText: '关联账户',
+                border: OutlineInputBorder(),
+                contentPadding: EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 16,
+                ),
+              )
+            : const InputDecoration(labelText: '关联账户'),
         child: DropdownButtonHideUnderline(
           child: DropdownButton<int>(
             key: const Key('periodic_asset_picker'),
@@ -764,6 +810,7 @@ class _PeriodicEditorPageState extends ConsumerState<PeriodicEditorPage> {
     final fromValue = _fromAssetId == noRef ? null : _fromAssetId;
     final toValue = _toAssetId == noRef ? null : _toAssetId;
 
+    final isDesktop = DesktopAdaptive.isDesktop(context);
     return [
       if (activeAssets.length < 2)
         const Padding(
@@ -771,7 +818,16 @@ class _PeriodicEditorPageState extends ConsumerState<PeriodicEditorPage> {
           child: Text('周期转账至少需要两个启用状态的账户。'),
         ),
       InputDecorator(
-        decoration: const InputDecoration(labelText: '转出账户'),
+        decoration: isDesktop
+            ? const InputDecoration(
+                labelText: '转出账户',
+                border: OutlineInputBorder(),
+                contentPadding: EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 16,
+                ),
+              )
+            : const InputDecoration(labelText: '转出账户'),
         child: DropdownButtonHideUnderline(
           child: DropdownButton<int>(
             key: const Key('periodic_from_asset_picker'),
@@ -791,7 +847,16 @@ class _PeriodicEditorPageState extends ConsumerState<PeriodicEditorPage> {
       ),
       const SizedBox(height: 12),
       InputDecorator(
-        decoration: const InputDecoration(labelText: '转入账户'),
+        decoration: isDesktop
+            ? const InputDecoration(
+                labelText: '转入账户',
+                border: OutlineInputBorder(),
+                contentPadding: EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 16,
+                ),
+              )
+            : const InputDecoration(labelText: '转入账户'),
         child: DropdownButtonHideUnderline(
           child: DropdownButton<int>(
             key: const Key('periodic_to_asset_picker'),
@@ -816,10 +881,17 @@ class _PeriodicEditorPageState extends ConsumerState<PeriodicEditorPage> {
         enabled: !_busy,
         keyboardType: const TextInputType.numberWithOptions(decimal: true),
         inputFormatters: _amountFormatters,
-        decoration: const InputDecoration(
-          labelText: '转账手续费（可选）',
-          prefixText: '¥ ',
-        ),
+        decoration: isDesktop
+            ? const InputDecoration(
+                labelText: '转账手续费（可选）',
+                prefixText: '¥ ',
+                border: OutlineInputBorder(),
+                contentPadding: EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 16,
+                ),
+              )
+            : const InputDecoration(labelText: '转账手续费（可选）', prefixText: '¥ '),
       ),
       SwitchListTile(
         key: const Key('periodic_fee_from_target_switch'),
@@ -864,7 +936,17 @@ class _PeriodicEditorPageState extends ConsumerState<PeriodicEditorPage> {
         enabled: !_busy,
         keyboardType: TextInputType.number,
         inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-        decoration: InputDecoration(labelText: '重复间隔步长', helperText: freqHint),
+        decoration: DesktopAdaptive.isDesktop(context)
+            ? InputDecoration(
+                labelText: '重复间隔步长',
+                helperText: freqHint,
+                border: const OutlineInputBorder(),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 16,
+                ),
+              )
+            : InputDecoration(labelText: '重复间隔步长', helperText: freqHint),
       ),
       const SizedBox(height: 12),
       if (_periodType == PeriodType.weekly) ...[
@@ -1023,7 +1105,16 @@ class _PeriodicEditorPageState extends ConsumerState<PeriodicEditorPage> {
           enabled: !_busy,
           keyboardType: TextInputType.number,
           inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-          decoration: const InputDecoration(labelText: '累计执行次数上限（1–366）'),
+          decoration: DesktopAdaptive.isDesktop(context)
+              ? const InputDecoration(
+                  labelText: '累计执行次数上限（1–366）',
+                  border: OutlineInputBorder(),
+                  contentPadding: EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 16,
+                  ),
+                )
+              : const InputDecoration(labelText: '累计执行次数上限（1–366）'),
         ),
       ] else if (_endMode == PeriodEndMode.date) ...[
         ListTile(

@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../app/adaptive.dart';
 import '../../data/db/database.dart';
 import '../../domain/rules/wish_note_rules.dart';
 import '../common/common.dart';
+import '../common/desktop_modal_page.dart';
 import 'note_providers.dart';
 
 const _uuid = Uuid();
@@ -98,46 +100,61 @@ class NoteTrashPage extends ConsumerWidget {
     final trashedAsync = ref.watch(trashedNotesProvider);
     final trashedList = trashedAsync.value ?? const <Note>[];
 
-    return Scaffold(
-      key: const Key('note_trash_page'),
-      appBar: AppBar(
-        title: const Text('便签回收站'),
-        actions: [
-          TextButton.icon(
-            key: const Key('empty_note_trash_button'),
-            onPressed: trashedList.isEmpty
-                ? null
-                : () => _emptyTrash(context, ref, trashedList.length),
-            icon: const Icon(Icons.delete_forever_outlined),
-            label: const Text('清空回收站'),
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    final content = asyncBody(trashedAsync, (notes) {
+      if (notes.isEmpty) {
+        return const Center(
+          key: Key('note_trash_empty_state'),
+          child: Padding(
+            padding: EdgeInsets.all(24),
+            child: Text('回收站为空', textAlign: TextAlign.center),
           ),
-        ],
-      ),
-      body: asyncBody(trashedAsync, (notes) {
-        if (notes.isEmpty) {
-          return const Center(
-            key: Key('note_trash_empty_state'),
-            child: Padding(
-              padding: EdgeInsets.all(24),
-              child: Text('回收站为空', textAlign: TextAlign.center),
-            ),
-          );
-        }
-
-        return ListView.separated(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-          itemCount: notes.length,
-          separatorBuilder: (_, _) => const SizedBox(height: 8),
-          itemBuilder: (context, index) {
-            final note = notes[index];
-            return _TrashedNoteCard(
-              note: note,
-              onRestore: () => _restore(context, ref, note),
-              onDeletePermanently: () => _deletePermanently(context, ref, note),
-            );
-          },
         );
-      }),
+      }
+
+      return ListView.separated(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+        itemCount: notes.length,
+        separatorBuilder: (_, _) => const SizedBox(height: 8),
+        itemBuilder: (context, index) {
+          final note = notes[index];
+          return _TrashedNoteCard(
+            note: note,
+            onRestore: () => _restore(context, ref, note),
+            onDeletePermanently: () => _deletePermanently(context, ref, note),
+          );
+        },
+      );
+    });
+
+    return DesktopModalEscapeScope(
+      enabled: isDesktop,
+      child: Scaffold(
+        key: const Key('note_trash_page'),
+        appBar: AppBar(
+          leading: isDesktop ? const CloseButton() : null,
+          scrolledUnderElevation: isDesktop ? 0 : null,
+          title: const Text('便签回收站'),
+          actions: [
+            TextButton.icon(
+              key: const Key('empty_note_trash_button'),
+              onPressed: trashedList.isEmpty
+                  ? null
+                  : () => _emptyTrash(context, ref, trashedList.length),
+              icon: const Icon(Icons.delete_forever_outlined),
+              label: const Text('清空回收站'),
+            ),
+          ],
+        ),
+        body: isDesktop
+            ? Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 760),
+                  child: content,
+                ),
+              )
+            : content,
+      ),
     );
   }
 }

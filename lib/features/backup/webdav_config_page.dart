@@ -3,9 +3,11 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/adaptive.dart';
 import '../../data/backup/webdav_client.dart';
 import '../../domain/rules/tally_backup.dart';
 import '../common/common.dart';
+import '../common/desktop_modal_page.dart';
 import 'backup_providers.dart';
 
 class WebDavConfigPage extends ConsumerStatefulWidget {
@@ -228,192 +230,227 @@ class _WebDavConfigPageState extends ConsumerState<WebDavConfigPage> {
 
   @override
   Widget build(BuildContext context) {
+    final isDesktop = DesktopAdaptive.isDesktop(context);
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final keepOptions = <int>{..._presetKeepCounts, _keepCount}.toList()
       ..sort();
 
-    return Scaffold(
-      key: const Key('webdav_config_page'),
-      appBar: AppBar(
-        title: const Text('WebDAV 配置'),
-        actions: [
-          if (_baseConfig.isConfigured)
-            TextButton(
-              key: const Key('webdav_clear_config_button'),
-              onPressed: _busy ? null : _handleClear,
-              child: const Text('清除配置'),
+    final actionButtons = Row(
+      children: [
+        Expanded(
+          child: OutlinedButton.icon(
+            key: const Key('webdav_test_connection_button'),
+            onPressed: _busy ? null : _handleTestConnection,
+            icon: const Icon(Icons.wifi_tethering, size: 18),
+            label: const FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text('测试连接', maxLines: 1, softWrap: false),
             ),
-        ],
-      ),
-      body: Column(
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: FilledButton.icon(
+            key: const Key('webdav_save_config_button'),
+            onPressed: _busy ? null : _handleSave,
+            icon: const Icon(Icons.save_outlined, size: 18),
+            label: const FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text('保存配置', maxLines: 1, softWrap: false),
+            ),
+          ),
+        ),
+      ],
+    );
+
+    final scrollForm = SingleChildScrollView(
+      padding: isDesktop
+          ? const EdgeInsets.fromLTRB(20, 12, 20, 16)
+          : const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (_busy)
-            const LinearProgressIndicator(key: Key('webdav_config_busy')),
-          Expanded(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  TextField(
-                    key: const Key('webdav_url_input'),
-                    controller: _urlController,
-                    enabled: !_busy,
-                    keyboardType: TextInputType.url,
-                    onChanged: (_) => _userTouched = true,
-                    decoration: const InputDecoration(
-                      labelText: '服务器地址',
-                      hintText: 'https://dav.jianguoyun.com/dav/',
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    key: const Key('webdav_username_input'),
-                    controller: _usernameController,
-                    enabled: !_busy,
-                    onChanged: (_) => _userTouched = true,
-                    decoration: const InputDecoration(
-                      labelText: '用户名 / 账号',
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    key: const Key('webdav_password_input'),
-                    controller: _passwordController,
-                    enabled: !_busy,
-                    obscureText: _obscurePassword,
-                    onChanged: (_) => _userTouched = true,
-                    decoration: InputDecoration(
-                      labelText: '密码 / 应用专用密码',
-                      border: const OutlineInputBorder(),
-                      suffixIcon: IconButton(
-                        icon: Icon(
-                          _obscurePassword
-                              ? Icons.visibility
-                              : Icons.visibility_off,
-                        ),
-                        onPressed: () => setState(
-                          () => _obscurePassword = !_obscurePassword,
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    key: const Key('webdav_remote_dir_input'),
-                    controller: _remoteDirController,
-                    enabled: !_busy,
-                    onChanged: (_) => _userTouched = true,
-                    decoration: const InputDecoration(
-                      labelText: '远端存储目录',
-                      hintText: '/TallyIsle',
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  InputDecorator(
-                    decoration: const InputDecoration(
-                      labelText: '远端自动保留备份份数',
-                      border: OutlineInputBorder(),
-                    ),
-                    child: DropdownButtonHideUnderline(
-                      child: DropdownButton<int>(
-                        key: const Key('webdav_keep_count_dropdown'),
-                        isExpanded: true,
-                        isDense: true,
-                        value: _keepCount,
-                        items: [
-                          for (final n in keepOptions)
-                            DropdownMenuItem<int>(
-                              value: n,
-                              child: Text('保留最近 $n 份备份'),
-                            ),
-                        ],
-                        onChanged: _busy
-                            ? null
-                            : (val) {
-                                if (val != null) {
-                                  _userTouched = true;
-                                  setState(() => _keepCount = val);
-                                }
-                              },
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  SwitchListTile(
-                    key: const Key('webdav_auto_backup_switch'),
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('开启自动静默云备份'),
-                    subtitle: const Text('距上次备份超过 24 小时且本地产生新账单变动时自动上传'),
-                    value: _autoBackupEnabled,
-                    onChanged: _busy
-                        ? null
-                        : (val) {
-                            _userTouched = true;
-                            setState(() => _autoBackupEnabled = val);
-                          },
-                  ),
-                  if (_testStatusMessage != null) ...[
-                    const SizedBox(height: 12),
-                    Container(
-                      key: const Key('webdav_test_result_banner'),
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: _testSucceeded
-                            ? Colors.green.withValues(
-                                alpha: isDark ? 0.18 : 0.12,
-                              )
-                            : Theme.of(context).colorScheme.errorContainer,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text(
-                        _testStatusMessage!,
-                        style: TextStyle(
-                          color: _testSucceeded
-                              ? (isDark
-                                    ? Colors.green.shade300
-                                    : Colors.green.shade800)
-                              : Theme.of(context).colorScheme.onErrorContainer,
-                        ),
-                      ),
-                    ),
-                  ],
-                  const SizedBox(height: 20),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          key: const Key('webdav_test_connection_button'),
-                          onPressed: _busy ? null : _handleTestConnection,
-                          icon: const Icon(Icons.wifi_tethering, size: 18),
-                          label: const FittedBox(
-                            fit: BoxFit.scaleDown,
-                            child: Text('测试连接', maxLines: 1, softWrap: false),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: FilledButton.icon(
-                          key: const Key('webdav_save_config_button'),
-                          onPressed: _busy ? null : _handleSave,
-                          icon: const Icon(Icons.save_outlined, size: 18),
-                          label: const FittedBox(
-                            fit: BoxFit.scaleDown,
-                            child: Text('保存配置', maxLines: 1, softWrap: false),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
+          TextField(
+            key: const Key('webdav_url_input'),
+            controller: _urlController,
+            enabled: !_busy,
+            keyboardType: TextInputType.url,
+            onChanged: (_) => _userTouched = true,
+            decoration: InputDecoration(
+              labelText: '服务器地址',
+              hintText: 'https://dav.jianguoyun.com/dav/',
+              border: const OutlineInputBorder(),
+              contentPadding: isDesktop
+                  ? const EdgeInsets.symmetric(horizontal: 12, vertical: 16)
+                  : null,
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            key: const Key('webdav_username_input'),
+            controller: _usernameController,
+            enabled: !_busy,
+            onChanged: (_) => _userTouched = true,
+            decoration: InputDecoration(
+              labelText: '用户名 / 账号',
+              border: const OutlineInputBorder(),
+              contentPadding: isDesktop
+                  ? const EdgeInsets.symmetric(horizontal: 12, vertical: 16)
+                  : null,
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            key: const Key('webdav_password_input'),
+            controller: _passwordController,
+            enabled: !_busy,
+            obscureText: _obscurePassword,
+            onChanged: (_) => _userTouched = true,
+            decoration: InputDecoration(
+              labelText: '密码 / 应用专用密码',
+              border: const OutlineInputBorder(),
+              contentPadding: isDesktop
+                  ? const EdgeInsets.symmetric(horizontal: 12, vertical: 16)
+                  : null,
+              suffixIcon: IconButton(
+                visualDensity: isDesktop ? VisualDensity.compact : null,
+                icon: Icon(
+                  _obscurePassword ? Icons.visibility : Icons.visibility_off,
+                ),
+                onPressed: () =>
+                    setState(() => _obscurePassword = !_obscurePassword),
               ),
             ),
           ),
+          const SizedBox(height: 12),
+          TextField(
+            key: const Key('webdav_remote_dir_input'),
+            controller: _remoteDirController,
+            enabled: !_busy,
+            onChanged: (_) => _userTouched = true,
+            decoration: InputDecoration(
+              labelText: '远端存储目录',
+              hintText: '/TallyIsle',
+              border: const OutlineInputBorder(),
+              contentPadding: isDesktop
+                  ? const EdgeInsets.symmetric(horizontal: 12, vertical: 16)
+                  : null,
+            ),
+          ),
+          const SizedBox(height: 16),
+          InputDecorator(
+            decoration: InputDecoration(
+              labelText: '远端自动保留备份份数',
+              border: const OutlineInputBorder(),
+              contentPadding: isDesktop
+                  ? const EdgeInsets.symmetric(horizontal: 12, vertical: 16)
+                  : null,
+            ),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<int>(
+                key: const Key('webdav_keep_count_dropdown'),
+                isExpanded: true,
+                isDense: true,
+                value: _keepCount,
+                items: [
+                  for (final n in keepOptions)
+                    DropdownMenuItem<int>(value: n, child: Text('保留最近 $n 份备份')),
+                ],
+                onChanged: _busy
+                    ? null
+                    : (val) {
+                        if (val != null) {
+                          _userTouched = true;
+                          setState(() => _keepCount = val);
+                        }
+                      },
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          SwitchListTile(
+            key: const Key('webdav_auto_backup_switch'),
+            contentPadding: EdgeInsets.zero,
+            title: const Text('开启自动静默云备份'),
+            subtitle: const Text('距上次备份超过 24 小时且本地产生新账单变动时自动上传'),
+            value: _autoBackupEnabled,
+            onChanged: _busy
+                ? null
+                : (val) {
+                    _userTouched = true;
+                    setState(() => _autoBackupEnabled = val);
+                  },
+          ),
+          if (_testStatusMessage != null) ...[
+            const SizedBox(height: 12),
+            Container(
+              key: const Key('webdav_test_result_banner'),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: _testSucceeded
+                    ? Colors.green.withValues(alpha: isDark ? 0.18 : 0.12)
+                    : Theme.of(context).colorScheme.errorContainer,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                _testStatusMessage!,
+                style: TextStyle(
+                  color: _testSucceeded
+                      ? (isDark ? Colors.green.shade300 : Colors.green.shade800)
+                      : Theme.of(context).colorScheme.onErrorContainer,
+                ),
+              ),
+            ),
+          ],
+          if (!isDesktop) ...[const SizedBox(height: 20), actionButtons],
         ],
+      ),
+    );
+
+    return PopScope(
+      canPop: !_busy,
+      child: DesktopModalEscapeScope(
+        enabled: isDesktop,
+        child: Scaffold(
+          key: const Key('webdav_config_page'),
+          appBar: AppBar(
+            leading: isDesktop ? const CloseButton() : null,
+            scrolledUnderElevation: isDesktop ? 0 : null,
+            title: const Text('WebDAV 配置'),
+            actions: [
+              if (_baseConfig.isConfigured)
+                TextButton(
+                  key: const Key('webdav_clear_config_button'),
+                  onPressed: _busy ? null : _handleClear,
+                  child: const Text('清除配置'),
+                ),
+            ],
+          ),
+          bottomNavigationBar: isDesktop
+              ? SafeArea(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 8, 20, 14),
+                    child: actionButtons,
+                  ),
+                )
+              : null,
+          body: Column(
+            children: [
+              if (_busy)
+                const LinearProgressIndicator(key: Key('webdav_config_busy')),
+              Expanded(
+                child: isDesktop
+                    ? Center(
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 640),
+                          child: scrollForm,
+                        ),
+                      )
+                    : scrollForm,
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

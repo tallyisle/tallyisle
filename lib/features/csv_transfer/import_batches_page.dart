@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../app/adaptive.dart';
 import '../../domain/model/codes.dart';
 import '../../data/repo/import_batch_queries.dart';
 import '../common/common.dart';
+import '../common/desktop_modal_page.dart';
 import 'csv_transfer_providers.dart';
 
 const _uuid = Uuid();
@@ -89,6 +91,7 @@ class _ImportBatchesPageState extends ConsumerState<ImportBatchesPage>
 
   @override
   Widget build(BuildContext context) {
+    final isDesktop = DesktopAdaptive.isDesktop(context);
     final visibleAsync = ref.watch(visibleImportBatchesProvider);
     final hiddenAsync = ref.watch(hiddenImportBatchesProvider);
 
@@ -96,13 +99,29 @@ class _ImportBatchesPageState extends ConsumerState<ImportBatchesPage>
       key: const Key('import_batches_page'),
       appBar: AppBar(
         title: const Text('导入记录管理'),
-        bottom: TabBar(
-          controller: _tabController,
-          tabs: const [
-            Tab(key: Key('visible_batches_tab'), text: '导入记录'),
-            Tab(key: Key('hidden_batches_tab'), text: '已隐藏'),
-          ],
-        ),
+        bottom: isDesktop
+            ? PreferredSize(
+                preferredSize: const Size.fromHeight(46),
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 780),
+                    child: TabBar(
+                      controller: _tabController,
+                      tabs: const [
+                        Tab(key: Key('visible_batches_tab'), text: '导入记录'),
+                        Tab(key: Key('hidden_batches_tab'), text: '已隐藏'),
+                      ],
+                    ),
+                  ),
+                ),
+              )
+            : TabBar(
+                controller: _tabController,
+                tabs: const [
+                  Tab(key: Key('visible_batches_tab'), text: '导入记录'),
+                  Tab(key: Key('hidden_batches_tab'), text: '已隐藏'),
+                ],
+              ),
       ),
       body: TabBarView(
         controller: _tabController,
@@ -159,7 +178,8 @@ class _BatchListView extends StatelessWidget {
       );
     }
 
-    return ListView.separated(
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    final list = ListView.separated(
       padding: const EdgeInsets.all(16),
       itemCount: items.length,
       separatorBuilder: (_, _) => const SizedBox(height: 12),
@@ -177,10 +197,9 @@ class _BatchListView extends StatelessWidget {
           child: InkWell(
             onTap: isBusy
                 ? null
-                : () => Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) => ImportBatchDetailPage(batchId: batch.id),
-                    ),
+                : () => pushDesktopModalOrMaterialRoute<void>(
+                    context,
+                    child: ImportBatchDetailPage(batchId: batch.id),
                   ),
             child: Padding(
               padding: const EdgeInsets.all(16),
@@ -241,6 +260,13 @@ class _BatchListView extends StatelessWidget {
         );
       },
     );
+    if (!isDesktop) return list;
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 780),
+        child: list,
+      ),
+    );
   }
 }
 
@@ -286,6 +312,7 @@ class _ImportBatchDetailPageState extends ConsumerState<ImportBatchDetailPage> {
 
   @override
   Widget build(BuildContext context) {
+    final isDesktop = DesktopAdaptive.isDesktop(context);
     final batchAsync = ref.watch(importBatchProvider(widget.batchId));
     final recordsAsync = ref.watch(importBatchRecordsProvider(widget.batchId));
 
@@ -296,61 +323,82 @@ class _ImportBatchDetailPageState extends ConsumerState<ImportBatchDetailPage> {
             .length ??
         0;
 
-    return Scaffold(
-      key: const Key('import_batch_detail_page'),
-      appBar: AppBar(
-        title: Text(batch == null ? '批次账单明细' : '${batch.platform} 明细'),
-        actions: [
-          if (batch != null)
-            TextButton(
-              key: const Key('detail_undo_batch_button'),
-              onPressed: _busy
-                  ? null
-                  : () => _undoFromDetail(batch.platform, livePrimaryCount),
-              child: const Text('撤销批次'),
-            ),
-        ],
-      ),
-      body: asyncBody(recordsAsync, (records) {
-        if (records.isEmpty) {
-          return const Center(
-            child: Padding(
-              padding: EdgeInsets.all(24),
-              child: Text('该批次下已无现存账单记录'),
-            ),
-          );
-        }
-        return ListView.separated(
-          padding: const EdgeInsets.all(16),
-          itemCount: records.length,
-          separatorBuilder: (_, _) => const Divider(height: 1),
-          itemBuilder: (context, index) {
-            final item = records[index];
-            final r = item.record;
-            final dt = DateTime.fromMillisecondsSinceEpoch(r.recordTime);
-            final title = _recordTitle(item);
-            final accountSummary = _accountSummary(item);
-            final bookLabel = item.bookName ?? '默认账本';
+    return PopScope(
+      canPop: !_busy,
+      child: DesktopModalEscapeScope(
+        enabled: isDesktop,
+        child: Scaffold(
+          key: const Key('import_batch_detail_page'),
+          appBar: AppBar(
+            leading:
+                isDesktop &&
+                    ModalRoute.of(context) is PopupRoute &&
+                    Navigator.of(context).canPop()
+                ? const CloseButton()
+                : null,
+            scrolledUnderElevation: isDesktop ? 0 : null,
+            title: Text(batch == null ? '批次账单明细' : '${batch.platform} 明细'),
+            actions: [
+              if (batch != null)
+                TextButton(
+                  key: const Key('detail_undo_batch_button'),
+                  onPressed: _busy
+                      ? null
+                      : () => _undoFromDetail(batch.platform, livePrimaryCount),
+                  child: const Text('撤销批次'),
+                ),
+            ],
+          ),
+          body: asyncBody(recordsAsync, (records) {
+            if (records.isEmpty) {
+              return const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(24),
+                  child: Text('该批次下已无现存账单记录'),
+                ),
+              );
+            }
+            final list = ListView.separated(
+              padding: const EdgeInsets.all(16),
+              itemCount: records.length,
+              separatorBuilder: (_, _) => const Divider(height: 1),
+              itemBuilder: (context, index) {
+                final item = records[index];
+                final r = item.record;
+                final dt = DateTime.fromMillisecondsSinceEpoch(r.recordTime);
+                final title = _recordTitle(item);
+                final accountSummary = _accountSummary(item);
+                final bookLabel = item.bookName ?? '默认账本';
 
-            return ListTile(
-              key: Key('batch_record_tile_${r.recordId}'),
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 8,
-                vertical: 4,
-              ),
-              title: Text(title),
-              subtitle: Text(
-                '$bookLabel · $accountSummary · ${formatDateTime(dt)}'
-                '${r.remark.isEmpty ? '' : '\n${r.remark}'}',
-              ),
-              trailing: Text(
-                '${_amountPrefix(r.type)}${formatMinor(r.moneyMinor)}',
-                style: Theme.of(context).textTheme.titleMedium,
+                return ListTile(
+                  key: Key('batch_record_tile_${r.recordId}'),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  isThreeLine: r.remark.isNotEmpty,
+                  title: Text(title),
+                  subtitle: Text(
+                    '$bookLabel · $accountSummary · ${formatDateTime(dt)}'
+                    '${r.remark.isEmpty ? '' : '\n${r.remark}'}',
+                  ),
+                  trailing: Text(
+                    '${_amountPrefix(r.type)}${formatMinor(r.moneyMinor)}',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                );
+              },
+            );
+            if (!isDesktop) return list;
+            return Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 680),
+                child: list,
               ),
             );
-          },
-        );
-      }),
+          }),
+        ),
+      ),
     );
   }
 

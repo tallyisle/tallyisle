@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/adaptive.dart';
 import '../../app/providers.dart';
 import '../../core/failure.dart';
 import '../../data/automation/ocr_service.dart';
@@ -232,187 +233,202 @@ class _OcrBillPageState extends ConsumerState<OcrBillPage> {
     final selectedCount = _candidates.where((c) => c.selected).length;
     final theme = Theme.of(context);
 
-    return Scaffold(
-      key: const Key('ocr_bill_page'),
-      appBar: AppBar(title: const Text('账单图 / 文本识别')),
-      body: ListView(
-        key: const Key('ocr_list_view'),
-        padding: const EdgeInsets.all(16),
-        children: [
-          _OcrProviderStatusCard(
-            provider: provider,
-            config: config,
-            onConfigure: () => _openConfigDialog(config),
-          ),
-          const SizedBox(height: 12),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: FilledButton.icon(
-                          key: const Key('ocr_pick_image_button'),
-                          style: FilledButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(horizontal: 10),
-                          ),
-                          onPressed: _recognizing
-                              ? null
-                              : _pickAndRecognizeImage,
-                          icon: const Icon(Icons.image_search, size: 18),
-                          label: FittedBox(
-                            fit: BoxFit.scaleDown,
-                            child: Text(
-                              _recognizing ? '识别中…' : '选择账单图片识别',
-                              maxLines: 1,
-                              softWrap: false,
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          key: const Key('ocr_parse_text_button'),
-                          style: OutlinedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(horizontal: 10),
-                          ),
-                          onPressed: _recognizing ? null : _parseTextLocally,
-                          icon: const Icon(Icons.notes, size: 18),
-                          label: const FittedBox(
-                            fit: BoxFit.scaleDown,
-                            child: Text('解析下方文本', maxLines: 1, softWrap: false),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    key: const Key('ocr_text_input'),
-                    controller: _textController,
-                    maxLines: 3,
-                    decoration: const InputDecoration(
-                      labelText: '账单明细或小票文本（支持直接离线粘贴解析）',
-                      hintText: '例如：\n11月10日 09:15\n瑞幸咖啡\n-18.50',
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          if (_error != null) ...[
-            const SizedBox(height: 12),
-            Container(
-              key: const Key('ocr_error_banner'),
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: theme.colorScheme.errorContainer,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text(
-                _error!,
-                style: TextStyle(color: theme.colorScheme.onErrorContainer),
-              ),
-            ),
-          ],
-          if (_infoMessage != null) ...[
-            const SizedBox(height: 12),
-            Container(
-              key: const Key('ocr_info_banner'),
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: theme.colorScheme.secondaryContainer,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text(
-                _infoMessage!,
-                style: TextStyle(color: theme.colorScheme.onSecondaryContainer),
-              ),
-            ),
-          ],
-          if (_candidates.isNotEmpty) ...[
-            const SizedBox(height: 16),
-            Row(
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    final listView = ListView(
+      key: const Key('ocr_list_view'),
+      padding: const EdgeInsets.all(16),
+      children: [
+        _OcrProviderStatusCard(
+          provider: provider,
+          config: config,
+          onConfigure: () => _openConfigDialog(config),
+        ),
+        const SizedBox(height: 12),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
-                  child: Text(
-                    '识别结果核对（已选 $selectedCount / ${_candidates.length} 笔）',
-                    style: theme.textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.bold,
+                Row(
+                  children: [
+                    Expanded(
+                      child: FilledButton.icon(
+                        key: const Key('ocr_pick_image_button'),
+                        style: FilledButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 10),
+                        ),
+                        onPressed: _recognizing ? null : _pickAndRecognizeImage,
+                        icon: const Icon(Icons.image_search, size: 18),
+                        label: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text(
+                            _recognizing ? '识别中…' : '选择账单图片识别',
+                            maxLines: 1,
+                            softWrap: false,
+                          ),
+                        ),
+                      ),
                     ),
-                  ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        key: const Key('ocr_parse_text_button'),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 10),
+                        ),
+                        onPressed: _recognizing ? null : _parseTextLocally,
+                        icon: const Icon(Icons.notes, size: 18),
+                        label: const FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text('解析下方文本', maxLines: 1, softWrap: false),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(width: 8),
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 168),
-                  child: FilledButton(
-                    key: const Key('ocr_confirm_batch_button'),
-                    style: FilledButton.styleFrom(
-                      visualDensity: VisualDensity.compact,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 8,
-                      ),
-                    ),
-                    onPressed: _confirming || selectedCount == 0
-                        ? null
-                        : _confirmBatch,
-                    child: FittedBox(
-                      fit: BoxFit.scaleDown,
-                      child: Text(
-                        _confirming ? '入账中…' : '批量确认入账 ($selectedCount)',
-                        maxLines: 1,
-                        softWrap: false,
-                      ),
-                    ),
+                const SizedBox(height: 12),
+                TextField(
+                  key: const Key('ocr_text_input'),
+                  controller: _textController,
+                  maxLines: 3,
+                  decoration: const InputDecoration(
+                    labelText: '账单明细或小票文本（支持直接离线粘贴解析）',
+                    hintText: '例如：\n11月10日 09:15\n瑞幸咖啡\n-18.50',
+                    border: OutlineInputBorder(),
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 10),
-            InputDecorator(
-              decoration: const InputDecoration(
-                labelText: '默认入账资金账户（单笔未指定时生效）',
-                border: OutlineInputBorder(),
-                isDense: true,
-              ),
-              child: DropdownButtonHideUnderline(
-                child: DropdownButton<int?>(
-                  key: const Key('ocr_default_asset_dropdown'),
-                  isExpanded: true,
-                  isDense: true,
-                  value: validDefaultAssetId,
-                  items: [
-                    const DropdownMenuItem<int?>(
-                      value: null,
-                      child: Text('不指定默认账户'),
-                    ),
-                    for (final a in assets)
-                      DropdownMenuItem<int?>(value: a.id, child: Text(a.name)),
-                  ],
-                  onChanged: (v) => setState(() => _defaultAssetId = v),
+          ),
+        ),
+        if (_error != null) ...[
+          const SizedBox(height: 12),
+          Container(
+            key: const Key('ocr_error_banner'),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.errorContainer,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              _error!,
+              style: TextStyle(color: theme.colorScheme.onErrorContainer),
+            ),
+          ),
+        ],
+        if (_infoMessage != null) ...[
+          const SizedBox(height: 12),
+          Container(
+            key: const Key('ocr_info_banner'),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.secondaryContainer,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              _infoMessage!,
+              style: TextStyle(color: theme.colorScheme.onSecondaryContainer),
+            ),
+          ),
+        ],
+        if (_candidates.isNotEmpty) ...[
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  '识别结果核对（已选 $selectedCount / ${_candidates.length} 笔）',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(height: 12),
-            for (final candidate in _candidates) ...[
-              _CandidateReviewCard(
-                candidate: candidate,
-                categories: categories,
-                assets: assets,
-                onChanged: (next) => _updateCandidate(candidate.index, next),
-                onEditDetail: () => _editCandidateDialog(candidate),
+              const SizedBox(width: 8),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 168),
+                child: FilledButton(
+                  key: const Key('ocr_confirm_batch_button'),
+                  style: FilledButton.styleFrom(
+                    visualDensity: isDesktop ? null : VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                  ),
+                  onPressed: _confirming || selectedCount == 0
+                      ? null
+                      : _confirmBatch,
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      _confirming ? '入账中…' : '批量确认入账 ($selectedCount)',
+                      maxLines: 1,
+                      softWrap: false,
+                    ),
+                  ),
+                ),
               ),
-              const SizedBox(height: 8),
             ],
+          ),
+          const SizedBox(height: 10),
+          InputDecorator(
+            decoration: const InputDecoration(
+              labelText: '默认入账资金账户（单笔未指定时生效）',
+              border: OutlineInputBorder(),
+              contentPadding: EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 14,
+              ),
+            ),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<int?>(
+                key: const Key('ocr_default_asset_dropdown'),
+                isExpanded: true,
+                isDense: true,
+                style: theme.textTheme.bodyLarge,
+                value: validDefaultAssetId,
+                items: [
+                  const DropdownMenuItem<int?>(
+                    value: null,
+                    child: Text('不指定默认账户'),
+                  ),
+                  for (final a in assets)
+                    DropdownMenuItem<int?>(value: a.id, child: Text(a.name)),
+                ],
+                onChanged: (v) => setState(() => _defaultAssetId = v),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          for (final candidate in _candidates) ...[
+            _CandidateReviewCard(
+              candidate: candidate,
+              categories: categories,
+              assets: assets,
+              onChanged: (next) => _updateCandidate(candidate.index, next),
+              onEditDetail: () => _editCandidateDialog(candidate),
+            ),
+            const SizedBox(height: 8),
           ],
         ],
+      ],
+    );
+
+    return Scaffold(
+      key: const Key('ocr_bill_page'),
+      appBar: AppBar(
+        scrolledUnderElevation: isDesktop ? 0 : null,
+        title: const Text('账单图 / 文本识别'),
       ),
+      body: isDesktop
+          ? Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 820),
+                child: listView,
+              ),
+            )
+          : listView,
     );
   }
 }
@@ -594,36 +610,38 @@ class _OcrConfigDialogState extends ConsumerState<_OcrConfigDialog> {
     title: const Text('配置 HTTP OCR 接口'),
     content: SizedBox(
       width: 420,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          TextField(
-            key: const Key('ocr_endpoint_input'),
-            controller: _urlController,
-            decoration: const InputDecoration(
-              labelText: 'HTTP/HTTPS 接口地址',
-              hintText: 'https://ocr.example.com/v1/recognize',
-              border: OutlineInputBorder(),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              key: const Key('ocr_endpoint_input'),
+              controller: _urlController,
+              decoration: const InputDecoration(
+                labelText: 'HTTP/HTTPS 接口地址',
+                hintText: 'https://ocr.example.com/v1/recognize',
+                border: OutlineInputBorder(),
+              ),
             ),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            key: const Key('ocr_apikey_input'),
-            controller: _apiKeyController,
-            obscureText: true,
-            decoration: const InputDecoration(
-              labelText: 'Bearer API Key（可选）',
-              border: OutlineInputBorder(),
+            const SizedBox(height: 12),
+            TextField(
+              key: const Key('ocr_apikey_input'),
+              controller: _apiKeyController,
+              obscureText: true,
+              decoration: const InputDecoration(
+                labelText: 'Bearer API Key（可选）',
+                border: OutlineInputBorder(),
+              ),
             ),
-          ),
-          if (_error != null) ...[
-            const SizedBox(height: 8),
-            Text(
-              _error!,
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
-            ),
+            if (_error != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                _error!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+            ],
           ],
-        ],
+        ),
       ),
     ),
     actions: [
@@ -674,6 +692,7 @@ class _CandidateReviewCard extends StatelessWidget {
         ? candidate.assetId
         : null;
 
+    final isDesktop = DesktopAdaptive.isDesktop(context);
     return Card(
       key: Key('ocr_candidate_${candidate.index}'),
       child: Padding(
@@ -691,8 +710,11 @@ class _CandidateReviewCard extends StatelessWidget {
                       onChanged(candidate.copyWith(selected: v ?? false)),
                 ),
                 ActionChip(
-                  visualDensity: VisualDensity.compact,
-                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  visualDensity: isDesktop ? null : VisualDensity.compact,
+                  padding: EdgeInsets.symmetric(
+                    horizontal: isDesktop ? 8 : 4,
+                    vertical: isDesktop ? 4 : 0,
+                  ),
                   label: Text(
                     candidate.type == RecordType.income ? '收入' : '支出',
                   ),
@@ -737,7 +759,7 @@ class _CandidateReviewCard extends StatelessWidget {
               ],
             ),
             Padding(
-              padding: const EdgeInsets.only(left: 12, right: 12, bottom: 4),
+              padding: const EdgeInsets.only(left: 12, right: 12, bottom: 8),
               child: Text(
                 formatDateTime(
                   DateTime.fromMillisecondsSinceEpoch(candidate.recordTimeMs),
@@ -754,12 +776,16 @@ class _CandidateReviewCard extends StatelessWidget {
                     decoration: const InputDecoration(
                       labelText: '分类',
                       border: OutlineInputBorder(),
-                      isDense: true,
+                      contentPadding: EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 14,
+                      ),
                     ),
                     child: DropdownButtonHideUnderline(
                       child: DropdownButton<int>(
                         isExpanded: true,
                         isDense: true,
+                        style: theme.textTheme.bodyLarge,
                         value: validCatId,
                         items: [
                           for (final c in dirCats)
@@ -777,12 +803,16 @@ class _CandidateReviewCard extends StatelessWidget {
                     decoration: const InputDecoration(
                       labelText: '账户（可选）',
                       border: OutlineInputBorder(),
-                      isDense: true,
+                      contentPadding: EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 14,
+                      ),
                     ),
                     child: DropdownButtonHideUnderline(
                       child: DropdownButton<int?>(
                         isExpanded: true,
                         isDense: true,
+                        style: theme.textTheme.bodyLarge,
                         value: validAssetId,
                         items: [
                           const DropdownMenuItem<int?>(
@@ -874,35 +904,39 @@ class _EditCandidateDialogState extends State<_EditCandidateDialog> {
     title: const Text('修改识别记录'),
     content: SizedBox(
       width: 380,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          TextField(
-            key: const Key('ocr_edit_amount_input'),
-            controller: _amountController,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration: const InputDecoration(
-              labelText: '金额（元）',
-              border: OutlineInputBorder(),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              key: const Key('ocr_edit_amount_input'),
+              controller: _amountController,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
+              decoration: const InputDecoration(
+                labelText: '金额（元）',
+                border: OutlineInputBorder(),
+              ),
             ),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            key: const Key('ocr_edit_remark_input'),
-            controller: _remarkController,
-            decoration: const InputDecoration(
-              labelText: '备注',
-              border: OutlineInputBorder(),
+            const SizedBox(height: 12),
+            TextField(
+              key: const Key('ocr_edit_remark_input'),
+              controller: _remarkController,
+              decoration: const InputDecoration(
+                labelText: '备注',
+                border: OutlineInputBorder(),
+              ),
             ),
-          ),
-          if (_error != null) ...[
-            const SizedBox(height: 8),
-            Text(
-              _error!,
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
-            ),
+            if (_error != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                _error!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+            ],
           ],
-        ],
+        ),
       ),
     ),
     actions: [

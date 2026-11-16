@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/adaptive.dart';
 import '../../app/providers.dart';
 import '../../data/db/database.dart';
 import '../../domain/model/codes.dart';
@@ -100,9 +101,12 @@ class _BankCardsPageState extends ConsumerState<BankCardsPage> {
     final assets = ref.watch(assetsProvider).value ?? const <Asset>[];
     final assetMap = <int, Asset>{for (final a in assets) a.id: a};
 
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+
     return Scaffold(
       key: const Key('bank_cards_page'),
       appBar: AppBar(
+        scrolledUnderElevation: isDesktop ? 0 : null,
         title: const Text('银行卡备忘'),
         actions: [
           IconButton(
@@ -116,17 +120,35 @@ class _BankCardsPageState extends ConsumerState<BankCardsPage> {
             onPressed: () =>
                 ref.read(bankCardMaskProvider.notifier).toggleGlobal(),
           ),
+          if (isDesktop) ...[
+            const SizedBox(width: 8),
+            FilledButton.icon(
+              key: const Key('add_bank_card_fab'),
+              style: FilledButton.styleFrom(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+              ),
+              onPressed: _openCreate,
+              icon: const Icon(Icons.add_card, size: 18),
+              label: const Text('添加银行卡'),
+            ),
+            const SizedBox(width: 12),
+          ],
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        key: const Key('add_bank_card_fab'),
-        onPressed: _openCreate,
-        icon: const Icon(Icons.add_card),
-        label: const Text('添加银行卡'),
-      ),
+      floatingActionButton: isDesktop
+          ? null
+          : FloatingActionButton.extended(
+              key: const Key('add_bank_card_fab'),
+              onPressed: _openCreate,
+              icon: const Icon(Icons.add_card),
+              label: const Text('添加银行卡'),
+            ),
       body: Center(
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 720),
+          constraints: BoxConstraints(maxWidth: isDesktop ? 800 : 720),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -137,12 +159,14 @@ class _BankCardsPageState extends ConsumerState<BankCardsPage> {
                   child: SegmentedButton<int?>(
                     key: const Key('bank_card_filter_tabs'),
                     showSelectedIcon: false,
-                    style: const ButtonStyle(
-                      visualDensity: VisualDensity.compact,
-                      padding: WidgetStatePropertyAll(
-                        EdgeInsets.symmetric(horizontal: 10),
-                      ),
-                    ),
+                    style: isDesktop
+                        ? null
+                        : const ButtonStyle(
+                            visualDensity: VisualDensity.compact,
+                            padding: WidgetStatePropertyAll(
+                              EdgeInsets.symmetric(horizontal: 10),
+                            ),
+                          ),
                     segments: [
                       for (final (value, label) in const <(int?, String)>[
                         (null, '全部'),
@@ -177,14 +201,21 @@ class _BankCardsPageState extends ConsumerState<BankCardsPage> {
                       child: Padding(
                         padding: const EdgeInsets.all(24),
                         child: Text(
-                          '暂无银行卡备忘，点击右下角“添加银行卡”保存常用卡号',
+                          isDesktop
+                              ? '暂无银行卡备忘，点击右上角“添加银行卡”保存常用卡号'
+                              : '暂无银行卡备忘，点击右下角“添加银行卡”保存常用卡号',
                           style: Theme.of(context).textTheme.bodyMedium,
                         ),
                       ),
                     );
                   }
                   return ListView.separated(
-                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 88),
+                    padding: EdgeInsets.fromLTRB(
+                      16,
+                      4,
+                      16,
+                      isDesktop ? 24 : 88,
+                    ),
                     itemCount: rows.length,
                     separatorBuilder: (_, _) => const SizedBox(height: 10),
                     itemBuilder: (context, index) {

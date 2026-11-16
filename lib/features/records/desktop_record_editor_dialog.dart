@@ -28,9 +28,13 @@ Widget _buildDesktopRecordDialogShell(
   double maxHeight = kDesktopRecordDialogMaxHeight,
 }) {
   final scheme = Theme.of(dialogContext).colorScheme;
+  final mediaSize = MediaQuery.sizeOf(dialogContext);
+  final compactWindow = mediaSize.width < 640 || mediaSize.height < 660;
   return Dialog(
     key: const Key('desktop-record-editor-dialog'),
-    insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+    insetPadding: compactWindow
+        ? const EdgeInsets.all(12)
+        : const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
     backgroundColor: scheme.surface,
     surfaceTintColor: Colors.transparent,
     shape: const RoundedRectangleBorder(

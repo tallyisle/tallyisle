@@ -7,6 +7,7 @@ import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../app/adaptive.dart';
 import '../../core/failure.dart';
 import '../../domain/model/codes.dart';
 
@@ -1361,6 +1362,31 @@ Future<({String icon, String colorHex})?> showCategoryVisualPicker(
     type: categoryType,
   );
 
+  final isDesktop = DesktopAdaptive.isDesktop(context);
+  final resolvedPreviewName = previewName.trim().isEmpty
+      ? '分类预览'
+      : previewName.trim();
+  final hasExplicitColor =
+      initialColor != null && initialColor.trim().isNotEmpty;
+
+  if (isDesktop) {
+    return showDialog<({String icon, String colorHex})>(
+      context: context,
+      builder: (dialogCtx) => Dialog(
+        constraints: const BoxConstraints(maxWidth: 520, maxHeight: 650),
+        clipBehavior: Clip.antiAlias,
+        child: _CategoryVisualPickerSheet(
+          initialIconKey: initialVisual.iconKey,
+          initialColorHex: initialVisual.colorHex,
+          hasExplicitInitialColor: hasExplicitColor,
+          previewName: resolvedPreviewName,
+          categoryType: categoryType,
+          isDialog: true,
+        ),
+      ),
+    );
+  }
+
   return showModalBottomSheet<({String icon, String colorHex})>(
     context: context,
     isScrollControlled: true,
@@ -1369,9 +1395,8 @@ Future<({String icon, String colorHex})?> showCategoryVisualPicker(
     builder: (sheetCtx) => _CategoryVisualPickerSheet(
       initialIconKey: initialVisual.iconKey,
       initialColorHex: initialVisual.colorHex,
-      hasExplicitInitialColor:
-          initialColor != null && initialColor.trim().isNotEmpty,
-      previewName: previewName.trim().isEmpty ? '分类预览' : previewName.trim(),
+      hasExplicitInitialColor: hasExplicitColor,
+      previewName: resolvedPreviewName,
       categoryType: categoryType,
     ),
   );
@@ -1384,6 +1409,7 @@ class _CategoryVisualPickerSheet extends StatefulWidget {
     required this.hasExplicitInitialColor,
     required this.previewName,
     this.categoryType,
+    this.isDialog = false,
   });
 
   final String initialIconKey;
@@ -1391,6 +1417,7 @@ class _CategoryVisualPickerSheet extends StatefulWidget {
   final bool hasExplicitInitialColor;
   final String previewName;
   final int? categoryType;
+  final bool isDialog;
 
   @override
   State<_CategoryVisualPickerSheet> createState() =>
@@ -1414,7 +1441,9 @@ class _CategoryVisualPickerSheetState
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final maxHeight = MediaQuery.sizeOf(context).height * 0.82;
+    final maxHeight = widget.isDialog
+        ? 650.0
+        : MediaQuery.sizeOf(context).height * 0.82;
 
     return ConstrainedBox(
       constraints: BoxConstraints(maxHeight: maxHeight),
@@ -1422,7 +1451,12 @@ class _CategoryVisualPickerSheetState
         mainAxisSize: MainAxisSize.min,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            padding: EdgeInsets.fromLTRB(
+              16,
+              widget.isDialog ? 14 : 0,
+              widget.isDialog ? 12 : 16,
+              12,
+            ),
             child: Row(
               children: [
                 CategoryIconAvatar(
@@ -1462,6 +1496,10 @@ class _CategoryVisualPickerSheetState
                   )),
                   child: const Text('确定'),
                 ),
+                if (widget.isDialog) ...[
+                  const SizedBox(width: 4),
+                  const CloseButton(),
+                ],
               ],
             ),
           ),
@@ -2597,6 +2635,33 @@ Future<({String icon, String colorHex})?> showAssetVisualPicker(
     subType: subType,
   );
 
+  final isDesktop = DesktopAdaptive.isDesktop(context);
+  final resolvedPreviewName = previewName.trim().isEmpty
+      ? (assetType == AssetType.credit ? '信用账户预览' : '账户预览')
+      : previewName.trim();
+  final hasExplicitColor =
+      initialColor != null && initialColor.trim().isNotEmpty;
+
+  if (isDesktop) {
+    return showDialog<({String icon, String colorHex})>(
+      context: context,
+      builder: (dialogCtx) => Dialog(
+        constraints: const BoxConstraints(maxWidth: 520, maxHeight: 650),
+        clipBehavior: Clip.antiAlias,
+        child: _AssetVisualPickerSheet(
+          initialIconKey: initialVisual.iconKey,
+          initialColorHex: initialVisual.colorHex,
+          hasExplicitInitialColor: hasExplicitColor,
+          assetType: assetType,
+          subType: subType,
+          previewName: resolvedPreviewName,
+          pickCustomImageBytes: pickCustomImageBytes,
+          isDialog: true,
+        ),
+      ),
+    );
+  }
+
   return showModalBottomSheet<({String icon, String colorHex})>(
     context: context,
     isScrollControlled: true,
@@ -2605,13 +2670,10 @@ Future<({String icon, String colorHex})?> showAssetVisualPicker(
     builder: (sheetCtx) => _AssetVisualPickerSheet(
       initialIconKey: initialVisual.iconKey,
       initialColorHex: initialVisual.colorHex,
-      hasExplicitInitialColor:
-          initialColor != null && initialColor.trim().isNotEmpty,
+      hasExplicitInitialColor: hasExplicitColor,
       assetType: assetType,
       subType: subType,
-      previewName: previewName.trim().isEmpty
-          ? (assetType == AssetType.credit ? '信用账户预览' : '账户预览')
-          : previewName.trim(),
+      previewName: resolvedPreviewName,
       pickCustomImageBytes: pickCustomImageBytes,
     ),
   );
@@ -2641,6 +2703,7 @@ class _AssetVisualPickerSheet extends StatefulWidget {
     this.subType,
     required this.previewName,
     this.pickCustomImageBytes,
+    this.isDialog = false,
   });
 
   final String initialIconKey;
@@ -2650,6 +2713,7 @@ class _AssetVisualPickerSheet extends StatefulWidget {
   final int? subType;
   final String previewName;
   final Future<Uint8List?> Function()? pickCustomImageBytes;
+  final bool isDialog;
 
   @override
   State<_AssetVisualPickerSheet> createState() =>
@@ -3145,7 +3209,11 @@ class _AssetVisualPickerSheetState extends State<_AssetVisualPickerSheet> {
                   child: Text(
                     _uploadingImage
                         ? '正在处理图片…'
-                        : (hasCustomImage ? '更换图片' : '从相册 / 文件选择图片'),
+                        : (hasCustomImage
+                              ? '更换图片'
+                              : (DesktopAdaptive.isDesktop(context)
+                                    ? '选择本地图片文件'
+                                    : '从相册 / 文件选择图片')),
                     maxLines: 1,
                     softWrap: false,
                   ),
@@ -3180,7 +3248,9 @@ class _AssetVisualPickerSheetState extends State<_AssetVisualPickerSheet> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final maxHeight = MediaQuery.sizeOf(context).height * 0.86;
+    final maxHeight = widget.isDialog
+        ? 650.0
+        : MediaQuery.sizeOf(context).height * 0.86;
 
     return ConstrainedBox(
       constraints: BoxConstraints(maxHeight: maxHeight),
@@ -3191,7 +3261,12 @@ class _AssetVisualPickerSheetState extends State<_AssetVisualPickerSheet> {
             builder: (messengerCtx) => Column(
               children: [
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+                  padding: EdgeInsets.fromLTRB(
+                    16,
+                    widget.isDialog ? 14 : 0,
+                    widget.isDialog ? 12 : 16,
+                    10,
+                  ),
                   child: Row(
                     children: [
                       AssetIconAvatar(
@@ -3234,6 +3309,10 @@ class _AssetVisualPickerSheetState extends State<_AssetVisualPickerSheet> {
                               )),
                         child: const Text('确定'),
                       ),
+                      if (widget.isDialog) ...[
+                        const SizedBox(width: 4),
+                        const CloseButton(),
+                      ],
                     ],
                   ),
                 ),

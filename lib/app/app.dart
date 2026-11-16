@@ -27,6 +27,36 @@ import 'router.dart';
 
 const String appDisplayVersion = '0.1.0.rc';
 
+const List<String> _desktopCjkFontFallback = <String>[
+  'PingFang SC',
+  'Hiragino Sans GB',
+  'Microsoft YaHei UI',
+  'Microsoft YaHei',
+  'Noto Sans CJK SC',
+  'Source Han Sans SC',
+  'sans-serif',
+];
+
+ThemeData _buildDesktopTheme(ThemeData base) => base.copyWith(
+  textTheme: base.textTheme.apply(fontFamilyFallback: _desktopCjkFontFallback),
+  primaryTextTheme: base.primaryTextTheme.apply(
+    fontFamilyFallback: _desktopCjkFontFallback,
+  ),
+  inputDecorationTheme: base.inputDecorationTheme.copyWith(
+    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+  ),
+  segmentedButtonTheme: const SegmentedButtonThemeData(
+    style: ButtonStyle(
+      visualDensity: VisualDensity.standard,
+      minimumSize: WidgetStatePropertyAll(Size(0, 36)),
+      padding: WidgetStatePropertyAll(
+        EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      ),
+      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    ),
+  ),
+);
+
 String brandName(Locale locale) =>
     locale.languageCode == 'zh' ? '帐屿' : 'TallyIsle';
 
@@ -233,7 +263,8 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
         route == '/stats' ||
         route.startsWith('/stats?') ||
         route == '/assets' ||
-        route == '/me') {
+        route == '/me' ||
+        route.startsWith('/me?')) {
       router.go(route);
       return;
     }
@@ -450,14 +481,14 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
         useMaterial3: true,
       ),
       builder: (context, child) {
+        final baseTheme = Theme.of(context);
         final isDesktop =
-            desktopOverride ??
-            isDesktopTargetPlatform(Theme.of(context).platform);
+            desktopOverride ?? isDesktopTargetPlatform(baseTheme.platform);
         Widget content = child ?? const SizedBox.shrink();
         if (!isDesktop && MediaQuery.sizeOf(context).width > 960) {
           content = ColoredBox(
             key: const Key('desktop_widescreen_shell'),
-            color: Theme.of(context).colorScheme.surfaceContainerLowest,
+            color: baseTheme.colorScheme.surfaceContainerLowest,
             child: Align(
               alignment: Alignment.topCenter,
               child: ConstrainedBox(
@@ -468,7 +499,7 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
             ),
           );
         }
-        return DesktopAdaptiveScope(
+        final scoped = DesktopAdaptiveScope(
           isDesktop: isDesktop,
           child: AppLockGate(
             child: DesktopGlobalShortcuts(
@@ -478,6 +509,10 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
             ),
           ),
         );
+        if (!isDesktop) {
+          return scoped;
+        }
+        return Theme(data: _buildDesktopTheme(baseTheme), child: scoped);
       },
       routerConfig: router,
     );

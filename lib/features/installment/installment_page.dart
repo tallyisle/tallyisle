@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/adaptive.dart';
 import '../../app/providers.dart';
 import '../../data/db/database.dart';
 import '../../data/repo/installment_queries.dart';
@@ -68,6 +69,7 @@ class _InstallmentPageState extends ConsumerState<InstallmentPage> {
 
   @override
   Widget build(BuildContext context) {
+    final isDesktop = DesktopAdaptive.isDesktop(context);
     final showAllBooks = ref.watch(installmentAllBooksProvider);
     final activeAsync = ref.watch(activeInstallmentsProvider);
     final finishedAsync = ref.watch(finishedInstallmentsProvider);
@@ -96,13 +98,44 @@ class _InstallmentPageState extends ConsumerState<InstallmentPage> {
               onPressed: _catchingUp ? null : () => _runCatchUp(silent: false),
               icon: const Icon(Icons.sync),
             ),
+            if (isDesktop)
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: FilledButton.tonalIcon(
+                  key: const Key('add_installment_fab'),
+                  onPressed: () => pushDesktopModalOrMaterialRoute<Object?>(
+                    context,
+                    child: const InstallmentEditorPage(),
+                  ),
+                  icon: const Icon(Icons.add, size: 18),
+                  label: const Text('新建分期'),
+                ),
+              ),
           ],
-          bottom: const TabBar(
-            tabs: [
-              Tab(key: Key('installment_tab_active'), text: '进行中'),
-              Tab(key: Key('installment_tab_finished'), text: '已完结'),
-            ],
-          ),
+          bottom: isDesktop
+              ? PreferredSize(
+                  preferredSize: const Size.fromHeight(46),
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 800),
+                      child: const TabBar(
+                        tabs: [
+                          Tab(key: Key('installment_tab_active'), text: '进行中'),
+                          Tab(
+                            key: Key('installment_tab_finished'),
+                            text: '已完结',
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                )
+              : const TabBar(
+                  tabs: [
+                    Tab(key: Key('installment_tab_active'), text: '进行中'),
+                    Tab(key: Key('installment_tab_finished'), text: '已完结'),
+                  ],
+                ),
         ),
         body: TabBarView(
           children: [
@@ -126,15 +159,17 @@ class _InstallmentPageState extends ConsumerState<InstallmentPage> {
             ),
           ],
         ),
-        floatingActionButton: FloatingActionButton.extended(
-          key: const Key('add_installment_fab'),
-          onPressed: () => pushDesktopModalOrMaterialRoute<Object?>(
-            context,
-            child: const InstallmentEditorPage(),
-          ),
-          icon: const Icon(Icons.add),
-          label: const Text('新建分期'),
-        ),
+        floatingActionButton: isDesktop
+            ? null
+            : FloatingActionButton.extended(
+                key: const Key('add_installment_fab'),
+                onPressed: () => pushDesktopModalOrMaterialRoute<Object?>(
+                  context,
+                  child: const InstallmentEditorPage(),
+                ),
+                icon: const Icon(Icons.add),
+                label: const Text('新建分期'),
+              ),
       ),
     );
   }
@@ -167,8 +202,9 @@ class _InstallmentTabList extends StatelessWidget {
       );
     }
 
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 88),
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    final list = ListView(
+      padding: EdgeInsets.fromLTRB(16, 12, 16, isDesktop ? 24 : 88),
       children: [
         _TabSummaryCard(totals: totals, isFinishedTab: isFinishedTab),
         const SizedBox(height: 8),
@@ -176,16 +212,22 @@ class _InstallmentTabList extends StatelessWidget {
           _InstallmentCard(
             item: item,
             assets: assets,
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute<void>(
-                builder: (_) => InstallmentDetailPage(
-                  installmentId: item.installment.id,
-                  onRecordTap: onRecordTap,
-                ),
+            onTap: () => pushDesktopModalOrMaterialRoute<void>(
+              context,
+              child: InstallmentDetailPage(
+                installmentId: item.installment.id,
+                onRecordTap: onRecordTap,
               ),
             ),
           ),
       ],
+    );
+    if (!isDesktop) return list;
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 800),
+        child: list,
+      ),
     );
   }
 }

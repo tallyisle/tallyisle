@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/adaptive.dart';
 import '../../app/providers.dart';
 import '../../data/db/database.dart';
 import '../../domain/ledger/record_extra.dart';
@@ -170,18 +171,36 @@ class _BatchEditPageState extends ConsumerState<BatchEditPage> {
       return;
     }
 
-    final patch = await showModalBottomSheet<BatchEditPatch>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      builder: (_) => _BatchEditConfigSheet(
-        currentBookId: currentBookId,
-        books: books,
-        assets: assets,
-        tags: tags,
-        selectedRecords: selectedRecords,
-      ),
-    );
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    final patch = isDesktop
+        ? await showDialog<BatchEditPatch>(
+            context: context,
+            builder: (_) => Dialog(
+              key: const Key('batch-edit-dialog'),
+              constraints: const BoxConstraints(maxWidth: 520, maxHeight: 680),
+              clipBehavior: Clip.antiAlias,
+              child: _BatchEditConfigSheet(
+                currentBookId: currentBookId,
+                books: books,
+                assets: assets,
+                tags: tags,
+                selectedRecords: selectedRecords,
+                isDialog: true,
+              ),
+            ),
+          )
+        : await showModalBottomSheet<BatchEditPatch>(
+            context: context,
+            isScrollControlled: true,
+            useSafeArea: true,
+            builder: (_) => _BatchEditConfigSheet(
+              currentBookId: currentBookId,
+              books: books,
+              assets: assets,
+              tags: tags,
+              selectedRecords: selectedRecords,
+            ),
+          );
     if (patch == null || !patch.hasChanges || !mounted) return;
 
     setState(() => _busy = true);
@@ -214,8 +233,13 @@ class _BatchEditPageState extends ConsumerState<BatchEditPage> {
     final assets = ref.watch(assetsProvider).value ?? const <Asset>[];
     final tags = ref.watch(tagsProvider).value ?? const <Tag>[];
 
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+
     return Scaffold(
-      appBar: AppBar(title: const Text('账单批量管理')),
+      appBar: AppBar(
+        scrolledUnderElevation: isDesktop ? 0 : null,
+        title: const Text('账单批量管理'),
+      ),
       body: asyncBody(booksAsync, (books) {
         if (books.isEmpty) {
           return const Center(child: Text('暂无账本'));
@@ -251,7 +275,7 @@ class _BatchEditPageState extends ConsumerState<BatchEditPage> {
                 .where((r) => _selectedIds.contains(r.recordId))
                 .toList();
 
-            return Column(
+            final bodyColumn = Column(
               children: [
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
@@ -264,13 +288,15 @@ class _BatchEditPageState extends ConsumerState<BatchEditPage> {
                             border: OutlineInputBorder(),
                             contentPadding: EdgeInsets.symmetric(
                               horizontal: 12,
-                              vertical: 2,
+                              vertical: 14,
                             ),
                           ),
                           child: DropdownButtonHideUnderline(
                             child: DropdownButton<int>(
                               key: const Key('batch-book-dropdown'),
                               isExpanded: true,
+                              isDense: true,
+                              style: Theme.of(context).textTheme.bodyLarge,
                               value: effectiveBookId,
                               items: [
                                 for (final b in books)
@@ -300,8 +326,11 @@ class _BatchEditPageState extends ConsumerState<BatchEditPage> {
                       TextButton(
                         key: const Key('batch-select-all'),
                         style: TextButton.styleFrom(
-                          visualDensity: VisualDensity.compact,
-                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                          visualDensity: isDesktop
+                              ? null
+                              : VisualDensity.compact,
+                          minimumSize: isDesktop ? const Size(0, 40) : null,
+                          padding: const EdgeInsets.symmetric(horizontal: 10),
                         ),
                         onPressed: _busy || visibleRecords.isEmpty
                             ? null
@@ -315,8 +344,11 @@ class _BatchEditPageState extends ConsumerState<BatchEditPage> {
                       TextButton(
                         key: const Key('batch-invert-select'),
                         style: TextButton.styleFrom(
-                          visualDensity: VisualDensity.compact,
-                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                          visualDensity: isDesktop
+                              ? null
+                              : VisualDensity.compact,
+                          minimumSize: isDesktop ? const Size(0, 40) : null,
+                          padding: const EdgeInsets.symmetric(horizontal: 10),
                         ),
                         onPressed: _busy || visibleRecords.isEmpty
                             ? null
@@ -340,7 +372,13 @@ class _BatchEditPageState extends ConsumerState<BatchEditPage> {
                     decoration: InputDecoration(
                       hintText: '搜索分类、备注、账户或金额',
                       prefixIcon: const Icon(Icons.search),
-                      isDense: true,
+                      isDense: !isDesktop,
+                      contentPadding: isDesktop
+                          ? const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 12,
+                            )
+                          : null,
                       border: const OutlineInputBorder(),
                       suffixIcon: _keyword.isEmpty
                           ? null
@@ -477,6 +515,16 @@ class _BatchEditPageState extends ConsumerState<BatchEditPage> {
                 ),
               ],
             );
+
+            if (isDesktop) {
+              return Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 820),
+                  child: bodyColumn,
+                ),
+              );
+            }
+            return bodyColumn;
           },
         );
       }),
@@ -491,6 +539,7 @@ class _BatchEditConfigSheet extends ConsumerStatefulWidget {
     required this.assets,
     required this.tags,
     required this.selectedRecords,
+    this.isDialog = false,
   });
 
   final int currentBookId;
@@ -498,6 +547,7 @@ class _BatchEditConfigSheet extends ConsumerStatefulWidget {
   final List<Asset> assets;
   final List<Tag> tags;
   final List<LedgerRecord> selectedRecords;
+  final bool isDialog;
 
   @override
   ConsumerState<_BatchEditConfigSheet> createState() =>
@@ -593,6 +643,304 @@ class _BatchEditConfigSheetState extends ConsumerState<_BatchEditConfigSheet> {
         ? _targetBookId
         : otherBooks.firstOrNull?.id;
 
+    void submitPatch() {
+      final patch = BatchEditPatch(
+        targetCategoryId: _editCategory && catDir != null ? validCatId : null,
+        targetAssetId: _editAsset && _canEditAsset ? effectiveAssetId : null,
+        targetBookId: _editBook ? effectiveTargetBookId : null,
+        shiftToDate: _editDate ? _shiftDate : null,
+        addTagIds: _addTagIds,
+        removeTagIds: _removeTagIds,
+        excludeBudget: _excludeBudget,
+        excludeExIn: _excludeExIn,
+      );
+      if (!patch.hasChanges) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('请至少选择一项要修改的内容')));
+        return;
+      }
+      Navigator.pop(context, patch);
+    }
+
+    final actionRow = Row(
+      mainAxisAlignment: MainAxisAlignment.end,
+      children: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('取消'),
+        ),
+        const SizedBox(width: 8),
+        FilledButton(
+          key: const Key('batch-apply-edit-btn'),
+          onPressed: submitPatch,
+          child: const Text('确认修改'),
+        ),
+      ],
+    );
+
+    final optionsChildren = <Widget>[
+      // 1. Category
+      SwitchListTile(
+        key: const Key('batch-toggle-category'),
+        contentPadding: EdgeInsets.zero,
+        title: const Text('统一修改分类'),
+        subtitle: catDir == null
+            ? const Text('所选账单包含转账/借贷或收支方向不一致，不可统一改分类')
+            : null,
+        value: _editCategory && catDir != null,
+        onChanged: catDir == null || matchingCats.isEmpty
+            ? null
+            : (v) => setState(() {
+                _editCategory = v;
+                _targetCategoryId ??= matchingCats.first.id;
+              }),
+      ),
+      if (_editCategory && catDir != null && matchingCats.isNotEmpty) ...[
+        const SizedBox(height: 8),
+        InputDecorator(
+          decoration: const InputDecoration(
+            labelText: '目标分类',
+            border: OutlineInputBorder(),
+            contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+          ),
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<int>(
+              key: const Key('batch-target-category'),
+              isExpanded: true,
+              isDense: true,
+              style: Theme.of(context).textTheme.bodyLarge,
+              value: validCatId,
+              items: [
+                for (final c in matchingCats)
+                  DropdownMenuItem(
+                    value: c.id,
+                    child: Text(
+                      c.parentCatId != -1 && catById[c.parentCatId] != null
+                          ? '${catById[c.parentCatId]!.name} · ${c.name}'
+                          : c.name,
+                    ),
+                  ),
+              ],
+              onChanged: (v) => setState(() => _targetCategoryId = v),
+            ),
+          ),
+        ),
+        const SizedBox(height: 6),
+      ],
+
+      // 2. Asset
+      SwitchListTile(
+        key: const Key('batch-toggle-asset'),
+        contentPadding: EdgeInsets.zero,
+        title: const Text('统一修改账户'),
+        subtitle: _canEditAsset ? null : const Text('所选账单包含转账或借贷记录，不可统一改账户'),
+        value: _editAsset && _canEditAsset,
+        onChanged: !_canEditAsset
+            ? null
+            : (v) => setState(() => _editAsset = v),
+      ),
+      if (_editAsset && _canEditAsset) ...[
+        const SizedBox(height: 8),
+        InputDecorator(
+          decoration: const InputDecoration(
+            labelText: '目标资金账户',
+            border: OutlineInputBorder(),
+            contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+          ),
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<int>(
+              key: const Key('batch-target-asset'),
+              isExpanded: true,
+              isDense: true,
+              style: Theme.of(context).textTheme.bodyLarge,
+              value: effectiveAssetId,
+              items: [
+                const DropdownMenuItem(value: noRef, child: Text('无账户')),
+                for (final a in fundingAssets)
+                  DropdownMenuItem(value: a.id, child: Text(a.name)),
+              ],
+              onChanged: (v) {
+                if (v != null) setState(() => _targetAssetId = v);
+              },
+            ),
+          ),
+        ),
+        const SizedBox(height: 6),
+      ],
+
+      // 3. Target Book
+      if (otherBooks.isNotEmpty) ...[
+        SwitchListTile(
+          key: const Key('batch-toggle-book'),
+          contentPadding: EdgeInsets.zero,
+          title: const Text('移动到其他账本'),
+          subtitle: const Text('自动同步子单并映射目标账本同名分类'),
+          value: _editBook,
+          onChanged: (v) => setState(() {
+            _editBook = v;
+            _targetBookId ??= otherBooks.first.id;
+            _targetCategoryId = null;
+          }),
+        ),
+        if (_editBook && effectiveTargetBookId != null) ...[
+          const SizedBox(height: 8),
+          InputDecorator(
+            decoration: const InputDecoration(
+              labelText: '目标账本',
+              border: OutlineInputBorder(),
+              contentPadding: EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 14,
+              ),
+            ),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<int>(
+                key: const Key('batch-target-book'),
+                isExpanded: true,
+                isDense: true,
+                style: Theme.of(context).textTheme.bodyLarge,
+                value: effectiveTargetBookId,
+                items: [
+                  for (final b in otherBooks)
+                    DropdownMenuItem(value: b.id, child: Text(b.name)),
+                ],
+                onChanged: (v) => setState(() {
+                  _targetBookId = v;
+                  _targetCategoryId = null;
+                }),
+              ),
+            ),
+          ),
+          const SizedBox(height: 6),
+        ],
+      ],
+
+      // 4. Date Shift
+      SwitchListTile(
+        key: const Key('batch-toggle-date'),
+        contentPadding: EdgeInsets.zero,
+        title: const Text('统一修改日期'),
+        subtitle: const Text('保留每笔账单原有的时分秒'),
+        value: _editDate,
+        onChanged: (v) => setState(() => _editDate = v),
+      ),
+      if (_editDate) ...[
+        const SizedBox(height: 6),
+        OutlinedButton.icon(
+          key: const Key('batch-pick-date-btn'),
+          onPressed: _pickDate,
+          icon: const Icon(Icons.calendar_today_outlined),
+          label: Text('目标日期：${formatDate(_shiftDate)}'),
+        ),
+      ],
+
+      // 5. Tags
+      if (widget.tags.isNotEmpty) ...[
+        const SizedBox(height: 12),
+        Text('增加标签', style: Theme.of(context).textTheme.labelLarge),
+        const SizedBox(height: 6),
+        Wrap(
+          spacing: 8,
+          runSpacing: 6,
+          children: [
+            for (final t in widget.tags)
+              FilterChip(
+                key: Key('batch-add-tag-${t.tagId}'),
+                label: Text('+ ${t.name}'),
+                selected: _addTagIds.contains(t.tagId),
+                onSelected: (sel) => setState(() {
+                  if (sel) {
+                    _addTagIds.add(t.tagId);
+                    _removeTagIds.remove(t.tagId);
+                  } else {
+                    _addTagIds.remove(t.tagId);
+                  }
+                }),
+              ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Text('移除标签', style: Theme.of(context).textTheme.labelLarge),
+        const SizedBox(height: 6),
+        Wrap(
+          spacing: 8,
+          runSpacing: 6,
+          children: [
+            for (final t in widget.tags)
+              FilterChip(
+                key: Key('batch-rm-tag-${t.tagId}'),
+                label: Text('- ${t.name}'),
+                selected: _removeTagIds.contains(t.tagId),
+                onSelected: (sel) => setState(() {
+                  if (sel) {
+                    _removeTagIds.add(t.tagId);
+                    _addTagIds.remove(t.tagId);
+                  } else {
+                    _removeTagIds.remove(t.tagId);
+                  }
+                }),
+              ),
+          ],
+        ),
+      ],
+
+      // 6. Exclude Budget / ExIn
+      const SizedBox(height: 12),
+      _TriStateBoolRow(
+        rowKey: const Key('batch-exclude-budget-row'),
+        label: '不计入预算',
+        value: _excludeBudget,
+        onChanged: (v) => setState(() => _excludeBudget = v),
+      ),
+      const SizedBox(height: 8),
+      _TriStateBoolRow(
+        rowKey: const Key('batch-exclude-exin-row'),
+        label: '不计入收支',
+        value: _excludeExIn,
+        onChanged: (v) => setState(() => _excludeExIn = v),
+      ),
+    ];
+
+    if (widget.isDialog) {
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 14, 12, 10),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '批量修改 ${widget.selectedRecords.length} 笔账单',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                ),
+                const CloseButton(),
+              ],
+            ),
+          ),
+          const Divider(height: 1),
+          Flexible(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                mainAxisSize: MainAxisSize.min,
+                children: optionsChildren,
+              ),
+            ),
+          ),
+          const Divider(height: 1),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 10, 20, 14),
+            child: actionRow,
+          ),
+        ],
+      );
+    }
+
     return Padding(
       padding: EdgeInsets.only(
         left: 16,
@@ -610,258 +958,9 @@ class _BatchEditConfigSheetState extends ConsumerState<_BatchEditConfigSheet> {
               style: Theme.of(context).textTheme.titleLarge,
             ),
             const SizedBox(height: 12),
-
-            // 1. Category
-            SwitchListTile(
-              key: const Key('batch-toggle-category'),
-              contentPadding: EdgeInsets.zero,
-              title: const Text('统一修改分类'),
-              subtitle: catDir == null
-                  ? const Text('所选账单包含转账/借贷或收支方向不一致，不可统一改分类')
-                  : null,
-              value: _editCategory && catDir != null,
-              onChanged: catDir == null || matchingCats.isEmpty
-                  ? null
-                  : (v) => setState(() {
-                      _editCategory = v;
-                      _targetCategoryId ??= matchingCats.first.id;
-                    }),
-            ),
-            if (_editCategory && catDir != null && matchingCats.isNotEmpty)
-              InputDecorator(
-                decoration: const InputDecoration(
-                  labelText: '目标分类',
-                  border: OutlineInputBorder(),
-                  contentPadding: EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 4,
-                  ),
-                ),
-                child: DropdownButtonHideUnderline(
-                  child: DropdownButton<int>(
-                    key: const Key('batch-target-category'),
-                    isExpanded: true,
-                    value: validCatId,
-                    items: [
-                      for (final c in matchingCats)
-                        DropdownMenuItem(
-                          value: c.id,
-                          child: Text(
-                            c.parentCatId != -1 &&
-                                    catById[c.parentCatId] != null
-                                ? '${catById[c.parentCatId]!.name} · ${c.name}'
-                                : c.name,
-                          ),
-                        ),
-                    ],
-                    onChanged: (v) => setState(() => _targetCategoryId = v),
-                  ),
-                ),
-              ),
-
-            // 2. Asset
-            SwitchListTile(
-              key: const Key('batch-toggle-asset'),
-              contentPadding: EdgeInsets.zero,
-              title: const Text('统一修改账户'),
-              subtitle: _canEditAsset
-                  ? null
-                  : const Text('所选账单包含转账或借贷记录，不可统一改账户'),
-              value: _editAsset && _canEditAsset,
-              onChanged: !_canEditAsset
-                  ? null
-                  : (v) => setState(() => _editAsset = v),
-            ),
-            if (_editAsset && _canEditAsset)
-              InputDecorator(
-                decoration: const InputDecoration(
-                  labelText: '目标资金账户',
-                  border: OutlineInputBorder(),
-                  contentPadding: EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 4,
-                  ),
-                ),
-                child: DropdownButtonHideUnderline(
-                  child: DropdownButton<int>(
-                    key: const Key('batch-target-asset'),
-                    isExpanded: true,
-                    value: effectiveAssetId,
-                    items: [
-                      const DropdownMenuItem(value: noRef, child: Text('无账户')),
-                      for (final a in fundingAssets)
-                        DropdownMenuItem(value: a.id, child: Text(a.name)),
-                    ],
-                    onChanged: (v) {
-                      if (v != null) setState(() => _targetAssetId = v);
-                    },
-                  ),
-                ),
-              ),
-
-            // 3. Target Book
-            if (otherBooks.isNotEmpty) ...[
-              SwitchListTile(
-                key: const Key('batch-toggle-book'),
-                contentPadding: EdgeInsets.zero,
-                title: const Text('移动到其他账本'),
-                subtitle: const Text('自动同步子单并映射目标账本同名分类'),
-                value: _editBook,
-                onChanged: (v) => setState(() {
-                  _editBook = v;
-                  _targetBookId ??= otherBooks.first.id;
-                  _targetCategoryId = null;
-                }),
-              ),
-              if (_editBook && effectiveTargetBookId != null)
-                InputDecorator(
-                  decoration: const InputDecoration(
-                    labelText: '目标账本',
-                    border: OutlineInputBorder(),
-                    contentPadding: EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 4,
-                    ),
-                  ),
-                  child: DropdownButtonHideUnderline(
-                    child: DropdownButton<int>(
-                      key: const Key('batch-target-book'),
-                      isExpanded: true,
-                      value: effectiveTargetBookId,
-                      items: [
-                        for (final b in otherBooks)
-                          DropdownMenuItem(value: b.id, child: Text(b.name)),
-                      ],
-                      onChanged: (v) => setState(() {
-                        _targetBookId = v;
-                        _targetCategoryId = null;
-                      }),
-                    ),
-                  ),
-                ),
-            ],
-
-            // 4. Date Shift
-            SwitchListTile(
-              key: const Key('batch-toggle-date'),
-              contentPadding: EdgeInsets.zero,
-              title: const Text('统一修改日期'),
-              subtitle: const Text('保留每笔账单原有的时分秒'),
-              value: _editDate,
-              onChanged: (v) => setState(() => _editDate = v),
-            ),
-            if (_editDate)
-              OutlinedButton.icon(
-                key: const Key('batch-pick-date-btn'),
-                onPressed: _pickDate,
-                icon: const Icon(Icons.calendar_today_outlined),
-                label: Text('目标日期：${formatDate(_shiftDate)}'),
-              ),
-
-            // 5. Tags
-            if (widget.tags.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              Text('增加标签', style: Theme.of(context).textTheme.labelLarge),
-              const SizedBox(height: 6),
-              Wrap(
-                spacing: 8,
-                runSpacing: 6,
-                children: [
-                  for (final t in widget.tags)
-                    FilterChip(
-                      key: Key('batch-add-tag-${t.tagId}'),
-                      label: Text('+ ${t.name}'),
-                      selected: _addTagIds.contains(t.tagId),
-                      onSelected: (sel) => setState(() {
-                        if (sel) {
-                          _addTagIds.add(t.tagId);
-                          _removeTagIds.remove(t.tagId);
-                        } else {
-                          _addTagIds.remove(t.tagId);
-                        }
-                      }),
-                    ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Text('移除标签', style: Theme.of(context).textTheme.labelLarge),
-              const SizedBox(height: 6),
-              Wrap(
-                spacing: 8,
-                runSpacing: 6,
-                children: [
-                  for (final t in widget.tags)
-                    FilterChip(
-                      key: Key('batch-rm-tag-${t.tagId}'),
-                      label: Text('- ${t.name}'),
-                      selected: _removeTagIds.contains(t.tagId),
-                      onSelected: (sel) => setState(() {
-                        if (sel) {
-                          _removeTagIds.add(t.tagId);
-                          _addTagIds.remove(t.tagId);
-                        } else {
-                          _removeTagIds.remove(t.tagId);
-                        }
-                      }),
-                    ),
-                ],
-              ),
-            ],
-
-            // 6. Exclude Budget / ExIn
-            const SizedBox(height: 12),
-            _TriStateBoolRow(
-              rowKey: const Key('batch-exclude-budget-row'),
-              label: '不计入预算',
-              value: _excludeBudget,
-              onChanged: (v) => setState(() => _excludeBudget = v),
-            ),
-            const SizedBox(height: 8),
-            _TriStateBoolRow(
-              rowKey: const Key('batch-exclude-exin-row'),
-              label: '不计入收支',
-              value: _excludeExIn,
-              onChanged: (v) => setState(() => _excludeExIn = v),
-            ),
-
+            ...optionsChildren,
             const SizedBox(height: 16),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('取消'),
-                ),
-                const SizedBox(width: 8),
-                FilledButton(
-                  key: const Key('batch-apply-edit-btn'),
-                  onPressed: () {
-                    final patch = BatchEditPatch(
-                      targetCategoryId: _editCategory && catDir != null
-                          ? validCatId
-                          : null,
-                      targetAssetId: _editAsset && _canEditAsset
-                          ? effectiveAssetId
-                          : null,
-                      targetBookId: _editBook ? effectiveTargetBookId : null,
-                      shiftToDate: _editDate ? _shiftDate : null,
-                      addTagIds: _addTagIds,
-                      removeTagIds: _removeTagIds,
-                      excludeBudget: _excludeBudget,
-                      excludeExIn: _excludeExIn,
-                    );
-                    if (!patch.hasChanges) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('请至少选择一项要修改的内容')),
-                      );
-                      return;
-                    }
-                    Navigator.pop(context, patch);
-                  },
-                  child: const Text('确认修改'),
-                ),
-              ],
-            ),
+            actionRow,
           ],
         ),
       ),
@@ -885,6 +984,7 @@ class _TriStateBoolRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final code = value == null ? -1 : (value! ? 1 : 0);
+    final isDesktop = DesktopAdaptive.isDesktop(context);
     return Row(
       key: rowKey,
       children: [
@@ -892,13 +992,15 @@ class _TriStateBoolRow extends StatelessWidget {
         const SizedBox(width: 8),
         SegmentedButton<int>(
           showSelectedIcon: false,
-          style: const ButtonStyle(
-            visualDensity: VisualDensity.compact,
-            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            padding: WidgetStatePropertyAll(
-              EdgeInsets.symmetric(horizontal: 10),
-            ),
-          ),
+          style: isDesktop
+              ? null
+              : const ButtonStyle(
+                  visualDensity: VisualDensity.compact,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  padding: WidgetStatePropertyAll(
+                    EdgeInsets.symmetric(horizontal: 10),
+                  ),
+                ),
           segments: const [
             ButtonSegment(
               value: -1,

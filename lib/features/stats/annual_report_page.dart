@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../app/adaptive.dart';
 import '../../app/providers.dart';
 import '../../domain/rules/annual_report.dart';
 import '../common/common.dart';
+import '../common/desktop_modal_page.dart';
+import '../records/record_detail_page.dart';
 import 'annual_report_providers.dart';
 
 /// Full page for Annual Bill and Annual Report (F-030).
@@ -105,7 +108,24 @@ class _AnnualReportPageState extends ConsumerState<AnnualReportPage> {
                     : _AnnualReportHighlightView(
                         key: const Key('annual-report-highlight-view'),
                         data: report,
-                        onRecordTap: widget.onRecordTap,
+                        onRecordTap:
+                            widget.onRecordTap ??
+                            (recordId) {
+                              if (GoRouter.maybeOf(context) != null &&
+                                  ModalRoute.of(context)?.settings is Page) {
+                                try {
+                                  context.push('/record/$recordId');
+                                  return;
+                                } catch (_) {}
+                              }
+                              pushDesktopModalOrMaterialRoute<void>(
+                                context,
+                                maxWidth: 560,
+                                maxHeight: 740,
+                                barrierDismissible: true,
+                                child: RecordDetailPage(recordId: recordId),
+                              );
+                            },
                       );
               },
             ),
@@ -211,7 +231,7 @@ class _AnnualReportPageState extends ConsumerState<AnnualReportPage> {
       );
     }
 
-    return Padding(
+    final stackedControls = Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Column(
         children: [
@@ -219,6 +239,15 @@ class _AnnualReportPageState extends ConsumerState<AnnualReportPage> {
           const SizedBox(height: 6),
           SizedBox(width: double.infinity, child: segmentedTabs),
         ],
+      ),
+    );
+    if (!DesktopAdaptive.isDesktop(context)) {
+      return stackedControls;
+    }
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 760),
+        child: stackedControls,
       ),
     );
   }
@@ -662,7 +691,7 @@ class _YearlyBillView extends StatelessWidget {
       );
     }
 
-    return ListView(
+    final stackedBillList = ListView(
       padding: const EdgeInsets.all(16),
       children: [
         summaryCard,
@@ -671,6 +700,15 @@ class _YearlyBillView extends StatelessWidget {
         const SizedBox(height: 16),
         monthlyTableCard,
       ],
+    );
+    if (!DesktopAdaptive.isDesktop(context)) {
+      return stackedBillList;
+    }
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 760),
+        child: stackedBillList,
+      ),
     );
   }
 
@@ -962,60 +1000,65 @@ class _AnnualReportHighlightView extends StatelessWidget {
 
             // Max Income Record
             if (data.maxIncomeRecord != null) ...[
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.green.withValues(alpha: isDark ? 0.10 : 0.05),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Row(
-                  children: [
-                    CircleAvatar(
-                      backgroundColor: Colors.green.withValues(
-                        alpha: isDark ? 0.20 : 0.14,
+              InkWell(
+                key: const Key('annual-report-max-income-record-tile'),
+                borderRadius: BorderRadius.circular(8),
+                onTap: () => onRecordTap?.call(data.maxIncomeRecord!.id),
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.green.withValues(alpha: isDark ? 0.10 : 0.05),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    children: [
+                      CircleAvatar(
+                        backgroundColor: Colors.green.withValues(
+                          alpha: isDark ? 0.20 : 0.14,
+                        ),
+                        child: Icon(Icons.arrow_upward, color: incomeColor),
                       ),
-                      child: Icon(Icons.arrow_upward, color: incomeColor),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            '单笔最高收入',
-                            style: TextStyle(fontSize: 12, color: mutedColor),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            data.maxIncomeRecord!.categoryName,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 15,
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '单笔最高收入',
+                              style: TextStyle(fontSize: 12, color: mutedColor),
                             ),
-                          ),
-                        ],
+                            const SizedBox(height: 2),
+                            Text(
+                              data.maxIncomeRecord!.categoryName,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 15,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 132),
-                      child: FittedBox(
-                        fit: BoxFit.scaleDown,
-                        alignment: Alignment.centerRight,
-                        child: Text(
-                          '+¥${formatMinor(data.maxIncomeRecord!.amount)}',
-                          maxLines: 1,
-                          style: TextStyle(
-                            color: incomeColor,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 16,
+                      const SizedBox(width: 8),
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 132),
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: Alignment.centerRight,
+                          child: Text(
+                            '+¥${formatMinor(data.maxIncomeRecord!.amount)}',
+                            maxLines: 1,
+                            style: TextStyle(
+                              color: incomeColor,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                            ),
                           ),
                         ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
               const SizedBox(height: 12),
@@ -1319,7 +1362,7 @@ class _AnnualReportHighlightView extends StatelessWidget {
       );
     }
 
-    return ListView(
+    final stackedReportList = ListView(
       padding: const EdgeInsets.all(16),
       children: [
         reviewCard,
@@ -1332,6 +1375,15 @@ class _AnnualReportHighlightView extends StatelessWidget {
         const SizedBox(height: 16),
         closingQuoteCard,
       ],
+    );
+    if (!DesktopAdaptive.isDesktop(context)) {
+      return stackedReportList;
+    }
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 760),
+        child: stackedReportList,
+      ),
     );
   }
 

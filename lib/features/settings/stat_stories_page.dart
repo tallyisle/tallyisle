@@ -2,11 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../app/adaptive.dart';
 import '../../app/providers.dart';
 import '../../core/failure.dart';
 import '../../data/db/database.dart';
 import '../../domain/model/codes.dart';
 import '../../domain/rules/app_settings_rules.dart';
+import '../common/desktop_modal_page.dart';
 import 'settings_providers.dart';
 
 const _uuid = Uuid();
@@ -91,78 +93,175 @@ class _StatStoriesPageState extends ConsumerState<StatStoriesPage> {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('统计故事')),
-      floatingActionButton: FloatingActionButton.extended(
-        key: const Key('stat_story_add_fab'),
-        onPressed: () => _openEditor(books: books),
-        icon: const Icon(Icons.add),
-        label: const Text('新增故事'),
-      ),
-      body: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (books.isNotEmpty)
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-              child: Row(
-                children: [
-                  ChoiceChip(
-                    key: const Key('stat_story_filter_all'),
-                    label: const Text('全部账本'),
-                    selected: selectedBookId == null,
-                    onSelected: (_) => ref
-                        .read(statStoriesBookFilterProvider.notifier)
-                        .selectBook(null),
-                  ),
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    final isPopupModal = isDesktop && ModalRoute.of(context) is PopupRoute;
+    final bodyColumn = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (books.isNotEmpty)
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+            child: Row(
+              children: [
+                ChoiceChip(
+                  key: const Key('stat_story_filter_all'),
+                  label: const Text('全部账本'),
+                  selected: selectedBookId == null,
+                  onSelected: (_) => ref
+                      .read(statStoriesBookFilterProvider.notifier)
+                      .selectBook(null),
+                ),
+                const SizedBox(width: 8),
+                ChoiceChip(
+                  key: const Key('stat_story_filter_global'),
+                  label: const Text('跨账本汇总'),
+                  selected: selectedBookId == noRef,
+                  onSelected: (_) => ref
+                      .read(statStoriesBookFilterProvider.notifier)
+                      .selectBook(noRef),
+                ),
+                for (final b in books) ...[
                   const SizedBox(width: 8),
                   ChoiceChip(
-                    key: const Key('stat_story_filter_global'),
-                    label: const Text('跨账本汇总'),
-                    selected: selectedBookId == noRef,
+                    key: Key('stat_story_filter_book_${b.id}'),
+                    label: Text(b.name),
+                    selected: selectedBookId == b.id,
                     onSelected: (_) => ref
                         .read(statStoriesBookFilterProvider.notifier)
-                        .selectBook(noRef),
+                        .selectBook(b.id),
                   ),
-                  for (final b in books) ...[
-                    const SizedBox(width: 8),
-                    ChoiceChip(
-                      key: Key('stat_story_filter_book_${b.id}'),
-                      label: Text(b.name),
-                      selected: selectedBookId == b.id,
-                      onSelected: (_) => ref
-                          .read(statStoriesBookFilterProvider.notifier)
-                          .selectBook(b.id),
-                    ),
-                  ],
                 ],
-              ),
+              ],
             ),
-          Expanded(
-            child: storiesAsync.when(
-              loading: () => const Center(child: CircularProgressIndicator()),
-              error: (err, _) => Center(child: Text('读取失败：$err')),
-              data: (stories) {
-                if (stories.isEmpty) {
-                  return Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(24),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.auto_stories_outlined,
-                            size: 52,
-                            color: scheme.outline,
+          ),
+        Expanded(
+          child: storiesAsync.when(
+            loading: () => const Center(child: CircularProgressIndicator()),
+            error: (err, _) => Center(child: Text('读取失败：$err')),
+            data: (stories) {
+              if (stories.isEmpty) {
+                return Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.auto_stories_outlined,
+                          size: 52,
+                          color: scheme.outline,
+                        ),
+                        const SizedBox(height: 12),
+                        Text('暂无统计故事', style: theme.textTheme.titleMedium),
+                        const SizedBox(height: 4),
+                        Text(
+                          isDesktop
+                              ? '点击右上角“新增故事”，可根据所选账期自动汇总收支摘要并编辑留存。'
+                              : '点击右下角“新增故事”，可根据所选账期自动汇总收支摘要并编辑留存。',
+                          textAlign: TextAlign.center,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: scheme.onSurfaceVariant,
                           ),
-                          const SizedBox(height: 12),
-                          Text('暂无统计故事', style: theme.textTheme.titleMedium),
-                          const SizedBox(height: 4),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }
+
+              return ListView.builder(
+                padding: EdgeInsets.fromLTRB(16, 8, 16, isDesktop ? 24 : 88),
+                itemCount: stories.length,
+                itemBuilder: (context, index) {
+                  final item = stories[index];
+                  final bookLabel = item.bookId == noRef
+                      ? '全部账本'
+                      : (bookNameById[item.bookId] ?? '账本 #${item.bookId}');
+                  final rangeLabel =
+                      '${_formatDateMs(item.sdate)} ~ ${_formatDateMs(item.edate)}';
+                  final sectionTitle =
+                      (item.dsection != null &&
+                          item.dsection!.trim().isNotEmpty)
+                      ? item.dsection!.trim()
+                      : rangeLabel;
+
+                  return Card(
+                    key: Key('stat_story_card_${item.id}'),
+                    margin: const EdgeInsets.only(bottom: 12),
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 12, 8, 14),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              ConstrainedBox(
+                                constraints: const BoxConstraints(
+                                  maxWidth: 112,
+                                ),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 2,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: scheme.primaryContainer,
+                                    borderRadius: BorderRadius.circular(999),
+                                  ),
+                                  child: Text(
+                                    bookLabel,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: theme.textTheme.labelSmall?.copyWith(
+                                      color: scheme.onPrimaryContainer,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  sectionTitle,
+                                  style: theme.textTheme.titleSmall?.copyWith(
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              IconButton(
+                                key: Key('stat_story_edit_${item.id}'),
+                                tooltip: '编辑',
+                                visualDensity: VisualDensity.compact,
+                                icon: const Icon(Icons.edit_outlined, size: 20),
+                                onPressed: () =>
+                                    _openEditor(existing: item, books: books),
+                              ),
+                              IconButton(
+                                key: Key('stat_story_delete_${item.id}'),
+                                tooltip: '删除',
+                                visualDensity: VisualDensity.compact,
+                                icon: const Icon(
+                                  Icons.delete_outline,
+                                  size: 20,
+                                ),
+                                onPressed: () => _confirmDelete(item),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                          Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: Text(
+                              item.story,
+                              style: theme.textTheme.bodyMedium,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
                           Text(
-                            '点击右下角“新增故事”，可根据所选账期自动汇总收支摘要并编辑留存。',
-                            textAlign: TextAlign.center,
-                            style: theme.textTheme.bodySmall?.copyWith(
+                            '统计区间：$rangeLabel',
+                            style: theme.textTheme.labelSmall?.copyWith(
                               color: scheme.onSurfaceVariant,
                             ),
                           ),
@@ -170,117 +269,55 @@ class _StatStoriesPageState extends ConsumerState<StatStoriesPage> {
                       ),
                     ),
                   );
-                }
-
-                return ListView.builder(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 88),
-                  itemCount: stories.length,
-                  itemBuilder: (context, index) {
-                    final item = stories[index];
-                    final bookLabel = item.bookId == noRef
-                        ? '全部账本'
-                        : (bookNameById[item.bookId] ?? '账本 #${item.bookId}');
-                    final rangeLabel =
-                        '${_formatDateMs(item.sdate)} ~ ${_formatDateMs(item.edate)}';
-                    final sectionTitle =
-                        (item.dsection != null &&
-                            item.dsection!.trim().isNotEmpty)
-                        ? item.dsection!.trim()
-                        : rangeLabel;
-
-                    return Card(
-                      key: Key('stat_story_card_${item.id}'),
-                      margin: const EdgeInsets.only(bottom: 12),
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 12, 8, 14),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                ConstrainedBox(
-                                  constraints: const BoxConstraints(
-                                    maxWidth: 112,
-                                  ),
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 8,
-                                      vertical: 2,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: scheme.primaryContainer,
-                                      borderRadius: BorderRadius.circular(999),
-                                    ),
-                                    child: Text(
-                                      bookLabel,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: theme.textTheme.labelSmall
-                                          ?.copyWith(
-                                            color: scheme.onPrimaryContainer,
-                                            fontWeight: FontWeight.w600,
-                                          ),
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Text(
-                                    sectionTitle,
-                                    style: theme.textTheme.titleSmall?.copyWith(
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                                IconButton(
-                                  key: Key('stat_story_edit_${item.id}'),
-                                  tooltip: '编辑',
-                                  visualDensity: VisualDensity.compact,
-                                  icon: const Icon(
-                                    Icons.edit_outlined,
-                                    size: 20,
-                                  ),
-                                  onPressed: () =>
-                                      _openEditor(existing: item, books: books),
-                                ),
-                                IconButton(
-                                  key: Key('stat_story_delete_${item.id}'),
-                                  tooltip: '删除',
-                                  visualDensity: VisualDensity.compact,
-                                  icon: const Icon(
-                                    Icons.delete_outline,
-                                    size: 20,
-                                  ),
-                                  onPressed: () => _confirmDelete(item),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 6),
-                            Padding(
-                              padding: const EdgeInsets.only(right: 8),
-                              child: Text(
-                                item.story,
-                                style: theme.textTheme.bodyMedium,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              '统计区间：$rangeLabel',
-                              style: theme.textTheme.labelSmall?.copyWith(
-                                color: scheme.onSurfaceVariant,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
-                );
-              },
-            ),
+                },
+              );
+            },
           ),
-        ],
+        ),
+      ],
+    );
+
+    return DesktopModalEscapeScope(
+      enabled: isPopupModal,
+      child: Scaffold(
+        appBar: AppBar(
+          leading: isPopupModal ? const CloseButton() : null,
+          scrolledUnderElevation: isDesktop ? 0 : null,
+          title: const Text('统计故事'),
+          actions: isDesktop
+              ? [
+                  FilledButton.icon(
+                    key: const Key('stat_story_add_fab'),
+                    style: FilledButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
+                    ),
+                    onPressed: () => _openEditor(books: books),
+                    icon: const Icon(Icons.add, size: 18),
+                    label: const Text('新增故事'),
+                  ),
+                  const SizedBox(width: 12),
+                ]
+              : null,
+        ),
+        floatingActionButton: isDesktop
+            ? null
+            : FloatingActionButton.extended(
+                key: const Key('stat_story_add_fab'),
+                onPressed: () => _openEditor(books: books),
+                icon: const Icon(Icons.add),
+                label: const Text('新增故事'),
+              ),
+        body: isDesktop
+            ? Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 800),
+                  child: bodyColumn,
+                ),
+              )
+            : bodyColumn,
       ),
     );
   }
@@ -472,11 +509,11 @@ class _StatStoryEditorDialogState
                     child: OutlinedButton.icon(
                       key: const Key('stat_story_pick_sdate_button'),
                       style: OutlinedButton.styleFrom(
+                        minimumSize: const Size(0, 40),
                         padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 0,
+                          horizontal: 10,
+                          vertical: 10,
                         ),
-                        visualDensity: VisualDensity.compact,
                       ),
                       onPressed: _busy ? null : _pickStartDate,
                       icon: const Icon(Icons.calendar_today_outlined, size: 15),
@@ -495,11 +532,11 @@ class _StatStoryEditorDialogState
                     child: OutlinedButton.icon(
                       key: const Key('stat_story_pick_edate_button'),
                       style: OutlinedButton.styleFrom(
+                        minimumSize: const Size(0, 40),
                         padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 0,
+                          horizontal: 10,
+                          vertical: 10,
                         ),
-                        visualDensity: VisualDensity.compact,
                       ),
                       onPressed: _busy ? null : _pickEndDate,
                       icon: const Icon(Icons.event_outlined, size: 15),
@@ -523,7 +560,10 @@ class _StatStoryEditorDialogState
                 decoration: const InputDecoration(
                   labelText: '账期标题（可选，如 2026年11月）',
                   border: OutlineInputBorder(),
-                  isDense: true,
+                  contentPadding: EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 14,
+                  ),
                 ),
               ),
               const SizedBox(height: 10),

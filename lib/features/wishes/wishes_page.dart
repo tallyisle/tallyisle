@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../app/adaptive.dart';
 import '../../app/providers.dart';
 import '../../data/db/database.dart';
 import '../../domain/rules/wish_note_rules.dart';
@@ -113,58 +114,99 @@ class _WishesPageState extends ConsumerState<WishesPage>
         ref.watch(databaseProvider).value?.nowMs() ??
         DateTime.now().millisecondsSinceEpoch;
 
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    final tabBar = TabBar(
+      controller: _tabController,
+      tabs: const [
+        Tab(key: Key('wish_tab_unrealized'), text: '待实现'),
+        Tab(key: Key('wish_tab_realized'), text: '已实现'),
+      ],
+    );
+    final bodyColumn = Column(
+      children: [
+        _WishSummaryBanner(summaryAsync: summaryAsync),
+        Expanded(
+          child: TabBarView(
+            controller: _tabController,
+            children: [
+              asyncBody(
+                unrealizedAsync,
+                (items) => _WishListView(
+                  wishes: items,
+                  isRealizedTab: false,
+                  nowMs: nowMs,
+                  onEdit: (w) => _openEditor(wishId: w.id),
+                  onToggleRealized: _markRealized,
+                  onDelete: _deleteWish,
+                ),
+              ),
+              asyncBody(
+                realizedAsync,
+                (items) => _WishListView(
+                  wishes: items,
+                  isRealizedTab: true,
+                  nowMs: nowMs,
+                  onEdit: (w) => _openEditor(wishId: w.id),
+                  onToggleRealized: _reopenWish,
+                  onDelete: _deleteWish,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+
     return Scaffold(
       key: const Key('wishes_page'),
       appBar: AppBar(
+        scrolledUnderElevation: isDesktop ? 0 : null,
         title: const Text('心愿单'),
-        bottom: TabBar(
-          controller: _tabController,
-          tabs: const [
-            Tab(key: Key('wish_tab_unrealized'), text: '待实现'),
-            Tab(key: Key('wish_tab_realized'), text: '已实现'),
-          ],
-        ),
+        actions: isDesktop
+            ? [
+                FilledButton.icon(
+                  key: const Key('add_wish_fab'),
+                  style: FilledButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                  ),
+                  onPressed: _openEditor,
+                  icon: const Icon(Icons.add, size: 18),
+                  label: const Text('新建心愿'),
+                ),
+                const SizedBox(width: 12),
+              ]
+            : null,
+        bottom: isDesktop
+            ? PreferredSize(
+                preferredSize: tabBar.preferredSize,
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 800),
+                    child: tabBar,
+                  ),
+                ),
+              )
+            : tabBar,
       ),
-      body: Column(
-        children: [
-          _WishSummaryBanner(summaryAsync: summaryAsync),
-          Expanded(
-            child: TabBarView(
-              controller: _tabController,
-              children: [
-                asyncBody(
-                  unrealizedAsync,
-                  (items) => _WishListView(
-                    wishes: items,
-                    isRealizedTab: false,
-                    nowMs: nowMs,
-                    onEdit: (w) => _openEditor(wishId: w.id),
-                    onToggleRealized: _markRealized,
-                    onDelete: _deleteWish,
-                  ),
-                ),
-                asyncBody(
-                  realizedAsync,
-                  (items) => _WishListView(
-                    wishes: items,
-                    isRealizedTab: true,
-                    nowMs: nowMs,
-                    onEdit: (w) => _openEditor(wishId: w.id),
-                    onToggleRealized: _reopenWish,
-                    onDelete: _deleteWish,
-                  ),
-                ),
-              ],
+      body: isDesktop
+          ? Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 800),
+                child: bodyColumn,
+              ),
+            )
+          : bodyColumn,
+      floatingActionButton: isDesktop
+          ? null
+          : FloatingActionButton.extended(
+              key: const Key('add_wish_fab'),
+              onPressed: _openEditor,
+              icon: const Icon(Icons.add),
+              label: const Text('新建心愿'),
             ),
-          ),
-        ],
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        key: const Key('add_wish_fab'),
-        onPressed: _openEditor,
-        icon: const Icon(Icons.add),
-        label: const Text('新建心愿'),
-      ),
     );
   }
 }
@@ -289,6 +331,7 @@ class _WishListView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDesktop = DesktopAdaptive.isDesktop(context);
     if (wishes.isEmpty) {
       return Center(
         key: Key(
@@ -297,7 +340,9 @@ class _WishListView extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Text(
-            isRealizedTab ? '暂无已实现的心愿' : '还没有待实现的心愿，点击右下角新建一个吧',
+            isRealizedTab
+                ? '暂无已实现的心愿'
+                : (isDesktop ? '还没有待实现的心愿，点击右上角新建一个吧' : '还没有待实现的心愿，点击右下角新建一个吧'),
             textAlign: TextAlign.center,
           ),
         ),
@@ -305,7 +350,7 @@ class _WishListView extends StatelessWidget {
     }
 
     return ListView.separated(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 88),
+      padding: EdgeInsets.fromLTRB(16, 8, 16, isDesktop ? 24 : 88),
       itemCount: wishes.length,
       separatorBuilder: (_, _) => const SizedBox(height: 8),
       itemBuilder: (context, index) {

@@ -315,7 +315,7 @@ class _BankCardEditorPageState extends ConsumerState<BankCardEditorPage> {
                             border: OutlineInputBorder(),
                             contentPadding: EdgeInsets.symmetric(
                               horizontal: 12,
-                              vertical: 4,
+                              vertical: 14,
                             ),
                           ),
                           child: DropdownButtonHideUnderline(
@@ -323,6 +323,7 @@ class _BankCardEditorPageState extends ConsumerState<BankCardEditorPage> {
                               key: const Key('bank_card_asset_dropdown'),
                               isExpanded: true,
                               isDense: true,
+                              style: Theme.of(context).textTheme.bodyLarge,
                               value: validAssetId,
                               items: [
                                 const DropdownMenuItem<int>(
