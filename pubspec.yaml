@@ -30,3 +30,7 @@ flutter:
   uses-material-design: true
   assets:
     - assets/branding/tallyisle-logo-original.png
+    - assets/icons/
+    - assets/icons/banks/
+    - assets/icons/banks/library/
+    - assets/icons/social/

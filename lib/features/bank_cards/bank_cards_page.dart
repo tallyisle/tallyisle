@@ -7,6 +7,7 @@ import '../../app/providers.dart';
 import '../../data/db/database.dart';
 import '../../domain/model/codes.dart';
 import '../../domain/rules/template_card_rules.dart';
+import '../common/catalog_icons.dart';
 import '../common/common.dart';
 import '../common/desktop_modal_page.dart';
 import 'bank_card_editor_page.dart';
@@ -312,11 +313,26 @@ class _BankCardTile extends StatelessWidget {
                 spacing: 8,
                 runSpacing: 6,
                 children: [
-                  Text(
-                    card.cardName,
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      BankCardIconAvatar(
+                        key: Key('bank_card_avatar_${card.id}'),
+                        cardColorMeta: card.cardColor,
+                        cardName: card.cardName,
+                        cardType: card.cardType,
+                        size: 30,
+                      ),
+                      const SizedBox(width: 8),
+                      Flexible(
+                        child: Text(
+                          card.cardName,
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                   Wrap(
                     spacing: 6,

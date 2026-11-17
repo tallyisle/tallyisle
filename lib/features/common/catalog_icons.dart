@@ -10,6 +10,9 @@ import 'package:flutter/services.dart';
 import '../../app/adaptive.dart';
 import '../../core/failure.dart';
 import '../../domain/model/codes.dart';
+import '../../domain/rules/bank_icon_catalog.dart';
+import '../../domain/rules/template_card_rules.dart';
+import 'svg_vector_icon.dart';
 
 /// Harmonious Material 3-aligned color presets matching 一羽记账's soft rounded
 /// circular category and account icon badges.
@@ -2327,8 +2330,9 @@ AssetIconSpec _fallbackAssetSpecForType(int assetType, int? subType) {
   return _assetSpecByKey['bank_card']!;
 }
 
-/// Resolved visual representation (preset/general icon, custom monogram text,
-/// or custom local image + brand-harmonious color) for an asset account.
+/// Resolved visual representation (preset/general icon, bundled vector SVG,
+/// custom monogram text, or custom local image + brand-harmonious color) for an
+/// asset account.
 final class AssetVisual {
   const AssetVisual({
     required this.iconKey,
@@ -2336,6 +2340,8 @@ final class AssetVisual {
     required this.icon,
     required this.color,
     required this.colorHex,
+    this.svgAssetPath,
+    this.svgInsetFraction = 0.05,
     this.customText,
     this.customImageBytes,
   });
@@ -2345,17 +2351,52 @@ final class AssetVisual {
   final IconData icon;
   final Color color;
   final String colorHex;
+  final String? svgAssetPath;
+  final double svgInsetFraction;
   final String? customText;
   final Uint8List? customImageBytes;
+}
+
+AssetVisual _buildBundledVectorAssetVisual({
+  required ({
+    String canonicalKey,
+    String assetPath,
+    String displayName,
+    String defaultColorHex,
+    double insetFraction,
+  })
+  vector,
+  required String? colorHex,
+  required int assetType,
+}) {
+  final presetFallback = _assetSpecByKey[vector.canonicalKey];
+  final fallbackIcon =
+      presetFallback?.icon ??
+      (assetType == AssetType.credit
+          ? Icons.credit_card_rounded
+          : Icons.account_balance_rounded);
+  final resolvedColor =
+      tryParseCatalogColor(colorHex) ??
+      tryParseCatalogColor(vector.defaultColorHex)!;
+  return AssetVisual(
+    iconKey: vector.canonicalKey,
+    label: presetFallback?.label ?? vector.displayName,
+    icon: fallbackIcon,
+    color: resolvedColor,
+    colorHex: formatCatalogColorHex(resolvedColor),
+    svgAssetPath: vector.assetPath,
+    svgInsetFraction: vector.insetFraction,
+  );
 }
 
 /// Resolves an [AssetVisual] in priority order:
 /// 1. Custom uploaded image (`'data:image/<ext>;base64,...'`), falling back if corrupt
 /// 2. Custom 1–2 grapheme monogram / Emoji (`'text:<value>'`), falling back if blank
-/// 3. Explicit [iconKey] in [assetIconCatalog]
-/// 4. General icon `'cat:<key>'` (or direct semantic key in [categoryIconCatalog])
-/// 5. Smart keyword match on [name] (`微信`, `支付宝`, `花呗`, `白条`, `招行信用卡`, `现金`, etc.)
-/// 6. Fallback by [assetType] (and optional [subType] for borrow/lend debt accounts).
+/// 3. Explicit bundled vector SVG (`builtin:bank.*`, `builtin:bank-icon.*`, `builtin:pay.*`, `builtin:social.*`, `builtin:type.*`, `'wechat_pay'`, `'alipay'`)
+/// 4. Explicit [iconKey] in [assetIconCatalog]
+/// 5. General icon `'cat:<key>'` (or direct semantic key in [categoryIconCatalog])
+/// 6. Smart institution & keyword match on [name] (18 reviewed banks, 微信, 支付宝, 抖音, 小红书, 花呗, 白条, 现金, etc.)
+/// 7. Fallback by [assetType] (and optional [subType] for borrow/lend debt accounts).
 AssetVisual resolveAssetVisual({
   String? iconKey,
   String? colorHex,
@@ -2402,6 +2443,17 @@ AssetVisual resolveAssetVisual({
         color: resolvedColor,
         colorHex: formatCatalogColorHex(resolvedColor),
         customText: monogram,
+      );
+    }
+  }
+
+  if (trimmedKey.isNotEmpty) {
+    final explicitVector = resolveBundledVectorIcon(trimmedKey);
+    if (explicitVector != null) {
+      return _buildBundledVectorAssetVisual(
+        vector: explicitVector,
+        colorHex: colorHex,
+        assetType: assetType,
       );
     }
   }
@@ -2455,7 +2507,31 @@ AssetVisual resolveAssetVisual({
     }
   }
 
+  final autoInstitution = matchReviewedInstitution(
+    name,
+    assetType: assetType,
+    isBankCardMemo: false,
+  );
+  if (autoInstitution != null) {
+    final vector = resolveBundledVectorIcon(autoInstitution.iconKey);
+    if (vector != null) {
+      return _buildBundledVectorAssetVisual(
+        vector: vector,
+        colorHex: colorHex,
+        assetType: assetType,
+      );
+    }
+  }
+
   final spec = fallbackSpec();
+  final fallbackVector = resolveBundledVectorIcon(spec.key);
+  if (fallbackVector != null) {
+    return _buildBundledVectorAssetVisual(
+      vector: fallbackVector,
+      colorHex: colorHex,
+      assetType: assetType,
+    );
+  }
   final resolvedColor =
       tryParseCatalogColor(colorHex) ??
       tryParseCatalogColor(spec.defaultColorHex)!;
@@ -2469,7 +2545,8 @@ AssetVisual resolveAssetVisual({
 }
 
 /// Soft/vivid circular badge rendering an account's semantic rounded icon,
-/// custom 1–2 grapheme monogram/Emoji, or circular uploaded image.
+/// bundled vector SVG emblem, custom 1–2 grapheme monogram/Emoji, or circular
+/// uploaded image.
 class AssetIconAvatar extends StatelessWidget {
   const AssetIconAvatar({
     super.key,
@@ -2575,6 +2652,40 @@ class AssetIconAvatar extends StatelessWidget {
       );
     }
 
+    final svgPath = visual.svgAssetPath;
+    if (svgPath != null) {
+      final plateColor = isDark
+          ? const Color(0xFFF6F8FC)
+          : Color.alphaBlend(
+              visual.color.withValues(alpha: selected ? 0.14 : 0.06),
+              Colors.white,
+            );
+      final ringColor = selected
+          ? visual.color
+          : visual.color.withValues(alpha: isDark ? 0.55 : 0.24);
+      final innerSize = math.max(
+        10.0,
+        size * (1.0 - visual.svgInsetFraction * 2.0),
+      );
+      return AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          color: plateColor,
+          shape: BoxShape.circle,
+          border: Border.all(color: ringColor, width: selected ? 2.0 : 1.0),
+        ),
+        alignment: Alignment.center,
+        child: SvgVectorIcon(
+          assetPath: svgPath,
+          size: innerSize,
+          fallbackIcon: visual.icon,
+          fallbackColor: visual.color,
+        ),
+      );
+    }
+
     return AnimatedContainer(
       duration: const Duration(milliseconds: 160),
       width: size,
@@ -2593,6 +2704,186 @@ class AssetIconAvatar extends StatelessWidget {
       child: Icon(visual.icon, size: size * 0.52, color: fgColor),
     );
   }
+}
+
+/// Resolved visual metadata for a `BankCard` memo entry (`F-023`).
+final class BankCardVisual {
+  const BankCardVisual({
+    required this.visual,
+    required this.explicitColorHex,
+    required this.manualIconKey,
+  });
+
+  final AssetVisual visual;
+  final String? explicitColorHex;
+  final String? manualIconKey;
+
+  bool get isAutoMatched => manualIconKey == null;
+}
+
+/// Resolves a `BankCard` memo visual:
+/// 1. Manual icon override in `bank_card.card_color` (`[#RRGGBB]|icon:<key>`)
+/// 2. Smart institution auto-match on `cardName` across the 18 reviewed banks
+/// 3. Fallback `credit_card` / `bank_card` badge.
+BankCardVisual resolveBankCardVisual({
+  String? cardColorMeta,
+  required String cardName,
+  required int cardType,
+}) {
+  final meta = tryParseBankCardVisualMeta(cardColorMeta);
+  final mappedAssetType = cardType == BankCardType.credit
+      ? AssetType.credit
+      : AssetType.normal;
+
+  if (meta.iconKey != null) {
+    final resolved = resolveAssetVisual(
+      iconKey: meta.iconKey,
+      colorHex: meta.colorHex,
+      name: cardName,
+      assetType: mappedAssetType,
+    );
+    return BankCardVisual(
+      visual: resolved,
+      explicitColorHex: meta.colorHex,
+      manualIconKey: meta.iconKey,
+    );
+  }
+
+  final inst = matchReviewedInstitution(
+    cardName,
+    assetType: mappedAssetType,
+    isBankCardMemo: true,
+  );
+  if (inst != null) {
+    final vector = resolveBundledVectorIcon(inst.iconKey)!;
+    final resolved = _buildBundledVectorAssetVisual(
+      vector: vector,
+      colorHex: meta.colorHex,
+      assetType: mappedAssetType,
+    );
+    return BankCardVisual(
+      visual: resolved,
+      explicitColorHex: meta.colorHex,
+      manualIconKey: null,
+    );
+  }
+
+  final fallbackKey = cardType == BankCardType.credit
+      ? 'credit_card'
+      : 'bank_card';
+  final resolved = resolveAssetVisual(
+    iconKey: fallbackKey,
+    colorHex: meta.colorHex,
+    name: cardName,
+    assetType: mappedAssetType,
+  );
+  return BankCardVisual(
+    visual: resolved,
+    explicitColorHex: meta.colorHex,
+    manualIconKey: null,
+  );
+}
+
+/// Circular emblem badge for a `BankCard` memo item or editor header.
+class BankCardIconAvatar extends StatelessWidget {
+  const BankCardIconAvatar({
+    super.key,
+    this.cardColorMeta,
+    required this.cardName,
+    required this.cardType,
+    this.size = 36,
+    this.selected = false,
+  });
+
+  final String? cardColorMeta;
+  final String cardName;
+  final int cardType;
+  final double size;
+  final bool selected;
+
+  @override
+  Widget build(BuildContext context) {
+    final resolved = resolveBankCardVisual(
+      cardColorMeta: cardColorMeta,
+      cardName: cardName,
+      cardType: cardType,
+    );
+    return AssetIconAvatar(
+      iconKey: resolved.visual.iconKey,
+      colorHex: resolved.visual.colorHex,
+      name: cardName,
+      assetType: cardType == BankCardType.credit
+          ? AssetType.credit
+          : AssetType.normal,
+      size: size,
+      selected: selected,
+    );
+  }
+}
+
+/// Opens the searchable bank & financial icon picker for a `BankCard` memo.
+/// Returns `(icon, colorHex)` where `icon == ''` indicates resetting to
+/// automatic name-based bank logo matching.
+Future<({String icon, String colorHex})?> showBankCardVisualPicker(
+  BuildContext context, {
+  String? initialIcon,
+  String? initialColor,
+  required int cardType,
+  required String previewName,
+}) {
+  final mappedAssetType = cardType == BankCardType.credit
+      ? AssetType.credit
+      : AssetType.normal;
+  final current = resolveBankCardVisual(
+    cardColorMeta: encodeBankCardVisualMeta(
+      colorHex: initialColor,
+      iconKey: initialIcon,
+    ),
+    cardName: previewName,
+    cardType: cardType,
+  );
+  final isDesktop = DesktopAdaptive.isDesktop(context);
+  final resolvedPreviewName = previewName.trim().isEmpty
+      ? (cardType == BankCardType.credit ? '信用卡预览' : '储蓄卡预览')
+      : previewName.trim();
+  final hasExplicitColor =
+      initialColor != null && initialColor.trim().isNotEmpty;
+
+  if (isDesktop) {
+    return showDialog<({String icon, String colorHex})>(
+      context: context,
+      builder: (dialogCtx) => Dialog(
+        constraints: const BoxConstraints(maxWidth: 520, maxHeight: 650),
+        clipBehavior: Clip.antiAlias,
+        child: _AssetVisualPickerSheet(
+          initialIconKey: current.visual.iconKey,
+          initialColorHex: current.visual.colorHex,
+          hasExplicitInitialColor: hasExplicitColor,
+          assetType: mappedAssetType,
+          previewName: resolvedPreviewName,
+          allowCustomImage: false,
+          preferBankFilterInitially: true,
+          isDialog: true,
+        ),
+      ),
+    );
+  }
+
+  return showModalBottomSheet<({String icon, String colorHex})>(
+    context: context,
+    isScrollControlled: true,
+    useSafeArea: true,
+    showDragHandle: true,
+    builder: (sheetCtx) => _AssetVisualPickerSheet(
+      initialIconKey: current.visual.iconKey,
+      initialColorHex: current.visual.colorHex,
+      hasExplicitInitialColor: hasExplicitColor,
+      assetType: mappedAssetType,
+      previewName: resolvedPreviewName,
+      allowCustomImage: false,
+      preferBankFilterInitially: true,
+    ),
+  );
 }
 
 Future<Uint8List?> _defaultPickCustomAssetImageBytes() async {
@@ -2681,6 +2972,80 @@ Future<({String icon, String colorHex})?> showAssetVisualPicker(
 
 enum _AssetPickerMode { preset, text, image }
 
+enum _AssetPresetFilter { all, banks, accounts, general }
+
+final class _PickerTileSpec {
+  const _PickerTileSpec({
+    required this.iconKey,
+    required this.widgetKey,
+    required this.label,
+    required this.defaultColorHex,
+    this.searchTokens = const <String>[],
+  });
+
+  final String iconKey;
+  final String widgetKey;
+  final String label;
+  final String defaultColorHex;
+  final List<String> searchTokens;
+
+  bool matchesQuery(String rawQuery) {
+    final q = rawQuery.trim().toLowerCase();
+    if (q.isEmpty) return true;
+    if (label.toLowerCase().contains(q)) return true;
+    if (iconKey.toLowerCase().contains(q)) return true;
+    for (final token in searchTokens) {
+      if (token.toLowerCase().contains(q)) return true;
+    }
+    return false;
+  }
+}
+
+final List<_PickerTileSpec> _reviewedBankPickerTiles = <_PickerTileSpec>[
+  for (final desc in BankIconCatalog.bundled.reviewedEntries)
+    _PickerTileSpec(
+      iconKey: desc.reference,
+      widgetKey: 'visual-icon-${desc.reference}',
+      label: desc.displayName,
+      defaultColorHex: desc.defaultColorHex,
+      searchTokens: <String>[desc.code, ...desc.aliases],
+    ),
+];
+
+final List<_PickerTileSpec> _libraryBankPickerTiles = <_PickerTileSpec>[
+  for (final desc in BankIconCatalog.bundled.libraryEntries)
+    _PickerTileSpec(
+      iconKey: desc.reference,
+      widgetKey: 'visual-icon-${desc.reference}',
+      label: desc.displayName,
+      defaultColorHex: desc.defaultColorHex,
+      searchTokens: <String>[desc.code, ...desc.aliases],
+    ),
+];
+
+final List<_PickerTileSpec> _extraVectorPickerTiles = <_PickerTileSpec>[
+  for (final spec in extraVectorIconCatalog)
+    if (spec.canonicalKey != 'wechat_pay' && spec.canonicalKey != 'alipay')
+      _PickerTileSpec(
+        iconKey: spec.canonicalKey,
+        widgetKey: 'visual-icon-${spec.canonicalKey}',
+        label: spec.displayName,
+        defaultColorHex: spec.defaultColorHex,
+        searchTokens: <String>[spec.reference, ...spec.aliases],
+      ),
+];
+
+final List<_PickerTileSpec> _categoryPickerTiles = <_PickerTileSpec>[
+  for (final spec in categoryIconCatalog)
+    _PickerTileSpec(
+      iconKey: '$assetCategoryIconPrefix${spec.key}',
+      widgetKey: 'visual-icon-cat-${spec.key}',
+      label: spec.label,
+      defaultColorHex: spec.defaultColorHex,
+      searchTokens: <String>[spec.key],
+    ),
+];
+
 final TextInputFormatter _twoGraphemeInputFormatter =
     TextInputFormatter.withFunction((oldValue, newValue) {
       if (newValue.composing.isValid && !newValue.composing.isCollapsed) {
@@ -2703,6 +3068,8 @@ class _AssetVisualPickerSheet extends StatefulWidget {
     this.subType,
     required this.previewName,
     this.pickCustomImageBytes,
+    this.allowCustomImage = true,
+    this.preferBankFilterInitially = false,
     this.isDialog = false,
   });
 
@@ -2713,6 +3080,8 @@ class _AssetVisualPickerSheet extends StatefulWidget {
   final int? subType;
   final String previewName;
   final Future<Uint8List?> Function()? pickCustomImageBytes;
+  final bool allowCustomImage;
+  final bool preferBankFilterInitially;
   final bool isDialog;
 
   @override
@@ -2725,8 +3094,11 @@ class _AssetVisualPickerSheetState extends State<_AssetVisualPickerSheet> {
   late String _colorHex;
   late bool _userLockedColor;
   late _AssetPickerMode _mode;
+  late _AssetPresetFilter _presetFilter;
   late String _lastPresetIconKey;
   late final TextEditingController _customTextController;
+  late final TextEditingController _searchController;
+  String _searchQuery = '';
   bool _uploadingImage = false;
 
   @override
@@ -2735,6 +3107,10 @@ class _AssetVisualPickerSheetState extends State<_AssetVisualPickerSheet> {
     _iconKey = widget.initialIconKey;
     _colorHex = widget.initialColorHex;
     _userLockedColor = widget.hasExplicitInitialColor;
+    _presetFilter = widget.preferBankFilterInitially
+        ? _AssetPresetFilter.banks
+        : _AssetPresetFilter.all;
+    _searchController = TextEditingController();
 
     final defaultPresetKey = resolveAssetVisual(
       name: widget.previewName,
@@ -2742,7 +3118,8 @@ class _AssetVisualPickerSheetState extends State<_AssetVisualPickerSheet> {
       subType: widget.subType,
     ).iconKey;
 
-    if (decodeCustomAssetIconBytes(_iconKey) != null) {
+    if (widget.allowCustomImage &&
+        decodeCustomAssetIconBytes(_iconKey) != null) {
       _mode = _AssetPickerMode.image;
       _lastPresetIconKey = defaultPresetKey;
       _customTextController = TextEditingController();
@@ -2765,17 +3142,31 @@ class _AssetVisualPickerSheetState extends State<_AssetVisualPickerSheet> {
   @override
   void dispose() {
     _customTextController.dispose();
+    _searchController.dispose();
     super.dispose();
   }
 
-  List<({String title, List<AssetIconSpec> items})> _orderedSections() {
-    final normalItems = assetIconCatalog
-        .where((s) => s.group == 'normal')
-        .toList();
-    final creditItems = assetIconCatalog
-        .where((s) => s.group == 'credit')
-        .toList();
-    final debtItems = assetIconCatalog.where((s) => s.group == 'debt').toList();
+  List<({String title, List<_PickerTileSpec> items})>
+  _orderedAccountSections() {
+    List<_PickerTileSpec> mapGroup(String group) => [
+      for (final s in assetIconCatalog)
+        if (s.group == group)
+          _PickerTileSpec(
+            iconKey: s.key,
+            widgetKey: 'visual-icon-${s.key}',
+            label: s.label,
+            defaultColorHex: s.defaultColorHex,
+            searchTokens: <String>[
+              s.key,
+              if (s.key == 'wechat_pay') ...const <String>['微信', 'wechat'],
+              if (s.key == 'alipay') ...const <String>['支付宝', 'alipay'],
+            ],
+          ),
+    ];
+
+    final normalItems = mapGroup('normal');
+    final creditItems = mapGroup('credit');
+    final debtItems = mapGroup('debt');
 
     if (widget.assetType == AssetType.credit) {
       return [
@@ -2798,6 +3189,74 @@ class _AssetVisualPickerSheetState extends State<_AssetVisualPickerSheet> {
     ];
   }
 
+  List<({String title, List<_PickerTileSpec> items})> _visiblePresetSections() {
+    final accountSections = _orderedAccountSections();
+    final q = _searchQuery.trim();
+    if (q.isNotEmpty) {
+      final matchedReviewed = _reviewedBankPickerTiles
+          .where((t) => t.matchesQuery(q))
+          .toList();
+      final matchedAccounts = <_PickerTileSpec>[
+        for (final sec in accountSections)
+          ...sec.items.where((t) => t.matchesQuery(q)),
+        ..._extraVectorPickerTiles.where((t) => t.matchesQuery(q)),
+      ];
+      final matchedLibrary = _libraryBankPickerTiles
+          .where((t) => t.matchesQuery(q))
+          .toList();
+      final matchedCats = _categoryPickerTiles
+          .where((t) => t.matchesQuery(q))
+          .toList();
+      return [
+        if (matchedReviewed.isNotEmpty)
+          (title: '常用银行 (${matchedReviewed.length})', items: matchedReviewed),
+        if (matchedAccounts.isNotEmpty)
+          (title: '支付与账户 (${matchedAccounts.length})', items: matchedAccounts),
+        if (matchedLibrary.isNotEmpty)
+          (title: '扩展银行与机构 (${matchedLibrary.length})', items: matchedLibrary),
+        if (matchedCats.isNotEmpty)
+          (title: '通用图标 (${matchedCats.length})', items: matchedCats),
+      ];
+    }
+
+    switch (_presetFilter) {
+      case _AssetPresetFilter.banks:
+        return [
+          (
+            title: '常用商业银行 (${_reviewedBankPickerTiles.length})',
+            items: _reviewedBankPickerTiles,
+          ),
+          (
+            title: '扩展银行与机构库 (${_libraryBankPickerTiles.length})',
+            items: _libraryBankPickerTiles,
+          ),
+        ];
+      case _AssetPresetFilter.accounts:
+        return [
+          ...accountSections,
+          (title: '支付与平台徽标', items: _extraVectorPickerTiles),
+        ];
+      case _AssetPresetFilter.general:
+        return [(title: '更多通用图标', items: _categoryPickerTiles)];
+      case _AssetPresetFilter.all:
+        return [
+          ...accountSections,
+          (
+            title: '常用银行与平台',
+            items: <_PickerTileSpec>[
+              ..._reviewedBankPickerTiles,
+              ..._extraVectorPickerTiles,
+            ],
+          ),
+          (title: '更多通用图标', items: _categoryPickerTiles),
+          (
+            title: '扩展银行与机构库 (${_libraryBankPickerTiles.length})',
+            items: _libraryBankPickerTiles,
+          ),
+        ];
+    }
+  }
+
   List<String> _buildMonogramSuggestions() {
     final result = <String>[];
     final seen = <String>{};
@@ -2812,6 +3271,8 @@ class _AssetVisualPickerSheetState extends State<_AssetVisualPickerSheet> {
     if (preview.isNotEmpty &&
         preview != '账户预览' &&
         preview != '信用账户预览' &&
+        preview != '储蓄卡预览' &&
+        preview != '信用卡预览' &&
         preview.characters.length >= 2) {
       addCandidate(preview.characters.take(2).toString());
       final stripped = preview
@@ -2944,12 +3405,13 @@ class _AssetVisualPickerSheetState extends State<_AssetVisualPickerSheet> {
               icon: Icons.text_fields_rounded,
               label: '文字/Emoji',
             ),
-            tab(
-              key: const Key('asset-picker-mode-image'),
-              mode: _AssetPickerMode.image,
-              icon: Icons.image_outlined,
-              label: '自定义图片',
-            ),
+            if (widget.allowCustomImage)
+              tab(
+                key: const Key('asset-picker-mode-image'),
+                mode: _AssetPickerMode.image,
+                icon: Icons.image_outlined,
+                label: '自定义图片',
+              ),
           ],
         ),
       ),
@@ -2957,135 +3419,202 @@ class _AssetVisualPickerSheetState extends State<_AssetVisualPickerSheet> {
   }
 
   Widget _buildPresetBody(ThemeData theme) {
-    final sections = _orderedSections();
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+    final sections = _visiblePresetSections();
+
+    Widget filterChip(_AssetPresetFilter filter, String label, String keyId) {
+      final selected = _searchQuery.trim().isEmpty && _presetFilter == filter;
+      return ChoiceChip(
+        key: Key(keyId),
+        visualDensity: VisualDensity.compact,
+        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        showCheckmark: false,
+        label: Text(label, style: const TextStyle(fontSize: 12)),
+        selected: selected,
+        onSelected: (_) => setState(() {
+          _presetFilter = filter;
+          if (_searchQuery.isNotEmpty) {
+            _searchController.clear();
+            _searchQuery = '';
+          }
+        }),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        for (final section in sections) ...[
-          Padding(
-            padding: const EdgeInsets.only(bottom: 8, top: 4),
-            child: Text(
-              section.title,
-              style: theme.textTheme.labelLarge?.copyWith(
-                color: theme.colorScheme.primary,
-              ),
-            ),
-          ),
-          GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-              maxCrossAxisExtent: 84,
-              mainAxisSpacing: 8,
-              crossAxisSpacing: 8,
-              childAspectRatio: 0.94,
-            ),
-            itemCount: section.items.length,
-            itemBuilder: (context, idx) {
-              final spec = section.items[idx];
-              final isSelected = _iconKey == spec.key;
-              return InkWell(
-                key: Key('visual-icon-${spec.key}'),
-                borderRadius: BorderRadius.circular(12),
-                onTap: () => setState(() {
-                  _iconKey = spec.key;
-                  _lastPresetIconKey = spec.key;
-                  if (!_userLockedColor) {
-                    _colorHex = spec.defaultColorHex;
-                  }
-                }),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    AssetIconAvatar(
-                      iconKey: spec.key,
-                      colorHex: isSelected ? _colorHex : spec.defaultColorHex,
-                      name: spec.label,
-                      assetType: widget.assetType,
-                      subType: widget.subType,
-                      size: 38,
-                      selected: isSelected,
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      spec.label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: isSelected
-                            ? FontWeight.w600
-                            : FontWeight.normal,
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            },
-          ),
-          const SizedBox(height: 12),
-        ],
         Padding(
-          padding: const EdgeInsets.only(bottom: 8, top: 4),
-          child: Text(
-            '更多通用图标',
-            style: theme.textTheme.labelLarge?.copyWith(
-              color: theme.colorScheme.primary,
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 6),
+          child: TextField(
+            key: const Key('asset-picker-search-input'),
+            controller: _searchController,
+            onChanged: (v) => setState(() => _searchQuery = v),
+            style: theme.textTheme.bodyMedium,
+            decoration: InputDecoration(
+              isDense: true,
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 9,
+              ),
+              prefixIcon: const Icon(Icons.search_rounded, size: 18),
+              prefixIconConstraints: const BoxConstraints(
+                minWidth: 36,
+                minHeight: 34,
+              ),
+              suffixIcon: _searchQuery.isEmpty
+                  ? null
+                  : IconButton(
+                      key: const Key('asset-picker-search-clear'),
+                      tooltip: '清空搜索',
+                      icon: const Icon(Icons.clear_rounded, size: 16),
+                      onPressed: () => setState(() {
+                        _searchController.clear();
+                        _searchQuery = '';
+                      }),
+                    ),
+              suffixIconConstraints: const BoxConstraints(
+                minWidth: 34,
+                minHeight: 34,
+              ),
+              hintText: '搜索银行、支付或图标（如：招行、CMB、上海）',
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
             ),
           ),
         ),
-        GridView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-            maxCrossAxisExtent: 84,
-            mainAxisSpacing: 8,
-            crossAxisSpacing: 8,
-            childAspectRatio: 0.94,
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
+          child: Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              filterChip(
+                _AssetPresetFilter.all,
+                '全部',
+                'asset-picker-filter-all',
+              ),
+              filterChip(
+                _AssetPresetFilter.banks,
+                '银行行标',
+                'asset-picker-filter-banks',
+              ),
+              filterChip(
+                _AssetPresetFilter.accounts,
+                '支付与账户',
+                'asset-picker-filter-accounts',
+              ),
+              filterChip(
+                _AssetPresetFilter.general,
+                '通用图标',
+                'asset-picker-filter-general',
+              ),
+              if (!widget.allowCustomImage)
+                ActionChip(
+                  key: const Key('bank-card-picker-reset-auto'),
+                  visualDensity: VisualDensity.compact,
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  avatar: const Icon(Icons.auto_awesome_outlined, size: 14),
+                  label: const Text('自动匹配', style: TextStyle(fontSize: 12)),
+                  onPressed: () => Navigator.pop(context, (
+                    icon: '',
+                    colorHex: _userLockedColor ? _colorHex : '',
+                  )),
+                ),
+            ],
           ),
-          itemCount: categoryIconCatalog.length,
-          itemBuilder: (context, idx) {
-            final spec = categoryIconCatalog[idx];
-            final catKey = '$assetCategoryIconPrefix${spec.key}';
-            final isSelected = _iconKey == catKey;
-            return InkWell(
-              key: Key('visual-icon-cat-${spec.key}'),
-              borderRadius: BorderRadius.circular(12),
-              onTap: () => setState(() {
-                _iconKey = catKey;
-                _lastPresetIconKey = catKey;
-                if (!_userLockedColor) {
-                  _colorHex = spec.defaultColorHex;
-                }
-              }),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  AssetIconAvatar(
-                    iconKey: catKey,
-                    colorHex: isSelected ? _colorHex : spec.defaultColorHex,
-                    name: spec.label,
-                    assetType: widget.assetType,
-                    subType: widget.subType,
-                    size: 38,
-                    selected: isSelected,
+        ),
+        Expanded(
+          child: CustomScrollView(
+            slivers: [
+              if (sections.isEmpty)
+                SliverFillRemaining(
+                  hasScrollBody: false,
+                  child: Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Text(
+                        '未找到匹配的图标，可切换至“文字/Emoji”自定义',
+                        textAlign: TextAlign.center,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.outline,
+                        ),
+                      ),
+                    ),
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    spec.label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: isSelected
-                          ? FontWeight.w600
-                          : FontWeight.normal,
+                )
+              else
+                for (final section in sections) ...[
+                  SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(16, 6, 16, 8),
+                    sliver: SliverToBoxAdapter(
+                      child: Text(
+                        section.title,
+                        style: theme.textTheme.labelLarge?.copyWith(
+                          color: theme.colorScheme.primary,
+                        ),
+                      ),
+                    ),
+                  ),
+                  SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                    sliver: SliverGrid(
+                      gridDelegate:
+                          const SliverGridDelegateWithMaxCrossAxisExtent(
+                            maxCrossAxisExtent: 84,
+                            mainAxisSpacing: 8,
+                            crossAxisSpacing: 8,
+                            childAspectRatio: 0.94,
+                          ),
+                      delegate: SliverChildBuilderDelegate((context, idx) {
+                        final item = section.items[idx];
+                        final isSelected = _iconKey == item.iconKey;
+                        return InkWell(
+                          key: Key(item.widgetKey),
+                          borderRadius: BorderRadius.circular(12),
+                          onTap: () => setState(() {
+                            _iconKey = item.iconKey;
+                            _lastPresetIconKey = item.iconKey;
+                            if (!_userLockedColor) {
+                              _colorHex = item.defaultColorHex;
+                            }
+                          }),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              AssetIconAvatar(
+                                iconKey: item.iconKey,
+                                colorHex: isSelected
+                                    ? _colorHex
+                                    : item.defaultColorHex,
+                                name: item.label,
+                                assetType: widget.assetType,
+                                subType: widget.subType,
+                                size: 38,
+                                selected: isSelected,
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                item.label,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: isSelected
+                                      ? FontWeight.w600
+                                      : FontWeight.normal,
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      }, childCount: section.items.length),
                     ),
                   ),
                 ],
-              ),
-            );
-          },
+              const SliverToBoxAdapter(child: SizedBox(height: 16)),
+            ],
+          ),
         ),
       ],
     );
@@ -3291,7 +3820,9 @@ class _AssetVisualPickerSheetState extends State<_AssetVisualPickerSheet> {
                               ),
                             ),
                             Text(
-                              '选择账户图标、文字或自定义图片',
+                              widget.allowCustomImage
+                                  ? '选择银行/平台图标、文字或自定义图片'
+                                  : '选择银行行标、通用图标或文字徽标',
                               style: theme.textTheme.bodySmall?.copyWith(
                                 color: theme.colorScheme.outline,
                               ),

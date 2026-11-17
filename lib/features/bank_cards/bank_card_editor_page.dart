@@ -8,13 +8,15 @@ import '../../data/db/database.dart';
 import '../../data/tools/bank_card_service.dart';
 import '../../domain/model/codes.dart';
 import '../../domain/rules/template_card_rules.dart';
+import '../common/catalog_icons.dart';
 import '../common/common.dart';
 import '../common/desktop_modal_page.dart';
 import 'bank_card_providers.dart';
 
 Color? parseCardColorOrNull(String? hex) {
-  if (hex == null) return null;
-  final trimmed = hex.trim();
+  final cleanHex = tryParseBankCardVisualMeta(hex).colorHex;
+  if (cleanHex == null) return null;
+  final trimmed = cleanHex.trim();
   if (trimmed.isEmpty) return null;
   final digits = trimmed.startsWith('#') ? trimmed.substring(1) : trimmed;
   if (digits.length == 6) {
@@ -46,13 +48,19 @@ class _BankCardEditorPageState extends ConsumerState<BankCardEditorPage> {
   final CommandIds _ids = CommandIds();
 
   int _cardType = BankCardType.debit;
-  String? _cardColor;
+  String? _explicitColorHex;
+  String? _manualIconKey;
   int _cardAssetId = noRef;
   bool _loading = true;
   bool _busy = false;
   String? _error;
 
   bool get _editing => widget.cardId != null;
+
+  String? _encodedCardColorMeta() => encodeBankCardVisualMeta(
+    colorHex: _explicitColorHex,
+    iconKey: _manualIconKey,
+  );
 
   @override
   void initState() {
@@ -68,12 +76,14 @@ class _BankCardEditorPageState extends ConsumerState<BankCardEditorPage> {
         if (card == null) {
           _error = '银行卡记录不存在或已删除';
         } else {
+          final meta = tryParseBankCardVisualMeta(card.cardColor);
           _cardType = card.cardType;
           _nameController.text = card.cardName;
           _noController.text = formatCardNumberGrouped(card.cardNo);
           _ownerController.text = card.cardOwner;
           _remarkController.text = card.remark;
-          _cardColor = card.cardColor;
+          _explicitColorHex = meta.colorHex;
+          _manualIconKey = meta.iconKey;
           _cardAssetId = card.cardAssetId;
         }
       }
@@ -83,6 +93,29 @@ class _BankCardEditorPageState extends ConsumerState<BankCardEditorPage> {
     if (mounted) {
       setState(() => _loading = false);
     }
+  }
+
+  Future<void> _pickCardIcon() async {
+    final picked = await showBankCardVisualPicker(
+      context,
+      initialIcon: _manualIconKey,
+      initialColor: _explicitColorHex,
+      cardType: _cardType,
+      previewName: _nameController.text.trim(),
+    );
+    if (picked == null || !mounted) return;
+    setState(() {
+      if (picked.icon.isEmpty) {
+        _manualIconKey = null;
+        if (picked.colorHex.isEmpty) {
+          _explicitColorHex = null;
+        } else {
+          _explicitColorHex = picked.colorHex;
+        }
+      } else {
+        _manualIconKey = picked.icon;
+      }
+    });
   }
 
   @override
@@ -107,7 +140,7 @@ class _BankCardEditorPageState extends ConsumerState<BankCardEditorPage> {
         cardNo: _noController.text,
         cardOwner: _ownerController.text,
         remark: _remarkController.text,
-        cardColor: _cardColor,
+        cardColor: _encodedCardColorMeta(),
         cardAssetId: _cardAssetId,
       );
       final svc = await ref.read(bankCardServiceProvider.future);
@@ -205,12 +238,75 @@ class _BankCardEditorPageState extends ConsumerState<BankCardEditorPage> {
                           controller: _nameController,
                           enabled: !_busy,
                           maxLength: maxBankCardNameLength,
+                          onChanged: (_) => setState(() {}),
                           decoration: const InputDecoration(
                             labelText: '银行与卡片名称（如：招商银行储蓄卡）',
                             border: OutlineInputBorder(),
                           ),
                         ),
                         const SizedBox(height: 8),
+                        Builder(
+                          builder: (context) {
+                            final theme = Theme.of(context);
+                            final cardVisual = resolveBankCardVisual(
+                              cardColorMeta: _encodedCardColorMeta(),
+                              cardName: _nameController.text.trim(),
+                              cardType: _cardType,
+                            );
+                            return InkWell(
+                              key: const Key('bank_card_icon_picker_trigger'),
+                              borderRadius: BorderRadius.circular(12),
+                              onTap: _busy ? null : _pickCardIcon,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 10,
+                                ),
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(
+                                    color: theme.colorScheme.outlineVariant,
+                                  ),
+                                ),
+                                child: Row(
+                                  children: [
+                                    BankCardIconAvatar(
+                                      cardColorMeta: _encodedCardColorMeta(),
+                                      cardName: _nameController.text.trim(),
+                                      cardType: _cardType,
+                                      size: 38,
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            '银行行标',
+                                            style: theme.textTheme.bodyMedium,
+                                          ),
+                                          Text(
+                                            cardVisual.isAutoMatched
+                                                ? '${cardVisual.visual.label}（按名称智能关联）· 点击更换'
+                                                : '${cardVisual.visual.label}（手动指定）· 点击更换或恢复自动',
+                                            style: theme.textTheme.bodySmall
+                                                ?.copyWith(
+                                                  color:
+                                                      theme.colorScheme.outline,
+                                                ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    const Icon(Icons.chevron_right),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                        const SizedBox(height: 12),
                         TextField(
                           key: const Key('bank_card_no_input'),
                           controller: _noController,
@@ -357,10 +453,12 @@ class _BankCardEditorPageState extends ConsumerState<BankCardEditorPage> {
                             ChoiceChip(
                               key: const Key('card_color_default'),
                               label: const Text('默认'),
-                              selected: _cardColor == null,
+                              selected: _explicitColorHex == null,
                               onSelected: _busy
                                   ? null
-                                  : (_) => setState(() => _cardColor = null),
+                                  : (_) => setState(
+                                      () => _explicitColorHex = null,
+                                    ),
                             ),
                             for (final (hex, label) in presetBankCardColors)
                               ChoiceChip(
@@ -370,10 +468,13 @@ class _BankCardEditorPageState extends ConsumerState<BankCardEditorPage> {
                                   radius: 8,
                                 ),
                                 label: Text(label),
-                                selected: _cardColor?.toUpperCase() == hex,
+                                selected:
+                                    _explicitColorHex?.toUpperCase() == hex,
                                 onSelected: _busy
                                     ? null
-                                    : (_) => setState(() => _cardColor = hex),
+                                    : (_) => setState(
+                                        () => _explicitColorHex = hex,
+                                      ),
                               ),
                           ],
                         ),

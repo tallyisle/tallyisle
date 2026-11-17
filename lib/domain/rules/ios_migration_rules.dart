@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import '../../core/failure.dart';
 import '../../core/money.dart';
 import 'reminder_rules.dart';
+import 'template_card_rules.dart';
 
 /// Standard exported `.ya2i` file name (Android -> iOS, zero legacy brand text).
 const String defaultYa2iExportFileName = 'TallyIsle-Android2iOS.ya2i';
@@ -2646,7 +2647,7 @@ Map<String, Object?> _bankCardToJson(MigrationBankCardRow r) => {
   'no': r.cardNo,
   'owner': r.cardOwner,
   'remark': r.remark,
-  'color': r.cardColor,
+  'color': tryParseBankCardVisualMeta(r.cardColor).colorHex,
   'sort': r.sort,
   'cdate': r.createDate,
   'card_asset_id': r.cardAssetId,

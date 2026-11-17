@@ -10,6 +10,7 @@ import '../../core/money.dart';
 import '../../data/db/database.dart';
 import '../../domain/ledger/asset_json.dart';
 import '../../domain/model/codes.dart';
+import '../../domain/rules/bank_icon_catalog.dart';
 import '../common/catalog_icons.dart';
 import '../common/common.dart';
 import '../common/desktop_modal_page.dart';
@@ -145,12 +146,21 @@ class _AssetEditorPageState extends ConsumerState<AssetEditorPage> {
         assetType: original!.type,
         subType: original!.subType,
       );
+      final wasGenericFallback =
+          (original!.icon == 'bank_card' &&
+              (original!.color == null ||
+                  original!.color!.toUpperCase() == '#1565C0')) ||
+          (original!.icon == 'credit_card' &&
+              (original!.color == null ||
+                  original!.color!.toUpperCase() == '#E53935'));
+      final wasAutoVisual =
+          wasGenericFallback ||
+          ((original!.icon.isEmpty || original!.icon == origDefault.iconKey) &&
+              (original!.color == null ||
+                  original!.color!.toUpperCase() ==
+                      origDefault.colorHex.toUpperCase()));
       final nameChanged = name.text.trim() != original!.name;
-      if (nameChanged &&
-          (original!.icon.isEmpty || original!.icon == origDefault.iconKey) &&
-          (original!.color == null ||
-              original!.color!.toUpperCase() ==
-                  origDefault.colorHex.toUpperCase())) {
+      if (nameChanged && wasAutoVisual) {
         effectiveIcon = null;
         effectiveColor = null;
       }
@@ -436,7 +446,14 @@ class _AssetEditorPageState extends ConsumerState<AssetEditorPage> {
                                       style: theme.textTheme.bodyMedium,
                                     ),
                                     Text(
-                                      '${visual.label} · 点击更换图标或配色',
+                                      !_userPickedVisual &&
+                                              matchReviewedInstitution(
+                                                    name.text.trim(),
+                                                    assetType: type,
+                                                  ) !=
+                                                  null
+                                          ? '${visual.label}（已按名称智能关联）· 点击更换'
+                                          : '${visual.label} · 点击更换图标或配色',
                                       style: theme.textTheme.bodySmall
                                           ?.copyWith(
                                             color: theme.colorScheme.outline,

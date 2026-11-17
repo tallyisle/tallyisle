@@ -304,7 +304,7 @@ void main() {
       );
       expect(
         resolveAssetVisual(name: '招行信用卡', assetType: AssetType.credit).iconKey,
-        'credit_card',
+        'builtin:bank.cmb',
       );
       expect(
         resolveAssetVisual(name: '现金', assetType: AssetType.normal).iconKey,
@@ -312,7 +312,7 @@ void main() {
       );
       expect(
         resolveAssetVisual(name: '招行储蓄卡', assetType: AssetType.normal).iconKey,
-        'bank_card',
+        'builtin:bank.cmb',
       );
 
       // Pure fallbacks when name has no specific brand keyword:
