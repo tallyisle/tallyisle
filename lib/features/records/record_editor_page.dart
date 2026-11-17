@@ -223,10 +223,13 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
   int? _resolvedBookId;
   int? _initialCategoriesBookId;
   List<RecordCategory> _initialCategories = const <RecordCategory>[];
+  List<Asset> _initialAssets = const <Asset>[];
+  List<AssetBook> _initialAssetBooks = const <AssetBook>[];
   int type = RecordType.expense;
   int? categoryId;
   int? parentCatId;
   bool _userTouchedCategory = false;
+  bool _userTouchedAsset = false;
   Set<String> selectedTagIds = {};
   List<String> imageNames = const <String>[];
   BillLocationInfo? location;
@@ -766,9 +769,57 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     });
   }
 
+  static Map<int, Set<int>> _buildAssetBookBindings(Iterable<AssetBook> links) {
+    final bound = <int, Set<int>>{};
+    for (final l in links) {
+      bound.putIfAbsent(l.assetId, () => <int>{}).add(l.bookId);
+    }
+    return bound;
+  }
+
+  static bool _isAssetVisibleInBook(
+    int candidateId,
+    int? bookId,
+    Map<int, Set<int>> assetBookBindings,
+  ) {
+    final bound = assetBookBindings[candidateId];
+    if (bound == null || bound.isEmpty) return true;
+    return bookId != null && bound.contains(bookId);
+  }
+
+  static bool _isSelectableBookAsset(
+    int candidateId, {
+    required int? bookId,
+    required Iterable<Asset> assets,
+    required Map<int, Set<int>> assetBookBindings,
+  }) {
+    if (candidateId == noRef || candidateId <= 0) return false;
+    final asset = assets.where((a) => a.id == candidateId).firstOrNull;
+    if (asset == null) return false;
+    if (asset.status != AssetStatus.active || asset.type == AssetType.debt) {
+      return false;
+    }
+    return _isAssetVisibleInBook(asset.id, bookId, assetBookBindings);
+  }
+
+  static int _computeEffectiveDefaultAccountId({
+    required DiyToolbarConfig config,
+    required int? bookId,
+    required Iterable<Asset> assets,
+    required Map<int, Set<int>> assetBookBindings,
+  }) {
+    if (bookId == null) return noRef;
+    return resolveEffectiveDefaultAccountId(
+      config: config,
+      bookId: bookId,
+      assets: assets.map((a) => (id: a.id, type: a.type, status: a.status)),
+      assetBookBindings: assetBookBindings,
+    );
+  }
+
   String _currencyOf(int id) {
     if (id == noRef) return baseCurrency;
-    final assets = ref.read(assetsProvider).value ?? const <Asset>[];
+    final assets = ref.read(assetsProvider).value ?? _initialAssets;
     final a = assets.where((x) => x.id == id).firstOrNull;
     return normalizeCurrency(a?.currency) ?? baseCurrency;
   }
@@ -838,21 +889,23 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     TemplatePrefill prefill, {
     RecordCategory? fallbackFirstCategory,
     bool? autoSelectFirstOverride,
+    DiyToolbarConfig? diyConfigOverride,
   }) {
+    final effectiveConfig =
+        diyConfigOverride ??
+        ref.read(diyToolbarConfigProvider).value ??
+        DiyToolbarConfig.defaults();
+    final currentBookId =
+        original?.accountBookId ??
+        ref.read(currentBookIdProvider).value ??
+        _resolvedBookId ??
+        (prefill.bookExists ? prefill.bookId : null);
     RecordCategory? resolvedFallback = fallbackFirstCategory;
     if (prefill.categoryId == null && prefill.type != RecordType.transfer) {
       final autoSelectEnabled =
           autoSelectFirstOverride ??
-          (ref
-                  .read(diyToolbarConfigProvider)
-                  .value
-                  ?.isEnabled(DiyToolbarAction.autoSelectFirstCategory) ??
-              false);
+          effectiveConfig.isEnabled(DiyToolbarAction.autoSelectFirstCategory);
       if (autoSelectEnabled && resolvedFallback == null) {
-        final currentBookId =
-            original?.accountBookId ??
-            ref.read(currentBookIdProvider).value ??
-            _resolvedBookId;
         final currentCats = currentBookId == null
             ? const <RecordCategory>[]
             : (ref.read(categoriesProvider(currentBookId)).value ??
@@ -862,6 +915,65 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
         resolvedFallback = _firstTopCategoryForType(prefill.type, currentCats);
       }
     }
+
+    final currentAssets = ref.read(assetsProvider).value ?? _initialAssets;
+    final currentAssetBooks =
+        ref.read(assetBooksProvider).value ?? _initialAssetBooks;
+    final bindings = _buildAssetBookBindings(currentAssetBooks);
+    final effectiveDefaultId = editing
+        ? noRef
+        : _computeEffectiveDefaultAccountId(
+            config: effectiveConfig,
+            bookId: currentBookId,
+            assets: currentAssets,
+            assetBookBindings: bindings,
+          );
+
+    int nextAssetId = noRef;
+    int nextFromAssetId = noRef;
+    int nextToAssetId = noRef;
+    bool nextUserTouchedAsset = false;
+
+    if (prefill.type == RecordType.transfer) {
+      final validFrom = _isSelectableBookAsset(
+        prefill.fromAssetId,
+        bookId: currentBookId,
+        assets: currentAssets,
+        assetBookBindings: bindings,
+      );
+      final validTo = _isSelectableBookAsset(
+        prefill.toAssetId,
+        bookId: currentBookId,
+        assets: currentAssets,
+        assetBookBindings: bindings,
+      );
+      nextToAssetId = validTo ? prefill.toAssetId : noRef;
+      if (validFrom && prefill.fromAssetId != nextToAssetId) {
+        nextFromAssetId = prefill.fromAssetId;
+        nextUserTouchedAsset = true;
+      } else {
+        nextFromAssetId =
+            (effectiveDefaultId != noRef && effectiveDefaultId != nextToAssetId)
+            ? effectiveDefaultId
+            : noRef;
+        nextUserTouchedAsset = validTo;
+      }
+    } else {
+      final validAsset = _isSelectableBookAsset(
+        prefill.assetId,
+        bookId: currentBookId,
+        assets: currentAssets,
+        assetBookBindings: bindings,
+      );
+      if (validAsset) {
+        nextAssetId = prefill.assetId;
+        nextUserTouchedAsset = true;
+      } else {
+        nextAssetId = effectiveDefaultId;
+        nextUserTouchedAsset = false;
+      }
+    }
+
     setState(() {
       type = prefill.type;
       if (prefill.type == RecordType.transfer) {
@@ -878,9 +990,10 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
         _userTouchedCategory = false;
       }
       _remarksShowAllScope = false;
-      assetId = prefill.assetId;
-      fromAssetId = prefill.fromAssetId;
-      toAssetId = prefill.toAssetId;
+      assetId = nextAssetId;
+      fromAssetId = nextFromAssetId;
+      toAssetId = nextToAssetId;
+      _userTouchedAsset = nextUserTouchedAsset;
       _setAmountText(prefill.amountText);
       fee.text = prefill.feeText;
       feeFromTarget = prefill.feeFromTarget;
@@ -1094,6 +1207,10 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     assetId = widget.initialAsset ?? noRef;
     fromAssetId = widget.initialFrom ?? noRef;
     toAssetId = widget.initialTo ?? noRef;
+    _userTouchedAsset =
+        widget.initialAsset != null ||
+        widget.initialFrom != null ||
+        widget.initialTo != null;
     if (widget.initialAmount != null) _setAmountText(widget.initialAmount!);
     if (widget.initialRemark != null) remark.text = widget.initialRemark!;
     if (!editing && widget.initialRecordTimeMs != null) {
@@ -1185,6 +1302,10 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
   Future<void> _load() async {
     try {
       final db = await ref.read(databaseProvider.future);
+      final loadedAssets = await db.select(db.assets).get();
+      final loadedAssetBooks = await db.select(db.assetBooks).get();
+      _initialAssets = loadedAssets;
+      _initialAssetBooks = loadedAssetBooks;
       if (editing) {
         await _loadExisting(db, widget.recordId!);
         if (_resolvedBookId != null) {
@@ -1197,11 +1318,11 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
         final cats = await LedgerQueries(db).getCategories(_resolvedBookId!);
         _initialCategoriesBookId = _resolvedBookId;
         _initialCategories = cats;
+        final diyConfig = await _resolveLatestDiyConfig(db);
         if (widget.initialTemplateId != null) {
           final prefill = await TemplateRemarkService(
             db,
           ).buildTemplatePrefill(widget.initialTemplateId!);
-          final diyConfig = await _resolveLatestDiyConfig(db);
           final autoSelect = diyConfig.isEnabled(
             DiyToolbarAction.autoSelectFirstCategory,
           );
@@ -1216,22 +1337,47 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
               prefill,
               fallbackFirstCategory: fallbackCat,
               autoSelectFirstOverride: autoSelect,
+              diyConfigOverride: diyConfig,
             );
           }
-        } else if (widget.initialCategory == null &&
-            type != RecordType.transfer &&
-            categoryId == null &&
-            !_userTouchedCategory) {
-          final diyConfig = await _resolveLatestDiyConfig(db);
-          if (diyConfig.isEnabled(DiyToolbarAction.autoSelectFirstCategory)) {
-            final first = _firstTopCategoryForType(type, cats);
-            if (first != null &&
-                mounted &&
-                categoryId == null &&
-                !_userTouchedCategory &&
-                type != RecordType.transfer) {
-              categoryId = first.id;
-              parentCatId = first.id;
+        } else {
+          if (widget.initialCategory == null &&
+              type != RecordType.transfer &&
+              categoryId == null &&
+              !_userTouchedCategory) {
+            if (diyConfig.isEnabled(DiyToolbarAction.autoSelectFirstCategory)) {
+              final first = _firstTopCategoryForType(type, cats);
+              if (first != null &&
+                  mounted &&
+                  categoryId == null &&
+                  !_userTouchedCategory &&
+                  type != RecordType.transfer) {
+                categoryId = first.id;
+                parentCatId = first.id;
+              }
+            }
+          }
+          if (mounted && !_userTouchedAsset) {
+            final effectiveDefaultId = _computeEffectiveDefaultAccountId(
+              config: diyConfig,
+              bookId: _resolvedBookId,
+              assets: loadedAssets,
+              assetBookBindings: _buildAssetBookBindings(loadedAssetBooks),
+            );
+            if (type == RecordType.transfer) {
+              if (fromAssetId == noRef) {
+                fromAssetId =
+                    (effectiveDefaultId != noRef &&
+                        effectiveDefaultId != toAssetId)
+                    ? effectiveDefaultId
+                    : noRef;
+                _autoConvert();
+              }
+            } else {
+              if (assetId == noRef) {
+                assetId = effectiveDefaultId;
+                _autoConvert();
+              }
             }
           }
         }
@@ -1479,10 +1625,31 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
               currentCategories,
             );
           }
+          final resetToDefaultAccount =
+              effectiveDiyConfig.autoSelectDefaultAccount;
+          var nextDefaultAccountId = noRef;
+          List<Asset>? refreshedAssets;
+          List<AssetBook>? refreshedAssetBooks;
+          if (resetToDefaultAccount) {
+            refreshedAssets = await db.select(db.assets).get();
+            refreshedAssetBooks = await db.select(db.assetBooks).get();
+            nextDefaultAccountId = _computeEffectiveDefaultAccountId(
+              config: effectiveDiyConfig,
+              bookId: bookId,
+              assets: refreshedAssets,
+              assetBookBindings: _buildAssetBookBindings(refreshedAssetBooks),
+            );
+          }
           if (!mounted) return;
           setState(() {
             busy = false;
             _draftNonce++;
+            if (refreshedAssets != null) {
+              _initialAssets = refreshedAssets;
+            }
+            if (refreshedAssetBooks != null) {
+              _initialAssetBooks = refreshedAssetBooks;
+            }
             _setAmountText('');
             converted.clear();
             convertedEdited = false;
@@ -1498,6 +1665,19 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
               parentCatId = nextAutoFirstCat?.id;
               _userTouchedCategory = false;
             }
+            if (resetToDefaultAccount) {
+              _userTouchedAsset = false;
+              if (type == RecordType.transfer) {
+                toAssetId = noRef;
+                fromAssetId = nextDefaultAccountId;
+                assetId = noRef;
+              } else {
+                assetId = nextDefaultAccountId;
+                fromAssetId = noRef;
+                toAssetId = noRef;
+              }
+            }
+            _autoConvert();
             _panelMode = _BottomPanelMode.customKeypad;
             _desktopRemarksExpanded = false;
             _savedAndResetBanner = true;
@@ -1795,9 +1975,47 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     required List<Asset> assets,
     required int currentId,
     required bool allowNone,
+    int defaultAccountId = noRef,
     required ValueChanged<int> onSelected,
   }) async {
     _unfocusOsKeyboardFields();
+    Widget buildAccountTitle(BuildContext ctx, Asset a) {
+      final isDefault =
+          defaultAccountId != noRef &&
+          a.id == defaultAccountId &&
+          a.status == AssetStatus.active &&
+          a.type != AssetType.debt;
+      if (!isDefault) {
+        return Text(a.name, maxLines: 1, overflow: TextOverflow.ellipsis);
+      }
+      final itemCs = Theme.of(ctx).colorScheme;
+      return Row(
+        children: [
+          Flexible(
+            child: Text(a.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+          ),
+          const SizedBox(width: 6),
+          Container(
+            key: Key('account-default-badge-${a.id}'),
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+            decoration: BoxDecoration(
+              color: itemCs.secondaryContainer,
+              borderRadius: BorderRadius.circular(999),
+            ),
+            child: Text(
+              '默认',
+              style: TextStyle(
+                fontSize: 10.5,
+                fontWeight: FontWeight.w600,
+                color: itemCs.onSecondaryContainer,
+                height: 1.2,
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
     final isDesktop = _isDesktopActive;
     final int? chosen;
     if (isDesktop) {
@@ -1888,7 +2106,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                               size: 34,
                               selected: currentId == a.id,
                             ),
-                            title: Text(a.name),
+                            title: buildAccountTitle(dialogCtx, a),
                             subtitle: Text(
                               '${normalizeCurrency(a.currency) ?? baseCurrency} · ${formatMinor(a.balanceMinor)}',
                               style: const TextStyle(fontSize: 12),
@@ -1981,7 +2199,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                               size: 36,
                               selected: currentId == a.id,
                             ),
-                            title: Text(a.name),
+                            title: buildAccountTitle(sheetCtx, a),
                             subtitle: Text(
                               '${normalizeCurrency(a.currency) ?? baseCurrency} · ${formatMinor(a.balanceMinor)}',
                               style: const TextStyle(fontSize: 12),
@@ -2423,11 +2641,25 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
               (bookId == _initialCategoriesBookId
                   ? _initialCategories
                   : const <RecordCategory>[]));
-    final assets = (ref.watch(assetsProvider).value ?? const <Asset>[])
-        .where(
-          (a) => a.status != AssetStatus.settled && a.type != AssetType.debt,
-        )
-        .toList();
+    final rawAssets = ref.watch(assetsProvider).value ?? _initialAssets;
+    final rawAssetBooks =
+        ref.watch(assetBooksProvider).value ?? _initialAssetBooks;
+    final assetBookBindings = _buildAssetBookBindings(rawAssetBooks);
+    final preservedEditAssetIds = <int>{
+      if (editing && original != null) ...[
+        if (original!.assetId != noRef) original!.assetId,
+        if (original!.fromAssetId != noRef) original!.fromAssetId,
+        if (original!.toAssetId != noRef) original!.toAssetId,
+      ],
+    };
+    final assets = rawAssets.where((a) {
+      if (preservedEditAssetIds.contains(a.id)) {
+        return a.type != AssetType.debt;
+      }
+      return a.status == AssetStatus.active &&
+          a.type != AssetType.debt &&
+          _isAssetVisibleInBook(a.id, bookId, assetBookBindings);
+    }).toList();
     final tags = (ref.watch(activeTagsProvider).value ?? const <Tag>[])
         .where((t) => t.parent != 1)
         .toList();
@@ -2445,6 +2677,88 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     final diyConfig =
         ref.watch(diyToolbarConfigProvider).value ??
         DiyToolbarConfig.defaults();
+    final effectiveDefaultAccountId = editing
+        ? noRef
+        : _computeEffectiveDefaultAccountId(
+            config: diyConfig,
+            bookId: bookId,
+            assets: rawAssets,
+            assetBookBindings: assetBookBindings,
+          );
+
+    void syncUntouchedDefaultAccountFromLiveCatalog({
+      required List<Asset> latestAssets,
+      required List<AssetBook> latestAssetBooks,
+    }) {
+      if (loading || editing || _userTouchedAsset) return;
+      final currentBookId =
+          original?.accountBookId ??
+          ref.read(currentBookIdProvider).value ??
+          _resolvedBookId;
+      final latestBindings = _buildAssetBookBindings(latestAssetBooks);
+      final currentCfg =
+          ref.read(diyToolbarConfigProvider).value ??
+          DiyToolbarConfig.defaults();
+      final nextEffective = _computeEffectiveDefaultAccountId(
+        config: currentCfg,
+        bookId: currentBookId,
+        assets: latestAssets,
+        assetBookBindings: latestBindings,
+      );
+      if (type == RecordType.transfer) {
+        final currentFromValid = _isSelectableBookAsset(
+          fromAssetId,
+          bookId: currentBookId,
+          assets: latestAssets,
+          assetBookBindings: latestBindings,
+        );
+        if (fromAssetId == noRef || !currentFromValid) {
+          final target = (nextEffective != noRef && nextEffective != toAssetId)
+              ? nextEffective
+              : noRef;
+          if (fromAssetId != target) {
+            setState(() {
+              fromAssetId = target;
+              convertedEdited = false;
+              _autoConvert();
+            });
+          }
+        }
+      } else {
+        final currentValid = _isSelectableBookAsset(
+          assetId,
+          bookId: currentBookId,
+          assets: latestAssets,
+          assetBookBindings: latestBindings,
+        );
+        if (assetId == noRef || !currentValid) {
+          if (assetId != nextEffective) {
+            setState(() {
+              assetId = nextEffective;
+              convertedEdited = false;
+              _autoConvert();
+            });
+          }
+        }
+      }
+    }
+
+    ref.listen<AsyncValue<List<Asset>>>(assetsProvider, (_, next) {
+      if (!next.hasValue) return;
+      syncUntouchedDefaultAccountFromLiveCatalog(
+        latestAssets: next.value!,
+        latestAssetBooks:
+            ref.read(assetBooksProvider).value ?? _initialAssetBooks,
+      );
+    });
+
+    ref.listen<AsyncValue<List<AssetBook>>>(assetBooksProvider, (_, next) {
+      if (!next.hasValue) return;
+      syncUntouchedDefaultAccountFromLiveCatalog(
+        latestAssets: ref.read(assetsProvider).value ?? _initialAssets,
+        latestAssetBooks: next.value!,
+      );
+    });
 
     ref.listen<AsyncValue<DiyToolbarConfig>>(diyToolbarConfigProvider, (
       prev,
@@ -2486,6 +2800,57 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
           });
         }
       }
+      if (!loading && !editing && !_userTouchedAsset && next.hasValue) {
+        final currentBookId =
+            original?.accountBookId ??
+            ref.read(currentBookIdProvider).value ??
+            _resolvedBookId;
+        final currentAssets = ref.read(assetsProvider).value ?? _initialAssets;
+        final currentBindings = _buildAssetBookBindings(
+          ref.read(assetBooksProvider).value ?? _initialAssetBooks,
+        );
+        final prevEffective = prev?.value == null
+            ? noRef
+            : _computeEffectiveDefaultAccountId(
+                config: prev!.value!,
+                bookId: currentBookId,
+                assets: currentAssets,
+                assetBookBindings: currentBindings,
+              );
+        final nextEffective = _computeEffectiveDefaultAccountId(
+          config: next.value!,
+          bookId: currentBookId,
+          assets: currentAssets,
+          assetBookBindings: currentBindings,
+        );
+        if (type == RecordType.transfer) {
+          if (fromAssetId == noRef ||
+              (prevEffective != noRef && fromAssetId == prevEffective)) {
+            final target =
+                (nextEffective != noRef && nextEffective != toAssetId)
+                ? nextEffective
+                : noRef;
+            if (fromAssetId != target) {
+              setState(() {
+                fromAssetId = target;
+                convertedEdited = false;
+                _autoConvert();
+              });
+            }
+          }
+        } else {
+          if (assetId == noRef ||
+              (prevEffective != noRef && assetId == prevEffective)) {
+            if (assetId != nextEffective) {
+              setState(() {
+                assetId = nextEffective;
+                convertedEdited = false;
+                _autoConvert();
+              });
+            }
+          }
+        }
+      }
     });
 
     final isDesktop = DesktopAdaptive.isDesktop(context);
@@ -2509,6 +2874,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
             context,
             categories: categories,
             diyConfig: diyConfig,
+            effectiveDefaultAccountId: effectiveDefaultAccountId,
           ),
           // Zone 2 + Zone 3: Scrollable middle zone + unified bottom dock & slot
           Expanded(
@@ -2871,6 +3237,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     BuildContext context, {
     required List<RecordCategory> categories,
     required DiyToolbarConfig diyConfig,
+    required int effectiveDefaultAccountId,
   }) {
     final isDesktop = DesktopAdaptive.isDesktop(context);
     final cs = Theme.of(context).colorScheme;
@@ -2922,15 +3289,27 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                     if (_panelMode == _BottomPanelMode.frequentRemarks) {
                       _panelMode = _BottomPanelMode.customKeypad;
                     }
-                  } else if (diyConfig.isEnabled(
-                    DiyToolbarAction.autoSelectFirstCategory,
-                  )) {
-                    final first = _firstTopCategoryForType(value, categories);
-                    categoryId = first?.id;
-                    parentCatId = first?.id;
+                    if (!_userTouchedAsset && fromAssetId == noRef) {
+                      fromAssetId =
+                          (effectiveDefaultAccountId != noRef &&
+                              effectiveDefaultAccountId != toAssetId)
+                          ? effectiveDefaultAccountId
+                          : noRef;
+                    }
                   } else {
-                    categoryId = null;
-                    parentCatId = null;
+                    if (diyConfig.isEnabled(
+                      DiyToolbarAction.autoSelectFirstCategory,
+                    )) {
+                      final first = _firstTopCategoryForType(value, categories);
+                      categoryId = first?.id;
+                      parentCatId = first?.id;
+                    } else {
+                      categoryId = null;
+                      parentCatId = null;
+                    }
+                    if (!_userTouchedAsset && assetId == noRef) {
+                      assetId = effectiveDefaultAccountId;
+                    }
                   }
                   _remarksShowAllScope = false;
                   _autoConvert();
@@ -3024,7 +3403,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
           SliverPadding(
             padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
             sliver: SliverToBoxAdapter(
-              child: _buildTransferCard(context, assets),
+              child: _buildTransferCard(context, assets, diyConfig: diyConfig),
             ),
           )
         else ...[
@@ -3071,10 +3450,32 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     );
   }
 
-  Widget _buildTransferCard(BuildContext context, List<Asset> assets) {
+  Widget _buildTransferCard(
+    BuildContext context,
+    List<Asset> assets, {
+    required DiyToolbarConfig diyConfig,
+  }) {
     final cs = Theme.of(context).colorScheme;
-    final fromAsset = assets.where((a) => a.id == fromAssetId).firstOrNull;
-    final toAsset = assets.where((a) => a.id == toAssetId).firstOrNull;
+    final allLookupAssets =
+        ref.read(assetsProvider).value ??
+        (_initialAssets.isNotEmpty ? _initialAssets : assets);
+    final fromAsset =
+        assets.where((a) => a.id == fromAssetId).firstOrNull ??
+        (widget.initialFrom != null && fromAssetId == widget.initialFrom
+            ? allLookupAssets
+                  .where((a) => a.id == fromAssetId && a.type != AssetType.debt)
+                  .firstOrNull
+            : null);
+    final toAsset =
+        assets.where((a) => a.id == toAssetId).firstOrNull ??
+        (widget.initialTo != null && toAssetId == widget.initialTo
+            ? allLookupAssets
+                  .where((a) => a.id == toAssetId && a.type != AssetType.debt)
+                  .firstOrNull
+            : null);
+    final configuredDefaultId = diyConfig.autoSelectDefaultAccount
+        ? diyConfig.defaultAccountId
+        : noRef;
 
     Widget accountSlot({
       required Key key,
@@ -3098,7 +3499,9 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                       assets: assets,
                       currentId: asset?.id ?? noRef,
                       allowNone: false,
+                      defaultAccountId: configuredDefaultId,
                       onSelected: (v) => setState(() {
+                        _userTouchedAsset = true;
                         onPick(v);
                         convertedEdited = false;
                         _autoConvert();
@@ -3209,6 +3612,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                   onPressed: busy
                       ? null
                       : () => setState(() {
+                          _userTouchedAsset = true;
                           final tmp = fromAssetId;
                           fromAssetId = toAssetId;
                           toAssetId = tmp;
@@ -3348,7 +3752,9 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
       }
     }
 
-    final allAssets = ref.watch(assetsProvider).value ?? assets;
+    final allAssets =
+        ref.watch(assetsProvider).value ??
+        (_initialAssets.isNotEmpty ? _initialAssets : assets);
     final currentAsset = allAssets.where((a) => a.id == assetId).firstOrNull;
     final fromAsset = allAssets.where((a) => a.id == fromAssetId).firstOrNull;
     final toAsset = allAssets.where((a) => a.id == toAssetId).firstOrNull;
@@ -4586,7 +4992,19 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     final isDesktop = DesktopAdaptive.isDesktop(context);
     final cs = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final currentAsset = assets.where((a) => a.id == assetId).firstOrNull;
+    final allLookupAssets =
+        ref.read(assetsProvider).value ??
+        (_initialAssets.isNotEmpty ? _initialAssets : assets);
+    final currentAsset =
+        assets.where((a) => a.id == assetId).firstOrNull ??
+        (widget.initialAsset != null && assetId == widget.initialAsset
+            ? allLookupAssets
+                  .where((a) => a.id == assetId && a.type != AssetType.debt)
+                  .firstOrNull
+            : null);
+    final configuredDefaultId = diyConfig.autoSelectDefaultAccount
+        ? diyConfig.defaultAccountId
+        : noRef;
     final selectedTags = tags
         .where((t) => selectedTagIds.contains(t.tagId))
         .toList();
@@ -4689,7 +5107,9 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
               assets: assets,
               currentId: currentAsset?.id ?? noRef,
               allowNone: true,
+              defaultAccountId: configuredDefaultId,
               onSelected: (v) => setState(() {
+                _userTouchedAsset = true;
                 assetId = v;
                 _autoConvert();
               }),

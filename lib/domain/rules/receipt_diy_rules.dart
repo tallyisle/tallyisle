@@ -410,7 +410,10 @@ final class DiyToolbarConfig {
     List<DiyToolbarItem> items, {
     this.datePickerStyle = RecordDatePickerStyle.calendar,
     this.timePickerStyle = RecordTimePickerStyle.wheel,
-  }) : items = List<DiyToolbarItem>.unmodifiable(items);
+    this.autoSelectDefaultAccount = false,
+    int defaultAccountId = noRef,
+  }) : defaultAccountId = defaultAccountId > 0 ? defaultAccountId : noRef,
+       items = List<DiyToolbarItem>.unmodifiable(items);
 
   factory DiyToolbarConfig.defaults() => DiyToolbarConfig._(
     [
@@ -419,12 +422,16 @@ final class DiyToolbarConfig {
     ],
     datePickerStyle: RecordDatePickerStyle.calendar,
     timePickerStyle: RecordTimePickerStyle.wheel,
+    autoSelectDefaultAccount: false,
+    defaultAccountId: noRef,
   );
 
   factory DiyToolbarConfig.normalize(
     Iterable<DiyToolbarItem> rawItems, {
     RecordDatePickerStyle datePickerStyle = RecordDatePickerStyle.calendar,
     RecordTimePickerStyle timePickerStyle = RecordTimePickerStyle.wheel,
+    bool autoSelectDefaultAccount = false,
+    int defaultAccountId = noRef,
   }) {
     final seen = <DiyToolbarAction>{};
     final normalized = <DiyToolbarItem>[];
@@ -444,12 +451,16 @@ final class DiyToolbarConfig {
       normalized,
       datePickerStyle: datePickerStyle,
       timePickerStyle: timePickerStyle,
+      autoSelectDefaultAccount: autoSelectDefaultAccount,
+      defaultAccountId: defaultAccountId,
     );
   }
 
   final List<DiyToolbarItem> items;
   final RecordDatePickerStyle datePickerStyle;
   final RecordTimePickerStyle timePickerStyle;
+  final bool autoSelectDefaultAccount;
+  final int defaultAccountId;
 
   List<DiyToolbarAction> get visibleActions => [
     for (final item in items)
@@ -466,6 +477,20 @@ final class DiyToolbarConfig {
     items,
     datePickerStyle: datePickerStyle ?? this.datePickerStyle,
     timePickerStyle: timePickerStyle ?? this.timePickerStyle,
+    autoSelectDefaultAccount: autoSelectDefaultAccount,
+    defaultAccountId: defaultAccountId,
+  );
+
+  DiyToolbarConfig copyWithDefaultAccount({
+    bool? autoSelectDefaultAccount,
+    int? defaultAccountId,
+  }) => DiyToolbarConfig._(
+    items,
+    datePickerStyle: datePickerStyle,
+    timePickerStyle: timePickerStyle,
+    autoSelectDefaultAccount:
+        autoSelectDefaultAccount ?? this.autoSelectDefaultAccount,
+    defaultAccountId: defaultAccountId ?? this.defaultAccountId,
   );
 
   DiyToolbarConfig setEnabled(DiyToolbarAction action, bool enabled) =>
@@ -479,6 +504,8 @@ final class DiyToolbarConfig {
         ],
         datePickerStyle: datePickerStyle,
         timePickerStyle: timePickerStyle,
+        autoSelectDefaultAccount: autoSelectDefaultAccount,
+        defaultAccountId: defaultAccountId,
       );
 
   /// Reorders items using `ReorderableListView`'s `(oldIndex, newIndex)` convention.
@@ -508,6 +535,8 @@ final class DiyToolbarConfig {
       next,
       datePickerStyle: datePickerStyle,
       timePickerStyle: timePickerStyle,
+      autoSelectDefaultAccount: autoSelectDefaultAccount,
+      defaultAccountId: defaultAccountId,
     );
   }
 
@@ -516,6 +545,8 @@ final class DiyToolbarConfig {
     'items': [for (final item in items) item.toJson()],
     'datePickerStyle': datePickerStyle.key,
     'timePickerStyle': timePickerStyle.key,
+    'autoSelectDefaultAccount': autoSelectDefaultAccount,
+    'defaultAccountId': defaultAccountId,
   };
 
   String encode() => jsonEncode(toJson());
@@ -535,7 +566,9 @@ final class DiyToolbarConfig {
       Map m
           when !m.containsKey('items') &&
               (m.containsKey('datePickerStyle') ||
-                  m.containsKey('timePickerStyle')) =>
+                  m.containsKey('timePickerStyle') ||
+                  m.containsKey('autoSelectDefaultAccount') ||
+                  m.containsKey('defaultAccountId')) =>
         const <Object?>[],
       List l => l,
       _ => null,
@@ -548,6 +581,21 @@ final class DiyToolbarConfig {
     final timePickerStyle = decoded is Map
         ? RecordTimePickerStyle.fromKey(decoded['timePickerStyle'])
         : RecordTimePickerStyle.wheel;
+    final autoSelectDefaultAccount =
+        decoded is Map && decoded['autoSelectDefaultAccount'] is bool
+        ? decoded['autoSelectDefaultAccount'] as bool
+        : false;
+    final int rawDefaultAccountId = decoded is Map
+        ? switch (decoded['defaultAccountId']) {
+            int v => v,
+            num n => n.toInt(),
+            String s => int.tryParse(s.trim()) ?? noRef,
+            _ => noRef,
+          }
+        : noRef;
+    final defaultAccountId = rawDefaultAccountId > 0
+        ? rawDefaultAccountId
+        : noRef;
 
     final parsed = <DiyToolbarItem>[];
     for (final entry in rawList) {
@@ -571,6 +619,8 @@ final class DiyToolbarConfig {
       parsed,
       datePickerStyle: datePickerStyle,
       timePickerStyle: timePickerStyle,
+      autoSelectDefaultAccount: autoSelectDefaultAccount,
+      defaultAccountId: defaultAccountId,
     );
   }
 
@@ -580,6 +630,8 @@ final class DiyToolbarConfig {
     if (other is! DiyToolbarConfig) return false;
     if (other.datePickerStyle != datePickerStyle ||
         other.timePickerStyle != timePickerStyle ||
+        other.autoSelectDefaultAccount != autoSelectDefaultAccount ||
+        other.defaultAccountId != defaultAccountId ||
         other.items.length != items.length) {
       return false;
     }
@@ -590,8 +642,47 @@ final class DiyToolbarConfig {
   }
 
   @override
-  int get hashCode =>
-      Object.hash(Object.hashAll(items), datePickerStyle, timePickerStyle);
+  int get hashCode => Object.hash(
+    Object.hashAll(items),
+    datePickerStyle,
+    timePickerStyle,
+    autoSelectDefaultAccount,
+    defaultAccountId,
+  );
+}
+
+/// Resolves the effective default account ID for a new bill in [bookId].
+///
+/// Returns [noRef] unless [config.autoSelectDefaultAccount] is `true` and
+/// [config.defaultAccountId] points to an existing active (`status == 0`)
+/// non-debt (`type != 4`) account visible in [bookId].
+int resolveEffectiveDefaultAccountId({
+  required DiyToolbarConfig config,
+  required int bookId,
+  required Iterable<({int id, int type, int status})> assets,
+  required Map<int, Set<int>> assetBookBindings,
+}) {
+  if (!config.autoSelectDefaultAccount ||
+      config.defaultAccountId == noRef ||
+      config.defaultAccountId <= 0) {
+    return noRef;
+  }
+  final targetId = config.defaultAccountId;
+  ({int id, int type, int status})? target;
+  for (final a in assets) {
+    if (a.id == targetId) {
+      target = a;
+      break;
+    }
+  }
+  if (target == null) return noRef;
+  if (target.status != AssetStatus.active) return noRef;
+  if (target.type == AssetType.debt) return noRef;
+  final bound = assetBookBindings[target.id];
+  if (bound != null && bound.isNotEmpty && !bound.contains(bookId)) {
+    return noRef;
+  }
+  return target.id;
 }
 
 // ---------------------------------------------------------------------------
