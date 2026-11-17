@@ -115,7 +115,7 @@ class AboutHelpPage extends StatelessWidget {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  '基于 Flutter 构建 · 支持 Android / iOS / Windows / Linux / macOS',
+                  '基于 Flutter 构建 · 支持 Android / iOS / HarmonyOS / Windows / Linux / macOS 六端',
                   textAlign: TextAlign.center,
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: scheme.onSurfaceVariant,
@@ -206,8 +206,8 @@ class AboutHelpPage extends StatelessWidget {
               ListTile(
                 key: const Key('about_licenses_tile'),
                 leading: const Icon(Icons.description_outlined),
-                title: const Text('开源组件许可'),
-                subtitle: const Text('查看帐屿所使用的开源软件许可证'),
+                title: const Text('开源组件与图标许可'),
+                subtitle: const Text('查看帐屿所使用的开源软件及银行矢量图标许可证（MIT）'),
                 trailing: const Icon(Icons.chevron_right),
                 onTap: () {
                   showLicensePage(
@@ -258,6 +258,21 @@ class AboutHelpPage extends StatelessWidget {
           child: Column(
             children: [
               ExpansionTile(
+                key: Key('faq_cloud_sync_usage_tile'),
+                leading: Icon(Icons.cloud_sync_outlined),
+                title: Text('多端云同步适用于什么场景？可以多台设备同时离线记账吗？'),
+                childrenPadding: EdgeInsets.fromLTRB(16, 0, 16, 16),
+                children: [
+                  Text(
+                    '帐屿多端云同步（WebDAV / S3）采用「整库快照版本接力」机制，适用于「同一时段固定在一台主力设备记账，换用另一台设备前先同步接力」的场景：\n'
+                    '1. 标准换机接力：在旧主力设备完成记账并执行一次同步推送（或开启空闲/退出自动同步），再在新设备打开应用拉取最新快照后继续记账。\n'
+                    '2. 避免多机并发离线记账：请勿在多台设备离线或未同步状态下同时新增/修改账单，否则双端会产生快照版本分叉冲突。\n'
+                    '3. 冲突零丢数保护：一旦检测到双端均有未同步的新改动，系统绝不静默覆盖，会自动将本机完整数据（含图片附件）归档保存为 conflict_*.tally（同时留存于本机与云端备份列表），再由您显式选择保留版本。',
+                  ),
+                ],
+              ),
+              Divider(height: 1),
+              ExpansionTile(
                 leading: Icon(Icons.credit_card_outlined),
                 title: Text('信用账户的“授信额度”与当前余额有什么关系？'),
                 childrenPadding: EdgeInsets.fromLTRB(16, 0, 16, 16),
@@ -296,7 +311,7 @@ class AboutHelpPage extends StatelessWidget {
                 childrenPadding: EdgeInsets.fromLTRB(16, 0, 16, 16),
                 children: [
                   Text(
-                    '您可在数据备份与导出页面随时导出完整离线 .tally 备份包（或通过自托管 WebDAV / S3 备份恢复），同时支持导出标准 CSV 表格及兼容导入历史备份文件。',
+                    '移动端可在首页右上角「同步与备份」按钮或「更多」页顶部快捷卡片一键执行云同步、本地备份与 .tally 另存导出；桌面端与完整配置可在「更多 → 云同步与备份」管理 WebDAV / S3、导出标准 CSV 表格及导入历史备份文件。',
                   ),
                 ],
               ),

@@ -12,6 +12,7 @@ import '../../domain/rules/app_settings_rules.dart';
 import '../../domain/rules/asset_overview.dart';
 import '../../domain/rules/income_expense.dart';
 import '../books/book_switcher_modal.dart';
+import '../backup/mobile_sync_backup_quick_sheet.dart';
 import '../budget/budget_providers.dart'
     show budgetOffsetProvider, budgetOverviewForOffsetProvider;
 import '../budget/budget_widgets.dart';
@@ -259,6 +260,13 @@ class _HomePageState extends ConsumerState<HomePage> {
                 ),
               ),
               actions: [
+                if (!isDesktop)
+                  IconButton(
+                    key: const Key('home-sync-backup-button'),
+                    tooltip: '同步与备份',
+                    icon: const Icon(Icons.cloud_sync_outlined),
+                    onPressed: () => showMobileSyncBackupQuickSheet(context),
+                  ),
                 IconButton(
                   key: const Key('home-calendar-button'),
                   tooltip: '日历',

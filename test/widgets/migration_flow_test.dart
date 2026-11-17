@@ -178,7 +178,9 @@ void main() {
         findsOneWidget,
       );
       expect(
-        find.textContaining('Android / iOS / Windows / Linux / macOS'),
+        find.textContaining(
+          'Android / iOS / HarmonyOS / Windows / Linux / macOS',
+        ),
         findsOneWidget,
       );
       expect(find.textContaining('数据格式 100% 统一'), findsOneWidget);

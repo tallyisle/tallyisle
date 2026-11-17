@@ -1,14 +1,14 @@
 # 帐屿 · TallyIsle
 
-本地优先的多平台个人记账与资产管理应用（Flutter + Drift SQLite），支持 **Android / iOS / Windows / Linux / macOS** 五端统一数据格式与离线账务引擎。
+本地优先的多平台个人记账与资产管理应用（Flutter + Drift SQLite），支持 **Android / iOS / HarmonyOS / Windows / Linux / macOS** 六端统一数据格式与离线账务引擎。
 
 ## 核心特性
 
 - **精确整数账务引擎**：金额全程采用整数“分”（`int64` / `Money` `BigInt`）计算与存储，杜绝浮点精度误差。
 - **完整记账链路**：支出、收入、转账（含手续费与跨币种）、退款、分次报销、预收/预支结算、二级分类、多标签、多账本与自定义月起始日、搜索筛选与日历视图。
-- **资产与多币种**：资金账户与信用卡账期管理（额度、账单日、还款日、免息期计算与一键还款）、账户对账模式、离线自定义汇率与免密钥多源在线汇率更新。
+- **资产与多币种**：资金账户与信用卡账期管理（额度、账单日、还款日、免息期计算与一键还款）、内置银行/支付高清矢量行标与智能关联、账户对账模式、离线自定义汇率与免密钥多源在线汇率更新。
 - **多维统计与预算**：底部统一统计总览、月/年总预算与支出/储蓄分类预算（超额自动联动与结余结转）、分类趋势与一级/二级平铺下钻、净资产/总资产/总负债历史守恒逆推、年度账单与年度报告。
-- **跨端备份与数据流转**：五端 100% 统一的 `.tally` 全量备份包（本地文件、WebDAV、S3 兼容对象存储与退出自动同步），同时支持第三方记账软件与微信支付/支付宝 CSV 增量迁入。
+- **跨端备份与数据流转**：六端 100% 统一的 `.tally` 全量备份包（本地文件、WebDAV、S3 兼容对象存储与单设备接力云同步），同时支持第三方记账软件与微信支付/支付宝 CSV 增量迁入。
 
 ## 多平台支持与原生体验
 
@@ -16,6 +16,7 @@
 |---|---|---|
 | **Android** | `帐屿-Android-正式版.apk` / `开发版.apk` | SAF 文件保存、系统分享、桌面小组件、每日提醒通知、生物识别与应用锁、无障碍自动记账 |
 | **iOS / iPadOS** | `帐屿-iOS-unsigned.ipa`（支持 AltStore / SideStore / Sideloadly 自签安装） | 原生“文件”应用共享（`UIFileSharingEnabled`）与 `UIActivityViewController` 导出/分享（含 iPad 居中浮层适配） |
+| **HarmonyOS** | 原生鸿蒙安装包（`.hap` / `.app`） | 原生鸿蒙（HarmonyOS NEXT）运行适配，与其余五端共享同一套整数账务引擎与 `.tally` 数据格式 |
 | **Windows** | `帐屿-Windows-x64.zip` | Win32 原生窗口（`tallyisle.exe`）、多尺寸高清图标与系统保存/打开对话框 |
 | **Linux (KDE / GNOME)** | `帐屿-Linux-x64.tar.gz` | **KDE Plasma 原生体验优化**：Wayland/X11 自动识别 KWin 原生标题栏（不强塞 GNOME HeaderBar），并通过 `xdg-desktop-portal-kde` 调起原生 Dolphin/Qt 文件选择器 |
 | **macOS** | `帐屿-macOS.zip` | App Sandbox 网络与用户选定文件读写权限、Ad-hoc 签名开箱即用 |

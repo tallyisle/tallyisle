@@ -445,7 +445,7 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        '1. 帐屿各端（Android / iOS / Windows / Linux / macOS）数据格式 100% 统一，'
+                        '1. 帐屿六端（Android / iOS / HarmonyOS / Windows / Linux / macOS）数据格式 100% 统一，'
                         '日常多设备流转请使用「云同步与备份（.tally / WebDAV / S3）」；\n'
                         '2. 本页专用于第三方记账软件与外部平台历史数据迁入'
                         '（全量迁入采用单事务安全替换，并自动保留本机已有便签与自定义汇率）。',

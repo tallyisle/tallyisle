@@ -872,6 +872,78 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                 style: Theme.of(context).textTheme.titleMedium,
                               ),
                               const SizedBox(height: 8),
+                              Builder(
+                                builder: (context) {
+                                  final theme = Theme.of(context);
+                                  final scheme = theme.colorScheme;
+                                  final isDark =
+                                      theme.brightness == Brightness.dark;
+                                  return Container(
+                                    key: const Key(
+                                      'cloud_sync_single_device_notice',
+                                    ),
+                                    padding: const EdgeInsets.all(12),
+                                    decoration: BoxDecoration(
+                                      color: isDark
+                                          ? scheme.tertiaryContainer.withValues(
+                                              alpha: 0.34,
+                                            )
+                                          : scheme.tertiaryContainer.withValues(
+                                              alpha: 0.62,
+                                            ),
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: Border.all(
+                                        color: scheme.tertiary.withValues(
+                                          alpha: isDark ? 0.45 : 0.3,
+                                        ),
+                                      ),
+                                    ),
+                                    child: Row(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Icon(
+                                          Icons.warning_amber_rounded,
+                                          size: 20,
+                                          color: scheme.onTertiaryContainer,
+                                        ),
+                                        const SizedBox(width: 10),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                '使用前提：单设备主力记账 · 换设备前同步接力',
+                                                style: theme
+                                                    .textTheme
+                                                    .labelLarge
+                                                    ?.copyWith(
+                                                      fontWeight:
+                                                          FontWeight.w700,
+                                                      color: scheme
+                                                          .onTertiaryContainer,
+                                                    ),
+                                              ),
+                                              const SizedBox(height: 4),
+                                              Text(
+                                                '当前云同步采用整库快照接力机制（非逐笔实时合并），适用于同一时段固定在一台主力设备记账、换用另一台设备前先同步接力。请勿在多台设备离线或未同步状态下同时记账，以免产生快照冲突（若触发冲突，系统会自动归档 conflict_*.tally 保护本机数据零丢失）。',
+                                                style: theme.textTheme.bodySmall
+                                                    ?.copyWith(
+                                                      height: 1.38,
+                                                      color: scheme
+                                                          .onTertiaryContainer,
+                                                    ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                },
+                              ),
+                              const SizedBox(height: 10),
                               SizedBox(
                                 width: double.infinity,
                                 child: SegmentedButton<CloudBackendType>(

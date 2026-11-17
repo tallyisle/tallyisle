@@ -11,6 +11,7 @@ import '../automation/desktop_widgets_page.dart';
 import '../automation/ocr_bill_page.dart';
 import '../automation/url_scheme_page.dart';
 import '../backup/backup_page.dart';
+import '../backup/mobile_sync_backup_quick_sheet.dart';
 import '../bank_cards/bank_cards_page.dart';
 import '../batch_edit/batch_edit_page.dart';
 import '../books/books_page.dart';
@@ -808,12 +809,13 @@ class _MePageState extends ConsumerState<MePage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            if (!isDesktop) MobileMeSyncQuickCard(cardColor: sectionCardColor),
             for (var i = 0; i < sections.length; i++)
               _buildCardSection(
                 context,
                 section: sections[i],
                 sectionCardColor: sectionCardColor,
-                isFirst: i == 0,
+                isFirst: i == 0 && isDesktop,
               ),
           ],
         ),
