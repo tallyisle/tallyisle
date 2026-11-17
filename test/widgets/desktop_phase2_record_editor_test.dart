@@ -22,6 +22,7 @@ import 'package:tallyisle/domain/model/codes.dart';
 import 'package:tallyisle/features/backup/backup_providers.dart';
 import 'package:tallyisle/features/records/desktop_record_editor_dialog.dart';
 import 'package:tallyisle/features/records/record_editor_page.dart';
+import 'package:tallyisle/features/records/record_keypad.dart';
 import 'package:tallyisle/features/reminder/reminder_providers.dart';
 import 'package:tallyisle/platform/notifications.dart';
 
@@ -167,7 +168,10 @@ void main() {
       );
       final dialogRect = _dialogSurfaceRect(tester, dialogFinder);
       expect(dialogRect.width, closeTo(600.0, 1.0));
-      expect(dialogRect.height, lessThanOrEqualTo(740.0));
+      expect(
+        dialogRect.height,
+        lessThanOrEqualTo(kDesktopRecordDialogMaxHeight),
+      );
       expect(dialogRect.center.dx, closeTo(640.0, 1.0));
 
       // barrierDismissible: false -> tapping outside scrim must NOT dismiss dialog
@@ -945,6 +949,280 @@ void main() {
 
       final updated = await tester.runAsync(() => db.select(db.records).get());
       expect(updated!.single.moneyMinor, BigInt.from(8800));
+
+      await cleanUp();
+    },
+  );
+
+  testWidgets(
+    'Desktop remark row vertically centers left icon, EditableText, and clear button (dy diff <= 1.5px), and expanded keypad with all 8+ wrapped pills keeps summary-amount-row, amount, remark, keypad, and action-bar 100% visible without overlap at 1280x800 and 520x600',
+    variant: const TargetPlatformVariant(<TargetPlatform>{
+      TargetPlatform.linux,
+      TargetPlatform.windows,
+      TargetPlatform.macOS,
+    }),
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      final db = AppDatabase(NativeDatabase.memory());
+      final reminderScheduler = InMemoryReminderScheduler();
+      final tempRoot = (await tester.runAsync(
+        () => Directory.systemTemp.createTemp('desk_p2_geom_fix_'),
+      ))!;
+
+      await tester.runAsync(() async {
+        await CurrencyService(db).saveCurrency(
+          commandId: 'seed-usd-geom-fix',
+          code: 'USD',
+          name: '美元',
+          symbol: r'$',
+          price: '7.20',
+        );
+        final attSvc = BillAttachmentService(db);
+        final baseCfg = await attSvc.getDiyToolbarConfig();
+        // Enable all toolbar actions (except autoSelectFirstCategory so we also
+        // verify the "请选择分类  ¥ 14" summary state explicitly).
+        final allPillsConfig = DiyToolbarConfig.normalize([
+          for (final item in baseCfg.items)
+            item.copyWith(
+              enabled: item.action != DiyToolbarAction.autoSelectFirstCategory,
+            ),
+        ]);
+        await attSvc.saveDiyToolbarConfig(
+          commandId: 'enable-all-8-pills-geom',
+          config: allPillsConfig,
+        );
+      });
+
+      var closed = false;
+      Future<void> cleanUp() async {
+        if (closed) return;
+        closed = true;
+        await tester.pumpWidget(const SizedBox.shrink());
+        await _settle(tester, 4);
+        await tester.pump(const Duration(seconds: 1));
+        await tester.runAsync(reminderScheduler.dispose);
+        await tester.runAsync(db.close);
+        await tester.runAsync(() async {
+          if (await tempRoot.exists()) {
+            await tempRoot.delete(recursive: true);
+          }
+        });
+      }
+
+      addTearDown(cleanUp);
+
+      await tester.pumpWidget(
+        ProviderScope(
+          retry: (_, _) => null,
+          overrides: [
+            databaseProvider.overrideWith((ref) async => db),
+            reminderSchedulerProvider.overrideWithValue(reminderScheduler),
+            backupLocalDirectoryOverrideProvider.overrideWithValue(
+              () async => Directory(p.join(tempRoot.path, 'local')),
+            ),
+            backupAttachmentsDirectoryOverrideProvider.overrideWithValue(
+              () async => Directory(p.join(tempRoot.path, 'att')),
+            ),
+          ],
+          child: const TallyIsleApp(),
+        ),
+      );
+      await _settle(tester);
+      expect(tester.takeException(), isNull);
+
+      await tester.tap(find.byKey(const Key('add-record')));
+      await _settle(tester);
+      expect(tester.takeException(), isNull);
+
+      // ---------------------------------------------------------------------
+      // Regression 1: Remark row left icon, EditableText, and right clear
+      // button share horizontal center (pairwise dy diff <= 1.5px).
+      // ---------------------------------------------------------------------
+      final remarkRowFinder = find.byKey(const Key('editor-remark-row'));
+      final leftNoteIconFinder = find.descendant(
+        of: remarkRowFinder,
+        matching: find.byIcon(Icons.edit_note_rounded),
+      );
+      final remarkEditableFinder = find.descendant(
+        of: find.byKey(const Key('remark')),
+        matching: find.byType(EditableText),
+      );
+
+      // Check empty hint state alignment first
+      final emptyIconDy = tester.getCenter(leftNoteIconFinder).dy;
+      final emptyEditableDy = tester.getCenter(remarkEditableFinder).dy;
+      expect((emptyIconDy - emptyEditableDy).abs(), lessThanOrEqualTo(1.5));
+
+      // Enter '午饭' so the right clear button ('editor-remark-clear-btn') appears
+      await tester.enterText(find.byKey(const Key('remark')), '午饭');
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+
+      final clearBtnFinder = find.byKey(const Key('editor-remark-clear-btn'));
+      expect(clearBtnFinder, findsOneWidget);
+
+      final iconDy = tester.getCenter(leftNoteIconFinder).dy;
+      final editableDy = tester.getCenter(remarkEditableFinder).dy;
+      final clearBtnDy = tester.getCenter(clearBtnFinder).dy;
+
+      expect(
+        (iconDy - editableDy).abs(),
+        lessThanOrEqualTo(1.5),
+        reason: 'Left icon dy ($iconDy) vs EditableText dy ($editableDy)',
+      );
+      expect(
+        (editableDy - clearBtnDy).abs(),
+        lessThanOrEqualTo(1.5),
+        reason:
+            'EditableText dy ($editableDy) vs Clear button dy ($clearBtnDy)',
+      );
+      expect(
+        (iconDy - clearBtnDy).abs(),
+        lessThanOrEqualTo(1.5),
+        reason: 'Left icon dy ($iconDy) vs Clear button dy ($clearBtnDy)',
+      );
+
+      // ---------------------------------------------------------------------
+      // Regression 2: With all 8+ pills enabled (wrapped to >= 2 rows including
+      // '不计收支'), enter amount '14' and expand 'desktop-toggle-keypad' across
+      // both 1280x800 and compact 520x600 viewports.
+      // ---------------------------------------------------------------------
+      expect(find.byKey(const Key('editor-exclude-exin-pill')), findsOneWidget);
+      final firstPillDy = tester.getCenter(find.byKey(const Key('asset'))).dy;
+      final lastPillDy = tester
+          .getCenter(find.byKey(const Key('editor-exclude-exin-pill')))
+          .dy;
+      expect(
+        lastPillDy - firstPillDy,
+        greaterThan(16.0),
+        reason: 'All 8+ toolbar pills should wrap onto at least 2 rows',
+      );
+
+      // Focus amount, input '14', and expand virtual keypad
+      await tester.tap(find.byKey(const Key('amount')));
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.digit1);
+      await tester.sendKeyEvent(LogicalKeyboardKey.digit4);
+      await tester.pump();
+      expect(_fieldText(tester, const Key('amount')), '14');
+      expect(find.text('请选择分类'), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('desktop-toggle-keypad')));
+      await _settle(tester, 4);
+      expect(tester.takeException(), isNull);
+      expect(find.byType(RecordCustomKeypad), findsOneWidget);
+
+      void expectInsideRect(Rect inner, Rect outer, String name, Size vp) {
+        expect(
+          inner.left,
+          greaterThanOrEqualTo(outer.left - 0.5),
+          reason: '$name.left outside dialog at $vp',
+        );
+        expect(
+          inner.right,
+          lessThanOrEqualTo(outer.right + 0.5),
+          reason: '$name.right outside dialog at $vp',
+        );
+        expect(
+          inner.top,
+          greaterThanOrEqualTo(outer.top - 0.5),
+          reason: '$name.top outside dialog at $vp',
+        );
+        expect(
+          inner.bottom,
+          lessThanOrEqualTo(outer.bottom + 0.5),
+          reason: '$name.bottom outside dialog at $vp',
+        );
+      }
+
+      for (final viewport in const <Size>[Size(1280, 800), Size(520, 600)]) {
+        tester.view.physicalSize = viewport;
+        await _settle(tester, 4);
+        expect(
+          tester.takeException(),
+          isNull,
+          reason: 'No overflow at $viewport',
+        );
+
+        final dialogRect = _dialogSurfaceRect(
+          tester,
+          find.byKey(const Key('desktop-record-editor-dialog')),
+        );
+        final zone2Rect = tester.getRect(
+          find.byKey(const Key('editor-zone2-scroll')),
+        );
+        final dockRect = tester.getRect(
+          find.byKey(const Key('editor-bottom-dock')),
+        );
+        final summaryRect = tester.getRect(
+          find.byKey(const Key('editor-summary-amount-row')),
+        );
+        final amountRect = tester.getRect(find.byKey(const Key('amount')));
+        final remarkRect = tester.getRect(
+          find.byKey(const Key('editor-remark-row')),
+        );
+        final pillRect = tester.getRect(
+          find.byKey(const Key('editor-pill-toolbar')),
+        );
+        final slotRect = tester.getRect(
+          find.byKey(const Key('editor-bottom-panel-slot')),
+        );
+        final keypadRect = tester.getRect(find.byType(RecordCustomKeypad));
+        final actionBarRect = tester.getRect(
+          find.byKey(const Key('desktop-editor-action-bar')),
+        );
+
+        // Middle category grid retains >= 120px visible scroll height
+        expect(
+          zone2Rect.height,
+          greaterThanOrEqualTo(120.0),
+          reason:
+              'Category grid height (${zone2Rect.height}) < 120px at $viewport',
+        );
+
+        // Every critical section is 100% inside the visible dialog surface
+        expectInsideRect(
+          summaryRect,
+          dialogRect,
+          'summary-amount-row',
+          viewport,
+        );
+        expectInsideRect(amountRect, dialogRect, 'amount', viewport);
+        expectInsideRect(remarkRect, dialogRect, 'remark-row', viewport);
+        expectInsideRect(pillRect, dialogRect, 'pill-toolbar', viewport);
+        expectInsideRect(
+          keypadRect,
+          dialogRect,
+          'RecordCustomKeypad',
+          viewport,
+        );
+        expectInsideRect(actionBarRect, dialogRect, 'action-bar', viewport);
+
+        // Summary row is NOT clipped above bottom-dock top edge, and keypad is NOT cropped inside slot
+        expect(summaryRect.top, greaterThanOrEqualTo(dockRect.top - 0.5));
+        expect(amountRect.top, greaterThanOrEqualTo(summaryRect.top - 0.5));
+        expect(amountRect.bottom, lessThanOrEqualTo(summaryRect.bottom + 0.5));
+        expect(keypadRect.height, lessThanOrEqualTo(slotRect.height + 0.5));
+
+        // Strict top-to-bottom non-overlapping vertical order
+        expect(zone2Rect.bottom, lessThanOrEqualTo(summaryRect.top + 0.5));
+        expect(summaryRect.bottom, lessThanOrEqualTo(remarkRect.top + 0.5));
+        expect(remarkRect.bottom, lessThanOrEqualTo(pillRect.top + 0.5));
+        expect(pillRect.bottom, lessThanOrEqualTo(keypadRect.top + 0.5));
+        expect(keypadRect.bottom, lessThanOrEqualTo(actionBarRect.top + 0.5));
+
+        // Hit-test confirm summary & amount & keypad keys are genuinely unoccluded
+        expect(find.text('请选择分类').hitTestable(), findsOneWidget);
+        expect(find.byKey(const Key('amount')).hitTestable(), findsOneWidget);
+        expect(find.byKey(const Key('keypad-7')).hitTestable(), findsOneWidget);
+        expect(find.byKey(const Key('save')).hitTestable(), findsOneWidget);
+      }
 
       await cleanUp();
     },

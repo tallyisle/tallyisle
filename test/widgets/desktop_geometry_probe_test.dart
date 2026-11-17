@@ -96,6 +96,7 @@ import 'package:tallyisle/features/receipt/record_receipt_dialog.dart';
 import 'package:tallyisle/features/records/desktop_record_editor_dialog.dart';
 import 'package:tallyisle/features/records/record_datetime_dialog.dart';
 import 'package:tallyisle/features/records/record_detail_page.dart';
+import 'package:tallyisle/features/records/record_keypad.dart';
 import 'package:tallyisle/features/reimburse/reimburse_page.dart';
 import 'package:tallyisle/features/reminder/reminder_page.dart';
 import 'package:tallyisle/features/reminder/reminder_providers.dart';
@@ -2022,25 +2023,208 @@ void main() {
               violations: violations,
             );
 
-            // Hard assertion 4: RecordEditorPage at 520x600 with expanded
-            // custom keypad retains category selection zone height >= 120px!
-            if (modalSize == const Size(520, 600) &&
-                formName == 'Modal:DesktopRecordEditor(Expense)') {
+            // Hard assertion 4: RecordEditorPage remark row vertical center
+            // alignment (dy diff <= 1.5px) AND expanded custom keypad with
+            // wrapped multi-pill toolbar keeps editor-summary-amount-row 100%
+            // visible without clipping/overlap and category grid >= 120px!
+            if (formName == 'Modal:DesktopRecordEditor(Expense)') {
+              final remarkRowFinder = find.byKey(
+                const Key('editor-remark-row'),
+              );
+              final leftNoteIconFinder = find.descendant(
+                of: remarkRowFinder,
+                matching: find.byIcon(Icons.edit_note_rounded),
+              );
+              final remarkEditableFinder = find.descendant(
+                of: find.byKey(const Key('remark')),
+                matching: find.byType(EditableText),
+              );
+
+              // ①a Empty hint state center.dy alignment <= 1.5px
+              final emptyIconDy = tester.getCenter(leftNoteIconFinder).dy;
+              final emptyEditableDy = tester.getCenter(remarkEditableFinder).dy;
+              expect(
+                (emptyIconDy - emptyEditableDy).abs(),
+                lessThanOrEqualTo(1.5),
+                reason:
+                    '[$scene] Empty remark icon dy ($emptyIconDy) vs EditableText dy ($emptyEditableDy) must be <= 1.5px',
+              );
+
+              // ①b Populated remark ('午饭') with clear & frequent-remarks icons
+              await tester.enterText(find.byKey(const Key('remark')), '午饭');
+              await tester.pump();
+              final clearBtnFinder = find.byKey(
+                const Key('editor-remark-clear-btn'),
+              );
+              expect(clearBtnFinder, findsOneWidget);
+              final iconDy = tester.getCenter(leftNoteIconFinder).dy;
+              final editableDy = tester.getCenter(remarkEditableFinder).dy;
+              final clearBtnDy = tester.getCenter(clearBtnFinder).dy;
+              expect(
+                (iconDy - editableDy).abs(),
+                lessThanOrEqualTo(1.5),
+                reason:
+                    '[$scene] Remark left icon dy ($iconDy) vs EditableText dy ($editableDy) must be <= 1.5px',
+              );
+              expect(
+                (editableDy - clearBtnDy).abs(),
+                lessThanOrEqualTo(1.5),
+                reason:
+                    '[$scene] Remark EditableText dy ($editableDy) vs clear button dy ($clearBtnDy) must be <= 1.5px',
+              );
+              final remarksToggleFinder = find.byKey(
+                const Key('editor-remarks-toggle-btn'),
+              );
+              if (remarksToggleFinder.evaluate().isNotEmpty) {
+                final toggleDy = tester.getCenter(remarksToggleFinder).dy;
+                expect(
+                  (iconDy - toggleDy).abs(),
+                  lessThanOrEqualTo(1.5),
+                  reason:
+                      '[$scene] Remark left icon dy ($iconDy) vs remarks toggle dy ($toggleDy) must be <= 1.5px',
+                );
+              }
+
+              // ② Multi-pill wrap + expanded keypad geometry & visibility gate
+              expect(
+                find.byKey(const Key('editor-exclude-exin-pill')),
+                findsOneWidget,
+              );
+              final firstPillDy = tester
+                  .getCenter(find.byKey(const Key('asset')))
+                  .dy;
+              final lastPillDy = tester
+                  .getCenter(find.byKey(const Key('editor-exclude-exin-pill')))
+                  .dy;
+              expect(
+                lastPillDy - firstPillDy,
+                greaterThan(16.0),
+                reason:
+                    '[$scene] Toolbar pills must wrap onto >= 2 rows for multi-pill wrap assertion',
+              );
+
               final keypadToggle = find.byKey(
                 const Key('desktop-toggle-keypad'),
               );
               expect(keypadToggle, findsOneWidget);
               await tester.tap(keypadToggle);
               await _settleProbe(tester, violations, '$scene+KeypadExpanded');
-              final zone2Height = tester
-                  .getSize(find.byKey(const Key('editor-zone2-scroll')))
-                  .height;
+              await tester.tap(find.byKey(const Key('keypad-1')));
+              await tester.pump();
+              await tester.tap(find.byKey(const Key('keypad-4')));
+              await _settleProbe(tester, violations, '$scene+KeypadExpanded14');
+
+              final dialogSurfaceRect = tester.getRect(
+                find
+                    .descendant(
+                      of: find.byKey(const Key('desktop-record-editor-dialog')),
+                      matching: find.byType(Material),
+                    )
+                    .first,
+              );
+              final zone2Rect = tester.getRect(
+                find.byKey(const Key('editor-zone2-scroll')),
+              );
+              final dockRect = tester.getRect(
+                find.byKey(const Key('editor-bottom-dock')),
+              );
+              final summaryRect = tester.getRect(
+                find.byKey(const Key('editor-summary-amount-row')),
+              );
+              final amountRect = tester.getRect(
+                find.byKey(const Key('amount')),
+              );
+              final remarkRect = tester.getRect(remarkRowFinder);
+              final pillRect = tester.getRect(
+                find.byKey(const Key('editor-pill-toolbar')),
+              );
+              final slotRect = tester.getRect(
+                find.byKey(const Key('editor-bottom-panel-slot')),
+              );
+              final keypadRect = tester.getRect(
+                find.byType(RecordCustomKeypad),
+              );
+              final actionBarRect = tester.getRect(
+                find.byKey(const Key('desktop-editor-action-bar')),
+              );
+
               expect(
-                zone2Height,
+                zone2Rect.height,
                 greaterThanOrEqualTo(120.0),
                 reason:
-                    '[$scene] Category grid height ($zone2Height) at 520x600 with expanded keypad must be >= 120px',
+                    '[$scene] Category grid height (${zone2Rect.height}) with expanded keypad & wrapped pills must be >= 120px',
               );
+
+              for (final (rect, label) in <(Rect, String)>[
+                (summaryRect, 'editor-summary-amount-row'),
+                (amountRect, 'amount'),
+                (remarkRect, 'editor-remark-row'),
+                (pillRect, 'editor-pill-toolbar'),
+                (keypadRect, 'RecordCustomKeypad'),
+                (actionBarRect, 'desktop-editor-action-bar'),
+              ]) {
+                expect(
+                  rect.left,
+                  greaterThanOrEqualTo(dialogSurfaceRect.left - 0.5),
+                  reason: '[$scene] $label.left outside dialog surface',
+                );
+                expect(
+                  rect.right,
+                  lessThanOrEqualTo(dialogSurfaceRect.right + 0.5),
+                  reason: '[$scene] $label.right outside dialog surface',
+                );
+                expect(
+                  rect.top,
+                  greaterThanOrEqualTo(dialogSurfaceRect.top - 0.5),
+                  reason: '[$scene] $label.top outside dialog surface',
+                );
+                expect(
+                  rect.bottom,
+                  lessThanOrEqualTo(dialogSurfaceRect.bottom + 0.5),
+                  reason: '[$scene] $label.bottom outside dialog surface',
+                );
+              }
+
+              expect(
+                summaryRect.top,
+                greaterThanOrEqualTo(dockRect.top - 0.5),
+                reason:
+                    '[$scene] editor-summary-amount-row must not be scrolled/clipped above bottom dock',
+              );
+              expect(
+                keypadRect.height,
+                lessThanOrEqualTo(slotRect.height + 0.5),
+                reason:
+                    '[$scene] RecordCustomKeypad must fit inside editor-bottom-panel-slot without cropping',
+              );
+              expect(
+                zone2Rect.bottom,
+                lessThanOrEqualTo(summaryRect.top + 0.5),
+              );
+              expect(
+                summaryRect.bottom,
+                lessThanOrEqualTo(remarkRect.top + 0.5),
+              );
+              expect(remarkRect.bottom, lessThanOrEqualTo(pillRect.top + 0.5));
+              expect(pillRect.bottom, lessThanOrEqualTo(keypadRect.top + 0.5));
+              expect(
+                keypadRect.bottom,
+                lessThanOrEqualTo(actionBarRect.top + 0.5),
+              );
+              expect(
+                find
+                    .byKey(const Key('editor-summary-amount-row'))
+                    .hitTestable(),
+                findsOneWidget,
+                reason:
+                    '[$scene] editor-summary-amount-row must be unoccluded and hit-testable',
+              );
+              expect(
+                find.byKey(const Key('amount')).hitTestable(),
+                findsOneWidget,
+                reason: '[$scene] amount must be unoccluded and hit-testable',
+              );
+
               _probeCurrentTree(
                 tester,
                 scene: '$scene+KeypadExpanded',

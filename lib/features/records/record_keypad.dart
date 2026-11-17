@@ -265,6 +265,8 @@ class RecordCustomKeypad extends StatelessWidget {
     required this.onSave,
     this.onSaveAndNew,
     this.enableMultiplyDivide = false,
+    this.desktopCompact = false,
+    this.keyHeightOverride,
   });
 
   final String amountText;
@@ -277,11 +279,43 @@ class RecordCustomKeypad extends StatelessWidget {
   final VoidCallback onSave;
   final VoidCallback? onSaveAndNew;
   final bool enableMultiplyDivide;
+  final bool desktopCompact;
+  final double? keyHeightOverride;
 
   static const double keyRowHeight = 56.0;
   static const double gridGap = 6.0;
   static const double panelHeight =
       keyRowHeight * 4 + gridGap * 3 + 12.0; // 254dp
+
+  static const double desktopDefaultKeyRowHeight = 42.0;
+  static const double desktopMinKeyRowHeight = 34.0;
+  static const double desktopGridGap = 5.0;
+  static const double desktopVerticalInset = 10.0; // top 5 + bottom 5
+  static const double desktopDefaultPanelHeight =
+      desktopDefaultKeyRowHeight * 4 +
+      desktopGridGap * 3 +
+      desktopVerticalInset; // 193dp
+
+  static double desktopPanelHeightForKeyHeight(double keyHeight) =>
+      keyHeight * 4 + desktopGridGap * 3 + desktopVerticalInset;
+
+  static double resolveDesktopKeyHeight(
+    double availableHeight, {
+    double maxKeyHeight = desktopDefaultKeyRowHeight,
+    double minKeyHeight = desktopMinKeyRowHeight,
+  }) {
+    final raw =
+        (availableHeight - desktopGridGap * 3 - desktopVerticalInset) / 4.0;
+    return raw.clamp(minKeyHeight, maxKeyHeight);
+  }
+
+  bool get _isCompact => desktopCompact || keyHeightOverride != null;
+
+  double get _effectiveKeyRowHeight =>
+      keyHeightOverride ??
+      (desktopCompact ? desktopDefaultKeyRowHeight : keyRowHeight);
+
+  double get _effectiveGridGap => _isCompact ? desktopGridGap : gridGap;
 
   static const OutlinedBorder _keyShape = RoundedRectangleBorder(
     borderRadius: BorderRadius.all(Radius.circular(12)),
@@ -316,9 +350,11 @@ class RecordCustomKeypad extends StatelessWidget {
   }) {
     final cs = Theme.of(context).colorScheme;
     final token = insertValue ?? label;
+    final rowH = _effectiveKeyRowHeight;
+    final digitFontSize = _isCompact ? (rowH < 38 ? 17.5 : 19.0) : 21.0;
     return Expanded(
       child: SizedBox(
-        height: keyRowHeight,
+        height: rowH,
         child: Material(
           color: _digitKeyColor(context, cs),
           shape: _keyShape,
@@ -331,7 +367,7 @@ class RecordCustomKeypad extends StatelessWidget {
               child: Text(
                 label,
                 style: TextStyle(
-                  fontSize: 21,
+                  fontSize: digitFontSize,
                   fontWeight: FontWeight.w600,
                   height: 1.0,
                   color: busy
@@ -350,11 +386,13 @@ class RecordCustomKeypad extends StatelessWidget {
   Widget _buildBackspaceKey(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final fgColor = _utilityForegroundColor(context, cs);
+    final rowH = _effectiveKeyRowHeight;
+    final iconSize = _isCompact ? (rowH < 38 ? 17.5 : 19.0) : 20.0;
     return Expanded(
       child: Tooltip(
         message: '退格（长按清空）',
         child: SizedBox(
-          height: keyRowHeight,
+          height: rowH,
           child: Material(
             color: _utilityKeyColor(context, cs),
             shape: _keyShape,
@@ -367,7 +405,7 @@ class RecordCustomKeypad extends StatelessWidget {
               child: Center(
                 child: Icon(
                   Icons.backspace_outlined,
-                  size: 20,
+                  size: iconSize,
                   color: busy ? cs.onSurfaceVariant.withAlpha(110) : fgColor,
                 ),
               ),
@@ -391,11 +429,13 @@ class RecordCustomKeypad extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
     final fgColor = _utilityForegroundColor(context, cs);
     final allowLongPress = enableMultiplyDivide;
+    final rowH = _effectiveKeyRowHeight;
+    final opFontSize = _isCompact ? (rowH < 38 ? 18.5 : 20.0) : 22.0;
     return Expanded(
       child: Tooltip(
         message: allowLongPress ? longPressTooltip : baseTooltip,
         child: SizedBox(
-          height: keyRowHeight,
+          height: rowH,
           child: Material(
             color: _utilityKeyColor(context, cs),
             shape: _keyShape,
@@ -414,7 +454,7 @@ class RecordCustomKeypad extends StatelessWidget {
                     child: Text(
                       label,
                       style: TextStyle(
-                        fontSize: 22,
+                        fontSize: opFontSize,
                         fontWeight: FontWeight.w600,
                         height: 1.0,
                         color: busy
@@ -425,12 +465,12 @@ class RecordCustomKeypad extends StatelessWidget {
                   ),
                   if (allowLongPress)
                     Positioned(
-                      top: 5,
-                      right: 7,
+                      top: _isCompact ? 3 : 5,
+                      right: _isCompact ? 6 : 7,
                       child: Text(
                         longPressLabel,
                         style: TextStyle(
-                          fontSize: 11,
+                          fontSize: _isCompact ? 10 : 11,
                           fontWeight: FontWeight.w600,
                           height: 1.0,
                           color: busy
@@ -452,9 +492,10 @@ class RecordCustomKeypad extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
     final fgColor = _utilityForegroundColor(context, cs);
     final active = enabled && !busy && onSaveAndNew != null;
+    final rowH = _effectiveKeyRowHeight;
     return Expanded(
       child: SizedBox(
-        height: keyRowHeight,
+        height: rowH,
         child: Material(
           color: _utilityKeyColor(context, cs),
           shape: _keyShape,
@@ -471,7 +512,7 @@ class RecordCustomKeypad extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    fontSize: 15,
+                    fontSize: _isCompact ? 13.5 : 15,
                     fontWeight: FontWeight.w600,
                     height: 1.0,
                     color: active
@@ -490,13 +531,15 @@ class RecordCustomKeypad extends StatelessWidget {
   Widget _buildPrimaryActionKey(BuildContext context) {
     final pendingOp = hasPendingOperator(amountText);
     final active = enabled && !busy;
+    final rowH = _effectiveKeyRowHeight;
 
     final button = KeyedSubtree(
       key: const Key('editor-save-btn'),
       child: FilledButton(
         key: const Key('save'),
         style: FilledButton.styleFrom(
-          minimumSize: const Size.fromHeight(keyRowHeight),
+          visualDensity: _isCompact ? VisualDensity.compact : null,
+          minimumSize: Size.fromHeight(rowH),
           padding: const EdgeInsets.symmetric(horizontal: 6),
           side: BorderSide.none,
           shape: _keyShape,
@@ -504,10 +547,10 @@ class RecordCustomKeypad extends StatelessWidget {
         ),
         onPressed: active ? (pendingOp ? onEvaluate : onSave) : null,
         child: pendingOp
-            ? const Text(
+            ? Text(
                 '=',
                 style: TextStyle(
-                  fontSize: 22,
+                  fontSize: _isCompact ? 19 : 22,
                   fontWeight: FontWeight.w800,
                   height: 1.0,
                 ),
@@ -516,8 +559,8 @@ class RecordCustomKeypad extends StatelessWidget {
                 busy ? '保存中…' : '保存',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 16,
+                style: TextStyle(
+                  fontSize: _isCompact ? 14.5 : 16,
                   fontWeight: FontWeight.w700,
                 ),
               ),
@@ -527,7 +570,7 @@ class RecordCustomKeypad extends StatelessWidget {
     return Expanded(
       child: ExcludeFocus(
         child: SizedBox(
-          height: keyRowHeight,
+          height: rowH,
           child: pendingOp ? Tooltip(message: '计算结果', child: button) : button,
         ),
       ),
@@ -537,11 +580,15 @@ class RecordCustomKeypad extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final gap = _effectiveGridGap;
+    final pad = _isCompact
+        ? const EdgeInsets.fromLTRB(8, 5, 8, 5)
+        : const EdgeInsets.fromLTRB(8, 6, 8, 6);
 
     return TextFieldTapRegion(
       child: ExcludeFocus(
         child: Container(
-          padding: const EdgeInsets.fromLTRB(8, 6, 8, 6),
+          padding: pad,
           decoration: BoxDecoration(color: _trayColor(context, cs)),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -554,23 +601,23 @@ class RecordCustomKeypad extends StatelessWidget {
                     key: const Key('keypad-7'),
                     label: '7',
                   ),
-                  const SizedBox(width: gridGap),
+                  SizedBox(width: gap),
                   _buildDigitKey(
                     context,
                     key: const Key('keypad-8'),
                     label: '8',
                   ),
-                  const SizedBox(width: gridGap),
+                  SizedBox(width: gap),
                   _buildDigitKey(
                     context,
                     key: const Key('keypad-9'),
                     label: '9',
                   ),
-                  const SizedBox(width: gridGap),
+                  SizedBox(width: gap),
                   _buildBackspaceKey(context),
                 ],
               ),
-              const SizedBox(height: gridGap),
+              SizedBox(height: gap),
               // Row 2: 4, 5, 6, + (optional long-press ×)
               Row(
                 children: [
@@ -579,19 +626,19 @@ class RecordCustomKeypad extends StatelessWidget {
                     key: const Key('keypad-4'),
                     label: '4',
                   ),
-                  const SizedBox(width: gridGap),
+                  SizedBox(width: gap),
                   _buildDigitKey(
                     context,
                     key: const Key('keypad-5'),
                     label: '5',
                   ),
-                  const SizedBox(width: gridGap),
+                  SizedBox(width: gap),
                   _buildDigitKey(
                     context,
                     key: const Key('keypad-6'),
                     label: '6',
                   ),
-                  const SizedBox(width: gridGap),
+                  SizedBox(width: gap),
                   _buildOperatorKey(
                     context,
                     key: const Key('editor-op-add'),
@@ -604,7 +651,7 @@ class RecordCustomKeypad extends StatelessWidget {
                   ),
                 ],
               ),
-              const SizedBox(height: gridGap),
+              SizedBox(height: gap),
               // Row 3: 1, 2, 3, − (optional long-press ÷)
               Row(
                 children: [
@@ -613,19 +660,19 @@ class RecordCustomKeypad extends StatelessWidget {
                     key: const Key('keypad-1'),
                     label: '1',
                   ),
-                  const SizedBox(width: gridGap),
+                  SizedBox(width: gap),
                   _buildDigitKey(
                     context,
                     key: const Key('keypad-2'),
                     label: '2',
                   ),
-                  const SizedBox(width: gridGap),
+                  SizedBox(width: gap),
                   _buildDigitKey(
                     context,
                     key: const Key('keypad-3'),
                     label: '3',
                   ),
-                  const SizedBox(width: gridGap),
+                  SizedBox(width: gap),
                   _buildOperatorKey(
                     context,
                     key: const Key('editor-op-sub'),
@@ -638,24 +685,24 @@ class RecordCustomKeypad extends StatelessWidget {
                   ),
                 ],
               ),
-              const SizedBox(height: gridGap),
+              SizedBox(height: gap),
               // Row 4: 再记, 0, ., 保存 / =
               Row(
                 children: [
                   _buildSaveAndNewKey(context),
-                  const SizedBox(width: gridGap),
+                  SizedBox(width: gap),
                   _buildDigitKey(
                     context,
                     key: const Key('keypad-0'),
                     label: '0',
                   ),
-                  const SizedBox(width: gridGap),
+                  SizedBox(width: gap),
                   _buildDigitKey(
                     context,
                     key: const Key('keypad-dot'),
                     label: '.',
                   ),
-                  const SizedBox(width: gridGap),
+                  SizedBox(width: gap),
                   _buildPrimaryActionKey(context),
                 ],
               ),

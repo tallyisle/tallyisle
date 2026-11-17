@@ -6,7 +6,7 @@ import 'record_editor_page.dart';
 const double kDesktopRecordDialogMaxWidth = 600.0;
 
 /// Default height constraint for the desktop centered record editor modal dialog.
-const double kDesktopRecordDialogMaxHeight = 740.0;
+const double kDesktopRecordDialogMaxHeight = 760.0;
 
 /// Inherited marker indicating that a descendant [RecordEditorPage] is hosted
 /// inside the desktop centered modal dialog shell.
@@ -34,7 +34,7 @@ Widget _buildDesktopRecordDialogShell(
     key: const Key('desktop-record-editor-dialog'),
     insetPadding: compactWindow
         ? const EdgeInsets.all(12)
-        : const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+        : const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
     backgroundColor: scheme.surface,
     surfaceTintColor: Colors.transparent,
     shape: const RoundedRectangleBorder(
@@ -50,7 +50,7 @@ Widget _buildDesktopRecordDialogShell(
 }
 
 /// Builds an imperative [DialogRoute] hosting [RecordEditorPage] in desktop
-/// modal dialog mode (`600×740`, `20px` borderless rounded corners,
+/// modal dialog mode (`600×760`, `20px` borderless rounded corners,
 /// `barrierDismissible: false`).
 DialogRoute<String> createDesktopRecordEditorDialogRoute(
   BuildContext context, {

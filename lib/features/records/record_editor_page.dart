@@ -1007,7 +1007,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     final double slotHeight;
     if (_isDesktopActive) {
       slotHeight = _desktopKeypadExpanded
-          ? RecordCustomKeypad.panelHeight + 48.0
+          ? RecordCustomKeypad.desktopDefaultPanelHeight + 48.0
           : 52.0;
     } else {
       slotHeight = math.max(
@@ -2619,6 +2619,52 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     );
   }
 
+  int _countVisibleToolbarPills(
+    DiyToolbarConfig diyConfig,
+    List<Currency> currencies,
+  ) {
+    var count = 1 + (type != RecordType.transfer ? 1 : 0);
+    for (final item in diyConfig.items) {
+      switch (item.action) {
+        case DiyToolbarAction.tags:
+          if (item.enabled || selectedTagIds.isNotEmpty) count++;
+        case DiyToolbarAction.discount:
+          if ((type == RecordType.expense || type == RecordType.income) &&
+              (item.enabled || discount.text.trim().isNotEmpty)) {
+            count++;
+          }
+        case DiyToolbarAction.images:
+          if (item.enabled || imageNames.isNotEmpty) count++;
+        case DiyToolbarAction.location:
+          if (item.enabled || (location != null && !location!.isEmpty)) {
+            count++;
+          }
+        case DiyToolbarAction.currency:
+          if (type != RecordType.transfer) {
+            final (sc, acctCurr) = _currencies();
+            if ((item.enabled && currencies.length > 1) ||
+                (sourceCurrency != null && sc != acctCurr)) {
+              count++;
+            }
+          }
+        case DiyToolbarAction.excludeExIn:
+          if (type != RecordType.transfer && (item.enabled || excludeExIn)) {
+            count++;
+          }
+        case DiyToolbarAction.excludeBudget:
+          if (type != RecordType.transfer && (item.enabled || excludeBudget)) {
+            count++;
+          }
+        case DiyToolbarAction.templates:
+        case DiyToolbarAction.frequentRemarks:
+        case DiyToolbarAction.keypadMultiplyDivide:
+        case DiyToolbarAction.autoSelectFirstCategory:
+          break;
+      }
+    }
+    return count;
+  }
+
   Widget _buildMiddleAndBottomZones(
     BuildContext context, {
     required BoxConstraints areaConstraints,
@@ -2639,24 +2685,90 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
         : cs.surfaceContainerLow;
 
     if (isDesktop) {
-      final minMiddleZoneHeight = math.min(
-        areaConstraints.maxHeight * 0.38,
-        math.max(150.0, areaConstraints.maxHeight * 0.30),
-      );
+      final compactViewport = areaConstraints.maxHeight < 580.0;
+      final minMiddleZoneHeight = compactViewport
+          ? 132.0
+          : math.min(186.0, math.max(146.0, areaConstraints.maxHeight * 0.26));
       final maxDockHeight = math.max(
         0.0,
         areaConstraints.maxHeight - minMiddleZoneHeight,
       );
-      const desktopDockHeaderAndActionReserve = 148.0;
-      final maxOptionalPanelHeight = math.max(
+
+      final (sc, ac) = _currencies();
+      final showBudgetHint =
+          bookId != null &&
+          categoryId != null &&
+          (type == RecordType.expense ||
+              type == RecordType.income ||
+              type == RecordType.reimbursable);
+      final showAttachments =
+          (_attachmentsExpanded || imageNames.isNotEmpty) &&
+          (diyConfig.isEnabled(DiyToolbarAction.images) ||
+              imageNames.isNotEmpty);
+      final pillCount = _countVisibleToolbarPills(diyConfig, currencies);
+      final innerWidth = math.max(200.0, areaConstraints.maxWidth - 24.0);
+      final pillRows = pillCount <= 1
+          ? 1
+          : ((pillCount * 78.0) / innerWidth).ceil().clamp(1, 3);
+
+      final pinnedDockReserve =
+          43.0 +
+          (hasPendingOperator(amount.text) ? 15.0 : 0.0) +
+          (sc != ac ? 17.0 : 0.0) +
+          (showBudgetHint ? 28.0 : 0.0) +
+          (_savedAndResetBanner && error == null ? 26.0 : 0.0) +
+          (error != null ? 30.0 : 0.0) +
+          44.0 +
+          49.0;
+      final pillAndAttachmentReserve =
+          (pillRows * 24.0 + (pillRows - 1) * 4.0 + 6.0) +
+          (showAttachments ? 72.0 : 0.0);
+      final idealAvailableForPanel = math.max(
         0.0,
-        maxDockHeight - desktopDockHeaderAndActionReserve,
+        maxDockHeight - pinnedDockReserve - pillAndAttachmentReserve,
       );
-      final desktopPanelSlotHeight = _desktopKeypadExpanded
-          ? math.min(RecordCustomKeypad.panelHeight, maxOptionalPanelHeight)
-          : (_desktopRemarksExpanded && type != RecordType.transfer
-                ? math.min(188.0, maxOptionalPanelHeight)
-                : 0.0);
+      final hardMaxPanelHeight = math.max(
+        0.0,
+        maxDockHeight - pinnedDockReserve - 30.0,
+      );
+
+      double? desktopKeypadKeyHeight;
+      double desktopPanelSlotHeight = 0.0;
+      if (_desktopKeypadExpanded) {
+        final maxKeyH = compactViewport
+            ? 40.0
+            : RecordCustomKeypad.desktopDefaultKeyRowHeight;
+        final minStandardPanelH =
+            RecordCustomKeypad.desktopPanelHeightForKeyHeight(
+              RecordCustomKeypad.desktopMinKeyRowHeight,
+            );
+        if (idealAvailableForPanel >= minStandardPanelH) {
+          desktopKeypadKeyHeight = RecordCustomKeypad.resolveDesktopKeyHeight(
+            idealAvailableForPanel,
+            maxKeyHeight: maxKeyH,
+            minKeyHeight: RecordCustomKeypad.desktopMinKeyRowHeight,
+          );
+        } else {
+          desktopKeypadKeyHeight = RecordCustomKeypad.resolveDesktopKeyHeight(
+            idealAvailableForPanel > 0
+                ? idealAvailableForPanel
+                : hardMaxPanelHeight,
+            maxKeyHeight: maxKeyH,
+            minKeyHeight: 30.0,
+          );
+        }
+        desktopPanelSlotHeight = math.min(
+          RecordCustomKeypad.desktopPanelHeightForKeyHeight(
+            desktopKeypadKeyHeight,
+          ),
+          hardMaxPanelHeight,
+        );
+      } else if (_desktopRemarksExpanded && type != RecordType.transfer) {
+        desktopPanelSlotHeight = math.min(
+          compactViewport ? 156.0 : 184.0,
+          hardMaxPanelHeight,
+        );
+      }
 
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2682,6 +2794,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
               diyConfig: diyConfig,
               canSubmit: canSubmit,
               panelSlotHeight: desktopPanelSlotHeight,
+              desktopKeypadKeyHeight: desktopKeypadKeyHeight,
               bottomSafePadding: 0.0,
             ),
           ),
@@ -3205,6 +3318,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     required bool canSubmit,
     required double panelSlotHeight,
     required double bottomSafePadding,
+    double? desktopKeypadKeyHeight,
   }) {
     final cs = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -3465,20 +3579,417 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
       );
     }
 
+    final dockDecoration = BoxDecoration(
+      color: isDark ? cs.surfaceContainerLow : cs.surface,
+      borderRadius: const BorderRadius.vertical(top: Radius.circular(18)),
+      boxShadow: [
+        BoxShadow(
+          color: Colors.black.withAlpha(isDark ? 28 : 10),
+          blurRadius: 12,
+          offset: const Offset(0, -3),
+        ),
+      ],
+    );
+
+    final topBanners = <Widget>[
+      // Live budget hint bar (0px when no budget set)
+      if (bookId != null &&
+          categoryId != null &&
+          (type == RecordType.expense ||
+              type == RecordType.income ||
+              type == RecordType.reimbursable))
+        RecordBudgetHintBar(
+          bookId: bookId,
+          recordTime: time.millisecondsSinceEpoch,
+          categoryId: categoryId!,
+          excludeBudget: excludeBudget,
+        ),
+
+      // Non-blocking save-and-new confirmation banner
+      if (_savedAndResetBanner && error == null)
+        Container(
+          key: const Key('save-and-new-banner'),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          color: cs.primaryContainer.withAlpha(160),
+          child: Row(
+            children: [
+              Icon(
+                Icons.check_circle_outline_rounded,
+                size: 15,
+                color: cs.primary,
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  '已保存，可继续记下一笔',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                    color: cs.onPrimaryContainer,
+                  ),
+                ),
+              ),
+              InkWell(
+                onTap: () => setState(() => _savedAndResetBanner = false),
+                child: Icon(
+                  Icons.close,
+                  size: 15,
+                  color: cs.onPrimaryContainer,
+                ),
+              ),
+            ],
+          ),
+        ),
+
+      // Validation / conflict error banner
+      if (error != null)
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+          color: cs.errorContainer.withAlpha(180),
+          child: Row(
+            children: [
+              Icon(Icons.error_outline, size: 15, color: cs.error),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  error!,
+                  key: const Key('form-error'),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 12, color: cs.error),
+                ),
+              ),
+              InkWell(
+                onTap: () => setState(() => error = null),
+                child: Icon(Icons.close, size: 15, color: cs.error),
+              ),
+            ],
+          ),
+        ),
+    ];
+
+    Widget buildSummaryAmountRow({required bool isDesktopLayout}) {
+      return Padding(
+        key: const Key('editor-summary-amount-row'),
+        padding: isDesktopLayout
+            ? const EdgeInsets.fromLTRB(14, 6, 14, 4)
+            : const EdgeInsets.fromLTRB(14, 10, 14, 6),
+        child: LayoutBuilder(
+          builder: (context, rowConstraints) {
+            final maxAmountWidth = math.max(
+              124.0,
+              rowConstraints.maxWidth * 0.62,
+            );
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Expanded(child: summaryLeft),
+                const SizedBox(width: 8),
+                ConstrainedBox(
+                  constraints: BoxConstraints(maxWidth: maxAmountWidth),
+                  child: GestureDetector(
+                    key: const Key('amount-tap-area'),
+                    behavior: HitTestBehavior.opaque,
+                    onTap: busy ? null : _activateCustomKeypad,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        if (livePreview != null)
+                          Text(
+                            '= $livePreview',
+                            key: const Key('amount-live-preview'),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: cs.primary,
+                              fontFeatures: const [
+                                FontFeature.tabularFigures(),
+                              ],
+                            ),
+                          ),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          crossAxisAlignment: CrossAxisAlignment.baseline,
+                          textBaseline: TextBaseline.alphabetic,
+                          children: [
+                            currencyPrefixWidget,
+                            SizedBox(width: sc == baseCurrency ? 2 : 5),
+                            Flexible(
+                              child: IntrinsicWidth(
+                                child: TextField(
+                                  key: const Key('amount'),
+                                  controller: amount,
+                                  focusNode: _amountFocus,
+                                  enabled: !busy,
+                                  readOnly: false,
+                                  showCursor: true,
+                                  keyboardType: TextInputType.none,
+                                  textInputAction: TextInputAction.done,
+                                  textAlign: TextAlign.right,
+                                  inputFormatters: _keypadExpressionFormatters,
+                                  onTapOutside: isDesktopLayout ? (_) {} : null,
+                                  onTap: busy ? null : _activateCustomKeypad,
+                                  onChanged: (_) {
+                                    ScaffoldMessenger.maybeOf(
+                                      context,
+                                    )?.clearSnackBars();
+                                    setState(() {
+                                      error = null;
+                                      _savedAndResetBanner = false;
+                                      _autoConvert();
+                                    });
+                                  },
+                                  onSubmitted: (_) {
+                                    if (hasPendingOperator(amount.text)) {
+                                      try {
+                                        final res = evaluateKeypadExpression(
+                                          amount.text,
+                                        );
+                                        if (res.dividedByZero) {
+                                          _showCalcError('算式无效或除数不能为 0');
+                                          return;
+                                        }
+                                        if (res.isNegative) {
+                                          _showCalcError('计算结果不能小于 0');
+                                          return;
+                                        }
+                                        if (res.exceededMax) {
+                                          _showCalcError(
+                                            '金额不能超过 88888888888.00',
+                                          );
+                                          return;
+                                        }
+                                        final next = res.money.decimal;
+                                        setState(() {
+                                          error = null;
+                                          _setAmountText(next);
+                                          _autoConvert();
+                                        });
+                                      } on Failure catch (e) {
+                                        _showCalcError(safeMessage(e));
+                                        return;
+                                      }
+                                    }
+                                  },
+                                  style: TextStyle(
+                                    fontSize: 22,
+                                    fontWeight: FontWeight.w800,
+                                    color: amountColor,
+                                    fontFeatures: const [
+                                      FontFeature.tabularFigures(),
+                                    ],
+                                  ),
+                                  decoration: InputDecoration(
+                                    isCollapsed: isDesktopLayout,
+                                    isDense: !isDesktopLayout,
+                                    constraints: isDesktopLayout
+                                        ? const BoxConstraints(minHeight: 32)
+                                        : null,
+                                    hintText: amount.text.isEmpty
+                                        ? '0.00'
+                                        : null,
+                                    hintStyle: TextStyle(
+                                      fontSize: 22,
+                                      fontWeight: FontWeight.w700,
+                                      color: cs.outlineVariant,
+                                    ),
+                                    contentPadding: const EdgeInsets.symmetric(
+                                      vertical: 4,
+                                    ),
+                                    border: InputBorder.none,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        if (conversionSummaryWidget != null)
+                          conversionSummaryWidget,
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
+      );
+    }
+
+    if (DesktopAdaptive.isDesktop(context)) {
+      final remarkSuffix = _buildRemarkSuffixIcon(
+        remarksEnabled: remarksEnabled,
+      );
+      final showAttachmentStrip =
+          (_attachmentsExpanded || imageNames.isNotEmpty) &&
+          (diyConfig.isEnabled(DiyToolbarAction.images) ||
+              imageNames.isNotEmpty);
+
+      return Container(
+        key: const Key('editor-bottom-dock'),
+        clipBehavior: Clip.antiAlias,
+        decoration: dockDecoration,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            ...topBanners,
+            // Pinned Row 1: Category / Transfer Summary + Amount Bar (never scrolled out!)
+            buildSummaryAmountRow(isDesktopLayout: true),
+            // Pinned Row 2: Explicit Horizontally-Centered Desktop Remark Row
+            Container(
+              key: const Key('editor-remark-row'),
+              height: 38,
+              margin: const EdgeInsets.fromLTRB(12, 2, 12, 4),
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              decoration: BoxDecoration(
+                color: isDark
+                    ? cs.surfaceContainerHighest.withAlpha(115)
+                    : cs.surfaceContainerLow,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: busy ? null : () => _remarkFocus.requestFocus(),
+                    child: Icon(
+                      Icons.edit_note_rounded,
+                      size: 18,
+                      color: cs.onSurfaceVariant.withAlpha(185),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: TextField(
+                      key: const Key('remark'),
+                      controller: remark,
+                      focusNode: _remarkFocus,
+                      enabled: !busy,
+                      maxLength: 200,
+                      textInputAction: TextInputAction.done,
+                      onEditingComplete: () {},
+                      onSubmitted: (_) => _triggerDesktopEnter(),
+                      buildCounter:
+                          (
+                            _, {
+                            required currentLength,
+                            required isFocused,
+                            required maxLength,
+                          }) => null,
+                      onChanged: (_) =>
+                          setState(() => _savedAndResetBanner = false),
+                      textAlignVertical: TextAlignVertical.center,
+                      style: const TextStyle(fontSize: 13.5, height: 1.25),
+                      decoration: InputDecoration(
+                        isCollapsed: true,
+                        hintText: '输入备注...',
+                        hintStyle: TextStyle(
+                          fontSize: 13.5,
+                          height: 1.25,
+                          color: cs.onSurfaceVariant.withAlpha(160),
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(vertical: 8),
+                        border: InputBorder.none,
+                      ),
+                    ),
+                  ),
+                  if (remarkSuffix != null) ...[
+                    const SizedBox(width: 4),
+                    remarkSuffix,
+                  ],
+                ],
+              ),
+            ),
+            // Flexible Row 3: Optional Attachment Strip + Compact Pill Toolbar
+            Flexible(
+              fit: FlexFit.loose,
+              child: SingleChildScrollView(
+                physics: const ClampingScrollPhysics(),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (showAttachmentStrip)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 4, 12, 2),
+                        child: BillAttachmentStrip(
+                          key: const Key('record-attachment-strip'),
+                          imageNames: imageNames,
+                          readOnly: busy,
+                          onChanged: (next) =>
+                              setState(() => imageNames = next),
+                        ),
+                      ),
+                    _buildPillToolbar(
+                      context,
+                      assets: assets,
+                      tags: tags,
+                      currencies: currencies,
+                      diyConfig: diyConfig,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            // Row 4: Optional Compact Adaptive Keypad or Frequent Remarks Panel
+            if (panelSlotHeight > 0 &&
+                (_desktopKeypadExpanded ||
+                    (_desktopRemarksExpanded && type != RecordType.transfer)))
+              Container(
+                key: const Key('editor-bottom-panel-slot'),
+                height: panelSlotHeight,
+                color: trayColor,
+                child: _desktopRemarksExpanded && type != RecordType.transfer
+                    ? _buildFrequentRemarksPanel(
+                        context,
+                        categories: categories,
+                        selectedCategory: selectedCat,
+                        bottomSafePadding: 0,
+                      )
+                    : SingleChildScrollView(
+                        physics: const ClampingScrollPhysics(),
+                        child: RecordCustomKeypad(
+                          amountText: amount.text,
+                          enabled: canSubmit,
+                          busy: busy,
+                          enableMultiplyDivide: true,
+                          desktopCompact: true,
+                          keyHeightOverride: desktopKeypadKeyHeight,
+                          onKeyTap: _onKeypadKey,
+                          onBackspace: () => _onKeypadKey('BACKSPACE'),
+                          onClearAll: () => _onKeypadKey('CLEAR'),
+                          onEvaluate: _evaluateInPlace,
+                          onSave: () => unawaited(_save(stayAndReset: false)),
+                          onSaveAndNew: () =>
+                              unawaited(_save(stayAndReset: true)),
+                        ),
+                      ),
+              ),
+            // Pinned Row 5: Desktop Action Bar
+            _buildDesktopActionBar(
+              context,
+              trayColor: trayColor,
+              remarksEnabled: remarksEnabled && type != RecordType.transfer,
+              pendingOp: pendingOp,
+              canSubmit: canSubmit,
+            ),
+          ],
+        ),
+      );
+    }
+
     return Container(
       key: const Key('editor-bottom-dock'),
       clipBehavior: Clip.antiAlias,
-      decoration: BoxDecoration(
-        color: isDark ? cs.surfaceContainerLow : cs.surface,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(18)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withAlpha(isDark ? 28 : 10),
-            blurRadius: 12,
-            offset: const Offset(0, -3),
-          ),
-        ],
-      ),
+      decoration: dockDecoration,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -3492,89 +4003,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  // Live budget hint bar (0px when no budget set)
-                  if (bookId != null &&
-                      categoryId != null &&
-                      (type == RecordType.expense ||
-                          type == RecordType.income ||
-                          type == RecordType.reimbursable))
-                    RecordBudgetHintBar(
-                      bookId: bookId,
-                      recordTime: time.millisecondsSinceEpoch,
-                      categoryId: categoryId!,
-                      excludeBudget: excludeBudget,
-                    ),
-
-                  // Non-blocking save-and-new confirmation banner
-                  if (_savedAndResetBanner && error == null)
-                    Container(
-                      key: const Key('save-and-new-banner'),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 4,
-                      ),
-                      color: cs.primaryContainer.withAlpha(160),
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.check_circle_outline_rounded,
-                            size: 15,
-                            color: cs.primary,
-                          ),
-                          const SizedBox(width: 6),
-                          Expanded(
-                            child: Text(
-                              '已保存，可继续记下一笔',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w500,
-                                color: cs.onPrimaryContainer,
-                              ),
-                            ),
-                          ),
-                          InkWell(
-                            onTap: () =>
-                                setState(() => _savedAndResetBanner = false),
-                            child: Icon(
-                              Icons.close,
-                              size: 15,
-                              color: cs.onPrimaryContainer,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-
-                  // Validation / conflict error banner
-                  if (error != null)
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 5,
-                      ),
-                      color: cs.errorContainer.withAlpha(180),
-                      child: Row(
-                        children: [
-                          Icon(Icons.error_outline, size: 15, color: cs.error),
-                          const SizedBox(width: 6),
-                          Expanded(
-                            child: Text(
-                              error!,
-                              key: const Key('form-error'),
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(fontSize: 12, color: cs.error),
-                            ),
-                          ),
-                          InkWell(
-                            onTap: () => setState(() => error = null),
-                            child: Icon(Icons.close, size: 15, color: cs.error),
-                          ),
-                        ],
-                      ),
-                    ),
+                  ...topBanners,
 
                   // Collapsible image attachment strip
                   if ((_attachmentsExpanded || imageNames.isNotEmpty) &&
@@ -3591,194 +4020,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                     ),
 
                   // Row 1: Category / Transfer Summary + Tight Left-Prefixed Amount Bar
-                  Padding(
-                    key: const Key('editor-summary-amount-row'),
-                    padding: const EdgeInsets.fromLTRB(14, 10, 14, 6),
-                    child: LayoutBuilder(
-                      builder: (context, rowConstraints) {
-                        final maxAmountWidth = math.max(
-                          124.0,
-                          rowConstraints.maxWidth * 0.62,
-                        );
-                        return Row(
-                          crossAxisAlignment: CrossAxisAlignment.center,
-                          children: [
-                            Expanded(child: summaryLeft),
-                            const SizedBox(width: 8),
-                            ConstrainedBox(
-                              constraints: BoxConstraints(
-                                maxWidth: maxAmountWidth,
-                              ),
-                              child: GestureDetector(
-                                key: const Key('amount-tap-area'),
-                                behavior: HitTestBehavior.opaque,
-                                onTap: busy ? null : _activateCustomKeypad,
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  crossAxisAlignment: CrossAxisAlignment.end,
-                                  children: [
-                                    if (livePreview != null)
-                                      Text(
-                                        '= $livePreview',
-                                        key: const Key('amount-live-preview'),
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: TextStyle(
-                                          fontSize: 11,
-                                          fontWeight: FontWeight.w600,
-                                          color: cs.primary,
-                                          fontFeatures: const [
-                                            FontFeature.tabularFigures(),
-                                          ],
-                                        ),
-                                      ),
-                                    Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      mainAxisAlignment: MainAxisAlignment.end,
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.baseline,
-                                      textBaseline: TextBaseline.alphabetic,
-                                      children: [
-                                        currencyPrefixWidget,
-                                        SizedBox(
-                                          width: sc == baseCurrency ? 2 : 5,
-                                        ),
-                                        Flexible(
-                                          child: IntrinsicWidth(
-                                            child: TextField(
-                                              key: const Key('amount'),
-                                              controller: amount,
-                                              focusNode: _amountFocus,
-                                              enabled: !busy,
-                                              readOnly: false,
-                                              showCursor: true,
-                                              keyboardType: TextInputType.none,
-                                              textInputAction:
-                                                  TextInputAction.done,
-                                              textAlign: TextAlign.right,
-                                              inputFormatters:
-                                                  _keypadExpressionFormatters,
-                                              onTapOutside:
-                                                  DesktopAdaptive.isDesktop(
-                                                    context,
-                                                  )
-                                                  ? (_) {}
-                                                  : null,
-                                              onTap: busy
-                                                  ? null
-                                                  : _activateCustomKeypad,
-                                              onChanged: (_) {
-                                                ScaffoldMessenger.maybeOf(
-                                                  context,
-                                                )?.clearSnackBars();
-                                                setState(() {
-                                                  error = null;
-                                                  _savedAndResetBanner = false;
-                                                  _autoConvert();
-                                                });
-                                              },
-                                              onSubmitted: (_) {
-                                                if (hasPendingOperator(
-                                                  amount.text,
-                                                )) {
-                                                  try {
-                                                    final res =
-                                                        evaluateKeypadExpression(
-                                                          amount.text,
-                                                        );
-                                                    if (res.dividedByZero) {
-                                                      _showCalcError(
-                                                        '算式无效或除数不能为 0',
-                                                      );
-                                                      return;
-                                                    }
-                                                    if (res.isNegative) {
-                                                      _showCalcError(
-                                                        '计算结果不能小于 0',
-                                                      );
-                                                      return;
-                                                    }
-                                                    if (res.exceededMax) {
-                                                      _showCalcError(
-                                                        '金额不能超过 88888888888.00',
-                                                      );
-                                                      return;
-                                                    }
-                                                    final next =
-                                                        res.money.decimal;
-                                                    setState(() {
-                                                      error = null;
-                                                      _setAmountText(next);
-                                                      _autoConvert();
-                                                    });
-                                                  } on Failure catch (e) {
-                                                    _showCalcError(
-                                                      safeMessage(e),
-                                                    );
-                                                    return;
-                                                  }
-                                                }
-                                              },
-                                              style: TextStyle(
-                                                fontSize: 22,
-                                                fontWeight: FontWeight.w800,
-                                                color: amountColor,
-                                                fontFeatures: const [
-                                                  FontFeature.tabularFigures(),
-                                                ],
-                                              ),
-                                              decoration: InputDecoration(
-                                                isCollapsed:
-                                                    DesktopAdaptive.isDesktop(
-                                                      context,
-                                                    ),
-                                                isDense:
-                                                    !DesktopAdaptive.isDesktop(
-                                                      context,
-                                                    ),
-                                                constraints:
-                                                    DesktopAdaptive.isDesktop(
-                                                      context,
-                                                    )
-                                                    ? const BoxConstraints(
-                                                        minHeight: 36,
-                                                      )
-                                                    : null,
-                                                hintText: amount.text.isEmpty
-                                                    ? '0.00'
-                                                    : null,
-                                                hintStyle: TextStyle(
-                                                  fontSize: 22,
-                                                  fontWeight: FontWeight.w700,
-                                                  color: cs.outlineVariant,
-                                                ),
-                                                contentPadding:
-                                                    EdgeInsets.symmetric(
-                                                      vertical:
-                                                          DesktopAdaptive.isDesktop(
-                                                            context,
-                                                          )
-                                                          ? 6
-                                                          : 4,
-                                                    ),
-                                                border: InputBorder.none,
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                    if (conversionSummaryWidget != null)
-                                      conversionSummaryWidget,
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ],
-                        );
-                      },
-                    ),
-                  ),
+                  buildSummaryAmountRow(isDesktopLayout: false),
 
                   // Row 2: Borderless Tonal Remark Input Row (tags live exclusively in pill toolbar)
                   Container(
@@ -3819,23 +4061,17 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                           }) => null,
                       onChanged: (_) =>
                           setState(() => _savedAndResetBanner = false),
-                      textAlignVertical: DesktopAdaptive.isDesktop(context)
-                          ? TextAlignVertical.center
-                          : null,
                       style: const TextStyle(fontSize: 13.5),
                       decoration: InputDecoration(
-                        isDense: !DesktopAdaptive.isDesktop(context),
-                        constraints: DesktopAdaptive.isDesktop(context)
-                            ? const BoxConstraints(minHeight: 38)
-                            : null,
+                        isDense: true,
                         hintText: '输入备注...',
                         hintStyle: TextStyle(
                           fontSize: 13,
                           color: cs.onSurfaceVariant.withAlpha(160),
                         ),
-                        contentPadding: EdgeInsets.symmetric(
+                        contentPadding: const EdgeInsets.symmetric(
                           horizontal: 4,
-                          vertical: DesktopAdaptive.isDesktop(context) ? 10 : 8,
+                          vertical: 8,
                         ),
                         border: InputBorder.none,
                         prefixIcon: Icon(
@@ -3871,47 +4107,8 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
             ),
           ),
 
-          // Unified Bottom Panel Slot (Mobile) or Compact Action Bar + Optional Collapsible Panel (Desktop)
-          if (DesktopAdaptive.isDesktop(context)) ...[
-            if (panelSlotHeight > 0 &&
-                (_desktopKeypadExpanded ||
-                    (_desktopRemarksExpanded && type != RecordType.transfer)))
-              Container(
-                key: const Key('editor-bottom-panel-slot'),
-                height: panelSlotHeight,
-                color: trayColor,
-                child: _desktopRemarksExpanded && type != RecordType.transfer
-                    ? _buildFrequentRemarksPanel(
-                        context,
-                        categories: categories,
-                        selectedCategory: selectedCat,
-                        bottomSafePadding: 0,
-                      )
-                    : SingleChildScrollView(
-                        physics: const ClampingScrollPhysics(),
-                        child: RecordCustomKeypad(
-                          amountText: amount.text,
-                          enabled: canSubmit,
-                          busy: busy,
-                          enableMultiplyDivide: true,
-                          onKeyTap: _onKeypadKey,
-                          onBackspace: () => _onKeypadKey('BACKSPACE'),
-                          onClearAll: () => _onKeypadKey('CLEAR'),
-                          onEvaluate: _evaluateInPlace,
-                          onSave: () => unawaited(_save(stayAndReset: false)),
-                          onSaveAndNew: () =>
-                              unawaited(_save(stayAndReset: true)),
-                        ),
-                      ),
-              ),
-            _buildDesktopActionBar(
-              context,
-              trayColor: trayColor,
-              remarksEnabled: remarksEnabled && type != RecordType.transfer,
-              pendingOp: pendingOp,
-              canSubmit: canSubmit,
-            ),
-          ] else if (_panelMode != _BottomPanelMode.osKeyboard)
+          // Unified Bottom Panel Slot (Mobile)
+          if (_panelMode != _BottomPanelMode.osKeyboard)
             Container(
               key: const Key('editor-bottom-panel-slot'),
               height: panelSlotHeight,
@@ -3957,7 +4154,11 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
   }) {
     final cs = Theme.of(context).colorScheme;
     final modLabel = DesktopAdaptive.primaryModifierLabel(context);
-    final saveLabel = pendingOp ? '= (Enter)' : (busy ? '保存中…' : '保存 (Enter)');
+    final fullSaveAndAgainLabel = '再记 ($modLabel+Enter)';
+    final fullSaveLabel = pendingOp
+        ? '= (Enter)'
+        : (busy ? '保存中…' : '保存 (Enter)');
+    final compactSaveLabel = pendingOp ? '=' : (busy ? '保存中…' : '保存');
 
     final leftButtons = <Widget>[
       if (remarksEnabled)
@@ -3977,85 +4178,109 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
       ),
     ];
 
-    final rightButtons = <Widget>[
-      OutlinedButton(
-        key: const Key('desktop-save-and-again'),
-        style: OutlinedButton.styleFrom(
-          visualDensity: VisualDensity.compact,
-          minimumSize: const Size(0, 36),
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          side: BorderSide(color: cs.outlineVariant.withValues(alpha: 0.85)),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
-          ),
-        ),
-        onPressed: canSubmit ? _triggerDesktopSaveAndAgain : null,
-        child: Text(
-          '再记 ($modLabel+Enter)',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-        ),
-      ),
-      FilledButton(
-        key: const Key('desktop-save-button'),
-        style: FilledButton.styleFrom(
-          visualDensity: VisualDensity.compact,
-          minimumSize: const Size(0, 36),
-          padding: const EdgeInsets.symmetric(horizontal: 14),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
-          ),
-        ),
-        onPressed: canSubmit
-            ? (pendingOp
-                  ? _evaluateInPlace
-                  : () => unawaited(_save(stayAndReset: false)))
-            : null,
-        child: Text(
-          saveLabel,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
-        ),
-      ),
-    ];
-
     return TextFieldTapRegion(
       child: ExcludeFocus(
-        child: Container(
-          key: const Key('desktop-editor-action-bar'),
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
-          decoration: BoxDecoration(
-            color: trayColor,
-            border: Border(
-              top: BorderSide(
-                color: cs.outlineVariant.withValues(alpha: 0.35),
-                width: 0.6,
+        child: LayoutBuilder(
+          builder: (context, barConstraints) {
+            final compactBar = barConstraints.maxWidth < 550.0;
+            final saveAndAgainButton = OutlinedButton(
+              key: const Key('desktop-save-and-again'),
+              style: OutlinedButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                minimumSize: const Size(0, 34),
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                side: BorderSide(
+                  color: cs.outlineVariant.withValues(alpha: 0.85),
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
               ),
-            ),
-          ),
-          child: OverflowBar(
-            alignment: MainAxisAlignment.spaceBetween,
-            overflowAlignment: OverflowBarAlignment.end,
-            spacing: 8,
-            overflowSpacing: 6,
-            children: [
-              Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                children: leftButtons,
+              onPressed: canSubmit ? _triggerDesktopSaveAndAgain : null,
+              child: Text(
+                compactBar ? '再记' : fullSaveAndAgainLabel,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
-              Wrap(
+            );
+            final saveButton = FilledButton(
+              key: const Key('desktop-save-button'),
+              style: FilledButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                minimumSize: const Size(0, 34),
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              onPressed: canSubmit
+                  ? (pendingOp
+                        ? _evaluateInPlace
+                        : () => unawaited(_save(stayAndReset: false)))
+                  : null,
+              child: Text(
+                compactBar ? compactSaveLabel : fullSaveLabel,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            );
+            final rightButtons = <Widget>[
+              compactBar
+                  ? Tooltip(
+                      message: fullSaveAndAgainLabel,
+                      child: saveAndAgainButton,
+                    )
+                  : saveAndAgainButton,
+              compactBar
+                  ? Tooltip(message: fullSaveLabel, child: saveButton)
+                  : saveButton,
+            ];
+
+            return Container(
+              key: const Key('desktop-editor-action-bar'),
+              padding: const EdgeInsets.fromLTRB(12, 6, 12, 8),
+              decoration: BoxDecoration(
+                color: trayColor,
+                border: Border(
+                  top: BorderSide(
+                    color: cs.outlineVariant.withValues(alpha: 0.35),
+                    width: 0.6,
+                  ),
+                ),
+              ),
+              child: OverflowBar(
+                alignment: MainAxisAlignment.spaceBetween,
+                overflowAlignment: OverflowBarAlignment.end,
                 spacing: 8,
-                runSpacing: 6,
-                alignment: WrapAlignment.end,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                children: rightButtons,
+                overflowSpacing: 6,
+                children: [
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: leftButtons,
+                  ),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 6,
+                    alignment: WrapAlignment.end,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: rightButtons,
+                  ),
+                ],
               ),
-            ],
-          ),
+            );
+          },
         ),
       ),
     );
@@ -4396,7 +4621,9 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
             canRequestFocus: !isDesktop,
             onTap: busy ? null : onTap,
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              padding: isDesktop
+                  ? const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5)
+                  : const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -4619,11 +4846,11 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
 
     if (isDesktop) {
       return ConstrainedBox(
-        constraints: const BoxConstraints(minHeight: 38),
+        constraints: const BoxConstraints(minHeight: 30),
         child: Padding(
           key: const Key('editor-pill-toolbar'),
-          padding: const EdgeInsets.fromLTRB(12, 2, 12, 6),
-          child: Wrap(spacing: 6, runSpacing: 6, children: pills),
+          padding: const EdgeInsets.fromLTRB(12, 2, 12, 4),
+          child: Wrap(spacing: 5, runSpacing: 4, children: pills),
         ),
       );
     }
