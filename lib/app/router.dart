@@ -18,6 +18,7 @@ import '../features/bank_cards/bank_cards_page.dart';
 import '../features/batch_edit/batch_edit_page.dart';
 import '../features/books/books_page.dart';
 import '../features/budget/budget_page.dart';
+import '../features/budget/budget_providers.dart' show budgetOffsetProvider;
 import '../features/calendar/calendar_page.dart';
 import '../features/categories/categories_page.dart';
 import '../features/category_transfer/category_transfer_page.dart';
@@ -144,7 +145,14 @@ GoRouter buildRouter({List<NavigatorObserver>? observers}) => GoRouter(
         ),
       ],
     ),
-    GoRoute(path: '/budget', builder: (_, _) => const BudgetPage()),
+    GoRoute(
+      path: '/budget',
+      builder: (_, state) => BudgetPage(
+        initialOffset: int.tryParse(
+          state.uri.queryParameters['initialOffset'] ?? '',
+        ),
+      ),
+    ),
     GoRoute(
       path: '/stats/category',
       builder: (_, _) => const CategoryStatsPage(),
@@ -594,6 +602,9 @@ class _Shell extends ConsumerWidget {
     final selectedIndex = shell.currentIndex;
 
     void goBranch(int index) {
+      if (index == 1) {
+        ref.read(budgetOffsetProvider.notifier).reset();
+      }
       shell.goBranch(index, initialLocation: index == selectedIndex);
     }
 

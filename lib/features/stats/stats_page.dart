@@ -8,6 +8,7 @@ import '../../data/db/database.dart';
 import '../../domain/rules/category_stats.dart';
 import '../../domain/rules/tag_stats.dart';
 import '../books/book_switcher_modal.dart';
+import '../budget/budget_providers.dart' show budgetOffsetProvider;
 import '../budget/budget_widgets.dart';
 import '../common/common.dart';
 import 'annual_report_page.dart';
@@ -15,7 +16,8 @@ import 'asset_trend_page.dart';
 import 'category_stats_page.dart';
 import 'category_stats_providers.dart';
 import 'tag_stats_page.dart' show TagColorDot, parseTagColor;
-import 'tag_stats_providers.dart' show statsHubTagRankingsProvider;
+import 'tag_stats_providers.dart'
+    show statsHubTagRankingsProvider, tagRankingsOffsetProvider;
 
 /// Unified bottom "统计" Tab (mirrors original `AnalyzeFragment`, F-006 / F-008 / F-030).
 ///
@@ -34,6 +36,67 @@ class StatsPage extends ConsumerStatefulWidget {
 
 class _StatsPageState extends ConsumerState<StatsPage> {
   bool _pickingBook = false;
+  bool? _lastTickerEnabled;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final tickerEnabled = TickerMode.valuesOf(context).enabled;
+    final shouldReset =
+        _lastTickerEnabled == null ||
+        (_lastTickerEnabled == false && tickerEnabled);
+    _lastTickerEnabled = tickerEnabled;
+    if (shouldReset && tickerEnabled) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !TickerMode.valuesOf(context).enabled) return;
+        if (ref.read(budgetOffsetProvider) != 0) {
+          ref.read(budgetOffsetProvider.notifier).reset();
+        }
+      });
+    }
+  }
+
+  Future<void> _openBudgetPage({required int initialOffset}) async {
+    ref.read(budgetOffsetProvider.notifier).setOffset(initialOffset);
+    await context.push(
+      initialOffset == 0 ? '/budget' : '/budget?initialOffset=$initialOffset',
+    );
+    if (mounted && ref.read(budgetOffsetProvider) != 0) {
+      ref.read(budgetOffsetProvider.notifier).reset();
+    }
+  }
+
+  void _openCategoryStatsDetail() {
+    if (ref.read(categoryStatsRangeKindProvider) == StatRangeKind.custom) {
+      ref
+          .read(categoryStatsRangeKindProvider.notifier)
+          .setRangeKind(StatRangeKind.month);
+    }
+    if (ref.read(categoryStatsOffsetProvider) != 0) {
+      ref.read(categoryStatsOffsetProvider.notifier).reset();
+    }
+    context.push('/stats/category');
+  }
+
+  void _openCategoryDrilldownFromHub(CategoryRowItem row) {
+    if (ref.read(categoryStatsRangeKindProvider) != StatRangeKind.month) {
+      ref
+          .read(categoryStatsRangeKindProvider.notifier)
+          .setRangeKind(StatRangeKind.month);
+    }
+    if (ref.read(categoryStatsOffsetProvider) != 0) {
+      ref.read(categoryStatsOffsetProvider.notifier).reset();
+    }
+    ref.read(categoryStatsFilterConfigProvider.notifier).reset();
+    context.push('/stats/category/${row.categoryId}');
+  }
+
+  void _openTagRankings() {
+    if (ref.read(tagRankingsOffsetProvider) != 0) {
+      ref.read(tagRankingsOffsetProvider.notifier).reset();
+    }
+    context.push('/stats/tags');
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -46,17 +109,18 @@ class _StatsPageState extends ConsumerState<StatsPage> {
     );
     final categoryCard = CategoryStatsOverviewCard(
       key: const Key('stats-category-overview-card'),
-      onOpenDetail: () => context.push('/stats/category'),
-      onTapCategory: (row) => context.push('/stats/category/${row.categoryId}'),
+      onOpenDetail: _openCategoryStatsDetail,
+      onTapCategory: _openCategoryDrilldownFromHub,
     );
     final tagCard = _TagStatsOverviewCard(
       key: const Key('stats-tag-overview-card'),
-      onOpenAll: () => context.push('/stats/tags'),
+      onOpenAll: _openTagRankings,
       onTapTag: (item) => context.push('/stats/tag/${item.tagId}'),
     );
     final budgetCard = BudgetSummaryCard(
       enablePeriodControls: true,
-      onTap: () => context.push('/budget'),
+      onTap: () =>
+          _openBudgetPage(initialOffset: ref.read(budgetOffsetProvider)),
     );
     final trendCard = AssetTrendOverviewCard(
       onTap: () => context.push('/stats/trend'),
@@ -119,7 +183,7 @@ class _StatsPageState extends ConsumerState<StatsPage> {
             key: const Key('stats-budget-action'),
             tooltip: '预算管理',
             icon: const Icon(Icons.savings_outlined),
-            onPressed: () => context.push('/budget'),
+            onPressed: () => _openBudgetPage(initialOffset: 0),
           ),
           IconButton(
             key: const Key('stats-annual-action'),

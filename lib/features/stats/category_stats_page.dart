@@ -27,6 +27,22 @@ class _CategoryStatsPageState extends ConsumerState<CategoryStatsPage> {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (ref.read(categoryStatsRangeKindProvider) == StatRangeKind.custom) {
+        ref
+            .read(categoryStatsRangeKindProvider.notifier)
+            .setRangeKind(StatRangeKind.month);
+      }
+      if (ref.read(categoryStatsOffsetProvider) != 0) {
+        ref.read(categoryStatsOffsetProvider.notifier).reset();
+      }
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     final dimension = ref.watch(categoryStatsDimensionProvider);
     final rangeKind = ref.watch(categoryStatsRangeKindProvider);
@@ -2584,7 +2600,7 @@ class CategoryStatsOverviewCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
-    final resultAsync = ref.watch(categoryStatsResultProvider);
+    final resultAsync = ref.watch(statsHubCategoryOverviewProvider);
     final bookId = ref.watch(currentBookIdProvider).value ?? 1;
     final categories =
         ref.watch(categoriesProvider(bookId)).value ?? const <RecordCategory>[];

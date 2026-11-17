@@ -251,7 +251,7 @@ void main() {
       expect(find.text('¥2000.00'), findsOneWidget);
       expect(find.byKey(const Key('budget_card_period_prev')), findsNothing);
 
-      // 4. Switch back to "统计" Tab: still on previous month, tap '去设置' -> opens BudgetPage on previous month
+      // 4. Switch back to "统计" Tab: auto-resets budget card to current month (¥2000.00)!
       await tester.tap(find.text('统计'));
       await settle();
       await tester.scrollUntilVisible(
@@ -260,15 +260,29 @@ void main() {
         scrollable: statsScrollable(),
       );
       await settle();
+      expect(find.byKey(const Key('budget_card_period_reset')), findsNothing);
+      expect(find.text('¥2000.00'), findsOneWidget);
+
+      // 5. Step to previous month on StatsPage + tap '去设置' -> opens BudgetPage on previous month
+      await tester.tap(find.byKey(const Key('budget_card_period_prev')));
+      await settle();
       expect(find.text('回本月'), findsOneWidget);
+      expect(find.text('该期未设置预算'), findsOneWidget);
       await tester.tap(find.text('去设置'));
       await settle();
       expect(find.byKey(const Key('budget_page')), findsOneWidget);
       expect(find.text('未设置当期预算'), findsOneWidget);
+
+      // Pop back to StatsPage -> auto-resets StatsPage budget card to current month (¥2000.00)!
       await tester.tap(find.byType(BackButton));
       await settle();
+      expect(find.byKey(const Key('budget_card_period_reset')), findsNothing);
+      expect(find.text('¥2000.00'), findsOneWidget);
 
-      // 5. Tap '回本月' directly on StatsPage -> immediately restores current month ¥2000.00!
+      // 6. Step to previous month again and tap '回本月' inline -> restores current month ¥2000.00!
+      await tester.tap(find.byKey(const Key('budget_card_period_prev')));
+      await settle();
+      expect(find.byKey(const Key('budget_card_period_reset')), findsOneWidget);
       await tester.tap(find.byKey(const Key('budget_card_period_reset')));
       await settle();
       expect(find.byKey(const Key('budget_card_period_reset')), findsNothing);

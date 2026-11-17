@@ -18,7 +18,9 @@ const _uuid = Uuid();
 
 /// Budget management page (F-006, docs/modules/budget.md).
 class BudgetPage extends ConsumerStatefulWidget {
-  const BudgetPage({super.key});
+  const BudgetPage({super.key, this.initialOffset});
+
+  final int? initialOffset;
 
   @override
   ConsumerState<BudgetPage> createState() => _BudgetPageState();
@@ -26,6 +28,30 @@ class BudgetPage extends ConsumerStatefulWidget {
 
 class _BudgetPageState extends ConsumerState<BudgetPage> {
   final _commandIds = CommandIds();
+
+  @override
+  void initState() {
+    super.initState();
+    _scheduleInitialOffsetReset();
+  }
+
+  @override
+  void didUpdateWidget(covariant BudgetPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.initialOffset != widget.initialOffset) {
+      _scheduleInitialOffsetReset();
+    }
+  }
+
+  void _scheduleInitialOffsetReset() {
+    final targetOffset = widget.initialOffset ?? 0;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (ref.read(budgetOffsetProvider) != targetOffset) {
+        ref.read(budgetOffsetProvider.notifier).setOffset(targetOffset);
+      }
+    });
+  }
 
   Future<(int bookId, String section)> _resolveBookAndSection() async {
     final ledgerQ = await ref.read(queriesProvider.future);

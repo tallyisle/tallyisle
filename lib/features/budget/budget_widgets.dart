@@ -35,12 +35,21 @@ class _BudgetSummaryCardState extends ConsumerState<BudgetSummaryCard> {
 
   void _checkAutoCarryover(WidgetRef ref, int effectiveOffset) {
     if (effectiveOffset != 0) return;
-    final book = ref.read(currentBookProvider).value;
-    final mode = ref.read(budgetModeProvider).value;
-    final period = ref.read(budgetPeriodForOffsetProvider(0)).value;
-    final service = ref.read(budgetServiceProvider).value;
+    final bookAsync = ref.read(currentBookProvider);
+    final modeAsync = ref.read(budgetModeProvider);
+    final serviceAsync = ref.read(budgetServiceProvider);
+    if (bookAsync.isLoading || modeAsync.isLoading || serviceAsync.isLoading) {
+      return;
+    }
+    final book = bookAsync.value;
+    final mode = modeAsync.value;
+    final service = serviceAsync.value;
 
-    if (book != null && mode != null && period != null && service != null) {
+    if (book != null && mode != null && service != null) {
+      final now = DateTime.now();
+      final period = mode == BudgetMode.yearly
+          ? BillingPeriod.containingYear(now, book.startDay)
+          : BillingPeriod.containing(now, book.startDay);
       final section = mode.sectionFor(period);
       final key = '${book.id}-${mode.value}-$section';
       if (!_checkedCarryoverKeys.add(key)) return;
@@ -169,7 +178,7 @@ class _BudgetSummaryCardState extends ConsumerState<BudgetSummaryCard> {
 
     final targetProvider = budgetOverviewForOffsetProvider(effectiveOffset);
     ref.listen(targetProvider, (_, next) {
-      if (next.hasValue) {
+      if (next.hasValue && !next.isLoading) {
         _checkAutoCarryover(ref, effectiveOffset);
       }
     });
@@ -177,7 +186,7 @@ class _BudgetSummaryCardState extends ConsumerState<BudgetSummaryCard> {
     final overviewAsync = ref.watch(targetProvider);
     if (overviewAsync.hasValue) {
       _cachedOverview = overviewAsync.value;
-      if (effectiveOffset == 0) {
+      if (effectiveOffset == 0 && !overviewAsync.isLoading) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) {
             _checkAutoCarryover(ref, effectiveOffset);

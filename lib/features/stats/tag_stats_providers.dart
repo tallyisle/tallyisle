@@ -1,15 +1,14 @@
 import 'package:drift/drift.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../app/providers.dart' show databaseProvider;
+import '../../app/providers.dart' show currentBookProvider, databaseProvider;
 import '../../data/db/database.dart';
 import '../../domain/ledger/record_extra.dart';
 import '../../domain/ledger/record_relations.dart';
 import '../../domain/rules/billing_period.dart';
 import '../../domain/rules/category_stats.dart';
 import '../../domain/rules/tag_stats.dart';
-import 'category_stats_providers.dart'
-    show categoryStatsActivePeriodProvider, categoryStatsDimensionProvider;
+import 'category_stats_providers.dart' show categoryStatsDimensionProvider;
 
 /// Period mode for tag statistics (`全部 | 按月 | 按年`).
 enum TagStatsPeriodMode { all, month, year }
@@ -412,30 +411,31 @@ final tagRankingsViewProvider = Provider<AsyncValue<TagRankingsViewData>>((
 // Stats Hub (/stats) Tag Overview Card provider
 // ---------------------------------------------------------------------------
 
-/// Top tag rankings for the currently selected period & dimension on `StatsPage`.
+/// Top tag rankings for the current month (`offset = 0`) & dimension on `StatsPage`.
 final statsHubTagRankingsProvider = Provider<AsyncValue<TagRankingsResult>>((
   ref,
 ) {
   final bookIdAsync = ref.watch(tagStatsCurrentBookIdProvider);
-  final periodAsync = ref.watch(categoryStatsActivePeriodProvider);
+  final bookAsync = ref.watch(currentBookProvider);
   final tagsAsync = ref.watch(tagStatsAllTagsProvider);
   final baseCurrAsync = ref.watch(tagStatsBaseCurrencyProvider);
   final dim = ref.watch(categoryStatsDimensionProvider);
 
-  if (bookIdAsync.isLoading || periodAsync.isLoading || tagsAsync.isLoading) {
+  if (bookIdAsync.isLoading || bookAsync.isLoading || tagsAsync.isLoading) {
     return const AsyncValue.loading();
   }
   if (bookIdAsync.hasError) {
     return AsyncValue.error(bookIdAsync.error!, bookIdAsync.stackTrace!);
   }
-  if (periodAsync.hasError) {
-    return AsyncValue.error(periodAsync.error!, periodAsync.stackTrace!);
+  if (bookAsync.hasError) {
+    return AsyncValue.error(bookAsync.error!, bookAsync.stackTrace!);
   }
   if (tagsAsync.hasError) {
     return AsyncValue.error(tagsAsync.error!, tagsAsync.stackTrace!);
   }
 
-  final period = periodAsync.value!;
+  final startDay = bookAsync.value?.startDay ?? 1;
+  final period = BillingPeriod.containing(DateTime.now(), startDay);
   final winKey = (
     bookId: bookIdAsync.value!,
     startMs: period.startMs,

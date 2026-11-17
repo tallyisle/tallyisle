@@ -41,11 +41,27 @@ class TagColorDot extends StatelessWidget {
 }
 
 /// Tag Rankings Page (`/stats/tags`).
-class TagRankingsPage extends ConsumerWidget {
+class TagRankingsPage extends ConsumerStatefulWidget {
   const TagRankingsPage({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<TagRankingsPage> createState() => _TagRankingsPageState();
+}
+
+class _TagRankingsPageState extends ConsumerState<TagRankingsPage> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (ref.read(tagRankingsOffsetProvider) != 0) {
+        ref.read(tagRankingsOffsetProvider.notifier).reset();
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final mode = ref.watch(tagRankingsPeriodModeProvider);
     final bucket = ref.watch(tagRankingsBucketProvider);
     final rollup = ref.watch(tagRankingsRollupProvider);
