@@ -194,7 +194,10 @@ void main() {
         findsOneWidget,
       );
       expect(
-        find.descendant(of: paneFinder, matching: find.text('版本 0.1.0.rc')),
+        find.descendant(
+          of: paneFinder,
+          matching: find.text('版本 $appDisplayVersion'),
+        ),
         findsOneWidget,
       );
       expect(

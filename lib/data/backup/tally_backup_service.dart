@@ -7,6 +7,7 @@ import 'package:flutter/services.dart' show MissingPluginException;
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import '../../core/app_version.dart';
 import '../../core/failure.dart';
 import '../../core/zip_archive.dart';
 import '../../domain/rules/cloud_sync_rules.dart';
@@ -177,7 +178,7 @@ final class TallyBackupService {
     Future<Directory> Function()? localBackupsDirectoryProvider,
     Future<Directory> Function()? attachmentsDirectoryProvider,
     this.httpClientFactory,
-    this.appVersion = tallyDefaultAppVersion,
+    this.appVersion = appVersionName,
   }) : _localBackupsDirProvider =
            localBackupsDirectoryProvider ?? _defaultBackupsDirectory,
        _attachmentsDirProvider =

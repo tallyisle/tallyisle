@@ -204,7 +204,7 @@ void main() {
         expect(find.text('更多'), findsWidgets);
       }
 
-      expect(find.text('当前版本 · 0.1.0.rc'), findsNothing);
+      expect(find.text('当前版本 · $appDisplayVersion'), findsNothing);
       expect(find.text('开源许可'), findsNothing);
 
       // Legacy deep link `/import/penny` lands cleanly on unified MigrationPage.

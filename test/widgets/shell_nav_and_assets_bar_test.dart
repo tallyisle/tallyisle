@@ -26,7 +26,7 @@ void main() {
   }
 
   testWidgets(
-    '5-slot bottom bar renders symmetric slots + center add-record, MePage shows 更多 & 报销管理 & 0.1.0.rc without 开发版本',
+    '5-slot bottom bar renders symmetric slots + center add-record, MePage shows 更多 & 报销管理 & app version without 开发版本',
     (tester) async {
       tester.view.physicalSize = const Size(390, 844);
       tester.view.devicePixelRatio = 1.0;
@@ -125,7 +125,7 @@ void main() {
       expect(find.text('开发版本'), findsNothing);
       expect(find.text('支持一羽记账备份迁入、微信/支付宝及第三方账单扩展'), findsNothing);
 
-      // Scroll down to sole me-about entry and verify AboutHelpPage shows '版本 0.1.0.rc' badge.
+      // Scroll down to sole me-about entry and verify AboutHelpPage shows the app version badge.
       await tester.scrollUntilVisible(
         find.byKey(const Key('me-about')),
         240,
@@ -134,7 +134,7 @@ void main() {
       await tester.pump();
       await tester.tap(find.byKey(const Key('me-about')));
       await settle(tester);
-      expect(find.text('版本 0.1.0.rc'), findsOneWidget);
+      expect(find.text('版本 $appDisplayVersion'), findsOneWidget);
       expect(find.text('开发版本'), findsNothing);
       await tester.tap(find.byType(BackButton));
       await settle(tester);

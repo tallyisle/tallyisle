@@ -5,6 +5,7 @@ import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 
 import '../../app/adaptive.dart';
 import '../../app/app.dart' show appDisplayVersion;
+import '../../core/app_version.dart' show appVersionLabel;
 import '../../platform/files.dart';
 import '../common/desktop_modal_page.dart';
 
@@ -213,7 +214,7 @@ class AboutHelpPage extends StatelessWidget {
                   showLicensePage(
                     context: context,
                     applicationName: '帐屿 / TallyIsle',
-                    applicationVersion: appDisplayVersion,
+                    applicationVersion: appVersionLabel,
                   );
                 },
               ),

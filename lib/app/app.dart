@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../core/app_version.dart';
 import '../data/backup/backup_sync_scheduler.dart';
 import '../data/backup/tally_backup_service.dart';
 import '../domain/rules/app_settings_rules.dart';
@@ -25,7 +26,8 @@ import 'desktop_shell.dart';
 import 'providers.dart';
 import 'router.dart';
 
-const String appDisplayVersion = '0.1.0.rc';
+/// User-facing version shown in 「更多」 and 「帮助与关于」 (ADR-019).
+const String appDisplayVersion = appVersionName;
 
 const List<String> _desktopCjkFontFallback = <String>[
   'PingFang SC',
