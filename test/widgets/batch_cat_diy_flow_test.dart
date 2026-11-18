@@ -543,6 +543,32 @@ void main() {
       await settle(tester);
 
       expect(find.text('当前启用预览（8/11）'), findsOneWidget);
+      expect(
+        find.byKey(const Key('diy-toolbar-preview-chips')),
+        findsOneWidget,
+      );
+      expect(find.text('收起'), findsOneWidget);
+      final expandedHeight = tester
+          .getSize(find.byKey(const Key('diy-toolbar-preview')))
+          .height;
+
+      // Collapse preview card -> frees vertical viewport space, then re-expand!
+      await tester.tap(find.byKey(const Key('diy-toolbar-preview-toggle')));
+      await settle(tester);
+      expect(find.byKey(const Key('diy-toolbar-preview-chips')), findsNothing);
+      expect(find.text('展开'), findsOneWidget);
+      final collapsedHeight = tester
+          .getSize(find.byKey(const Key('diy-toolbar-preview')))
+          .height;
+      expect(collapsedHeight, lessThan(expandedHeight));
+
+      await tester.tap(find.byKey(const Key('diy-toolbar-preview-toggle')));
+      await settle(tester);
+      expect(
+        find.byKey(const Key('diy-toolbar-preview-chips')),
+        findsOneWidget,
+      );
+      expect(find.text('收起'), findsOneWidget);
 
       // Seed custom date/time picker styles in ti_preference and ensure UI setEnabled & moveItem preserve them.
       await tester.runAsync(() async {

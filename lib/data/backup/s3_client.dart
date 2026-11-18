@@ -171,19 +171,26 @@ final class S3ObjectMetadata {
 /// (`AWS4-HMAC-SHA256`), compatible with AWS S3, Cloudflare R2, Aliyun OSS,
 /// Tencent COS, MinIO, and Backblaze B2.
 final class S3Client {
-  S3Client(this.config, {HttpClient Function()? httpClientFactory, this.nowMs})
-    : _httpClientFactory = httpClientFactory ?? _defaultHttpClient;
+  S3Client(
+    this.config, {
+    HttpClient Function()? httpClientFactory,
+    this.nowMs,
+    this.transferTimeout = const Duration(seconds: 90),
+  }) : _httpClientFactory = httpClientFactory ?? _defaultHttpClient;
 
   final S3Config config;
   final HttpClient Function() _httpClientFactory;
   final int Function()? nowMs;
+  final Duration transferTimeout;
 
   static const int _uploadChunkSize = 32 * 1024;
   static const int _maxListPages = 50;
   static const String _probeRelativePath = '.tallyisle_s3_probe.tmp';
 
   static HttpClient _defaultHttpClient() => Zone.root.run(
-    () => HttpClient()..connectionTimeout = const Duration(seconds: 20),
+    () => HttpClient()
+      ..connectionTimeout = const Duration(seconds: 15)
+      ..idleTimeout = const Duration(seconds: 15),
   );
 
   DateTime _nowUtc() => DateTime.fromMillisecondsSinceEpoch(
@@ -203,7 +210,7 @@ final class S3Client {
     Zone.root.run(() async {
       final client = _httpClientFactory();
       try {
-        final result = await action(client);
+        final result = await action(client).timeout(transferTimeout);
         completer.complete(result);
       } on Failure catch (e, st) {
         completer.completeError(e, st);

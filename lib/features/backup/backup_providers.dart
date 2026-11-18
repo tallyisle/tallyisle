@@ -70,6 +70,11 @@ final cloudSyncCursorProvider = StreamProvider<LocalSyncCursor>((ref) async* {
   yield* service.watchSyncCursor();
 });
 
+final cloudSyncInProgressProvider = StreamProvider<bool>((ref) async* {
+  final service = await ref.watch(tallyBackupServiceProvider.future);
+  yield* service.watchSyncInProgress();
+});
+
 final localBackupsProvider = FutureProvider<List<BackupFileMetadata>>((
   ref,
 ) async {

@@ -198,6 +198,18 @@ final class TallyBackupService {
   Future<void>? _localAutoBackupSerialChain;
   int _internalRestoreDepth = 0;
   int _attachedSchedulerCount = 0;
+  int _activeSyncCount = 0;
+  final StreamController<bool> _syncInProgressController =
+      StreamController<bool>.broadcast();
+
+  /// `true` whenever a foreground or background [syncNow] task is queued or active.
+  bool get isSyncInProgress => _activeSyncCount > 0;
+
+  /// Broadcasts changes in [isSyncInProgress] (starting with the current value).
+  Stream<bool> watchSyncInProgress() async* {
+    yield isSyncInProgress;
+    yield* _syncInProgressController.stream.distinct();
+  }
 
   /// `true` while [restoreFromBytes] or a remote sync pull is replacing the 22
   /// business tables, allowing [BackupSyncScheduler] to suppress table-change
@@ -1518,6 +1530,10 @@ final class TallyBackupService {
     BackupProgressCallback? onProgress,
     FutureOr<void> Function()? beforePushCommitForTest,
   }) {
+    _activeSyncCount++;
+    if (_activeSyncCount == 1 && !_syncInProgressController.isClosed) {
+      _syncInProgressController.add(true);
+    }
     final prev = _syncSerialChain ?? Future<void>.value();
     final completer = Completer<CloudSyncOutcome>();
     _syncSerialChain = prev.catchError((_) {}).then((_) async {
@@ -1530,6 +1546,13 @@ final class TallyBackupService {
         completer.complete(outcome);
       } catch (e, st) {
         completer.completeError(e, st);
+      } finally {
+        if (_activeSyncCount > 0) {
+          _activeSyncCount--;
+        }
+        if (_activeSyncCount == 0 && !_syncInProgressController.isClosed) {
+          _syncInProgressController.add(false);
+        }
       }
     });
     return completer.future;
@@ -1544,6 +1567,7 @@ final class TallyBackupService {
     final CloudSyncObjectStore store;
     final BackupTarget cloudBackupTarget;
     final int archiveCooldownMs;
+    final bool includeArchiveAttachments;
 
     switch (settings.backend) {
       case CloudBackendType.none:
@@ -1564,6 +1588,7 @@ final class TallyBackupService {
         store = target;
         cloudBackupTarget = target;
         archiveCooldownMs = davCfg.autoBackupCooldownMs;
+        includeArchiveAttachments = davCfg.includeAttachments;
       case CloudBackendType.s3:
         final s3Cfg = await getS3Config();
         if (!s3Cfg.isConfigured) {
@@ -1577,6 +1602,7 @@ final class TallyBackupService {
         store = target;
         cloudBackupTarget = target;
         archiveCooldownMs = s3Cfg.autoBackupCooldownMs;
+        includeArchiveAttachments = s3Cfg.includeAttachments;
     }
 
     final localTables = await guardDatabase(
@@ -1655,6 +1681,7 @@ final class TallyBackupService {
           localAttChecksums: localAttChecksums,
           localDataSha256: localDataSha256,
           archiveCooldownMs: archiveCooldownMs,
+          includeArchiveAttachments: includeArchiveAttachments,
           forceOverwriteRemote: resolution == SyncConflictResolution.useLocal,
           onProgress: onProgress,
           beforePushCommitForTest: beforePushCommitForTest,
@@ -1887,6 +1914,7 @@ final class TallyBackupService {
     required Map<String, String> localAttChecksums,
     required String localDataSha256,
     required int archiveCooldownMs,
+    required bool includeArchiveAttachments,
     required bool forceOverwriteRemote,
     BackupProgressCallback? onProgress,
     FutureOr<void> Function()? beforePushCommitForTest,
@@ -1918,11 +1946,17 @@ final class TallyBackupService {
       }
     }
 
-    // 2. Re-read `sync/head.json` right before commit to guard concurrent races!
-    if (beforePushCommitForTest != null) {
-      await beforePushCommitForTest();
+    // 2. Re-read `sync/head.json` right before commit when attachment uploads
+    // or test hooks elapsed between initial read and commit!
+    final CloudSyncHead? freshHead;
+    if (beforePushCommitForTest != null || uploadedCount > 0) {
+      if (beforePushCommitForTest != null) {
+        await beforePushCommitForTest();
+      }
+      freshHead = await _readRemoteHeadOrNull(store);
+    } else {
+      freshHead = initialRemoteHead;
     }
-    final freshHead = await _readRemoteHeadOrNull(store);
     if (!forceOverwriteRemote) {
       final raced =
           (initialRemoteHead == null && freshHead != null) ||
@@ -2005,12 +2039,34 @@ final class TallyBackupService {
     await _saveSyncCursor(updatedCursor, ensureSettings: settings);
 
     // 4. Optional 24h full versioned `.tally` archive backup & pruning.
+    // Reuses already-exported `localTables` & `cloudBackupTarget` and isolates
+    // errors so a committed sync revision is NEVER failed by auxiliary archiving.
     String? archivedName;
     if (settings.autoArchiveBackupEnabled) {
-      final lastBackupAt = await getLastBackupAtMs();
-      if (lastBackupAt == null || (now - lastBackupAt) >= archiveCooldownMs) {
-        final archived = await uploadToActiveCloudBackup();
-        archivedName = archived.fileName;
+      try {
+        final lastBackupAt = await getLastBackupAtMs();
+        if (lastBackupAt == null || (now - lastBackupAt) >= archiveCooldownMs) {
+          final archivePack = packTallyArchive(
+            tables: localTables,
+            attachments: includeArchiveAttachments
+                ? localAttachments
+                : const <String, Uint8List>{},
+            createdAtMs: now,
+            appVersion: appVersion,
+            includeAttachments: includeArchiveAttachments,
+          );
+          final archiveFileName = formatTallyBackupFileName(
+            DateTime.fromMillisecondsSinceEpoch(now),
+          );
+          final archived = await cloudBackupTarget.writeBackup(
+            archiveFileName,
+            archivePack.bytes,
+          );
+          await _recordCompletedBackupState(now);
+          archivedName = archived.fileName;
+        }
+      } catch (_) {
+        // Sync commit (`latest_db.tally` + `head.json` + cursor) already succeeded.
       }
     }
 

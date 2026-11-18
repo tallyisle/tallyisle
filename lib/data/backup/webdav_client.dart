@@ -183,18 +183,25 @@ final class WebDavConfig {
 
 /// Pure `dart:io` [HttpClient] WebDAV client supporting Basic Auth,
 /// `PROPFIND`, recursive `MKCOL`, two-phase `.tmp -> MOVE` atomic upload (with
-/// `PUT + HEAD Content-Length` fallback when `MOVE` returns `405`/`501`),
-/// `GET`, and `DELETE` (R4, R6, ADR-017).
+/// delete-before-MOVE retry on `409`/`412` and `PUT + HEAD Content-Length`
+/// fallback when `MOVE` returns `405`/`501`/`502`/`400`), `GET`, and `DELETE`
+/// (R4, R6, ADR-017).
 final class WebDavClient {
   WebDavClient(
     this.config, {
     HttpClient Function()? httpClientFactory,
     this.nowMs,
+    this.controlTimeout = const Duration(seconds: 25),
+    this.transferTimeout = const Duration(seconds: 90),
   }) : _httpClientFactory = httpClientFactory ?? _defaultHttpClient;
 
   final WebDavConfig config;
   final HttpClient Function() _httpClientFactory;
   final int Function()? nowMs;
+  final Duration controlTimeout;
+  final Duration transferTimeout;
+
+  final Set<String> _verifiedCollectionPaths = <String>{};
 
   static const int _uploadChunkSize = 32 * 1024;
   static const String _probeFileName = '.tallyisle_write_probe.tmp';
@@ -210,7 +217,9 @@ final class WebDavClient {
       '</d:propfind>';
 
   static HttpClient _defaultHttpClient() => Zone.root.run(
-    () => HttpClient()..connectionTimeout = const Duration(seconds: 20),
+    () => HttpClient()
+      ..connectionTimeout = const Duration(seconds: 15)
+      ..idleTimeout = const Duration(seconds: 15),
   );
 
   Uri _validatedBaseUri() {
@@ -285,12 +294,15 @@ final class WebDavClient {
     return 'Basic $token';
   }
 
-  Future<T> _withClient<T>(Future<T> Function(HttpClient client) action) {
+  Future<T> _withClient<T>(
+    Future<T> Function(HttpClient client) action, {
+    Duration? timeout,
+  }) {
     final completer = Completer<T>();
     Zone.root.run(() async {
       final client = _httpClientFactory();
       try {
-        final result = await action(client);
+        final result = await action(client).timeout(timeout ?? transferTimeout);
         completer.complete(result);
       } on Failure catch (e, st) {
         completer.completeError(e, st);
@@ -342,7 +354,7 @@ final class WebDavClient {
     if (statusCode == 507) {
       throw const Failure(FailureCode.storageFull, 'WebDAV 远端存储空间不足');
     }
-    if (statusCode >= 500 && statusCode != 501) {
+    if (statusCode >= 500 && statusCode != 501 && statusCode != 502) {
       throw Failure(
         FailureCode.remoteUnavailable,
         '$action失败（远端服务器状态码 $statusCode）',
@@ -350,17 +362,13 @@ final class WebDavClient {
     }
   }
 
-  /// Ensures the configured remote WebDAV folder hierarchy exists (`PROPFIND` + `MKCOL`).
-  Future<void> ensureRemoteDirectory() =>
-      _withClient((client) => _ensureCollectionHierarchyOn(client, const []));
-
-  Future<void> _ensureCollectionHierarchyOn(
+  Future<int> _propfindCollectionDepth0StatusOn(
     HttpClient client,
-    List<String> extraSegments,
+    Uri dirUri,
   ) async {
-    final fullSegments = <String>[..._remoteDirSegments(), ...extraSegments];
-    final dirUri = _directoryUri(fullSegments);
-    final checkReq = await client.openUrl('PROPFIND', dirUri);
+    final checkReq = await client
+        .openUrl('PROPFIND', dirUri)
+        .timeout(controlTimeout);
     checkReq.headers.set(HttpHeaders.authorizationHeader, _basicAuthHeader);
     checkReq.headers.set('Depth', '0');
     checkReq.headers.set(
@@ -370,33 +378,83 @@ final class WebDavClient {
     final bodyBytes = utf8.encode(_propfindBody);
     checkReq.contentLength = bodyBytes.length;
     checkReq.add(bodyBytes);
-    final checkRes = await checkReq.close();
-    await checkRes.drain<void>();
-    _checkAuthAndStorageStatus(checkRes.statusCode, action: '检查远端目录');
-    if (checkRes.statusCode == 200 || checkRes.statusCode == 207) {
+    final checkRes = await checkReq.close().timeout(controlTimeout);
+    await checkRes.drain<void>().timeout(controlTimeout);
+    return checkRes.statusCode;
+  }
+
+  /// Ensures the configured remote WebDAV folder hierarchy exists (`PROPFIND` + `MKCOL`).
+  Future<void> ensureRemoteDirectory() => _withClient(
+    (client) => _ensureCollectionHierarchyOn(client, const []),
+    timeout: controlTimeout,
+  );
+
+  Future<void> _ensureCollectionHierarchyOn(
+    HttpClient client,
+    List<String> extraSegments, {
+    bool forceCheck = false,
+  }) async {
+    final fullSegments = <String>[..._remoteDirSegments(), ...extraSegments];
+    final fullKey = '/${fullSegments.join('/')}';
+    if (!forceCheck && _verifiedCollectionPaths.contains(fullKey)) {
+      return;
+    }
+
+    final dirUri = _directoryUri(fullSegments);
+    final checkStatus = await _propfindCollectionDepth0StatusOn(client, dirUri);
+    _checkAuthAndStorageStatus(checkStatus, action: '检查远端目录');
+    if (checkStatus == 200 || checkStatus == 207) {
+      final acc = <String>[];
+      for (final seg in fullSegments) {
+        acc.add(seg);
+        _verifiedCollectionPaths.add('/${acc.join('/')}');
+      }
+      if (fullSegments.isEmpty) {
+        _verifiedCollectionPaths.add('/');
+      }
       return;
     }
 
     final current = <String>[];
     for (final seg in fullSegments) {
       current.add(seg);
+      final prefixKey = '/${current.join('/')}';
+      if (!forceCheck && _verifiedCollectionPaths.contains(prefixKey)) {
+        continue;
+      }
       final colUri = _directoryUri(current);
-      final mkReq = await client.openUrl('MKCOL', colUri);
+      final mkReq = await client
+          .openUrl('MKCOL', colUri)
+          .timeout(controlTimeout);
       mkReq.headers.set(HttpHeaders.authorizationHeader, _basicAuthHeader);
       mkReq.contentLength = 0;
-      final mkRes = await mkReq.close();
-      await mkRes.drain<void>();
+      final mkRes = await mkReq.close().timeout(controlTimeout);
+      await mkRes.drain<void>().timeout(controlTimeout);
       _checkAuthAndStorageStatus(mkRes.statusCode, action: '创建远端目录');
-      if (mkRes.statusCode != 201 &&
-          mkRes.statusCode != 200 &&
-          mkRes.statusCode != 204 &&
-          mkRes.statusCode != 301 &&
-          mkRes.statusCode != 405) {
-        throw Failure(
-          FailureCode.remoteUnavailable,
-          '创建 WebDAV 远端目录失败（状态码 ${mkRes.statusCode}）',
-        );
+      if (mkRes.statusCode == 201 ||
+          mkRes.statusCode == 200 ||
+          mkRes.statusCode == 204 ||
+          mkRes.statusCode == 301 ||
+          mkRes.statusCode == 405) {
+        _verifiedCollectionPaths.add(prefixKey);
+        continue;
       }
+      if (mkRes.statusCode == 409) {
+        // Some WebDAV gateways (e.g. Alist / cloud-drive bridges) return 409
+        // instead of 405 when MKCOL targets an already-existing folder.
+        final verifyStatus = await _propfindCollectionDepth0StatusOn(
+          client,
+          colUri,
+        );
+        if (verifyStatus == 200 || verifyStatus == 207) {
+          _verifiedCollectionPaths.add(prefixKey);
+          continue;
+        }
+      }
+      throw Failure(
+        FailureCode.remoteUnavailable,
+        '创建 WebDAV 远端目录失败（状态码 ${mkRes.statusCode}）',
+      );
     }
   }
 
@@ -558,6 +616,7 @@ final class WebDavClient {
       tmpUri: _relativePathUri(tmpSegments),
       finalUri: _relativePathUri(segments),
       bytes: bytes,
+      parentExtraSegments: parentSegments,
       contentType: contentType,
       onProgress: onProgress,
     );
@@ -611,11 +670,29 @@ final class WebDavClient {
         return parsePropfindFileNames(xmlBody, collectionPath: dirUri.path);
       });
 
+  Future<int> _sendMoveOn(
+    HttpClient client, {
+    required Uri tmpUri,
+    required Uri finalUri,
+  }) async {
+    final moveReq = await client
+        .openUrl('MOVE', tmpUri)
+        .timeout(controlTimeout);
+    moveReq.headers.set(HttpHeaders.authorizationHeader, _basicAuthHeader);
+    moveReq.headers.set('Destination', finalUri.toString());
+    moveReq.headers.set('Overwrite', 'T');
+    moveReq.contentLength = 0;
+    final moveRes = await moveReq.close().timeout(controlTimeout);
+    await moveRes.drain<void>().timeout(controlTimeout);
+    return moveRes.statusCode;
+  }
+
   Future<void> _atomicPutWithMoveFallbackOn(
     HttpClient client, {
     required Uri tmpUri,
     required Uri finalUri,
     required Uint8List bytes,
+    List<String> parentExtraSegments = const <String>[],
     String contentType = 'application/octet-stream',
     BackupProgressCallback? onProgress,
   }) async {
@@ -623,42 +700,70 @@ final class WebDavClient {
       client,
       tmpUri,
       bytes,
+      parentExtraSegments: parentExtraSegments,
       contentType: contentType,
       onProgress: onProgress,
+      replaceOnConflict: true,
     );
 
-    final moveReq = await client.openUrl('MOVE', tmpUri);
-    moveReq.headers.set(HttpHeaders.authorizationHeader, _basicAuthHeader);
-    moveReq.headers.set('Destination', finalUri.toString());
-    moveReq.headers.set('Overwrite', 'T');
-    moveReq.contentLength = 0;
-    final moveRes = await moveReq.close();
-    await moveRes.drain<void>();
+    var moveStatus = await _sendMoveOn(
+      client,
+      tmpUri: tmpUri,
+      finalUri: finalUri,
+    );
 
-    if (moveRes.statusCode == 200 ||
-        moveRes.statusCode == 201 ||
-        moveRes.statusCode == 204) {
+    if (moveStatus == 200 || moveStatus == 201 || moveStatus == 204) {
       return;
     }
 
-    if (moveRes.statusCode == 405 || moveRes.statusCode == 501) {
-      await _deleteUriOn(client, tmpUri, ignoreNotFound: true);
+    // Many WebDAV servers (e.g. Nutstore/Jianguoyun, Alist/OpenList, SMB/cloud
+    // gateways) return 409 Conflict or 412 Precondition Failed when MOVE
+    // targets an already-existing destination even with `Overwrite: T`. Since
+    // `.tmp` is already intact on the server, remove the old destination and
+    // retry MOVE once without re-uploading bytes!
+    if (moveStatus == 409 || moveStatus == 412) {
+      await _deleteUriOn(client, finalUri, ignoreNotFound: true);
+      moveStatus = await _sendMoveOn(
+        client,
+        tmpUri: tmpUri,
+        finalUri: finalUri,
+      );
+      if (moveStatus == 200 || moveStatus == 201 || moveStatus == 204) {
+        return;
+      }
+    }
+
+    if (moveStatus == 405 ||
+        moveStatus == 501 ||
+        moveStatus == 502 ||
+        moveStatus == 400 ||
+        moveStatus == 409 ||
+        moveStatus == 412) {
+      try {
+        await _deleteUriOn(client, tmpUri, ignoreNotFound: true);
+      } catch (_) {
+        // Best-effort cleanup of .tmp before direct PUT fallback.
+      }
       await _putBytesOn(
         client,
         finalUri,
         bytes,
+        parentExtraSegments: parentExtraSegments,
         contentType: contentType,
         onProgress: onProgress,
+        replaceOnConflict: true,
       );
       await _verifyHeadContentLengthOn(client, finalUri, bytes.length);
       return;
     }
 
-    await _deleteUriOn(client, tmpUri, ignoreNotFound: true);
-    _checkAuthAndStorageStatus(moveRes.statusCode, action: '原子重命名远端文件');
+    try {
+      await _deleteUriOn(client, tmpUri, ignoreNotFound: true);
+    } catch (_) {}
+    _checkAuthAndStorageStatus(moveStatus, action: '原子重命名远端文件');
     throw Failure(
       FailureCode.remoteUnavailable,
-      'WebDAV 两阶段提交 MOVE 失败（状态码 ${moveRes.statusCode}）',
+      'WebDAV 两阶段提交 MOVE 失败（状态码 $moveStatus）',
     );
   }
 
@@ -667,16 +772,16 @@ final class WebDavClient {
     Uri uri, {
     BackupProgressCallback? onProgress,
   }) async {
-    final req = await client.getUrl(uri);
+    final req = await client.getUrl(uri).timeout(controlTimeout);
     req.headers.set(HttpHeaders.authorizationHeader, _basicAuthHeader);
-    final res = await req.close();
-    if (res.statusCode == 404) {
-      await res.drain<void>();
+    final res = await req.close().timeout(transferTimeout);
+    if (res.statusCode == 404 || res.statusCode == 410) {
+      await res.drain<void>().timeout(controlTimeout);
       return null;
     }
     _checkAuthAndStorageStatus(res.statusCode, action: '下载远端文件');
     if (res.statusCode != 200) {
-      await res.drain<void>();
+      await res.drain<void>().timeout(controlTimeout);
       throw Failure(
         FailureCode.remoteUnavailable,
         '下载 WebDAV 文件失败（状态码 ${res.statusCode}）',
@@ -686,7 +791,7 @@ final class WebDavClient {
     final expectedLength = res.contentLength;
     final builder = BytesBuilder(copy: false);
     var received = 0;
-    await for (final chunk in res) {
+    await for (final chunk in res.timeout(transferTimeout)) {
       builder.add(chunk);
       received += chunk.length;
       if (expectedLength > 0) {
@@ -703,10 +808,12 @@ final class WebDavClient {
     HttpClient client,
     Uri uri,
     Uint8List bytes, {
+    List<String> parentExtraSegments = const <String>[],
     String contentType = 'application/octet-stream',
     BackupProgressCallback? onProgress,
+    bool replaceOnConflict = false,
   }) async {
-    final req = await client.putUrl(uri);
+    final req = await client.putUrl(uri).timeout(controlTimeout);
     req.headers.set(HttpHeaders.authorizationHeader, _basicAuthHeader);
     req.headers.set(HttpHeaders.contentTypeHeader, contentType);
     req.contentLength = bytes.length;
@@ -725,8 +832,29 @@ final class WebDavClient {
       }
     }
 
-    final res = await req.close();
-    await res.drain<void>();
+    final res = await req.close().timeout(transferTimeout);
+    await res.drain<void>().timeout(controlTimeout);
+    if ((res.statusCode == 409 || res.statusCode == 412) && replaceOnConflict) {
+      // Either a stale target exists on a server that forbids PUT overwrite,
+      // or a cached collection was externally removed. Ensure parent & clear target!
+      _verifiedCollectionPaths.clear();
+      await _ensureCollectionHierarchyOn(
+        client,
+        parentExtraSegments,
+        forceCheck: true,
+      );
+      await _deleteUriOn(client, uri, ignoreNotFound: true);
+      await _putBytesOn(
+        client,
+        uri,
+        bytes,
+        parentExtraSegments: parentExtraSegments,
+        contentType: contentType,
+        onProgress: onProgress,
+        replaceOnConflict: false,
+      );
+      return;
+    }
     _checkAuthAndStorageStatus(res.statusCode, action: '上传备份文件');
     if (res.statusCode < 200 || res.statusCode >= 300) {
       throw Failure(
@@ -741,10 +869,14 @@ final class WebDavClient {
     Uri uri,
     int expectedLength,
   ) async {
-    final req = await client.openUrl('HEAD', uri);
+    final req = await client.openUrl('HEAD', uri).timeout(controlTimeout);
     req.headers.set(HttpHeaders.authorizationHeader, _basicAuthHeader);
-    final res = await req.close();
-    await res.drain<void>();
+    final res = await req.close().timeout(controlTimeout);
+    await res.drain<void>().timeout(controlTimeout);
+    if (res.statusCode == 405 || res.statusCode == 501) {
+      // Lightweight WebDAV server does not implement HEAD; direct PUT succeeded.
+      return;
+    }
     _checkAuthAndStorageStatus(res.statusCode, action: '校验远端备份长度');
     if (res.statusCode < 200 || res.statusCode >= 300) {
       throw Failure(
@@ -758,7 +890,7 @@ final class WebDavClient {
     final remoteLength = contentLengthHeader != null
         ? int.tryParse(contentLengthHeader.trim())
         : (res.contentLength >= 0 ? res.contentLength : null);
-    if (remoteLength == null || remoteLength != expectedLength) {
+    if (remoteLength != null && remoteLength != expectedLength) {
       throw const Failure(
         FailureCode.remoteUnavailable,
         'WebDAV 远端文件 Content-Length 校验不一致，已拒绝确认上传',
@@ -771,11 +903,11 @@ final class WebDavClient {
     Uri uri, {
     required bool ignoreNotFound,
   }) async {
-    final req = await client.deleteUrl(uri);
+    final req = await client.deleteUrl(uri).timeout(controlTimeout);
     req.headers.set(HttpHeaders.authorizationHeader, _basicAuthHeader);
-    final res = await req.close();
-    await res.drain<void>();
-    if (ignoreNotFound && res.statusCode == 404) {
+    final res = await req.close().timeout(controlTimeout);
+    await res.drain<void>().timeout(controlTimeout);
+    if (ignoreNotFound && (res.statusCode == 404 || res.statusCode == 410)) {
       return;
     }
     _checkAuthAndStorageStatus(res.statusCode, action: '删除远端文件');

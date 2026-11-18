@@ -692,6 +692,9 @@ class _BackupPageState extends ConsumerState<BackupPage>
     final syncSettingsAsync = ref.watch(cloudSyncSettingsProvider);
     final localPolicyAsync = ref.watch(localAutoBackupPolicyProvider);
     final syncCursorAsync = ref.watch(cloudSyncCursorProvider);
+    final serviceSyncing =
+        ref.watch(cloudSyncInProgressProvider).value ?? false;
+    final effectiveBusy = _busy || serviceSyncing;
     final localListAsync = ref.watch(localBackupsProvider);
     final lastBackupAsync = ref.watch(lastBackupAtMsProvider);
     final fileAccess = ref.watch(backupFileAccessProvider);
@@ -790,7 +793,7 @@ class _BackupPageState extends ConsumerState<BackupPage>
       appBar: AppBar(title: const Text('云同步与备份')),
       body: Column(
         children: [
-          if (_busy)
+          if (effectiveBusy)
             Material(
               key: const Key('webdav_transfer_progress'),
               elevation: 1,
@@ -803,7 +806,10 @@ class _BackupPageState extends ConsumerState<BackupPage>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(_progressLabel ?? '正在处理…'),
+                    Text(
+                      _progressLabel ??
+                          (serviceSyncing ? '正在执行多端云同步…' : '正在处理…'),
+                    ),
                     const SizedBox(height: 6),
                     LinearProgressIndicator(
                       value: _totalBytes > 0
@@ -1046,11 +1052,22 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                 width: double.infinity,
                                 child: FilledButton.icon(
                                   key: const Key('cloud_sync_now_button'),
-                                  onPressed: !_busy && isActiveCloudReady
+                                  onPressed:
+                                      !effectiveBusy && isActiveCloudReady
                                       ? _handleSyncNow
                                       : null,
-                                  icon: const Icon(Icons.sync, size: 18),
-                                  label: _singleLineText('立即多端同步'),
+                                  icon: effectiveBusy
+                                      ? const SizedBox(
+                                          width: 16,
+                                          height: 16,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                          ),
+                                        )
+                                      : const Icon(Icons.sync, size: 18),
+                                  label: _singleLineText(
+                                    effectiveBusy ? '正在多端同步…' : '立即多端同步',
+                                  ),
                                 ),
                               ),
                               const Divider(height: 20),

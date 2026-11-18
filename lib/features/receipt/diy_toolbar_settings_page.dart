@@ -553,6 +553,7 @@ class _DiyToolbarSettingsPageState
     extends ConsumerState<DiyToolbarSettingsPage> {
   final _ids = CommandIds();
   bool _busy = false;
+  bool _previewExpanded = true;
   int _saveSeq = 0;
 
   static IconData _iconFor(DiyToolbarAction action) => switch (action) {
@@ -619,53 +620,85 @@ class _DiyToolbarSettingsPageState
             Card(
               key: const Key('diy-toolbar-preview'),
               margin: const EdgeInsets.fromLTRB(16, 8, 16, 6),
+              clipBehavior: Clip.antiAlias,
               child: Padding(
-                padding: const EdgeInsets.all(10),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 6,
+                ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      '当前启用预览（${visible.length}/${config.items.length}）',
-                      style: Theme.of(context).textTheme.labelLarge,
-                    ),
-                    const SizedBox(height: 6),
-                    if (visible.isEmpty)
-                      const Text('已隐藏全部工具栏按钮')
-                    else
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 6,
-                        children: [
-                          for (final a in visible)
-                            Chip(
-                              avatar: Icon(_iconFor(a), size: 16),
-                              label: Text(a.label),
-                              visualDensity: VisualDensity.compact,
+                    Row(
+                      children: [
+                        Expanded(
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(8),
+                            onTap: () => setState(
+                              () => _previewExpanded = !_previewExpanded,
                             ),
-                        ],
-                      ),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 4),
+                              child: Text(
+                                '当前启用预览（${visible.length}/${config.items.length}）',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.labelLarge,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        TextButton.icon(
+                          key: const Key('diy-toolbar-preview-toggle'),
+                          onPressed: () => setState(
+                            () => _previewExpanded = !_previewExpanded,
+                          ),
+                          style: TextButton.styleFrom(
+                            visualDensity: VisualDensity.compact,
+                            minimumSize: const Size(0, 32),
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
+                          ),
+                          icon: Icon(
+                            _previewExpanded
+                                ? Icons.keyboard_arrow_up_rounded
+                                : Icons.keyboard_arrow_down_rounded,
+                            size: 18,
+                          ),
+                          label: Text(_previewExpanded ? '收起' : '展开'),
+                        ),
+                      ],
+                    ),
+                    if (_previewExpanded) ...[
+                      const SizedBox(height: 4),
+                      if (visible.isEmpty)
+                        const Padding(
+                          padding: EdgeInsets.only(bottom: 4),
+                          child: Text('已隐藏全部工具栏按钮'),
+                        )
+                      else
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 4),
+                          child: Wrap(
+                            key: const Key('diy-toolbar-preview-chips'),
+                            spacing: 8,
+                            runSpacing: 6,
+                            children: [
+                              for (final a in visible)
+                                Chip(
+                                  avatar: Icon(_iconFor(a), size: 16),
+                                  label: Text(a.label),
+                                  visualDensity: VisualDensity.compact,
+                                ),
+                            ],
+                          ),
+                        ),
+                    ],
                   ],
-                ),
-              ),
-            ),
-            Card(
-              margin: const EdgeInsets.fromLTRB(16, 0, 16, 6),
-              clipBehavior: Clip.antiAlias,
-              child: DefaultAccountPreferenceSection(
-                switchKey: const Key('diy-default-account-switch'),
-                selectorKey: const Key('diy-default-account-selector'),
-                externalBusy: _busy,
-                compact: !isDesktop,
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
-              child: Text(
-                isDesktop
-                    ? '拖拽左侧手柄或点击上下箭头调整顺序，开关控制是否在记一笔弹窗展示：'
-                    : '长按拖拽或点击上下箭头调整顺序，开关控制是否在记一笔页面展示：',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
               ),
             ),
@@ -673,6 +706,36 @@ class _DiyToolbarSettingsPageState
               child: ReorderableListView.builder(
                 buildDefaultDragHandles: false,
                 padding: const EdgeInsets.only(bottom: 16),
+                header: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Card(
+                      margin: const EdgeInsets.fromLTRB(16, 0, 16, 6),
+                      clipBehavior: Clip.antiAlias,
+                      child: DefaultAccountPreferenceSection(
+                        switchKey: const Key('diy-default-account-switch'),
+                        selectorKey: const Key('diy-default-account-selector'),
+                        externalBusy: _busy,
+                        compact: !isDesktop,
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 2,
+                      ),
+                      child: Text(
+                        isDesktop
+                            ? '拖拽左侧手柄或点击上下箭头调整顺序，开关控制是否在记一笔弹窗展示：'
+                            : '长按拖拽或点击上下箭头调整顺序，开关控制是否在记一笔页面展示：',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
                 itemCount: config.items.length,
                 onReorderItem: (oldIndex, newIndex) {
                   if (_busy) return;

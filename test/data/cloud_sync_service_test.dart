@@ -225,6 +225,8 @@ final class _LoopbackSyncWebDavServer {
   final Map<String, Uint8List> files = <String, Uint8List>{};
   final Map<String, DateTime> modifiedAt = <String, DateTime>{};
   final Set<String> collections = <String>{'/dav'};
+  bool rejectMoveOverwriteWith409 = false;
+  bool rejectExistingMkcolWith409 = false;
   int _tick = 0;
 
   String get baseUrl => 'http://127.0.0.1:${_server.port}/dav';
@@ -252,7 +254,9 @@ final class _LoopbackSyncWebDavServer {
         if (!collections.contains(parent)) {
           req.response.statusCode = HttpStatus.conflict;
         } else if (collections.contains(path)) {
-          req.response.statusCode = HttpStatus.methodNotAllowed;
+          req.response.statusCode = rejectExistingMkcolWith409
+              ? HttpStatus.conflict
+              : HttpStatus.methodNotAllowed;
         } else {
           collections.add(path);
           req.response.statusCode = HttpStatus.created;
@@ -330,6 +334,11 @@ final class _LoopbackSyncWebDavServer {
       case 'MOVE':
         await req.drain<void>();
         final dest = _norm(Uri.parse(req.headers.value('Destination')!).path);
+        if (rejectMoveOverwriteWith409 && files.containsKey(dest)) {
+          req.response.statusCode = HttpStatus.conflict;
+          await req.response.close();
+          return;
+        }
         files[dest] = files.remove(path)!;
         modifiedAt[dest] =
             modifiedAt.remove(path) ??
@@ -822,6 +831,158 @@ void main() {
         expect(racedOutcome.isConflict, isTrue);
         expect(racedOutcome.revision, 4);
         expect(racedOutcome.conflictBackupFileName, startsWith('conflict_'));
+      },
+    );
+
+    test(
+      'recovers cleanly when interrupted first sync leaves latest_db.tally without head.json and WebDAV returns 409 on MOVE overwrite, and enforces request timeout',
+      () async {
+        final davServer = await _LoopbackSyncWebDavServer.start()
+          ..rejectMoveOverwriteWith409 = true
+          ..rejectExistingMkcolWith409 = true;
+        addTearDown(davServer.close);
+
+        // Simulate interrupted first sync: `sync/latest_db.tally` already created
+        // on server while `sync/head.json` is still missing!
+        davServer.collections.addAll(<String>[
+          '/dav/TallySync',
+          '/dav/TallySync/sync',
+        ]);
+        davServer.files['/dav/TallySync/sync/latest_db.tally'] =
+            Uint8List.fromList(utf8.encode('stale-interrupted-latest-db'));
+
+        final tempRoot = await Directory.systemTemp.createTemp(
+          'dav_409_recovery_',
+        );
+        addTearDown(() async {
+          if (await tempRoot.exists()) await tempRoot.delete(recursive: true);
+        });
+
+        var now = 1794600000000;
+        final dbA = AppDatabase(NativeDatabase.memory(), nowMs: () => now);
+        final dbB = AppDatabase(NativeDatabase.memory(), nowMs: () => now);
+        addTearDown(dbA.close);
+        addTearDown(dbB.close);
+
+        final serviceA = TallyBackupService(
+          dbA,
+          reminderService: ReminderService(
+            dbA,
+            scheduler: InMemoryReminderScheduler(),
+          ),
+          localBackupsDirectoryProvider: () async =>
+              Directory(p.join(tempRoot.path, 'bk_a')),
+          attachmentsDirectoryProvider: () async =>
+              Directory(p.join(tempRoot.path, 'att_a')),
+        );
+        final serviceB = TallyBackupService(
+          dbB,
+          reminderService: ReminderService(
+            dbB,
+            scheduler: InMemoryReminderScheduler(),
+          ),
+          localBackupsDirectoryProvider: () async =>
+              Directory(p.join(tempRoot.path, 'bk_b')),
+          attachmentsDirectoryProvider: () async =>
+              Directory(p.join(tempRoot.path, 'att_b')),
+        );
+
+        final davCfg = WebDavConfig(
+          serverUrl: davServer.baseUrl,
+          username: 'alice',
+          password: 'dav_password',
+          remoteDirectory: '/TallySync',
+        );
+        await serviceA.saveWebDavConfig(davCfg);
+        await serviceB.saveWebDavConfig(davCfg);
+
+        await dbA.select(dbA.accountBooks).get();
+        await dbB.select(dbB.accountBooks).get();
+        final ledgerA = LedgerService(dbA);
+        final walletId = await ledgerA.createAsset(
+          commandId: 'dav-409-wallet',
+          name: '零钱账户',
+          type: AssetType.normal,
+          initial: Money.parse('300.00'),
+        );
+
+        // 1. Retry sync on Device A succeeds (deletes stale latest_db.tally & moves .tmp -> r1)!
+        final progressStates = <bool>[];
+        final sub = serviceA.watchSyncInProgress().listen(progressStates.add);
+        addTearDown(sub.cancel);
+
+        final push1 = await serviceA.syncNow();
+        expect(push1.status, CloudSyncStatus.pushed);
+        expect(push1.revision, 1);
+        expect(
+          davServer.files.keys,
+          containsAll(<String>[
+            '/dav/TallySync/sync/latest_db.tally',
+            '/dav/TallySync/sync/head.json',
+          ]),
+        );
+
+        // 2. Subsequent sync r2 (when BOTH latest_db.tally AND head.json already exist
+        // on the 409-on-MOVE-overwrite server) ALSO succeeds cleanly!
+        now += 5000;
+        await ledgerA.saveRecord(
+          commandId: 'dav-409-rec2',
+          draft: RecordDraft(
+            bookId: 1,
+            type: RecordType.expense,
+            money: Money.parse('25.00'),
+            recordTime: now,
+            categoryId: 1,
+            assetId: walletId,
+            remark: '二次覆盖同步成功',
+          ),
+        );
+        final push2 = await serviceA.syncNow();
+        expect(push2.status, CloudSyncStatus.pushed);
+        expect(push2.revision, 2);
+        expect(progressStates, contains(true));
+        expect(serviceA.isSyncInProgress, isFalse);
+
+        // Device B pulls r2 with exact 275.00 balance!
+        final pullB = await serviceB.syncNow();
+        expect(pullB.status, CloudSyncStatus.pulled);
+        expect(pullB.revision, 2);
+        final assetOnB = await (dbB.select(
+          dbB.assets,
+        )..where((t) => t.id.equals(walletId))).getSingle();
+        expect(assetOnB.balanceMinor, BigInt.from(27500));
+
+        // 3. Stalled HTTP server that accepts TCP but never responds times out cleanly!
+        final stalledServer = await HttpServer.bind(
+          InternetAddress.loopbackIPv4,
+          0,
+        );
+        final stalledSubs = stalledServer.listen((_) {
+          // Intentionally never respond to simulate half-open / tarpitted WebDAV socket.
+        });
+        addTearDown(() async {
+          await stalledSubs.cancel();
+          await stalledServer.close(force: true);
+        });
+
+        final timeoutClient = WebDavClient(
+          WebDavConfig(
+            serverUrl: 'http://127.0.0.1:${stalledServer.port}/dav',
+            username: 'alice',
+            password: 'pw',
+            remoteDirectory: '/TallySync',
+          ),
+          controlTimeout: const Duration(milliseconds: 80),
+          transferTimeout: const Duration(milliseconds: 120),
+        );
+        await expectLater(
+          timeoutClient.getRelativeFileOrNull('sync/head.json'),
+          throwsA(
+            isA<Failure>()
+                .having((f) => f.code, 'code', FailureCode.remoteUnavailable)
+                .having((f) => f.message, 'msg', contains('超时')),
+          ),
+        );
       },
     );
   });

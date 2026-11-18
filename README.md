@@ -55,5 +55,3 @@ flutter build windows --release          # Windows x64
 flutter build macos --release            # macOS
 flutter build ios --release --no-codesign # iOS 无签名构建（打包 Payload/Runner.app 为 .ipa）
 ```
-
-推送 `v*` 标签（如 `v0.1.0`）或在 GitHub Actions 手动触发 [Build & Release](.github/workflows/build.yml) 工作流，即可自动完成全量测试验证并产出五端安装包。
