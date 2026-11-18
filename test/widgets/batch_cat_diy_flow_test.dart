@@ -542,7 +542,20 @@ void main() {
       );
       await settle(tester);
 
-      expect(find.text('当前启用预览（8/11）'), findsOneWidget);
+      expect(find.text('已启用 8/11 项'), findsOneWidget);
+      // Preview defaults to collapsed on every entry (single compact row).
+      expect(find.byKey(const Key('diy-toolbar-preview-chips')), findsNothing);
+      expect(find.text('展开'), findsOneWidget);
+      expect(find.text('工具栏预览'), findsOneWidget);
+      expect(find.text('默认账户'), findsOneWidget);
+      expect(find.text('工具栏项目与顺序'), findsOneWidget);
+      final collapsedHeight = tester
+          .getSize(find.byKey(const Key('diy-toolbar-preview')))
+          .height;
+
+      // Expand -> chips visible & card grows, then collapse back.
+      await tester.tap(find.byKey(const Key('diy-toolbar-preview-toggle')));
+      await settle(tester);
       expect(
         find.byKey(const Key('diy-toolbar-preview-chips')),
         findsOneWidget,
@@ -551,24 +564,12 @@ void main() {
       final expandedHeight = tester
           .getSize(find.byKey(const Key('diy-toolbar-preview')))
           .height;
+      expect(expandedHeight, greaterThan(collapsedHeight));
 
-      // Collapse preview card -> frees vertical viewport space, then re-expand!
       await tester.tap(find.byKey(const Key('diy-toolbar-preview-toggle')));
       await settle(tester);
       expect(find.byKey(const Key('diy-toolbar-preview-chips')), findsNothing);
       expect(find.text('展开'), findsOneWidget);
-      final collapsedHeight = tester
-          .getSize(find.byKey(const Key('diy-toolbar-preview')))
-          .height;
-      expect(collapsedHeight, lessThan(expandedHeight));
-
-      await tester.tap(find.byKey(const Key('diy-toolbar-preview-toggle')));
-      await settle(tester);
-      expect(
-        find.byKey(const Key('diy-toolbar-preview-chips')),
-        findsOneWidget,
-      );
-      expect(find.text('收起'), findsOneWidget);
 
       // Seed custom date/time picker styles in ti_preference and ensure UI setEnabled & moveItem preserve them.
       await tester.runAsync(() async {
@@ -585,7 +586,7 @@ void main() {
 
       await tester.tap(find.byKey(const Key('diy-switch-tags')));
       await settle(tester);
-      expect(find.text('当前启用预览（7/11）'), findsOneWidget);
+      expect(find.text('已启用 7/11 项'), findsOneWidget);
 
       await tester.scrollUntilVisible(
         find.byKey(const Key('diy-switch-frequent_remarks')),
@@ -600,7 +601,12 @@ void main() {
 
       await tester.tap(find.byKey(const Key('diy-switch-frequent_remarks')));
       await settle(tester);
-      expect(find.text('当前启用预览（8/11）'), findsOneWidget);
+      await tester.drag(
+        find.byKey(const Key('diy-toolbar-list')),
+        const Offset(0, 3000),
+      );
+      await settle(tester);
+      expect(find.text('已启用 8/11 项'), findsOneWidget);
 
       await tester.scrollUntilVisible(
         find.byKey(const Key('diy-switch-keypad_mul_div')),
@@ -615,7 +621,12 @@ void main() {
 
       await tester.tap(find.byKey(const Key('diy-switch-keypad_mul_div')));
       await settle(tester);
-      expect(find.text('当前启用预览（9/11）'), findsOneWidget);
+      await tester.drag(
+        find.byKey(const Key('diy-toolbar-list')),
+        const Offset(0, 3000),
+      );
+      await settle(tester);
+      expect(find.text('已启用 9/11 项'), findsOneWidget);
 
       await tester.scrollUntilVisible(
         find.byKey(const Key('diy-switch-auto_select_first_cat')),
@@ -634,8 +645,19 @@ void main() {
         find.byKey(const Key('diy-switch-auto_select_first_cat')),
       );
       await settle(tester);
-      expect(find.text('当前启用预览（10/11）'), findsOneWidget);
+      await tester.drag(
+        find.byKey(const Key('diy-toolbar-list')),
+        const Offset(0, 3000),
+      );
+      await settle(tester);
+      expect(find.text('已启用 10/11 项'), findsOneWidget);
 
+      await tester.scrollUntilVisible(
+        find.byKey(const Key('diy-up-auto_select_first_cat')),
+        160,
+        scrollable: find.byType(Scrollable).last,
+      );
+      await settle(tester);
       await tester.tap(find.byKey(const Key('diy-up-auto_select_first_cat')));
       await settle(tester);
 
@@ -657,7 +679,12 @@ void main() {
 
       await tester.tap(find.byKey(const Key('diy-toolbar-reset-btn')));
       await settle(tester);
-      expect(find.text('当前启用预览（8/11）'), findsOneWidget);
+      await tester.drag(
+        find.byKey(const Key('diy-toolbar-list')),
+        const Offset(0, 3000),
+      );
+      await settle(tester);
+      expect(find.text('已启用 8/11 项'), findsOneWidget);
 
       final persistedAfterReset = await tester.runAsync(
         attService.getDiyToolbarConfig,

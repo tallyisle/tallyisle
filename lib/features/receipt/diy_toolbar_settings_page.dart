@@ -553,7 +553,7 @@ class _DiyToolbarSettingsPageState
     extends ConsumerState<DiyToolbarSettingsPage> {
   final _ids = CommandIds();
   bool _busy = false;
-  bool _previewExpanded = true;
+  bool _previewExpanded = false;
   int _saveSeq = 0;
 
   static IconData _iconFor(DiyToolbarAction action) => switch (action) {
@@ -589,6 +589,265 @@ class _DiyToolbarSettingsPageState
     }
   }
 
+  static Color _groupColor(ColorScheme scheme, bool isDark) => isDark
+      ? scheme.surfaceContainerLow
+      : Color.lerp(scheme.surfaceContainerLow, scheme.surfaceContainer, 0.55)!;
+
+  Widget _sectionHeader(BuildContext context, String title, {String? hint}) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(22, 14, 22, 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: theme.textTheme.labelMedium?.copyWith(
+              color: scheme.onSurfaceVariant.withValues(
+                alpha: isDark ? 0.78 : 0.85,
+              ),
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.3,
+            ),
+          ),
+          if (hint != null) ...[
+            const SizedBox(height: 2),
+            Text(
+              hint,
+              style: theme.textTheme.bodySmall?.copyWith(
+                fontSize: 11.5,
+                color: scheme.onSurfaceVariant.withValues(alpha: 0.72),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _groupCard(BuildContext context, {Key? key, required Widget child}) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Material(
+        key: key,
+        color: _groupColor(
+          theme.colorScheme,
+          theme.brightness == Brightness.dark,
+        ),
+        borderRadius: BorderRadius.circular(16),
+        clipBehavior: Clip.antiAlias,
+        child: child,
+      ),
+    );
+  }
+
+  Widget _buildPreviewCard(BuildContext context, DiyToolbarConfig config) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final visible = config.visibleActions;
+    void toggle() => setState(() => _previewExpanded = !_previewExpanded);
+    return _groupCard(
+      context,
+      key: const Key('diy-toolbar-preview'),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          InkWell(
+            onTap: toggle,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 6, 8, 6),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.view_week_outlined,
+                    size: 20,
+                    color: scheme.onSurfaceVariant,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      '已启用 ${visible.length}/${config.items.length} 项',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodyMedium,
+                    ),
+                  ),
+                  TextButton.icon(
+                    key: const Key('diy-toolbar-preview-toggle'),
+                    onPressed: toggle,
+                    style: TextButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                      minimumSize: const Size(0, 36),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                    ),
+                    icon: Icon(
+                      _previewExpanded
+                          ? Icons.keyboard_arrow_up_rounded
+                          : Icons.keyboard_arrow_down_rounded,
+                      size: 18,
+                    ),
+                    label: Text(_previewExpanded ? '收起' : '展开'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (_previewExpanded)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+              child: visible.isEmpty
+                  ? Text(
+                      '已隐藏全部工具栏按钮',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                      ),
+                    )
+                  : Wrap(
+                      key: const Key('diy-toolbar-preview-chips'),
+                      spacing: 8,
+                      runSpacing: 6,
+                      children: [
+                        for (final a in visible)
+                          Chip(
+                            avatar: Icon(_iconFor(a), size: 16),
+                            label: Text(a.label),
+                            visualDensity: VisualDensity.compact,
+                            side: BorderSide.none,
+                            backgroundColor: scheme.surface,
+                          ),
+                      ],
+                    ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildToolbarRow(
+    BuildContext context, {
+    required DiyToolbarConfig config,
+    required int index,
+    required bool isDesktop,
+  }) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
+    final item = config.items[index];
+    final action = item.action;
+    final isFirst = index == 0;
+    final isLast = index == config.items.length - 1;
+    const radius = Radius.circular(16);
+
+    final tile = ListTile(
+      visualDensity: isDesktop ? null : const VisualDensity(vertical: -1),
+      contentPadding: const EdgeInsets.only(left: 16, right: 8),
+      leading: isDesktop
+          ? Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                MouseRegion(
+                  cursor: _busy
+                      ? SystemMouseCursors.basic
+                      : SystemMouseCursors.grab,
+                  child: Icon(
+                    Icons.drag_handle_rounded,
+                    size: 20,
+                    color: scheme.outline,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Icon(_iconFor(action)),
+              ],
+            )
+          : Icon(_iconFor(action)),
+      title: Text(action.label),
+      subtitle: Text(action.description),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconButton(
+            key: Key('diy-up-${action.key}'),
+            tooltip: '上移',
+            visualDensity: VisualDensity.compact,
+            style: IconButton.styleFrom(
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            icon: const Icon(Icons.arrow_upward, size: 18),
+            onPressed: _busy || isFirst
+                ? null
+                : () => _persist(config.moveItem(index, index - 1)),
+          ),
+          IconButton(
+            key: Key('diy-down-${action.key}'),
+            tooltip: '下移',
+            visualDensity: VisualDensity.compact,
+            style: IconButton.styleFrom(
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            icon: const Icon(Icons.arrow_downward, size: 18),
+            onPressed: _busy || isLast
+                ? null
+                : () => _persist(config.moveItem(index, index + 1)),
+          ),
+          Switch(
+            key: Key('diy-switch-${action.key}'),
+            value: item.enabled,
+            onChanged: _busy
+                ? null
+                : (enabled) => _persist(config.setEnabled(action, enabled)),
+          ),
+        ],
+      ),
+    );
+
+    final grouped = Padding(
+      padding: EdgeInsets.fromLTRB(16, 0, 16, isLast ? 16 : 0),
+      child: Material(
+        color: _groupColor(scheme, isDark),
+        borderRadius: BorderRadius.vertical(
+          top: isFirst ? radius : Radius.zero,
+          bottom: isLast ? radius : Radius.zero,
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (!isFirst)
+              Divider(
+                height: 1,
+                thickness: 0.5,
+                indent: isDesktop ? 82 : 56,
+                endIndent: 16,
+                color: scheme.outlineVariant.withValues(
+                  alpha: isDark ? 0.28 : 0.35,
+                ),
+              ),
+            tile,
+          ],
+        ),
+      ),
+    );
+
+    if (isDesktop) {
+      return ReorderableDragStartListener(
+        key: ValueKey('diy-row-${action.key}'),
+        index: index,
+        enabled: !_busy,
+        child: grouped,
+      );
+    }
+    return ReorderableDelayedDragStartListener(
+      key: ValueKey('diy-row-${action.key}'),
+      index: index,
+      enabled: !_busy,
+      child: grouped,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final configAsync = ref.watch(diyToolbarConfigProvider);
@@ -602,6 +861,7 @@ class _DiyToolbarSettingsPageState
       appBar: AppBar(
         leading: isDesktopModal ? const CloseButton() : null,
         title: const Text('记账工具栏自定义'),
+        scrolledUnderElevation: 0,
         actions: [
           TextButton(
             key: const Key('diy-toolbar-reset-btn'),
@@ -613,231 +873,61 @@ class _DiyToolbarSettingsPageState
         ],
       ),
       body: asyncBody(configAsync, (config) {
-        final visible = config.visibleActions;
-        final content = Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Card(
-              key: const Key('diy-toolbar-preview'),
-              margin: const EdgeInsets.fromLTRB(16, 8, 16, 6),
-              clipBehavior: Clip.antiAlias,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 6,
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: InkWell(
-                            borderRadius: BorderRadius.circular(8),
-                            onTap: () => setState(
-                              () => _previewExpanded = !_previewExpanded,
-                            ),
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 4),
-                              child: Text(
-                                '当前启用预览（${visible.length}/${config.items.length}）',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: Theme.of(context).textTheme.labelLarge,
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        TextButton.icon(
-                          key: const Key('diy-toolbar-preview-toggle'),
-                          onPressed: () => setState(
-                            () => _previewExpanded = !_previewExpanded,
-                          ),
-                          style: TextButton.styleFrom(
-                            visualDensity: VisualDensity.compact,
-                            minimumSize: const Size(0, 32),
-                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 4,
-                            ),
-                          ),
-                          icon: Icon(
-                            _previewExpanded
-                                ? Icons.keyboard_arrow_up_rounded
-                                : Icons.keyboard_arrow_down_rounded,
-                            size: 18,
-                          ),
-                          label: Text(_previewExpanded ? '收起' : '展开'),
-                        ),
-                      ],
-                    ),
-                    if (_previewExpanded) ...[
-                      const SizedBox(height: 4),
-                      if (visible.isEmpty)
-                        const Padding(
-                          padding: EdgeInsets.only(bottom: 4),
-                          child: Text('已隐藏全部工具栏按钮'),
-                        )
-                      else
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 4),
-                          child: Wrap(
-                            key: const Key('diy-toolbar-preview-chips'),
-                            spacing: 8,
-                            runSpacing: 6,
-                            children: [
-                              for (final a in visible)
-                                Chip(
-                                  avatar: Icon(_iconFor(a), size: 16),
-                                  label: Text(a.label),
-                                  visualDensity: VisualDensity.compact,
-                                ),
-                            ],
-                          ),
-                        ),
-                    ],
-                  ],
+        final list = ReorderableListView.builder(
+          key: const Key('diy-toolbar-list'),
+          buildDefaultDragHandles: false,
+          padding: const EdgeInsets.only(bottom: 12),
+          proxyDecorator: (child, index, animation) => Material(
+            elevation: 6,
+            color: Colors.transparent,
+            borderRadius: BorderRadius.circular(16),
+            child: child,
+          ),
+          header: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _sectionHeader(context, '工具栏预览'),
+              _buildPreviewCard(context, config),
+              _sectionHeader(context, '默认账户'),
+              _groupCard(
+                context,
+                child: DefaultAccountPreferenceSection(
+                  switchKey: const Key('diy-default-account-switch'),
+                  selectorKey: const Key('diy-default-account-selector'),
+                  externalBusy: _busy,
+                  compact: !isDesktop,
                 ),
               ),
-            ),
-            Expanded(
-              child: ReorderableListView.builder(
-                buildDefaultDragHandles: false,
-                padding: const EdgeInsets.only(bottom: 16),
-                header: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Card(
-                      margin: const EdgeInsets.fromLTRB(16, 0, 16, 6),
-                      clipBehavior: Clip.antiAlias,
-                      child: DefaultAccountPreferenceSection(
-                        switchKey: const Key('diy-default-account-switch'),
-                        selectorKey: const Key('diy-default-account-selector'),
-                        externalBusy: _busy,
-                        compact: !isDesktop,
-                      ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 2,
-                      ),
-                      child: Text(
-                        isDesktop
-                            ? '拖拽左侧手柄或点击上下箭头调整顺序，开关控制是否在记一笔弹窗展示：'
-                            : '长按拖拽或点击上下箭头调整顺序，开关控制是否在记一笔页面展示：',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                itemCount: config.items.length,
-                onReorderItem: (oldIndex, newIndex) {
-                  if (_busy) return;
-                  _persist(config.moveItem(oldIndex, newIndex));
-                },
-                itemBuilder: (context, index) {
-                  final item = config.items[index];
-                  final action = item.action;
-                  final tile = ListTile(
-                    visualDensity: isDesktop
-                        ? null
-                        : const VisualDensity(vertical: -1),
-                    contentPadding: const EdgeInsets.only(left: 16, right: 10),
-                    leading: isDesktop
-                        ? Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              MouseRegion(
-                                cursor: _busy
-                                    ? SystemMouseCursors.basic
-                                    : SystemMouseCursors.grab,
-                                child: Icon(
-                                  Icons.drag_handle_rounded,
-                                  size: 20,
-                                  color: Theme.of(context).colorScheme.outline,
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              Icon(_iconFor(action)),
-                            ],
-                          )
-                        : Icon(_iconFor(action)),
-                    title: Text(action.label),
-                    subtitle: Text(action.description),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        IconButton(
-                          key: Key('diy-up-${action.key}'),
-                          tooltip: '上移',
-                          visualDensity: VisualDensity.compact,
-                          style: IconButton.styleFrom(
-                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          ),
-                          icon: const Icon(Icons.arrow_upward, size: 18),
-                          onPressed: _busy || index == 0
-                              ? null
-                              : () =>
-                                    _persist(config.moveItem(index, index - 1)),
-                        ),
-                        IconButton(
-                          key: Key('diy-down-${action.key}'),
-                          tooltip: '下移',
-                          visualDensity: VisualDensity.compact,
-                          style: IconButton.styleFrom(
-                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          ),
-                          icon: const Icon(Icons.arrow_downward, size: 18),
-                          onPressed: _busy || index == config.items.length - 1
-                              ? null
-                              : () =>
-                                    _persist(config.moveItem(index, index + 1)),
-                        ),
-                        Switch(
-                          key: Key('diy-switch-${action.key}'),
-                          value: item.enabled,
-                          onChanged: _busy
-                              ? null
-                              : (enabled) => _persist(
-                                  config.setEnabled(action, enabled),
-                                ),
-                        ),
-                      ],
-                    ),
-                  );
-                  if (isDesktop) {
-                    return ReorderableDragStartListener(
-                      key: ValueKey('diy-row-${action.key}'),
-                      index: index,
-                      enabled: !_busy,
-                      child: tile,
-                    );
-                  }
-                  return ReorderableDelayedDragStartListener(
-                    key: ValueKey('diy-row-${action.key}'),
-                    index: index,
-                    enabled: !_busy,
-                    child: tile,
-                  );
-                },
+              _sectionHeader(
+                context,
+                '工具栏项目与顺序',
+                hint: isDesktop
+                    ? '拖拽左侧手柄或点击箭头调整顺序，开关控制是否在记一笔弹窗展示'
+                    : '长按拖拽或点击箭头调整顺序，开关控制是否在记一笔页面展示',
               ),
-            ),
-          ],
+            ],
+          ),
+          itemCount: config.items.length,
+          onReorderItem: (oldIndex, newIndex) {
+            if (_busy) return;
+            _persist(config.moveItem(oldIndex, newIndex));
+          },
+          itemBuilder: (context, index) => _buildToolbarRow(
+            context,
+            config: config,
+            index: index,
+            isDesktop: isDesktop,
+          ),
         );
         if (!isDesktop) {
-          return content;
+          return list;
         }
         return Align(
           alignment: Alignment.topCenter,
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 760),
-            child: content,
+            child: list,
           ),
         );
       }),
