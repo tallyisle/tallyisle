@@ -15,6 +15,8 @@ import '../../domain/rules/asset_overview.dart'
 import '../../domain/rules/debt_rules.dart'
     show DebtRecordEntry, LoanInfo, recomputeDebtPrincipal;
 import '../../domain/rules/fixed_deposit.dart' show decodeFixedDepositList;
+import '../../domain/rules/receipt_diy_rules.dart'
+    show DiyToolbarConfig, prefKeyRecordDiyToolbar;
 import '../db/database.dart';
 import '../db/failures.dart';
 
@@ -469,6 +471,28 @@ final class LedgerService {
     (_) {},
   );
 
+  Future<void> _clearDefaultAccountIfMatches(int assetId) async {
+    final row = await (db.select(
+      db.preferences,
+    )..where((t) => t.key.equals(prefKeyRecordDiyToolbar))).getSingleOrNull();
+    if (row == null) return;
+    final current = DiyToolbarConfig.decode(row.value);
+    if (current.defaultAccountId == assetId) {
+      final cleared = current.copyWithDefaultAccount(
+        autoSelectDefaultAccount: false,
+        defaultAccountId: noRef,
+      );
+      await db
+          .into(db.preferences)
+          .insertOnConflictUpdate(
+            PreferencesCompanion.insert(
+              key: prefKeyRecordDiyToolbar,
+              value: cleared.encode(),
+            ),
+          );
+    }
+  }
+
   /// Sets `asset.status` (0 active / 1 hidden / 2 settled).
   Future<void> setAssetStatus({
     required String commandId,
@@ -486,6 +510,9 @@ final class LedgerService {
     await (db.update(db.assets)..where((t) => t.id.equals(assetId))).write(
       AssetsCompanion(status: Value(status)),
     );
+    if (status != AssetStatus.active) {
+      await _clearDefaultAccountIfMatches(assetId);
+    }
     return '$assetId';
   }, (_) {});
 
@@ -587,6 +614,7 @@ final class LedgerService {
           db.assetBooks,
         )..where((t) => t.assetId.equals(assetId))).go();
         await (db.delete(db.assets)..where((t) => t.id.equals(assetId))).go();
+        await _clearDefaultAccountIfMatches(assetId);
         return '$assetId';
       }, (_) {});
 

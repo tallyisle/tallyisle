@@ -8,8 +8,6 @@ import '../../domain/model/codes.dart';
 import '../../domain/rules/app_settings_rules.dart';
 import '../common/desktop_modal_page.dart';
 import '../me/me_page.dart' show MeEmbeddedNavigationScope;
-import '../receipt/diy_toolbar_settings_page.dart'
-    show DefaultAccountPreferenceSection;
 import '../security/app_lock_settings_page.dart';
 import 'about_help_page.dart';
 import 'data_health_page.dart';
@@ -277,14 +275,6 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                           ),
                         ],
                       ),
-                    ),
-                    const Divider(height: 1),
-                    DefaultAccountPreferenceSection(
-                      switchKey: const Key('setting_default_account_switch'),
-                      selectorKey: const Key(
-                        'setting_default_account_selector',
-                      ),
-                      externalBusy: _busy,
                     ),
                   ],
                 ),

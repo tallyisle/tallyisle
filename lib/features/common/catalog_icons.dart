@@ -1931,14 +1931,14 @@ const List<AssetIconSpec> assetIconCatalog = <AssetIconSpec>[
   ),
   AssetIconSpec(
     key: 'unionpay',
-    label: '云闪付/银联',
+    label: '银联',
     icon: Icons.qr_code_scanner_rounded,
-    defaultColorHex: '#D32F2F',
+    defaultColorHex: '#ED171F',
     group: 'normal',
   ),
   AssetIconSpec(
     key: 'wealth',
-    label: '余额宝/理财',
+    label: '货币基金/理财',
     icon: Icons.monetization_on_rounded,
     defaultColorHex: '#F59E0B',
     group: 'normal',
@@ -2008,16 +2008,16 @@ const List<AssetIconSpec> assetIconCatalog = <AssetIconSpec>[
   ),
   AssetIconSpec(
     key: 'currency_exchange',
-    label: '数字人民币/外币',
+    label: '外币账户',
     icon: Icons.currency_exchange_rounded,
     defaultColorHex: '#3949AB',
     group: 'normal',
   ),
   AssetIconSpec(
     key: 'paypal_intl',
-    label: 'PayPal/跨境户',
+    label: 'PayPal',
     icon: Icons.public_rounded,
-    defaultColorHex: '#1565C0',
+    defaultColorHex: '#179BD7',
     group: 'normal',
   ),
   AssetIconSpec(
@@ -2081,14 +2081,14 @@ const List<AssetIconSpec> assetIconCatalog = <AssetIconSpec>[
     key: 'huabei',
     label: '花呗',
     icon: Icons.auto_awesome_rounded,
-    defaultColorHex: '#29B6F6',
+    defaultColorHex: '#30B4FF',
     group: 'credit',
   ),
   AssetIconSpec(
     key: 'baitiao',
-    label: '白条',
+    label: '京东白条',
     icon: Icons.receipt_long_rounded,
-    defaultColorHex: '#EF5350',
+    defaultColorHex: '#D12C28',
     group: 'credit',
   ),
   AssetIconSpec(
@@ -2183,15 +2183,13 @@ AssetIconSpec? _matchAssetByKeyword(
   if (name.contains('微信') || name.contains('零钱通') || lower.contains('wechat')) {
     return _assetSpecByKey['wechat_pay'];
   }
-  if (name.contains('余额宝') || name.contains('朝朝宝') || name.contains('理财')) {
+  if (name.contains('朝朝宝') || name.contains('理财')) {
     return _assetSpecByKey['wealth'];
   }
   if (name.contains('支付宝') || lower.contains('alipay')) {
     return _assetSpecByKey['alipay'];
   }
-  if (name.contains('云闪付') ||
-      name.contains('银联') ||
-      lower.contains('unionpay')) {
+  if (name.contains('银联') || lower.contains('unionpay')) {
     return _assetSpecByKey['unionpay'];
   }
   if (lower.contains('paypal') || name.contains('跨境')) {
@@ -2208,6 +2206,9 @@ AssetIconSpec? _matchAssetByKeyword(
       name.contains('证券') ||
       lower.contains('etf')) {
     return _assetSpecByKey['stock'];
+  }
+  if (name.contains('小金库') || name.contains('存钱罐') || name.contains('保险箱')) {
+    return _assetSpecByKey['safe_box'];
   }
   if (name.contains('保单') || name.contains('保险') || name.contains('年金')) {
     return _assetSpecByKey['insurance'];
@@ -2227,6 +2228,7 @@ AssetIconSpec? _matchAssetByKeyword(
   if (name.contains('购物卡') ||
       name.contains('礼品卡') ||
       lower.contains('京东e卡') ||
+      RegExp(r'京东\s*e\s*卡', caseSensitive: false).hasMatch(name) ||
       name.contains('超市卡')) {
     return _assetSpecByKey['gift_card'];
   }
@@ -2253,17 +2255,12 @@ AssetIconSpec? _matchAssetByKeyword(
       lower.contains('crypto')) {
     return _assetSpecByKey['crypto'];
   }
-  if (name.contains('数字人民币') ||
-      lower.contains('e-cny') ||
-      name.contains('外币') ||
+  if (name.contains('外币') ||
       name.contains('美元') ||
       name.contains('港币') ||
       name.contains('日元') ||
       name.contains('欧元')) {
     return _assetSpecByKey['currency_exchange'];
-  }
-  if (name.contains('小金库') || name.contains('存钱罐') || name.contains('保险箱')) {
-    return _assetSpecByKey['safe_box'];
   }
   if (name.contains('心愿储蓄') || name.contains('心愿金')) {
     return _assetSpecByKey['piggy_bank'];
@@ -3025,7 +3022,7 @@ final List<_PickerTileSpec> _libraryBankPickerTiles = <_PickerTileSpec>[
 
 final List<_PickerTileSpec> _extraVectorPickerTiles = <_PickerTileSpec>[
   for (final spec in extraVectorIconCatalog)
-    if (spec.canonicalKey != 'wechat_pay' && spec.canonicalKey != 'alipay')
+    if (!_assetSpecByKey.containsKey(spec.canonicalKey))
       _PickerTileSpec(
         iconKey: spec.canonicalKey,
         widgetKey: 'visual-icon-${spec.canonicalKey}',
@@ -3158,8 +3155,12 @@ class _AssetVisualPickerSheetState extends State<_AssetVisualPickerSheet> {
             defaultColorHex: s.defaultColorHex,
             searchTokens: <String>[
               s.key,
-              if (s.key == 'wechat_pay') ...const <String>['微信', 'wechat'],
-              if (s.key == 'alipay') ...const <String>['支付宝', 'alipay'],
+              for (final extra in extraVectorIconCatalog)
+                if (extra.canonicalKey == s.key) ...<String>[
+                  extra.reference,
+                  extra.displayName,
+                  ...extra.aliases,
+                ],
             ],
           ),
     ];

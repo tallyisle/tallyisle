@@ -351,7 +351,7 @@ final class BankIconCatalog {
       _referenceFromAssetPath(assetPath) != null;
 
   /// Pre-validated synchronous snapshot of `assets/icons/banks/catalog.json`
-  /// (18 reviewed institutions + 194 manual-pick library icons).
+  /// (19 reviewed institutions + 194 manual-pick library icons).
   static final BankIconCatalog bundled = BankIconCatalog._(
     const <BankIconDescriptor>[
       BankIconDescriptor(
@@ -596,6 +596,15 @@ final class BankIconCatalog {
         relatedEntityCode: 'bank.czbank',
         reviewStatus: 'reviewed',
         defaultColorHex: '#E60012',
+      ),
+      BankIconDescriptor(
+        reference: 'builtin:bank.zabank',
+        assetPath: 'assets/icons/banks/zabank.svg',
+        displayName: '众安银行',
+        aliases: const <String>['众安', 'ZA Bank', 'ZABank'],
+        relatedEntityCode: 'bank.zabank',
+        reviewStatus: 'reviewed',
+        defaultColorHex: '#00CF9A',
       ),
       BankIconDescriptor(
         reference: 'builtin:bank-icon.bankcz',
@@ -2330,6 +2339,116 @@ const List<ExtraVectorIconSpec> extraVectorIconCatalog = <ExtraVectorIconSpec>[
     aliases: <String>['Alipay', '支付宝钱包'],
   ),
   ExtraVectorIconSpec(
+    reference: 'builtin:pay.huabei',
+    canonicalKey: 'huabei',
+    assetPath: 'assets/icons/huabei.svg',
+    displayName: '花呗',
+    defaultColorHex: '#30B4FF',
+    insetFraction: 0.16,
+    category: 'payment',
+    aliases: <String>['蚂蚁花呗', 'Huabei', '信用付'],
+  ),
+  ExtraVectorIconSpec(
+    reference: 'builtin:pay.baitiao',
+    canonicalKey: 'baitiao',
+    assetPath: 'assets/icons/baitiao.svg',
+    displayName: '京东白条',
+    defaultColorHex: '#D12C28',
+    insetFraction: 0.16,
+    category: 'payment',
+    aliases: <String>['白条', 'Baitiao', '分期付'],
+  ),
+  ExtraVectorIconSpec(
+    reference: 'builtin:pay.yuebao',
+    canonicalKey: 'builtin:pay.yuebao',
+    assetPath: 'assets/icons/yuebao.svg',
+    displayName: '余额宝',
+    defaultColorHex: '#F15A4A',
+    insetFraction: 0.16,
+    category: 'payment',
+    aliases: <String>['支付宝余额宝', 'Yuebao', '天弘余额宝'],
+  ),
+  ExtraVectorIconSpec(
+    reference: 'builtin:pay.ecny',
+    canonicalKey: 'builtin:pay.ecny',
+    assetPath: 'assets/icons/ecny.svg',
+    displayName: '数字人民币',
+    defaultColorHex: '#275FF5',
+    insetFraction: 0.14,
+    category: 'payment',
+    aliases: <String>['e-CNY', 'ECNY', '数币'],
+  ),
+  ExtraVectorIconSpec(
+    reference: 'builtin:pay.yunshanfu',
+    canonicalKey: 'builtin:pay.yunshanfu',
+    assetPath: 'assets/icons/yunshanfu.svg',
+    displayName: '云闪付',
+    defaultColorHex: '#3366CC',
+    insetFraction: 0.14,
+    category: 'payment',
+    aliases: <String>['银联云闪付', 'Yunshanfu'],
+  ),
+  ExtraVectorIconSpec(
+    reference: 'builtin:pay.unionpay',
+    canonicalKey: 'unionpay',
+    assetPath: 'assets/icons/unionpay.svg',
+    displayName: '银联',
+    defaultColorHex: '#ED171F',
+    insetFraction: 0.15,
+    category: 'payment',
+    aliases: <String>['中国银联', 'UnionPay', '银联卡'],
+  ),
+  ExtraVectorIconSpec(
+    reference: 'builtin:pay.paypal',
+    canonicalKey: 'paypal_intl',
+    assetPath: 'assets/icons/paypal.svg',
+    displayName: 'PayPal',
+    defaultColorHex: '#179BD7',
+    insetFraction: 0.15,
+    category: 'payment',
+    aliases: <String>['paypal', '贝宝', '跨境户'],
+  ),
+  ExtraVectorIconSpec(
+    reference: 'builtin:pay.jd',
+    canonicalKey: 'builtin:pay.jd',
+    assetPath: 'assets/icons/jd.svg',
+    displayName: '京东',
+    defaultColorHex: '#FF1010',
+    insetFraction: 0.16,
+    category: 'payment',
+    aliases: <String>['京东金融', '京东钱包', '京东小金库', 'JD'],
+  ),
+  ExtraVectorIconSpec(
+    reference: 'builtin:pay.meituan',
+    canonicalKey: 'builtin:pay.meituan',
+    assetPath: 'assets/icons/meituan.svg',
+    displayName: '美团',
+    defaultColorHex: '#FF8E12',
+    insetFraction: 0.15,
+    category: 'payment',
+    aliases: <String>['美团钱包', '美团生活费', 'Meituan'],
+  ),
+  ExtraVectorIconSpec(
+    reference: 'builtin:pay.visa',
+    canonicalKey: 'builtin:pay.visa',
+    assetPath: 'assets/icons/visa.svg',
+    displayName: 'Visa',
+    defaultColorHex: '#1A1F71',
+    insetFraction: 0.14,
+    category: 'payment',
+    aliases: <String>['VISA', 'Visa卡', '维萨'],
+  ),
+  ExtraVectorIconSpec(
+    reference: 'builtin:pay.mastercard',
+    canonicalKey: 'builtin:pay.mastercard',
+    assetPath: 'assets/icons/mastercard.svg',
+    displayName: 'Mastercard',
+    defaultColorHex: '#EB001B',
+    insetFraction: 0.15,
+    category: 'payment',
+    aliases: <String>['万事达', '万事达卡', 'MasterCard'],
+  ),
+  ExtraVectorIconSpec(
     reference: 'builtin:social.douyin',
     canonicalKey: 'builtin:social.douyin',
     assetPath: 'assets/icons/social/douyin.svg',
@@ -2566,6 +2685,7 @@ const List<(String, List<String>)> _reviewedBankCjkKeywords =
       ('builtin:bank.czbank', <String>['浙商银行', '浙商']),
       ('builtin:bank.bohai', <String>['渤海银行', '渤海']),
       ('builtin:bank.hengfeng', <String>['恒丰银行', '恒丰']),
+      ('builtin:bank.zabank', <String>['众安银行', '众安']),
     ];
 
 const List<(String, String)> _contextualBankCjkStems = <(String, String)>[
@@ -2586,46 +2706,93 @@ const List<String> _bankingContextWords = <String>[
   '工资',
 ];
 
-final List<(String, RegExp, bool)> _reviewedBankAsciiPatterns =
-    <(String, RegExp, bool)>[
-      for (final (ref, code, requireUpperOrBankContext)
-          in const <(String, String, bool)>[
-            ('builtin:bank.czbank', 'CZBANK', false),
-            ('builtin:bank.hengfeng', 'HFBANK', false),
-            ('builtin:bank.bocom', 'BOCOM', false),
-            ('builtin:bank.citic', 'CITIC', false),
-            ('builtin:bank.icbc', 'ICBC', false),
-            ('builtin:bank.cmbc', 'CMBC', false),
-            ('builtin:bank.psbc', 'PSBC', false),
-            ('builtin:bank.spdb', 'SPDB', false),
-            ('builtin:bank.bohai', 'CBHB', false),
-            ('builtin:bank.boc', 'BOC', false),
-            ('builtin:bank.ccb', 'CCB', false),
-            ('builtin:bank.cmb', 'CMB', false),
-            ('builtin:bank.cgb', 'CGB', false),
-            ('builtin:bank.ceb', 'CEB', false),
-            ('builtin:bank.pingan', 'PAB', false),
-            ('builtin:bank.hxb', 'HXB', false),
-            ('builtin:bank.cib', 'CIB', false),
-            ('builtin:bank.abc', 'ABC', true),
-          ])
-        (
-          ref,
-          RegExp(
-            '(?<![A-Za-z0-9])${RegExp.escape(code)}(?![A-Za-z0-9])',
-            caseSensitive: false,
-          ),
-          requireUpperOrBankContext,
-        ),
-    ];
+final List<(String, RegExp, bool)>
+_reviewedBankAsciiPatterns = <(String, RegExp, bool)>[
+  for (final (ref, code, requireUpperOrBankContext)
+      in const <(String, String, bool)>[
+        ('builtin:bank.czbank', 'CZBANK', false),
+        ('builtin:bank.hengfeng', 'HFBANK', false),
+        ('builtin:bank.zabank', 'ZABank', false),
+        ('builtin:bank.zabank', 'ZA Bank', false),
+        ('builtin:bank.bocom', 'BOCOM', false),
+        ('builtin:bank.citic', 'CITIC', false),
+        ('builtin:bank.icbc', 'ICBC', false),
+        ('builtin:bank.cmbc', 'CMBC', false),
+        ('builtin:bank.psbc', 'PSBC', false),
+        ('builtin:bank.spdb', 'SPDB', false),
+        ('builtin:bank.bohai', 'CBHB', false),
+        ('builtin:bank.boc', 'BOC', false),
+        ('builtin:bank.ccb', 'CCB', false),
+        ('builtin:bank.cmb', 'CMB', false),
+        ('builtin:bank.cgb', 'CGB', false),
+        ('builtin:bank.ceb', 'CEB', false),
+        ('builtin:bank.pingan', 'PAB', false),
+        ('builtin:bank.hxb', 'HXB', false),
+        ('builtin:bank.cib', 'CIB', false),
+        ('builtin:bank.abc', 'ABC', true),
+      ])
+    (
+      ref,
+      RegExp(
+        '(?<![A-Za-z0-9])${code.split(' ').map(RegExp.escape).join(r'\s+')}(?![A-Za-z0-9])',
+        caseSensitive: false,
+      ),
+      requireUpperOrBankContext,
+    ),
+];
 
 final RegExp _upperAbcPattern = RegExp(r'(?<![A-Za-z0-9])ABC(?![A-Za-z0-9])');
+final RegExp _jdECardPattern = RegExp(r'京东\s*e\s*卡', caseSensitive: false);
+final RegExp _huabeiAsciiPattern = RegExp(
+  r'(?<![A-Za-z0-9])huabei(?![A-Za-z0-9])',
+  caseSensitive: false,
+);
+final RegExp _baitiaoAsciiPattern = RegExp(
+  r'(?<![A-Za-z0-9])baitiao(?![A-Za-z0-9])',
+  caseSensitive: false,
+);
+final RegExp _yuebaoAsciiPattern = RegExp(
+  r'(?<![A-Za-z0-9])yuebao(?![A-Za-z0-9])',
+  caseSensitive: false,
+);
 final RegExp _wechatAsciiPattern = RegExp(
   r'(?<![A-Za-z0-9])wechat(?![A-Za-z0-9])',
   caseSensitive: false,
 );
 final RegExp _alipayAsciiPattern = RegExp(
   r'(?<![A-Za-z0-9])alipay(?![A-Za-z0-9])',
+  caseSensitive: false,
+);
+final RegExp _ecnyAsciiPattern = RegExp(
+  r'(?<![A-Za-z0-9])e-?cny(?![A-Za-z0-9])',
+  caseSensitive: false,
+);
+final RegExp _yunshanfuAsciiPattern = RegExp(
+  r'(?<![A-Za-z0-9])yunshanfu(?![A-Za-z0-9])',
+  caseSensitive: false,
+);
+final RegExp _unionpayAsciiPattern = RegExp(
+  r'(?<![A-Za-z0-9])union\s*pay(?![A-Za-z0-9])',
+  caseSensitive: false,
+);
+final RegExp _paypalAsciiPattern = RegExp(
+  r'(?<![A-Za-z0-9])pay\s*pal(?![A-Za-z0-9])',
+  caseSensitive: false,
+);
+final RegExp _jdAsciiPattern = RegExp(
+  r'(?<![A-Za-z0-9])jd(?![A-Za-z0-9])',
+  caseSensitive: false,
+);
+final RegExp _meituanAsciiPattern = RegExp(
+  r'(?<![A-Za-z0-9])meituan(?![A-Za-z0-9])',
+  caseSensitive: false,
+);
+final RegExp _visaAsciiPattern = RegExp(
+  r'(?<![A-Za-z0-9])visa(?![A-Za-z0-9])',
+  caseSensitive: false,
+);
+final RegExp _mastercardAsciiPattern = RegExp(
+  r'(?<![A-Za-z0-9])master\s*card(?![A-Za-z0-9])',
   caseSensitive: false,
 );
 final RegExp _douyinAsciiPattern = RegExp(
@@ -2654,9 +2821,18 @@ InstitutionAutoMatch _bankMatchFor(String ref) {
   );
 }
 
-/// Smartly matches [rawName] against the 18 reviewed commercial banks and
-/// curated payment/social platforms, strictly rejecting `source_label_only`
-/// entries and ambiguous non-bank names (`交通卡`, `平安保险`, `华夏基金`, `abcde`).
+InstitutionAutoMatch _extraMatchFor(ExtraVectorIconSpec spec) =>
+    InstitutionAutoMatch(
+      iconKey: spec.canonicalKey,
+      colorHex: spec.defaultColorHex,
+      displayName: spec.displayName,
+      svgAssetPath: spec.assetPath,
+    );
+
+/// Smartly matches [rawName] against the 19 reviewed commercial banks and
+/// curated payment/card-network/social platforms, strictly rejecting
+/// `source_label_only` entries and ambiguous non-bank names (`交通卡`, `平安保险`,
+/// `华夏基金`, `美团月付`, `京东e卡`, `朝朝宝`, `abcde`).
 InstitutionAutoMatch? matchReviewedInstitution(
   String rawName, {
   int? assetType,
@@ -2671,24 +2847,21 @@ InstitutionAutoMatch? matchReviewedInstitution(
       isBankCardMemo || _containsAny(name, _bankingContextWords);
 
   if (!isBankCardMemo) {
-    // Credit sub-brands keep their dedicated TallyIsle presets (`huabei`, `baitiao`, etc.).
-    if (name.contains('花呗') ||
-        lower.contains('huabei') ||
-        name.contains('白条') ||
-        lower.contains('baitiao') ||
-        name.contains('先享后付') ||
+    // Non-SVG credit/gift/wealth sub-brands keep their dedicated Material presets
+    // (`virtual_credit`, `credit_line`, `gift_card`, `wealth`).
+    if (name.contains('先享后付') ||
         name.contains('信用购') ||
         name.contains('借呗') ||
         name.contains('微粒贷') ||
         name.contains('金条') ||
-        name.contains('美团月付')) {
+        name.contains('美团月付') ||
+        (name.contains('美团') && name.contains('月付')) ||
+        _jdECardPattern.hasMatch(name) ||
+        name.contains('朝朝宝')) {
       return null;
     }
 
-    // Standalone余额宝 keeps its wealth preset unless an explicit bank is named.
-    if (name.contains('余额宝')) return null;
-
-    // Insurance policies (e.g. 平安保险 / 太平洋车险) stay insurance unless bank/card context exists.
+    // Insurance policies (e.g. 平安保险 / 众安保险) stay insurance unless bank/card context exists.
     if (!hasBankContext &&
         _containsAny(name, const <String>[
           '保险',
@@ -2710,7 +2883,7 @@ InstitutionAutoMatch? matchReviewedInstitution(
     }
   }
 
-  // 1. Check unambiguous reviewed bank CJK names & aliases.
+  // 1. Check unambiguous reviewed bank CJK names & aliases (beats card networks).
   for (final (ref, keywords) in _reviewedBankCjkKeywords) {
     for (final kw in keywords) {
       if (name.contains(kw)) {
@@ -2741,45 +2914,54 @@ InstitutionAutoMatch? matchReviewedInstitution(
     }
   }
 
-  // 4. Payment & social wallets (for Asset accounts; bank card memos stay bank-focused unless explicitly named).
+  // 4. Payment, card networks & social wallets (for Asset accounts; bank card memos stay bank-focused).
   if (!isBankCardMemo) {
+    if (name.contains('花呗') || _huabeiAsciiPattern.hasMatch(name)) {
+      return _extraMatchFor(_extraVectorByKey['huabei']!);
+    }
+    if (name.contains('白条') || _baitiaoAsciiPattern.hasMatch(name)) {
+      return _extraMatchFor(_extraVectorByKey['baitiao']!);
+    }
+    if (name.contains('余额宝') || _yuebaoAsciiPattern.hasMatch(name)) {
+      return _extraMatchFor(_extraVectorByKey['builtin:pay.yuebao']!);
+    }
     if (name.contains('微信') ||
         name.contains('零钱通') ||
         _wechatAsciiPattern.hasMatch(name)) {
-      final spec = _extraVectorByKey['wechat_pay']!;
-      return InstitutionAutoMatch(
-        iconKey: spec.canonicalKey,
-        colorHex: spec.defaultColorHex,
-        displayName: spec.displayName,
-        svgAssetPath: spec.assetPath,
-      );
+      return _extraMatchFor(_extraVectorByKey['wechat_pay']!);
     }
     if (name.contains('支付宝') || _alipayAsciiPattern.hasMatch(name)) {
-      final spec = _extraVectorByKey['alipay']!;
-      return InstitutionAutoMatch(
-        iconKey: spec.canonicalKey,
-        colorHex: spec.defaultColorHex,
-        displayName: spec.displayName,
-        svgAssetPath: spec.assetPath,
-      );
+      return _extraMatchFor(_extraVectorByKey['alipay']!);
+    }
+    if (name.contains('数字人民币') || _ecnyAsciiPattern.hasMatch(name)) {
+      return _extraMatchFor(_extraVectorByKey['builtin:pay.ecny']!);
+    }
+    if (name.contains('云闪付') || _yunshanfuAsciiPattern.hasMatch(name)) {
+      return _extraMatchFor(_extraVectorByKey['builtin:pay.yunshanfu']!);
+    }
+    if (name.contains('银联') || _unionpayAsciiPattern.hasMatch(name)) {
+      return _extraMatchFor(_extraVectorByKey['unionpay']!);
+    }
+    if (name.contains('贝宝') || _paypalAsciiPattern.hasMatch(name)) {
+      return _extraMatchFor(_extraVectorByKey['paypal_intl']!);
+    }
+    if (name.contains('京东') || _jdAsciiPattern.hasMatch(name)) {
+      return _extraMatchFor(_extraVectorByKey['builtin:pay.jd']!);
+    }
+    if (name.contains('美团') || _meituanAsciiPattern.hasMatch(name)) {
+      return _extraMatchFor(_extraVectorByKey['builtin:pay.meituan']!);
+    }
+    if (_visaAsciiPattern.hasMatch(name)) {
+      return _extraMatchFor(_extraVectorByKey['builtin:pay.visa']!);
+    }
+    if (name.contains('万事达') || _mastercardAsciiPattern.hasMatch(name)) {
+      return _extraMatchFor(_extraVectorByKey['builtin:pay.mastercard']!);
     }
     if (name.contains('抖音') || _douyinAsciiPattern.hasMatch(name)) {
-      final spec = _extraVectorByKey['builtin:social.douyin']!;
-      return InstitutionAutoMatch(
-        iconKey: spec.canonicalKey,
-        colorHex: spec.defaultColorHex,
-        displayName: spec.displayName,
-        svgAssetPath: spec.assetPath,
-      );
+      return _extraMatchFor(_extraVectorByKey['builtin:social.douyin']!);
     }
     if (name.contains('小红书') || _xhsAsciiPattern.hasMatch(name)) {
-      final spec = _extraVectorByKey['builtin:social.xiaohongshu']!;
-      return InstitutionAutoMatch(
-        iconKey: spec.canonicalKey,
-        colorHex: spec.defaultColorHex,
-        displayName: spec.displayName,
-        svgAssetPath: spec.assetPath,
-      );
+      return _extraMatchFor(_extraVectorByKey['builtin:social.xiaohongshu']!);
     }
   }
 

@@ -17,6 +17,7 @@ import 'package:tallyisle/data/tools/bill_attachment_service.dart';
 import 'package:tallyisle/data/tools/template_remark_service.dart';
 import 'package:tallyisle/domain/model/codes.dart';
 import 'package:tallyisle/domain/rules/app_settings_rules.dart';
+import 'package:tallyisle/features/assets/asset_editor_page.dart';
 import 'package:tallyisle/features/receipt/diy_toolbar_settings_page.dart';
 import 'package:tallyisle/features/records/desktop_record_editor_dialog.dart';
 import 'package:tallyisle/features/records/record_editor_page.dart';
@@ -318,13 +319,12 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      final switchFinder = find.byKey(
-        const Key('setting_default_account_switch'),
+      expect(find.text('系统与首页设置'), findsOneWidget);
+      expect(find.text('默认选择指定账户'), findsNothing);
+      expect(
+        find.byKey(const Key('setting_default_account_switch')),
+        findsNothing,
       );
-      expect(switchFinder, findsOneWidget);
-      final switchTile = tester.widget<SwitchListTile>(switchFinder);
-      expect(switchTile.value, isFalse);
-      expect(switchTile.onChanged, isNull);
       expect(
         find.byKey(const Key('setting_default_account_selector')),
         findsNothing,
@@ -333,7 +333,7 @@ void main() {
   );
 
   testWidgets(
-    'SettingsPage & DiyToolbarSettingsPage stay two-way synchronized, auto-open picker on toggle ON, warn on hidden/settled/deleted default account, and pass 360x640 @ 1.2x & 1280x800 layout audits',
+    'AssetEditorPage configures default account exclusively, DiyToolbarSettingsPage keeps only toolbar items & order, and both pass 360x640 @ 1.2x & 1280x800 layout audits',
     (tester) async {
       await tester.binding.setSurfaceSize(const Size(390, 844));
       addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -343,7 +343,6 @@ void main() {
       late int creditId;
       late int hiddenId;
       late int settledId;
-      late int tempDeleteId;
 
       await tester.runAsync(() async {
         final ledger = LedgerService(db);
@@ -379,11 +378,6 @@ void main() {
           assetId: settledId,
           status: AssetStatus.settled,
         );
-        tempDeleteId = await ledger.createAsset(
-          commandId: 'sync-temp-del',
-          name: '待删备用金',
-          initial: Money.zero(),
-        );
         await DebtService(db).createDebt(
           commandId: 'sync-debt',
           subType: AssetType.debtLend,
@@ -394,119 +388,98 @@ void main() {
         );
       });
 
-      final showDiyPage = ValueNotifier<bool>(false);
-      addTearDown(showDiyPage.dispose);
+      final activePage = ValueNotifier<Widget>(
+        AssetEditorPage(assetId: bankId),
+      );
+      addTearDown(activePage.dispose);
 
       await tester.pumpWidget(
         ProviderScope(
           retry: (_, _) => null,
           overrides: [databaseProvider.overrideWith((ref) async => db)],
-          child: ValueListenableBuilder<bool>(
-            valueListenable: showDiyPage,
-            builder: (_, diy, _) => MaterialApp(
+          child: ValueListenableBuilder<Widget>(
+            valueListenable: activePage,
+            builder: (_, page, _) => MaterialApp(
               locale: const Locale('zh'),
               supportedLocales: const <Locale>[Locale('zh'), Locale('en')],
               localizationsDelegates: GlobalMaterialLocalizations.delegates,
-              home: diy ? const DiyToolbarSettingsPage() : const SettingsPage(),
+              home: page,
             ),
           ),
         ),
       );
       await _settle(tester);
 
-      // 1. Toggle ON in SettingsPage -> persists true and immediately opens account picker sheet!
+      // 1. Toggle ON in AssetEditorPage for bankId and save.
       await tester.scrollUntilVisible(
-        find.byKey(const Key('setting_default_account_switch')),
-        150,
+        find.byKey(const Key('asset-default-account-switch')),
+        120,
+        scrollable: find
+            .descendant(
+              of: find.byType(AssetEditorPage),
+              matching: find.byType(Scrollable),
+            )
+            .first,
       );
       await _settle(tester, 4);
-      await tester.tap(find.byKey(const Key('setting_default_account_switch')));
+      await tester.tap(find.byKey(const Key('asset-default-account-switch')));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('asset-save')));
       await _settle(tester);
 
-      expect(find.text('选择默认账户'), findsOneWidget);
-      expect(
-        find.byKey(const Key('default-account-option-none')),
-        findsOneWidget,
+      final cfgAfterBank = await tester.runAsync(
+        () => BillAttachmentService(db).getDiyToolbarConfig(),
       );
-      expect(find.byKey(Key('default-account-option-$bankId')), findsOneWidget);
-      expect(
-        find.byKey(Key('default-account-option-$creditId')),
-        findsOneWidget,
+      expect(cfgAfterBank!.autoSelectDefaultAccount, isTrue);
+      expect(cfgAfterBank.defaultAccountId, bankId);
+
+      // 2. DiyToolbarSettingsPage shows ONLY '工具栏项目与顺序' and reset preserves default account.
+      activePage.value = const DiyToolbarSettingsPage();
+      await _settle(tester);
+      expect(find.text('工具栏项目与顺序'), findsOneWidget);
+      expect(find.text('工具栏预览'), findsNothing);
+      expect(find.text('默认账户'), findsNothing);
+      expect(find.byKey(const Key('diy-default-account-switch')), findsNothing);
+      await tester.tap(find.byKey(const Key('diy-toolbar-reset-btn')));
+      await _settle(tester);
+      final cfgAfterReset = await tester.runAsync(
+        () => BillAttachmentService(db).getDiyToolbarConfig(),
       );
-      // Hidden, settled, and debt accounts must NOT be offered!
-      expect(find.byKey(Key('default-account-option-$hiddenId')), findsNothing);
-      expect(
-        find.byKey(Key('default-account-option-$settledId')),
-        findsNothing,
-      );
-      expect(find.text('借出小李'), findsNothing);
+      expect(cfgAfterReset!.autoSelectDefaultAccount, isTrue);
+      expect(cfgAfterReset.defaultAccountId, bankId);
 
-      // Pick '招行储蓄卡'
-      await tester.tap(find.byKey(Key('default-account-option-$bankId')));
-      await _settle(tester);
-
-      expect(
-        find.byKey(const Key('setting_default_account_selector')),
-        findsOneWidget,
-      );
-      expect(find.text('招行储蓄卡'), findsOneWidget);
-
-      // 2. Switch to DiyToolbarSettingsPage -> already synced ON + '招行储蓄卡'!
-      showDiyPage.value = true;
-      await _settle(tester);
-
-      final diySwitch = tester.widget<SwitchListTile>(
-        find.byKey(const Key('diy-default-account-switch')),
-      );
-      expect(diySwitch.value, isTrue);
-      expect(
-        find.byKey(const Key('diy-default-account-selector')),
-        findsOneWidget,
-      );
-      expect(find.text('招行储蓄卡'), findsOneWidget);
-
-      // Tap selector in DiyToolbarSettingsPage -> choose '暂不指定' -> shows '未指定默认账户（点击选择）'
-      await tester.tap(find.byKey(const Key('diy-default-account-selector')));
-      await _settle(tester);
-      await tester.tap(find.byKey(const Key('default-account-option-none')));
-      await _settle(tester);
-      expect(find.text('未指定默认账户（点击选择）'), findsOneWidget);
-
-      // Tap selector again -> choose tempDeleteId ('待删备用金') and verify sync back to SettingsPage!
-      await tester.tap(find.byKey(const Key('diy-default-account-selector')));
-      await _settle(tester);
-      await tester.tap(find.byKey(Key('default-account-option-$tempDeleteId')));
-      await _settle(tester);
-      expect(find.text('待删备用金'), findsOneWidget);
-
-      showDiyPage.value = false;
-      await _settle(tester);
-      expect(find.text('待删备用金'), findsOneWidget);
-
-      // 3. Hide, settle, then delete the selected default account -> warning subtitle rendered!
-      await tester.runAsync(
-        () => LedgerService(db).setAssetStatus(
-          commandId: 'hide-temp-default',
-          assetId: tempDeleteId,
-          status: AssetStatus.hidden,
-        ),
-      );
-      await _settle(tester);
-      expect(find.text('原默认账户已隐藏、结清或删除，当前自动回退为不选账户，点击重新指定'), findsOneWidget);
-
-      await tester.runAsync(
-        () => LedgerService(
-          db,
-        ).deleteAsset(commandId: 'del-temp-default', assetId: tempDeleteId),
-      );
-      await _settle(tester);
-      expect(find.text('原默认账户已隐藏、结清或删除，当前自动回退为不选账户，点击重新指定'), findsOneWidget);
+      // 3. Hidden & settled accounts disable the switch in AssetEditorPage.
+      for (final inactiveId in <int>[hiddenId, settledId]) {
+        activePage.value = AssetEditorPage(
+          key: ValueKey<int>(inactiveId),
+          assetId: inactiveId,
+        );
+        await _settle(tester);
+        await tester.scrollUntilVisible(
+          find.byKey(const Key('asset-default-account-switch')),
+          120,
+          scrollable: find
+              .descendant(
+                of: find.byType(AssetEditorPage),
+                matching: find.byType(Scrollable),
+              )
+              .first,
+        );
+        await _settle(tester, 4);
+        final sw = tester.widget<SwitchListTile>(
+          find.byKey(const Key('asset-default-account-switch')),
+        );
+        expect(sw.value, isFalse);
+        expect(sw.onChanged, isNull);
+      }
 
       // 4. Verify zero overflow at 360x640 (Light & Dark @ 1.2x text scale) and desktop 1280x800!
-      for (final page in const <Widget>[
-        SettingsPage(),
-        DiyToolbarSettingsPage(),
-      ]) {
+      final pages = <Widget>[
+        const SettingsPage(),
+        const DiyToolbarSettingsPage(),
+        AssetEditorPage(assetId: creditId),
+      ];
+      for (final page in pages) {
         for (final brightness in const <Brightness>[
           Brightness.light,
           Brightness.dark,
@@ -539,7 +512,6 @@ void main() {
           expect(tester.takeException(), isNull);
         }
 
-        // Desktop 1280x800 (Linux) + centered Dialog picker
         await tester.binding.setSurfaceSize(const Size(1280, 800));
         await tester.pumpWidget(
           ProviderScope(
@@ -558,25 +530,6 @@ void main() {
         await _settle(tester);
         expect(tester.takeException(), isNull);
       }
-
-      // On desktop DiyToolbarSettingsPage, open centered Dialog and pick creditId, then reset defaults!
-      await tester.tap(find.byKey(const Key('diy-default-account-selector')));
-      await _settle(tester);
-      expect(
-        find.byKey(const Key('default-account-picker-dialog')),
-        findsOneWidget,
-      );
-      await tester.tap(find.byKey(Key('default-account-option-$creditId')));
-      await _settle(tester);
-      expect(find.text('工行信用卡'), findsOneWidget);
-
-      await tester.tap(find.byKey(const Key('diy-toolbar-reset-btn')));
-      await _settle(tester);
-      final resetCfg = await tester.runAsync(
-        () => BillAttachmentService(db).getDiyToolbarConfig(),
-      );
-      expect(resetCfg!.autoSelectDefaultAccount, isFalse);
-      expect(resetCfg.defaultAccountId, noRef);
 
       await closeCleanly();
     },
@@ -661,16 +614,28 @@ void main() {
         findsOneWidget,
       );
 
-      // Enable via editor-diy-toolbar-btn -> live updates untouched RecordEditorPage!
-      await tester.tap(find.byKey(const Key('editor-diy-toolbar-btn')));
-      await _settle(tester);
-      await tester.tap(find.byKey(const Key('diy-default-account-switch')));
-      await _settle(tester);
-      await tester.tap(
-        find.byKey(Key('default-account-option-$defaultWalletId')),
+      // Enable via AssetEditorPage -> live updates untouched RecordEditorPage!
+      final nav = Navigator.of(tester.element(find.byType(RecordEditorPage)));
+      nav.push(
+        MaterialPageRoute<void>(
+          builder: (_) => AssetEditorPage(assetId: defaultWalletId),
+        ),
       );
       await _settle(tester);
-      await tester.tap(find.byType(BackButton));
+      await tester.scrollUntilVisible(
+        find.byKey(const Key('asset-default-account-switch')),
+        120,
+        scrollable: find
+            .descendant(
+              of: find.byType(AssetEditorPage),
+              matching: find.byType(Scrollable),
+            )
+            .first,
+      );
+      await _settle(tester, 4);
+      await tester.tap(find.byKey(const Key('asset-default-account-switch')));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('asset-save')));
       await _settle(tester);
 
       expect(

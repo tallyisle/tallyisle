@@ -485,24 +485,37 @@ void main() {
       SwitchListTile remarksToggle() => tester.widget<SwitchListTile>(
         find.byKey(const Key('remarks-feature-toggle')),
       );
+      Switch diyRemarksSwitch() => tester.widget<Switch>(
+        find.byKey(const Key('diy-switch-frequent_remarks')),
+      );
 
-      // Default OFF in RemarksPage and 8/11 enabled in DiyToolbarSettingsPage.
+      await tester.scrollUntilVisible(
+        find.byKey(const Key('diy-switch-frequent_remarks')),
+        120,
+        scrollable: find.descendant(
+          of: find.byKey(const Key('diy-toolbar-list')),
+          matching: find.byType(Scrollable),
+        ),
+      );
+      await settle(tester);
+
+      // Default OFF in both RemarksPage and DiyToolbarSettingsPage.
       expect(remarksToggle().value, isFalse);
       expect(find.textContaining('已关闭（默认）'), findsOneWidget);
-      expect(find.text('已启用 8/11 项'), findsOneWidget);
+      expect(diyRemarksSwitch().value, isFalse);
 
-      // Toggle ON in RemarksPage -> syncs to DiyToolbarSettingsPage (9/11)!
+      // Toggle ON in RemarksPage -> syncs to DiyToolbarSettingsPage!
       await tester.tap(find.byKey(const Key('remarks-feature-toggle')));
       await settle(tester);
       expect(remarksToggle().value, isTrue);
       expect(find.textContaining('已开启'), findsOneWidget);
-      expect(find.text('已启用 9/11 项'), findsOneWidget);
+      expect(diyRemarksSwitch().value, isTrue);
 
       // Reset to defaults in DiyToolbarSettingsPage -> syncs back to RemarksPage (OFF)!
       await tester.tap(find.byKey(const Key('diy-toolbar-reset-btn')));
       await settle(tester);
       expect(remarksToggle().value, isFalse);
-      expect(find.text('已启用 8/11 项'), findsOneWidget);
+      expect(diyRemarksSwitch().value, isFalse);
 
       await closeCleanly();
     },

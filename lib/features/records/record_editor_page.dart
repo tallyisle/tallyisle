@@ -303,14 +303,24 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
   }
 
   void _focusDesktopAmountIfIdle() {
-    if (!_isDesktopActive || busy || loading || _hasOsKeyboardFieldFocus) {
+    if (!_isDesktopActive ||
+        !_isTopmostRoute ||
+        busy ||
+        loading ||
+        _hasOsKeyboardFieldFocus) {
       return;
     }
     if (!_amountFocus.hasFocus) {
       _amountFocus.requestFocus();
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || busy || loading || _hasOsKeyboardFieldFocus) return;
+      if (!mounted ||
+          !_isTopmostRoute ||
+          busy ||
+          loading ||
+          _hasOsKeyboardFieldFocus) {
+        return;
+      }
       if (!_amountFocus.hasFocus) {
         _amountFocus.requestFocus();
       }
@@ -1947,27 +1957,23 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     return clearBtn ?? remarksToggleBtn;
   }
 
-  void _openAssetsManager() {
-    if (_isDesktopActive) {
-      unawaited(
-        pushDesktopModalOrMaterialRoute<void>(
-          context,
-          maxWidth: 860,
-          maxHeight: 740,
-          child: const AssetsPage(),
-        ),
-      );
-      return;
-    }
+  Future<void> _openAssetsManager() {
     if (!_isImperativeDialogRoute && GoRouter.maybeOf(context) != null) {
-      unawaited(context.push('/assets'));
-    } else {
-      unawaited(
-        Navigator.of(
-          context,
-        ).push(MaterialPageRoute<void>(builder: (_) => const AssetsPage())),
+      return context.push<void>('/assets/manage');
+    }
+    if (_isDesktopActive) {
+      return pushDesktopModalOrMaterialRoute<void>(
+        context,
+        maxWidth: 860,
+        maxHeight: 740,
+        child: const AssetsPage(standaloneManagement: true),
       );
     }
+    return Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => const AssetsPage(standaloneManagement: true),
+      ),
+    );
   }
 
   Future<void> _openAccountPickerSheet({
@@ -2017,6 +2023,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     }
 
     final isDesktop = _isDesktopActive;
+    var openedManager = false;
     final int? chosen;
     if (isDesktop) {
       chosen = await showDialog<int>(
@@ -2045,9 +2052,10 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                         ),
                         const Spacer(),
                         TextButton.icon(
+                          key: const Key('manage-assets-sheet-btn'),
                           onPressed: () {
+                            openedManager = true;
                             Navigator.of(dialogCtx).pop();
-                            _openAssetsManager();
                           },
                           icon: const Icon(Icons.settings_outlined, size: 16),
                           label: const Text('管理账户'),
@@ -2150,15 +2158,15 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                           style: Theme.of(sheetCtx).textTheme.titleMedium,
                         ),
                         const Spacer(),
-                        if (GoRouter.maybeOf(context) != null)
-                          TextButton.icon(
-                            onPressed: () {
-                              Navigator.pop(sheetCtx);
-                              unawaited(context.push('/assets'));
-                            },
-                            icon: const Icon(Icons.settings_outlined, size: 16),
-                            label: const Text('管理账户'),
-                          ),
+                        TextButton.icon(
+                          key: const Key('manage-assets-sheet-btn'),
+                          onPressed: () {
+                            openedManager = true;
+                            Navigator.pop(sheetCtx);
+                          },
+                          icon: const Icon(Icons.settings_outlined, size: 16),
+                          label: const Text('管理账户'),
+                        ),
                       ],
                     ),
                   ),
@@ -2220,6 +2228,12 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
       );
     }
     if (!mounted) return;
+    if (openedManager) {
+      await _openAssetsManager();
+      if (!mounted) return;
+      _focusDesktopAmountIfIdle();
+      return;
+    }
     if (chosen != null) {
       onSelected(chosen);
     }

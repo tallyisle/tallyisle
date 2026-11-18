@@ -11,18 +11,34 @@ import '../../data/db/database.dart';
 import '../../domain/model/codes.dart';
 import '../common/catalog_icons.dart';
 import '../common/common.dart';
+import '../common/desktop_modal_page.dart';
+import '../debt/debt_detail_page.dart';
+import '../debt/debt_editor_page.dart';
+import '../debt/debt_page.dart';
+import '../deposit/fixed_deposit_page.dart';
+import '../installment/installment_page.dart';
+import '../stats/asset_trend_page.dart';
 import 'asset_detail_page.dart' show AssetDetailPage, creditBalanceLabel;
+import 'asset_editor_page.dart';
 
 const _uuid = Uuid();
 
 /// Accounts of the current book with the net-worth summary
 /// (docs/modules/asset-overview.md).
 class AssetsPage extends ConsumerStatefulWidget {
-  const AssetsPage({super.key, this.pickCustomImageBytes});
+  const AssetsPage({
+    super.key,
+    this.pickCustomImageBytes,
+    this.standaloneManagement = false,
+  });
 
   /// Optional image bytes provider override (used by widget tests to avoid
   /// platform file dialogs).
   final Future<Uint8List?> Function()? pickCustomImageBytes;
+
+  /// True when pushed as a standalone Account Management view (e.g. `/assets/manage`
+  /// from `RecordEditorPage`) rather than the shell's `/assets` tab.
+  final bool standaloneManagement;
 
   @override
   ConsumerState<AssetsPage> createState() => _AssetsPageState();
@@ -32,6 +48,63 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
   bool hidden = false;
   bool showHiddenAccounts = false;
   int? _selectedAssetId;
+
+  bool get _hasPageRouteRouter =>
+      GoRouter.maybeOf(context) != null &&
+      ModalRoute.of(context)?.settings is Page;
+
+  Future<void> _openCreateAsset({int? initialType}) {
+    if (_hasPageRouteRouter) {
+      final path = initialType == null
+          ? '/assets/new'
+          : '/assets/new?type=$initialType';
+      return context.push<void>(path);
+    }
+    return pushDesktopModalOrMaterialRoute<void>(
+      context,
+      child: AssetEditorPage(initialType: initialType),
+    );
+  }
+
+  Future<void> _openEditAsset(int assetId) {
+    if (_hasPageRouteRouter) {
+      return context.push<void>('/assets/$assetId/edit');
+    }
+    return pushDesktopModalOrMaterialRoute<void>(
+      context,
+      child: AssetEditorPage(assetId: assetId),
+    );
+  }
+
+  Future<void> _openEditDebt(int debtId) {
+    if (_hasPageRouteRouter) {
+      return context.push<void>('/debts/$debtId/edit');
+    }
+    return pushDesktopModalOrMaterialRoute<void>(
+      context,
+      child: DebtEditorPage(debtId: debtId),
+    );
+  }
+
+  Future<void> _pushFullPageOrModal(
+    String path,
+    Widget Function() fallbackBuilder, {
+    double maxWidth = 860,
+    double maxHeight = 740,
+  }) {
+    final isPopupModal =
+        DesktopAdaptive.isDesktop(context) &&
+        ModalRoute.of(context) is PopupRoute;
+    if (!isPopupModal && _hasPageRouteRouter) {
+      return context.push<void>(path);
+    }
+    return pushDesktopModalOrMaterialRoute<void>(
+      context,
+      maxWidth: maxWidth,
+      maxHeight: maxHeight,
+      child: fallbackBuilder(),
+    );
+  }
 
   Future<void> _customizeAssetIcon(Asset asset) async {
     final picked = await showAssetVisualPicker(
@@ -78,6 +151,9 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
     final theme = Theme.of(context);
     final isDesktop = DesktopAdaptive.isDesktop(context);
     final isExpandedDesktop = DesktopAdaptive.isExpandedDesktop(context);
+    final isPopupModal = isDesktop && ModalRoute.of(context) is PopupRoute;
+    final isManagementMode = widget.standaloneManagement || isPopupModal;
+    final useMasterDetail = isExpandedDesktop && !isManagementMode;
 
     String show(BigInt v) => hidden ? '***' : formatMinor(v);
     Widget cell(String label, BigInt? v, Key key) => Expanded(
@@ -104,7 +180,8 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('资产'),
+        leading: isPopupModal ? const CloseButton() : null,
+        title: Text(isManagementMode ? '账户管理' : '资产'),
         actions: [
           IconButton(
             tooltip: hidden ? '显示金额' : '隐藏金额',
@@ -116,7 +193,7 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
               padding: const EdgeInsets.only(right: 12, left: 4),
               child: FilledButton.tonalIcon(
                 key: const Key('add-asset'),
-                onPressed: () => context.push('/assets/new'),
+                onPressed: _openCreateAsset,
                 icon: const Icon(Icons.add, size: 18),
                 label: const Text('添加账户'),
               ),
@@ -185,33 +262,56 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
         }
 
         Widget buildAccountTile(Asset a, {bool isDebtSection = false}) {
+          final isDebt = isDebtSection || a.type == AssetType.debt;
+          void openAssetOrDebtDetail() {
+            if (isDebt) {
+              _pushFullPageOrModal(
+                '/debts/${a.id}',
+                () => DebtDetailPage(debtId: a.id),
+                maxWidth: 680,
+                maxHeight: 740,
+              );
+            } else {
+              _pushFullPageOrModal(
+                '/assets/${a.id}',
+                () => AssetDetailPage(assetId: a.id),
+                maxWidth: 680,
+                maxHeight: 740,
+              );
+            }
+          }
+
           if (!isDesktop) {
             return _AssetTile(
               asset: a,
               hidden: hidden,
               isDebtSection: isDebtSection,
               onCustomizeIcon: () => _customizeAssetIcon(a),
+              onTap: openAssetOrDebtDetail,
             );
           }
-          final isDebt = isDebtSection || a.type == AssetType.debt;
           return _DesktopAssetTile(
             asset: a,
             hidden: hidden,
             isDebtSection: isDebt,
+            standaloneManagement: isManagementMode,
             selected:
-                isExpandedDesktop &&
-                !isDebt &&
-                effectiveSelectedAssetId == a.id,
+                useMasterDetail && !isDebt && effectiveSelectedAssetId == a.id,
             onCustomizeIcon: () => _customizeAssetIcon(a),
             onOpenOrSelect: () {
-              if (isDebt) {
-                context.push('/debts/${a.id}');
-              } else if (isExpandedDesktop) {
+              if (useMasterDetail && !isDebt) {
                 setState(() => _selectedAssetId = a.id);
               } else {
-                context.push('/assets/${a.id}');
+                openAssetOrDebtDetail();
               }
             },
+            onEdit: () => isDebt ? _openEditDebt(a.id) : _openEditAsset(a.id),
+            onOpenTrend: () => _pushFullPageOrModal(
+              '/stats/trend?assetId=${a.id}',
+              () => AssetTrendPage(initialAssetId: a.id),
+            ),
+            onManageDebts: () =>
+                _pushFullPageOrModal('/debts', () => const DebtPage()),
           );
         }
 
@@ -274,19 +374,28 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
                         itemKey: const Key('assets-quick-debts'),
                         icon: Icons.swap_horiz_rounded,
                         label: '借贷管理',
-                        onTap: () => context.push('/debts'),
+                        onTap: () => _pushFullPageOrModal(
+                          '/debts',
+                          () => const DebtPage(),
+                        ),
                       ),
                       _AssetQuickEntryItem(
                         itemKey: const Key('assets-quick-installments'),
                         icon: Icons.calendar_view_month_rounded,
                         label: '分期管理',
-                        onTap: () => context.push('/installments'),
+                        onTap: () => _pushFullPageOrModal(
+                          '/installments',
+                          () => const InstallmentPage(),
+                        ),
                       ),
                       _AssetQuickEntryItem(
                         itemKey: const Key('assets-quick-deposits'),
                         icon: Icons.lock_clock_rounded,
                         label: '定期存款',
-                        onTap: () => context.push('/deposits'),
+                        onTap: () => _pushFullPageOrModal(
+                          '/deposits',
+                          () => const FixedDepositPage(),
+                        ),
                       ),
                     ],
                   ),
@@ -309,7 +418,7 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
                         Expanded(
                           child: OutlinedButton.icon(
                             key: const Key('empty-add-normal-asset'),
-                            onPressed: () => context.push('/assets/new'),
+                            onPressed: _openCreateAsset,
                             style: OutlinedButton.styleFrom(
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 10,
@@ -333,9 +442,8 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
                         Expanded(
                           child: OutlinedButton.icon(
                             key: const Key('empty-add-credit-asset'),
-                            onPressed: () => context.push(
-                              '/assets/new?type=${AssetType.credit}',
-                            ),
+                            onPressed: () =>
+                                _openCreateAsset(initialType: AssetType.credit),
                             style: OutlinedButton.styleFrom(
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 10,
@@ -385,7 +493,7 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
           ],
         );
 
-        if (!isExpandedDesktop) {
+        if (!useMasterDetail) {
           if (!isDesktop) {
             return accountTreeList;
           }
@@ -436,8 +544,10 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
           ? null
           : FloatingActionButton.extended(
               key: const Key('add-asset'),
-              heroTag: 'fab-assets',
-              onPressed: () => context.push('/assets/new'),
+              heroTag: widget.standaloneManagement
+                  ? 'fab-assets-manage'
+                  : 'fab-assets',
+              onPressed: _openCreateAsset,
               icon: const Icon(Icons.add),
               label: const Text('添加账户'),
             ),
@@ -577,16 +687,24 @@ class _DesktopAssetTile extends StatefulWidget {
     required this.hidden,
     required this.onCustomizeIcon,
     required this.onOpenOrSelect,
+    required this.onEdit,
+    required this.onOpenTrend,
+    required this.onManageDebts,
     required this.selected,
     this.isDebtSection = false,
+    this.standaloneManagement = false,
   });
 
   final Asset asset;
   final bool hidden;
   final VoidCallback onCustomizeIcon;
   final VoidCallback onOpenOrSelect;
+  final VoidCallback onEdit;
+  final VoidCallback onOpenTrend;
+  final VoidCallback onManageDebts;
   final bool selected;
   final bool isDebtSection;
+  final bool standaloneManagement;
 
   @override
   State<_DesktopAssetTile> createState() => _DesktopAssetTileState();
@@ -623,20 +741,21 @@ class _DesktopAssetTileState extends State<_DesktopAssetTile> {
                 child: Text('进入借贷管理'),
               ),
             ]
-          : const <PopupMenuEntry<_AssetContextAction>>[
-              PopupMenuItem<_AssetContextAction>(
+          : <PopupMenuEntry<_AssetContextAction>>[
+              const PopupMenuItem<_AssetContextAction>(
                 value: _AssetContextAction.viewFlows,
                 child: Text('查看账户流水'),
               ),
-              PopupMenuItem<_AssetContextAction>(
-                value: _AssetContextAction.newRecord,
-                child: Text('记一笔到此账户'),
-              ),
-              PopupMenuItem<_AssetContextAction>(
+              if (!widget.standaloneManagement)
+                const PopupMenuItem<_AssetContextAction>(
+                  value: _AssetContextAction.newRecord,
+                  child: Text('记一笔到此账户'),
+                ),
+              const PopupMenuItem<_AssetContextAction>(
                 value: _AssetContextAction.editAsset,
                 child: Text('编辑账户'),
               ),
-              PopupMenuItem<_AssetContextAction>(
+              const PopupMenuItem<_AssetContextAction>(
                 value: _AssetContextAction.assetTrend,
                 child: Text('资产趋势'),
               ),
@@ -649,15 +768,15 @@ class _DesktopAssetTileState extends State<_DesktopAssetTile> {
       case _AssetContextAction.newRecord:
         await context.push('/record/new?assetId=${asset.id}&asset=${asset.id}');
       case _AssetContextAction.editAsset:
-        await context.push('/assets/${asset.id}/edit');
+        widget.onEdit();
       case _AssetContextAction.assetTrend:
-        await context.push('/stats/trend?assetId=${asset.id}');
+        widget.onOpenTrend();
       case _AssetContextAction.viewDebtDetail:
         widget.onOpenOrSelect();
       case _AssetContextAction.editDebt:
-        await context.push('/debts/${asset.id}/edit');
+        widget.onEdit();
       case _AssetContextAction.manageDebts:
-        await context.push('/debts');
+        widget.onManageDebts();
     }
   }
 
@@ -786,6 +905,25 @@ class _DesktopAssetTileState extends State<_DesktopAssetTile> {
                         ),
                       ),
                     ),
+                    if (widget.standaloneManagement) ...[
+                      const SizedBox(width: 4),
+                      IconButton(
+                        key: Key('manage-edit-asset-${asset.id}'),
+                        tooltip: isDebt ? '编辑借贷项目' : '编辑账户',
+                        visualDensity: VisualDensity.compact,
+                        constraints: const BoxConstraints.tightFor(
+                          width: 32,
+                          height: 32,
+                        ),
+                        padding: EdgeInsets.zero,
+                        icon: Icon(
+                          Icons.edit_outlined,
+                          size: 18,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                        onPressed: widget.onEdit,
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -802,12 +940,14 @@ class _AssetTile extends StatelessWidget {
     required this.asset,
     required this.hidden,
     required this.onCustomizeIcon,
+    required this.onTap,
     this.isDebtSection = false,
   });
 
   final Asset asset;
   final bool hidden;
   final VoidCallback onCustomizeIcon;
+  final VoidCallback onTap;
   final bool isDebtSection;
 
   @override
@@ -843,7 +983,7 @@ class _AssetTile extends StatelessWidget {
         title: Text(asset.name),
         subtitle: Text(subtitleParts.join(' · ')),
         trailing: Text(hidden ? '***' : formatMinor(displayMinor)),
-        onTap: () => context.push('/debts/${asset.id}'),
+        onTap: onTap,
       );
     }
 
@@ -870,7 +1010,7 @@ class _AssetTile extends StatelessWidget {
             ? creditBalanceLabel(asset.balanceMinor)
             : formatMinor(asset.balanceMinor),
       ),
-      onTap: () => context.push('/assets/${asset.id}'),
+      onTap: onTap,
     );
   }
 }

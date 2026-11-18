@@ -21,7 +21,8 @@ import 'package:tallyisle/features/common/svg_vector_icon.dart';
 // table). Keyword rules are parsed from source so the table never drifts from
 // `matchReviewedInstitution` / `_matchAssetByKeyword`.
 
-const String _outDir = 'build/icon_table';
+final String _outDir =
+    Platform.environment['ICON_TABLE_OUT_DIR'] ?? 'build/icon_table';
 const String _bankSrc = 'lib/domain/rules/bank_icon_catalog.dart';
 const String _catalogSrc = 'lib/features/common/catalog_icons.dart';
 
@@ -111,7 +112,7 @@ List<_Rule> _parseInstitutionRules() {
 
   final ascii = _block(src, '_reviewedBankAsciiPatterns =', '];\n');
   for (final m in RegExp(
-    r"\('(builtin:bank\.[a-z0-9_]+)',\s*'([A-Za-z]+)',\s*(true|false)\)",
+    r"\('(builtin:bank\.[a-z0-9_]+)',\s*'([A-Za-z ]+)',\s*(true|false)\)",
   ).allMatches(ascii)) {
     final strict = m.group(3) == 'true';
     rules.add(
@@ -127,10 +128,34 @@ List<_Rule> _parseInstitutionRules() {
   }
 
   const asciiPatterns = <String, List<String>>{
+    '_huabeiAsciiPattern': ['huabei'],
+    '_baitiaoAsciiPattern': ['baitiao'],
+    '_yuebaoAsciiPattern': ['yuebao'],
     '_wechatAsciiPattern': ['wechat'],
     '_alipayAsciiPattern': ['alipay'],
+    '_ecnyAsciiPattern': ['e-cny'],
+    '_yunshanfuAsciiPattern': ['yunshanfu'],
+    '_unionpayAsciiPattern': ['unionpay'],
+    '_paypalAsciiPattern': ['paypal'],
+    '_jdAsciiPattern': ['jd'],
+    '_meituanAsciiPattern': ['meituan'],
+    '_visaAsciiPattern': ['visa'],
+    '_mastercardAsciiPattern': ['mastercard'],
     '_douyinAsciiPattern': ['douyin', 'tiktok'],
     '_xhsAsciiPattern': ['xiaohongshu'],
+  };
+  const extraRuleNotes = <String, String>{
+    'builtin:pay.jd': '不含「京东白条 / 京东金条 / 京东e卡」',
+    'builtin:pay.meituan': '不含「美团月付」',
+    'unionpay': '同含具体银行名时优先显示银行行标',
+    'builtin:pay.visa': '同含具体银行名时优先显示银行行标',
+    'builtin:pay.mastercard': '同含具体银行名时优先显示银行行标',
+  };
+  const creditPaymentTargets = <String>{
+    'huabei',
+    'baitiao',
+    'builtin:pay.visa',
+    'builtin:pay.mastercard',
   };
   final pay = _block(src, '// 4. Payment', 'return null;\n}');
   final pending = <String>[];
@@ -143,15 +168,26 @@ List<_Rule> _parseInstitutionRules() {
     }
     final target = RegExp(r"_extraVectorByKey\['([^']+)'\]").firstMatch(line);
     if (target != null) {
+      final targetKey = target.group(1)!;
+      final extraNote = extraRuleNotes[targetKey] ?? '';
       for (final kw in pending) {
+        final asciiNote = RegExp(r'^[a-z-]+$').hasMatch(kw)
+            ? '整词匹配，不区分大小写'
+            : '';
+        final combinedNote = [
+          if (asciiNote.isNotEmpty) asciiNote,
+          if (extraNote.isNotEmpty) extraNote,
+        ].join('；');
         rules.add(
           _Rule(
-            layer: 'A 机构矢量图标 · 支付/社交钱包',
+            layer: 'A 机构矢量图标 · 支付/卡组织/社交',
             keyword: kw,
             sample: kw,
-            assetType: AssetType.normal,
-            targetKey: target.group(1)!,
-            note: RegExp(r'^[a-z]+$').hasMatch(kw) ? '整词匹配，不区分大小写' : '',
+            assetType: creditPaymentTargets.contains(targetKey)
+                ? AssetType.credit
+                : AssetType.normal,
+            targetKey: targetKey,
+            note: combinedNote,
           ),
         );
       }
@@ -433,6 +469,47 @@ void main() {
         'aliases': '',
         'color': s.defaultColorHex,
       });
+    }
+
+    final previewDirPath = Platform.environment['ICON_PREVIEW_PNG_DIR'];
+    if (previewDirPath != null && previewDirPath.isNotEmpty) {
+      final previewDir = Directory(previewDirPath)..createSync(recursive: true);
+      const previewSvgs = <String>[
+        'assets/icons/banks/zabank.svg',
+        'assets/icons/huabei.svg',
+        'assets/icons/baitiao.svg',
+        'assets/icons/paypal.svg',
+        'assets/icons/unionpay.svg',
+        'assets/icons/yuebao.svg',
+        'assets/icons/ecny.svg',
+        'assets/icons/yunshanfu.svg',
+        'assets/icons/jd.svg',
+        'assets/icons/meituan.svg',
+        'assets/icons/visa.svg',
+        'assets/icons/mastercard.svg',
+      ];
+      for (final svgPath in previewSvgs) {
+        final doc = SvgVectorCache.peek(svgPath)!;
+        final pngBytes = await tester.runAsync(() async {
+          final recorder = ui.PictureRecorder();
+          final canvas = Canvas(recorder, const Rect.fromLTWH(0, 0, 256, 256));
+          canvas.drawRect(
+            const Rect.fromLTWH(0, 0, 256, 256),
+            Paint()..color = Colors.white,
+          );
+          canvas.save();
+          doc.paint(canvas, const Size(256, 256));
+          canvas.restore();
+          final pic = recorder.endRecording();
+          final img = await pic.toImage(256, 256);
+          final data = await img.toByteData(format: ui.ImageByteFormat.png);
+          img.dispose();
+          pic.dispose();
+          return data!.buffer.asUint8List();
+        });
+        final baseName = svgPath.split('/').last.replaceAll('.svg', '.png');
+        File('${previewDir.path}/$baseName').writeAsBytesSync(pngBytes!);
+      }
     }
 
     File('$_outDir/manifest.json').writeAsStringSync(

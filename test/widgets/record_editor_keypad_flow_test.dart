@@ -16,6 +16,7 @@ import 'package:tallyisle/data/tools/bill_attachment_service.dart';
 import 'package:tallyisle/data/tools/template_remark_service.dart';
 import 'package:tallyisle/domain/model/codes.dart';
 import 'package:tallyisle/features/common/catalog_icons.dart';
+import 'package:tallyisle/features/common/svg_vector_icon.dart';
 import 'package:tallyisle/features/records/record_editor_page.dart';
 
 Future<void> _settle(WidgetTester tester, [int ticks = 8]) async {
@@ -750,7 +751,14 @@ void main() {
 
           await tester.tap(find.byKey(const Key('asset')));
           await _settle(tester, 4);
-          expect(find.byIcon(Icons.auto_awesome_rounded), findsOneWidget);
+          expect(
+            find.byWidgetPredicate(
+              (w) =>
+                  w is SvgVectorIcon &&
+                  w.assetPath == 'assets/icons/huabei.svg',
+            ),
+            findsOneWidget,
+          );
           await tester.tap(find.text('花呗生活号').last);
           await _settle(tester, 4);
           expect(

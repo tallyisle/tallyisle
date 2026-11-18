@@ -542,51 +542,39 @@ void main() {
       );
       await settle(tester);
 
-      expect(find.text('已启用 8/11 项'), findsOneWidget);
-      // Preview defaults to collapsed on every entry (single compact row).
-      expect(find.byKey(const Key('diy-toolbar-preview-chips')), findsNothing);
-      expect(find.text('展开'), findsOneWidget);
-      expect(find.text('工具栏预览'), findsOneWidget);
-      expect(find.text('默认账户'), findsOneWidget);
+      // Only "工具栏项目与顺序" remains ("工具栏预览" and "默认账户" removed).
       expect(find.text('工具栏项目与顺序'), findsOneWidget);
-      final collapsedHeight = tester
-          .getSize(find.byKey(const Key('diy-toolbar-preview')))
-          .height;
+      expect(find.text('工具栏预览'), findsNothing);
+      expect(find.text('默认账户'), findsNothing);
+      expect(find.byKey(const Key('diy-toolbar-preview')), findsNothing);
+      expect(find.byKey(const Key('diy-default-account-switch')), findsNothing);
 
-      // Expand -> chips visible & card grows, then collapse back.
-      await tester.tap(find.byKey(const Key('diy-toolbar-preview-toggle')));
-      await settle(tester);
-      expect(
-        find.byKey(const Key('diy-toolbar-preview-chips')),
-        findsOneWidget,
-      );
-      expect(find.text('收起'), findsOneWidget);
-      final expandedHeight = tester
-          .getSize(find.byKey(const Key('diy-toolbar-preview')))
-          .height;
-      expect(expandedHeight, greaterThan(collapsedHeight));
+      Switch switchFor(String key) =>
+          tester.widget<Switch>(find.byKey(Key('diy-switch-$key')));
 
-      await tester.tap(find.byKey(const Key('diy-toolbar-preview-toggle')));
-      await settle(tester);
-      expect(find.byKey(const Key('diy-toolbar-preview-chips')), findsNothing);
-      expect(find.text('展开'), findsOneWidget);
+      expect(switchFor('tags').value, isTrue);
 
-      // Seed custom date/time picker styles in ti_preference and ensure UI setEnabled & moveItem preserve them.
+      // Seed custom date/time picker styles & default account in ti_preference and ensure UI setEnabled & moveItem preserve them.
       await tester.runAsync(() async {
         final current = await attService.getDiyToolbarConfig();
         await attService.saveDiyToolbarConfig(
           commandId: 'w-diy-seed-styles',
-          config: current.copyWithStyles(
-            datePickerStyle: RecordDatePickerStyle.wheel,
-            timePickerStyle: RecordTimePickerStyle.dial,
-          ),
+          config: current
+              .copyWithStyles(
+                datePickerStyle: RecordDatePickerStyle.wheel,
+                timePickerStyle: RecordTimePickerStyle.dial,
+              )
+              .copyWithDefaultAccount(
+                autoSelectDefaultAccount: true,
+                defaultAccountId: 1,
+              ),
         );
       });
       await settle(tester);
 
       await tester.tap(find.byKey(const Key('diy-switch-tags')));
       await settle(tester);
-      expect(find.text('已启用 7/11 项'), findsOneWidget);
+      expect(switchFor('tags').value, isFalse);
 
       await tester.scrollUntilVisible(
         find.byKey(const Key('diy-switch-frequent_remarks')),
@@ -594,19 +582,11 @@ void main() {
         scrollable: find.byType(Scrollable).last,
       );
       await settle(tester);
-      final remarkSwitchBefore = tester.widget<Switch>(
-        find.byKey(const Key('diy-switch-frequent_remarks')),
-      );
-      expect(remarkSwitchBefore.value, isFalse);
+      expect(switchFor('frequent_remarks').value, isFalse);
 
       await tester.tap(find.byKey(const Key('diy-switch-frequent_remarks')));
       await settle(tester);
-      await tester.drag(
-        find.byKey(const Key('diy-toolbar-list')),
-        const Offset(0, 3000),
-      );
-      await settle(tester);
-      expect(find.text('已启用 8/11 项'), findsOneWidget);
+      expect(switchFor('frequent_remarks').value, isTrue);
 
       await tester.scrollUntilVisible(
         find.byKey(const Key('diy-switch-keypad_mul_div')),
@@ -614,19 +594,11 @@ void main() {
         scrollable: find.byType(Scrollable).last,
       );
       await settle(tester);
-      final mulDivSwitchBefore = tester.widget<Switch>(
-        find.byKey(const Key('diy-switch-keypad_mul_div')),
-      );
-      expect(mulDivSwitchBefore.value, isFalse);
+      expect(switchFor('keypad_mul_div').value, isFalse);
 
       await tester.tap(find.byKey(const Key('diy-switch-keypad_mul_div')));
       await settle(tester);
-      await tester.drag(
-        find.byKey(const Key('diy-toolbar-list')),
-        const Offset(0, 3000),
-      );
-      await settle(tester);
-      expect(find.text('已启用 9/11 项'), findsOneWidget);
+      expect(switchFor('keypad_mul_div').value, isTrue);
 
       await tester.scrollUntilVisible(
         find.byKey(const Key('diy-switch-auto_select_first_cat')),
@@ -636,21 +608,13 @@ void main() {
       await settle(tester);
       expect(find.text('默认选中首个分类'), findsOneWidget);
       expect(find.byIcon(Icons.category_outlined), findsWidgets);
-      final autoSelectCatBefore = tester.widget<Switch>(
-        find.byKey(const Key('diy-switch-auto_select_first_cat')),
-      );
-      expect(autoSelectCatBefore.value, isFalse);
+      expect(switchFor('auto_select_first_cat').value, isFalse);
 
       await tester.tap(
         find.byKey(const Key('diy-switch-auto_select_first_cat')),
       );
       await settle(tester);
-      await tester.drag(
-        find.byKey(const Key('diy-toolbar-list')),
-        const Offset(0, 3000),
-      );
-      await settle(tester);
-      expect(find.text('已启用 10/11 项'), findsOneWidget);
+      expect(switchFor('auto_select_first_cat').value, isTrue);
 
       await tester.scrollUntilVisible(
         find.byKey(const Key('diy-up-auto_select_first_cat')),
@@ -676,6 +640,8 @@ void main() {
       );
       expect(persistedAfterEdits.datePickerStyle, RecordDatePickerStyle.wheel);
       expect(persistedAfterEdits.timePickerStyle, RecordTimePickerStyle.dial);
+      expect(persistedAfterEdits.autoSelectDefaultAccount, isTrue);
+      expect(persistedAfterEdits.defaultAccountId, 1);
 
       await tester.tap(find.byKey(const Key('diy-toolbar-reset-btn')));
       await settle(tester);
@@ -684,7 +650,7 @@ void main() {
         const Offset(0, 3000),
       );
       await settle(tester);
-      expect(find.text('已启用 8/11 项'), findsOneWidget);
+      expect(switchFor('tags').value, isTrue);
 
       final persistedAfterReset = await tester.runAsync(
         attService.getDiyToolbarConfig,
@@ -700,6 +666,9 @@ void main() {
         RecordDatePickerStyle.calendar,
       );
       expect(persistedAfterReset.timePickerStyle, RecordTimePickerStyle.wheel);
+      // Resetting DIY toolbar items preserves default account configured in AssetEditorPage.
+      expect(persistedAfterReset.autoSelectDefaultAccount, isTrue);
+      expect(persistedAfterReset.defaultAccountId, 1);
 
       await unmountCleanly(tester);
 

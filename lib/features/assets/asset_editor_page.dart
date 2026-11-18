@@ -11,9 +11,13 @@ import '../../data/db/database.dart';
 import '../../domain/ledger/asset_json.dart';
 import '../../domain/model/codes.dart';
 import '../../domain/rules/bank_icon_catalog.dart';
+import '../attachments/attachment_providers.dart'
+    show billAttachmentServiceProvider;
 import '../common/catalog_icons.dart';
 import '../common/common.dart';
 import '../common/desktop_modal_page.dart';
+import '../receipt/receipt_diy_providers.dart'
+    show DiyToolbarConfig, diyToolbarConfigProvider, prefKeyRecordDiyToolbar;
 
 final _maxAssetAmount = Money.parse('88888888888.00');
 
@@ -65,6 +69,9 @@ class _AssetEditorPageState extends ConsumerState<AssetEditorPage> {
   bool _userPickedVisual = false;
   String? currency;
   bool counted = true, busy = false, loading = true;
+  bool isDefaultAccount = false;
+  bool _userTouchedDefaultSwitch = false;
+  int _defaultSaveSeq = 0;
   int billDay = 1;
   int repaymentDay = 20;
   bool repaymentAfter = false;
@@ -106,6 +113,16 @@ class _AssetEditorPageState extends ConsumerState<AssetEditorPage> {
         counted = existing.type == AssetType.debt
             ? existing.isEffectiveAsset == 0
             : existing.isEffectiveAsset == 1;
+        final prefRow =
+            await (db.select(db.preferences)
+                  ..where((t) => t.key.equals(prefKeyRecordDiyToolbar)))
+                .getSingleOrNull();
+        final diyConfig = DiyToolbarConfig.decode(prefRow?.value);
+        isDefaultAccount =
+            existing.status == AssetStatus.active &&
+            existing.type != AssetType.debt &&
+            diyConfig.autoSelectDefaultAccount &&
+            diyConfig.defaultAccountId == existing.id;
         creditInfo = CreditInfo.parse(existing.creditInfo);
         extra = AssetExtra.parse(existing.extraInfo);
         if (isCredit) {
@@ -249,11 +266,51 @@ class _AssetEditorPageState extends ConsumerState<AssetEditorPage> {
           creditInfo: creditJson,
           extraInfo: extraJson,
         );
+        final latestAsset = await (service.db.select(
+          service.db.assets,
+        )..where((a) => a.id.equals(widget.assetId!))).getSingleOrNull();
+        final statusNow = latestAsset?.status ?? original?.status;
+        final effectiveSetDefault =
+            statusNow == AssetStatus.active &&
+            type != AssetType.debt &&
+            isDefaultAccount;
+        final attService = await ref.read(billAttachmentServiceProvider.future);
+        final latestDiy = await attService.getDiyToolbarConfig();
+        if (effectiveSetDefault) {
+          if (!latestDiy.autoSelectDefaultAccount ||
+              latestDiy.defaultAccountId != widget.assetId!) {
+            await attService.saveDiyToolbarConfig(
+              commandId: ids.forPayload([
+                'asset-set-default',
+                _defaultSaveSeq++,
+                widget.assetId,
+                true,
+              ]),
+              config: latestDiy.copyWithDefaultAccount(
+                autoSelectDefaultAccount: true,
+                defaultAccountId: widget.assetId!,
+              ),
+            );
+          }
+        } else if (latestDiy.defaultAccountId == widget.assetId!) {
+          await attService.saveDiyToolbarConfig(
+            commandId: ids.forPayload([
+              'asset-clear-default',
+              _defaultSaveSeq++,
+              widget.assetId,
+              false,
+            ]),
+            config: latestDiy.copyWithDefaultAccount(
+              autoSelectDefaultAccount: false,
+              defaultAccountId: noRef,
+            ),
+          );
+        }
       } else {
         // Credit accounts: the user enters the current debt as a positive number.
         var initial = _parseAmount(balance.text);
         if (isCredit) initial = -initial;
-        await service.createAsset(
+        final createdId = await service.createAsset(
           commandId: ids.forPayload([
             'create',
             type,
@@ -280,11 +337,29 @@ class _AssetEditorPageState extends ConsumerState<AssetEditorPage> {
           creditInfo: creditJson,
           extraInfo: extraJson,
         );
+        if (isDefaultAccount && type != AssetType.debt) {
+          final attService = await ref.read(
+            billAttachmentServiceProvider.future,
+          );
+          final latestDiy = await attService.getDiyToolbarConfig();
+          await attService.saveDiyToolbarConfig(
+            commandId: ids.forPayload([
+              'asset-create-default',
+              _defaultSaveSeq++,
+              createdId,
+              true,
+            ]),
+            config: latestDiy.copyWithDefaultAccount(
+              autoSelectDefaultAccount: true,
+              defaultAccountId: createdId,
+            ),
+          );
+        }
       }
       if (mounted) {
         if (GoRouter.maybeOf(context) != null) {
-          context.pop();
-        } else {
+          if (context.canPop()) context.pop();
+        } else if (Navigator.of(context).canPop()) {
           Navigator.of(context).pop();
         }
       }
@@ -308,6 +383,37 @@ class _AssetEditorPageState extends ConsumerState<AssetEditorPage> {
     final assets = (ref.watch(assetsProvider).value ?? const <Asset>[])
         .where((a) => a.type != AssetType.credit && a.id != widget.assetId)
         .toList();
+    final currentOriginal =
+        editing &&
+            (ref.exists(databaseProvider) ||
+                ref.exists(assetProvider(widget.assetId!)))
+        ? (ref.watch(assetProvider(widget.assetId!)).value ?? original)
+        : original;
+    if (editing &&
+        (ref.exists(databaseProvider) ||
+            ref.exists(diyToolbarConfigProvider))) {
+      ref.listen<AsyncValue<DiyToolbarConfig>>(diyToolbarConfigProvider, (
+        _,
+        next,
+      ) {
+        if (!next.hasValue || currentOriginal == null) return;
+        final liveDefault =
+            currentOriginal.status == AssetStatus.active &&
+            currentOriginal.type != AssetType.debt &&
+            next.value!.autoSelectDefaultAccount &&
+            next.value!.defaultAccountId == currentOriginal.id;
+        if (!_userTouchedDefaultSwitch && isDefaultAccount != liveDefault) {
+          setState(() => isDefaultAccount = liveDefault);
+        }
+      });
+    }
+    final isInactiveExisting =
+        editing &&
+        currentOriginal != null &&
+        currentOriginal.status != AssetStatus.active;
+    final inactiveStatusLabel = currentOriginal?.status == AssetStatus.settled
+        ? '已结清'
+        : '已隐藏';
     final visual = _currentVisual();
     final titleText = isCredit
         ? (editing ? '编辑信用账户' : '新建信用账户')
@@ -668,6 +774,24 @@ class _AssetEditorPageState extends ConsumerState<AssetEditorPage> {
                             ? null
                             : (v) => setState(() => counted = v),
                       ),
+                      if (type != AssetType.debt)
+                        SwitchListTile(
+                          key: const Key('asset-default-account-switch'),
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('设为默认账户'),
+                          subtitle: Text(
+                            isInactiveExisting
+                                ? '该账户当前$inactiveStatusLabel，恢复为正常状态后才可设为默认账户'
+                                : '开启后新建账单时默认自动填入此账户',
+                          ),
+                          value: isInactiveExisting ? false : isDefaultAccount,
+                          onChanged: busy || isInactiveExisting
+                              ? null
+                              : (v) => setState(() {
+                                  _userTouchedDefaultSwitch = true;
+                                  isDefaultAccount = v;
+                                }),
+                        ),
                       if (error != null)
                         Text(
                           error!,

@@ -273,6 +273,22 @@ GoRouter buildRouter({List<NavigatorObserver>? observers}) => GoRouter(
       },
     ),
     GoRoute(
+      path: '/assets/manage',
+      pageBuilder: (context, state) => buildDesktopModalOrMaterialPage<Object?>(
+        context: context,
+        key: state.pageKey,
+        name: state.name ?? state.path,
+        arguments: <String, String>{
+          ...state.pathParameters,
+          ...state.uri.queryParameters,
+        },
+        restorationId: state.pageKey.value,
+        maxWidth: 860,
+        maxHeight: 740,
+        child: const AssetsPage(standaloneManagement: true),
+      ),
+    ),
+    GoRoute(
       path: '/assets/new',
       pageBuilder: (context, state) => _adaptiveFormPage(
         context,

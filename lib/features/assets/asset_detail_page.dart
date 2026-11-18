@@ -13,6 +13,7 @@ import '../../domain/ledger/asset_json.dart';
 import '../../domain/model/codes.dart';
 import '../common/catalog_icons.dart';
 import '../common/common.dart';
+import '../receipt/receipt_diy_providers.dart' show diyToolbarConfigProvider;
 import 'asset_editor_page.dart';
 import 'asset_flow_section.dart';
 import 'credit_section.dart';
@@ -80,14 +81,24 @@ class AssetDetailPage extends ConsumerWidget {
               .firstOrNull
         : null;
     final currentAsset = asset.value ?? fallbackAsset;
+    final diyConfig =
+        ref.exists(databaseProvider) || ref.exists(diyToolbarConfigProvider)
+        ? ref.watch(diyToolbarConfigProvider).value
+        : null;
     final theme = Theme.of(context);
 
     Widget buildScrollableDetail(Asset a) {
+      final isDefaultAccount =
+          a.status == AssetStatus.active &&
+          a.type != AssetType.debt &&
+          diyConfig != null &&
+          diyConfig.autoSelectDefaultAccount &&
+          diyConfig.defaultAccountId == a.id;
       return CustomScrollView(
         slivers: [
           SliverToBoxAdapter(
             key: const ValueKey('asset-header'),
-            child: _Header(asset: a),
+            child: _Header(asset: a, isDefaultAccount: isDefaultAccount),
           ),
           if (a.type == AssetType.credit)
             SliverToBoxAdapter(
@@ -186,8 +197,9 @@ class AssetDetailPage extends ConsumerWidget {
 }
 
 class _Header extends StatelessWidget {
-  const _Header({required this.asset});
+  const _Header({required this.asset, this.isDefaultAccount = false});
   final Asset asset;
+  final bool isDefaultAccount;
 
   @override
   Widget build(BuildContext context) {
@@ -315,6 +327,14 @@ class _Header extends StatelessWidget {
                           materialTapTargetSize:
                               MaterialTapTargetSize.shrinkWrap,
                           label: Text(status),
+                        ),
+                      if (isDefaultAccount)
+                        const Chip(
+                          key: Key('asset-detail-default-chip'),
+                          visualDensity: VisualDensity.compact,
+                          materialTapTargetSize:
+                              MaterialTapTargetSize.shrinkWrap,
+                          label: Text('默认账户'),
                         ),
                     ],
                   ),

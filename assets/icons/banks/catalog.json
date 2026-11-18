@@ -331,6 +331,19 @@
       "reviewStatus": "reviewed"
     },
     {
+      "ref": "builtin:bank.zabank",
+      "relatedEntityCode": "bank.zabank",
+      "displayName": "众安银行",
+      "aliases": [
+        "众安",
+        "ZA Bank",
+        "ZABank"
+      ],
+      "assetPath": "assets/icons/banks/zabank.svg",
+      "sourceFile": "zabank.svg",
+      "reviewStatus": "reviewed"
+    },
+    {
       "ref": "builtin:bank-icon.bankcz",
       "relatedEntityCode": null,
       "displayName": "沧州银行",
