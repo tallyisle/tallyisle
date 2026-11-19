@@ -433,13 +433,26 @@ void main() {
       expect(cfgAfterBank!.autoSelectDefaultAccount, isTrue);
       expect(cfgAfterBank.defaultAccountId, bankId);
 
-      // 2. DiyToolbarSettingsPage shows ONLY '工具栏项目与顺序' and reset preserves default account.
+      // 2. DiyToolbarSettingsPage has no top section header or arrow buttons, and reset preserves both styles and default account (B-09).
+      await tester.runAsync(() async {
+        final svc = BillAttachmentService(db);
+        final cur = await svc.getDiyToolbarConfig();
+        await svc.saveDiyToolbarConfig(
+          commandId: 'seed-styles-before-reset',
+          config: cur.copyWithStyles(
+            datePickerStyle: RecordDatePickerStyle.wheel,
+            timePickerStyle: RecordTimePickerStyle.dial,
+          ),
+        );
+      });
       activePage.value = const DiyToolbarSettingsPage();
       await _settle(tester);
-      expect(find.text('工具栏项目与顺序'), findsOneWidget);
+      expect(find.text('工具栏项目与顺序'), findsNothing);
       expect(find.text('工具栏预览'), findsNothing);
       expect(find.text('默认账户'), findsNothing);
       expect(find.byKey(const Key('diy-default-account-switch')), findsNothing);
+      expect(find.byKey(const Key('diy-up-tags')), findsNothing);
+      expect(find.byKey(const Key('diy-down-tags')), findsNothing);
       await tester.tap(find.byKey(const Key('diy-toolbar-reset-btn')));
       await _settle(tester);
       final cfgAfterReset = await tester.runAsync(
@@ -447,6 +460,8 @@ void main() {
       );
       expect(cfgAfterReset!.autoSelectDefaultAccount, isTrue);
       expect(cfgAfterReset.defaultAccountId, bankId);
+      expect(cfgAfterReset.datePickerStyle, RecordDatePickerStyle.wheel);
+      expect(cfgAfterReset.timePickerStyle, RecordTimePickerStyle.dial);
 
       // 3. Hidden & settled accounts disable the switch in AssetEditorPage.
       for (final inactiveId in <int>[hiddenId, settledId]) {

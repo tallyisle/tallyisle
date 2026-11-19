@@ -699,8 +699,8 @@ void main() {
         findsOneWidget,
       );
 
-      // Click '招行信用卡' in left tree -> right pane seamlessly switches to credit card flows,
-      // credit limit & repayment actions, AND reconciliation balance '欠款 320.00'!
+      // Click '招行信用卡' in left tree -> right pane seamlessly switches to credit card flows
+      // & credit limit/repayment actions, resets _reconMode cleanly (B-15), and shows '欠款 320.00' once toggled on!
       await tester.tap(find.byKey(const Key('asset-招行信用卡')));
       await _settle(tester);
       expect(tester.takeException(), isNull);
@@ -718,12 +718,26 @@ void main() {
         ),
         findsOneWidget,
       );
+      final detailScrollable = find
+          .descendant(of: detailPane, matching: find.byType(Scrollable))
+          .first;
+      final creditReconSwitch = find.descendant(
+        of: detailPane,
+        matching: find.byKey(const Key('reconciliation-switch')),
+      );
+      await tester.scrollUntilVisible(
+        creditReconSwitch,
+        240,
+        scrollable: detailScrollable,
+      );
+      await _settle(tester);
+      expect(tester.widget<Switch>(creditReconSwitch).value, isFalse);
+      await tester.tap(creditReconSwitch);
+      await _settle(tester);
       await tester.scrollUntilVisible(
         find.descendant(of: detailPane, matching: find.text('-320.00')),
         240,
-        scrollable: find
-            .descendant(of: detailPane, matching: find.byType(Scrollable))
-            .first,
+        scrollable: detailScrollable,
       );
       await _settle(tester);
       expect(

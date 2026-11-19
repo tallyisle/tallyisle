@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../app/adaptive.dart';
 import '../../app/providers.dart';
@@ -174,7 +175,19 @@ class _InstallmentDetailPageState extends ConsumerState<InstallmentDetailPage> {
         deleteGeneratedRecords: decision.deleteRecords,
       );
       if (mounted) {
-        Navigator.of(context).pop();
+        setState(() => _busy = false);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          final route = ModalRoute.of(context);
+          if (route != null && route.settings is! Page) {
+            unawaited(Navigator.of(context).maybePop());
+          } else if (GoRouter.maybeOf(context)?.canPop() ?? false) {
+            context.pop();
+          } else {
+            unawaited(Navigator.of(context).maybePop());
+          }
+        });
+        return;
       }
     } catch (e) {
       _showSnack(safeMessage(e));

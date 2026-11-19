@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../app/adaptive.dart';
@@ -128,7 +129,16 @@ class _SavingsDetailPageState extends ConsumerState<SavingsDetailPage> {
         planId: detail.plan.id,
         deleteLinkedTransfers: deleteLinkedTransfers,
       );
-      if (mounted) Navigator.of(context).pop();
+      if (mounted) {
+        final route = ModalRoute.of(context);
+        if (route != null && route.settings is! Page) {
+          await Navigator.of(context).maybePop();
+        } else if (GoRouter.maybeOf(context)?.canPop() ?? false) {
+          context.pop();
+        } else {
+          await Navigator.of(context).maybePop();
+        }
+      }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(

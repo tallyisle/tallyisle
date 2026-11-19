@@ -95,6 +95,7 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
   final DesktopPopupRouteObserver _popupObserver = DesktopPopupRouteObserver();
   late final router = buildRouter(
     observers: <NavigatorObserver>[_popupObserver],
+    popupObserver: _popupObserver,
   );
   AppLifecycleListener? _lifecycleListener;
   BackupSyncScheduler? _backupSyncScheduler;

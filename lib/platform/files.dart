@@ -81,6 +81,9 @@ class FileAccess {
   bool get _isIOSNative =>
       !_isWeb && defaultTargetPlatform == TargetPlatform.iOS;
 
+  bool get _isWindowsNative =>
+      !_isWeb && defaultTargetPlatform == TargetPlatform.windows;
+
   bool get _usesNativeFileChannel => _isAndroidNative || _isIOSNative;
 
   Capability get saveLocationCapability {
@@ -333,19 +336,39 @@ class FileAccess {
       }
     }
 
+    if (_isWindowsNative) {
+      try {
+        final launched = await _effectiveChannel.invokeMethod<bool>(
+          'openExternalUrl',
+          {'url': normalizedUrl},
+        );
+        if (launched != true) {
+          throw const Failure(FailureCode.unsupportedCapability, '无法调起系统浏览器');
+        }
+        return;
+      } on Failure {
+        rethrow;
+      } on PlatformException catch (e) {
+        final message = e.message;
+        throw Failure(
+          FailureCode.unsupportedCapability,
+          message != null && message.isNotEmpty ? message : '无法调起系统浏览器',
+        );
+      } on MissingPluginException {
+        throw const Failure(
+          FailureCode.unsupportedCapability,
+          '当前环境未挂载 Windows 原生浏览器通道',
+        );
+      } catch (_) {
+        throw const Failure(FailureCode.unsupportedCapability, '无法调起系统浏览器');
+      }
+    }
+
     try {
       final result = switch (defaultTargetPlatform) {
         TargetPlatform.linux => await Process.run('xdg-open', [normalizedUrl]),
         TargetPlatform.macOS => await Process.run('/usr/bin/open', [
           normalizedUrl,
-        ]),
-        TargetPlatform.windows => await Process.run('powershell', [
-          '-NoProfile',
-          '-NonInteractive',
-          '-WindowStyle',
-          'Hidden',
-          '-Command',
-          "Start-Process -FilePath '${normalizedUrl.replaceAll("'", "''")}'",
         ]),
         _ => throw const Failure(
           FailureCode.unsupportedCapability,

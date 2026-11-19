@@ -1,3 +1,5 @@
+import 'dart:async' show unawaited;
+
 import 'package:drift/drift.dart' show OrderingTerm;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -15,8 +17,11 @@ import '../../domain/model/codes.dart';
 import '../attachments/attachment_providers.dart';
 import '../common/catalog_icons.dart';
 import '../common/common.dart';
+import '../common/desktop_modal_page.dart';
 import '../receipt/record_receipt_dialog.dart' show showRecordReceiptDialog;
 import '../stats/tag_stats_page.dart' show TagColorDot, parseTagColor;
+import 'desktop_record_editor_dialog.dart';
+import 'record_editor_page.dart';
 import 'record_labels.dart';
 
 final _maxAmount = Money.parse('88888888888.00');
@@ -127,6 +132,170 @@ class _RecordDetailPageState extends ConsumerState<RecordDetailPage> {
         .toList();
   }
 
+  bool _isImperativeRoute(BuildContext context) {
+    final route = ModalRoute.of(context);
+    return route != null && route.settings is! Page;
+  }
+
+  Future<void> _popDetailRoute() async {
+    if (widget.embeddedInPane) {
+      widget.onClosePane?.call();
+      return;
+    }
+    if (_isImperativeRoute(context)) {
+      await Navigator.of(context).maybePop();
+      return;
+    }
+    final router = GoRouter.maybeOf(context);
+    if (router != null && context.canPop()) {
+      context.pop();
+    } else {
+      await Navigator.of(context).maybePop();
+    }
+  }
+
+  Future<void> _openRelatedRecord(String relatedId) async {
+    if (widget.embeddedInPane && widget.onSelectRelatedRecord != null) {
+      widget.onSelectRelatedRecord!(relatedId);
+      return;
+    }
+    if (_isImperativeRoute(context)) {
+      await pushDesktopModalOrMaterialRoute<void>(
+        context,
+        maxWidth: 560,
+        maxHeight: 740,
+        barrierDismissible: true,
+        child: RecordDetailPage(recordId: relatedId),
+      );
+      return;
+    }
+    if (GoRouter.maybeOf(context) != null) {
+      await context.push('/record/$relatedId');
+    } else {
+      await Navigator.of(context).push<void>(
+        MaterialPageRoute<void>(
+          builder: (_) => RecordDetailPage(recordId: relatedId),
+        ),
+      );
+    }
+  }
+
+  void _openFeeParentRecord(String feeParent) {
+    if (widget.embeddedInPane && widget.onSelectRelatedRecord != null) {
+      widget.onSelectRelatedRecord!(feeParent);
+      return;
+    }
+    final route = ModalRoute.of(context);
+    if (route != null && route.settings is! Page) {
+      final nav = Navigator.of(context);
+      final navContext = nav.context;
+      if (DesktopAdaptive.isDesktop(context) || route is PopupRoute) {
+        final dismissible = route is PopupRoute
+            ? route.barrierDismissible
+            : true;
+        unawaited(
+          nav.pushReplacement<void, Object?>(
+            DialogRoute<void>(
+              context: navContext,
+              barrierDismissible: dismissible,
+              barrierColor: Colors.black54,
+              barrierLabel: MaterialLocalizations.of(
+                navContext,
+              ).modalBarrierDismissLabel,
+              builder: (dialogContext) => Focus(
+                autofocus: true,
+                onKeyEvent: (_, event) {
+                  if (event is KeyDownEvent &&
+                      event.logicalKey == LogicalKeyboardKey.escape &&
+                      (ModalRoute.of(dialogContext)?.isCurrent ?? true)) {
+                    Navigator.of(dialogContext).maybePop();
+                    return KeyEventResult.handled;
+                  }
+                  return KeyEventResult.ignored;
+                },
+                child: Dialog(
+                  insetPadding: const EdgeInsets.symmetric(
+                    horizontal: 24,
+                    vertical: 24,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: ConstrainedBox(
+                    key: const Key('desktop-modal-dialog-surface'),
+                    constraints: const BoxConstraints(
+                      maxWidth: 560,
+                      maxHeight: 740,
+                    ),
+                    child: RecordDetailPage(recordId: feeParent),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      } else {
+        unawaited(
+          nav.pushReplacement<void, Object?>(
+            MaterialPageRoute<void>(
+              builder: (_) => RecordDetailPage(recordId: feeParent),
+            ),
+          ),
+        );
+      }
+      return;
+    }
+
+    final router = GoRouter.maybeOf(context);
+    if (router != null) {
+      final hasMultipleMatches =
+          router.routerDelegate.currentConfiguration.matches.length > 1;
+      if (hasMultipleMatches && context.canPop()) {
+        context.pushReplacement('/record/$feeParent');
+      } else {
+        context.push('/record/$feeParent');
+      }
+      return;
+    }
+
+    unawaited(
+      Navigator.of(context).pushReplacement<void, Object?>(
+        MaterialPageRoute<void>(
+          builder: (_) => RecordDetailPage(recordId: feeParent),
+        ),
+      ),
+    );
+  }
+
+  void _openEditRecord(String recordId) {
+    if (_isImperativeRoute(context)) {
+      if (DesktopAdaptive.isDesktop(context)) {
+        unawaited(showDesktopRecordEditorDialog(context, recordId: recordId));
+      } else {
+        unawaited(
+          Navigator.of(context).push<void>(
+            MaterialPageRoute<void>(
+              builder: (_) => RecordEditorPage(recordId: recordId),
+            ),
+          ),
+        );
+      }
+      return;
+    }
+    if (GoRouter.maybeOf(context) != null) {
+      unawaited(context.push('/record/$recordId/edit'));
+    } else {
+      unawaited(
+        Navigator.of(context).push<void>(
+          MaterialPageRoute<void>(
+            builder: (_) => RecordEditorPage(recordId: recordId),
+          ),
+        ),
+      );
+    }
+  }
+
   Future<void> _delete(LedgerRecord r) async {
     final ok = await confirm(
       context,
@@ -148,13 +317,7 @@ class _RecordDetailPageState extends ConsumerState<RecordDetailPage> {
         recordId: r.recordId,
       );
       if (mounted) {
-        if (widget.embeddedInPane) {
-          widget.onClosePane?.call();
-        } else if (GoRouter.maybeOf(context) != null && context.canPop()) {
-          context.pop();
-        } else {
-          await Navigator.of(context).maybePop();
-        }
+        await _popDetailRoute();
       }
     } catch (e) {
       if (mounted) setState(() => error = safeMessage(e));
@@ -245,11 +408,7 @@ class _RecordDetailPageState extends ConsumerState<RecordDetailPage> {
         finish: finish,
       );
       if (mounted) {
-        if (widget.embeddedInPane && widget.onSelectRelatedRecord != null) {
-          widget.onSelectRelatedRecord!(settledId);
-        } else {
-          await context.push('/record/$settledId');
-        }
+        await _openRelatedRecord(settledId);
       }
     } catch (e) {
       if (mounted) setState(() => error = safeMessage(e));
@@ -268,7 +427,15 @@ class _RecordDetailPageState extends ConsumerState<RecordDetailPage> {
           ? null
           : BorderSide(color: tint.withValues(alpha: 0.45)),
       label: Text(t.name),
-      onPressed: () => context.push('/stats/tag/${t.tagId}'),
+      onPressed: () {
+        final router = GoRouter.maybeOf(context);
+        if (router == null) return;
+        final route = ModalRoute.of(context);
+        if (route is PopupRoute && route.settings is! Page) {
+          Navigator.of(context).pop();
+        }
+        router.push('/stats/tag/${t.tagId}');
+      },
     );
   }
 
@@ -572,14 +739,7 @@ class _RecordDetailPageState extends ConsumerState<RecordDetailPage> {
             ),
           if (isChild)
             OutlinedButton(
-              onPressed: () {
-                if (widget.embeddedInPane &&
-                    widget.onSelectRelatedRecord != null) {
-                  widget.onSelectRelatedRecord!(childOf);
-                } else {
-                  context.push('/record/$childOf');
-                }
-              },
+              onPressed: () => unawaited(_openRelatedRecord(childOf)),
               child: const Text('查看原账单'),
             ),
           if (error != null)
@@ -587,14 +747,8 @@ class _RecordDetailPageState extends ConsumerState<RecordDetailPage> {
           const SizedBox(height: 16),
           if (generated)
             OutlinedButton(
-              onPressed: () {
-                if (widget.embeddedInPane &&
-                    widget.onSelectRelatedRecord != null) {
-                  widget.onSelectRelatedRecord!(feeParent);
-                } else {
-                  context.pushReplacement('/record/$feeParent');
-                }
-              },
+              key: const Key('view-fee-parent'),
+              onPressed: () => _openFeeParentRecord(feeParent),
               child: const Text('这是转账手续费，查看所属转账'),
             )
           else ...[
@@ -625,9 +779,7 @@ class _RecordDetailPageState extends ConsumerState<RecordDetailPage> {
             if (editable) ...[
               FilledButton(
                 key: const Key('edit'),
-                onPressed: busy
-                    ? null
-                    : () => context.push('/record/${r.recordId}/edit'),
+                onPressed: busy ? null : () => _openEditRecord(r.recordId),
                 child: const Text('编辑'),
               ),
               const SizedBox(height: 10),
@@ -689,13 +841,18 @@ class _RecordDetailPageState extends ConsumerState<RecordDetailPage> {
 
     final receiptAction = buildReceiptAction();
     final isDesktop = DesktopAdaptive.isDesktop(context);
-    final isDesktopModal =
-        isDesktop &&
-        ModalRoute.of(context) is PopupRoute &&
-        Navigator.of(context).canPop();
+    final route = ModalRoute.of(context);
+    final isImperative = route != null && route.settings is! Page;
+    final canPopModal = isImperative
+        ? Navigator.of(context).canPop()
+        : ((GoRouter.maybeOf(context)?.canPop() ?? false) ||
+              Navigator.of(context).canPop());
+    final isDesktopModal = isDesktop && route is PopupRoute && canPopModal;
     return Scaffold(
       appBar: AppBar(
-        leading: isDesktopModal ? const CloseButton() : null,
+        leading: isDesktopModal
+            ? CloseButton(onPressed: () => unawaited(_popDetailRoute()))
+            : null,
         title: const Text('账单详情'),
         actions: [?receiptAction],
       ),

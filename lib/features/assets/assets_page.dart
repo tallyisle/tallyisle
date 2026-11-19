@@ -1,6 +1,5 @@
-import 'dart:typed_data';
-
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:uuid/uuid.dart';
@@ -17,7 +16,9 @@ import '../debt/debt_editor_page.dart';
 import '../debt/debt_page.dart';
 import '../deposit/fixed_deposit_page.dart';
 import '../installment/installment_page.dart';
+import '../records/record_editor_page.dart';
 import '../stats/asset_trend_page.dart';
+import 'archived_assets_sheet.dart';
 import 'asset_detail_page.dart' show AssetDetailPage, creditBalanceLabel;
 import 'asset_editor_page.dart';
 
@@ -46,15 +47,70 @@ class AssetsPage extends ConsumerStatefulWidget {
 
 class _AssetsPageState extends ConsumerState<AssetsPage> {
   bool hidden = false;
-  bool showHiddenAccounts = false;
   int? _selectedAssetId;
+  final Map<String, List<int>> _optimisticOrderByGroup = <String, List<int>>{};
+
+  List<Asset> _applyOptimisticOrder(String groupKey, List<Asset> raw) {
+    final opt = _optimisticOrderByGroup[groupKey];
+    if (opt == null || opt.length != raw.length) return raw;
+    final byId = <int, Asset>{for (final a in raw) a.id: a};
+    for (final id in opt) {
+      if (!byId.containsKey(id)) return raw;
+    }
+    var matchesDb = true;
+    for (var i = 0; i < raw.length; i++) {
+      if (raw[i].id != opt[i]) {
+        matchesDb = false;
+        break;
+      }
+    }
+    if (matchesDb) return raw;
+    return <Asset>[for (final id in opt) byId[id]!];
+  }
+
+  Future<void> _reorderGroup(
+    String groupKey,
+    List<Asset> currentGroup,
+    int oldIndex,
+    int newIndex,
+  ) async {
+    if (oldIndex < 0 ||
+        oldIndex >= currentGroup.length ||
+        newIndex < 0 ||
+        newIndex >= currentGroup.length ||
+        oldIndex == newIndex) {
+      return;
+    }
+    final updated = List<Asset>.of(currentGroup);
+    final moved = updated.removeAt(oldIndex);
+    updated.insert(newIndex, moved);
+    final orderedIds = <int>[for (final a in updated) a.id];
+    setState(() => _optimisticOrderByGroup[groupKey] = orderedIds);
+    try {
+      final service = await ref.read(ledgerServiceProvider.future);
+      await service.reorderAssets(
+        commandId: _uuid.v4(),
+        orderedAssetIds: orderedIds,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _optimisticOrderByGroup.remove(groupKey));
+      ScaffoldMessenger.maybeOf(
+        context,
+      )?.showSnackBar(SnackBar(content: Text(safeMessage(e))));
+    }
+  }
 
   bool get _hasPageRouteRouter =>
       GoRouter.maybeOf(context) != null &&
       ModalRoute.of(context)?.settings is Page;
 
+  bool get _isDesktopPopupModal =>
+      DesktopAdaptive.isDesktop(context) &&
+      ModalRoute.of(context) is PopupRoute;
+
   Future<void> _openCreateAsset({int? initialType}) {
-    if (_hasPageRouteRouter) {
+    if (!_isDesktopPopupModal && _hasPageRouteRouter) {
       final path = initialType == null
           ? '/assets/new'
           : '/assets/new?type=$initialType';
@@ -67,7 +123,7 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
   }
 
   Future<void> _openEditAsset(int assetId) {
-    if (_hasPageRouteRouter) {
+    if (!_isDesktopPopupModal && _hasPageRouteRouter) {
       return context.push<void>('/assets/$assetId/edit');
     }
     return pushDesktopModalOrMaterialRoute<void>(
@@ -77,7 +133,7 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
   }
 
   Future<void> _openEditDebt(int debtId) {
-    if (_hasPageRouteRouter) {
+    if (!_isDesktopPopupModal && _hasPageRouteRouter) {
       return context.push<void>('/debts/$debtId/edit');
     }
     return pushDesktopModalOrMaterialRoute<void>(
@@ -92,10 +148,7 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
     double maxWidth = 860,
     double maxHeight = 740,
   }) {
-    final isPopupModal =
-        DesktopAdaptive.isDesktop(context) &&
-        ModalRoute.of(context) is PopupRoute;
-    if (!isPopupModal && _hasPageRouteRouter) {
+    if (!_isDesktopPopupModal && _hasPageRouteRouter) {
       return context.push<void>(path);
     }
     return pushDesktopModalOrMaterialRoute<void>(
@@ -201,35 +254,39 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
         ],
       ),
       body: asyncBody(assets, (list) {
-        final archivedCount = list
-            .where(
-              (a) => a.type == AssetType.debt
-                  ? a.status != AssetStatus.active
-                  : a.status == AssetStatus.hidden,
-            )
-            .length;
-        final normal = list
-            .where(
-              (a) =>
-                  a.type != AssetType.credit &&
-                  a.type != AssetType.debt &&
-                  (showHiddenAccounts || a.status != AssetStatus.hidden),
-            )
+        final archivedAssets = list
+            .where((a) => a.status != AssetStatus.active)
             .toList();
-        final credit = list
-            .where(
-              (a) =>
-                  a.type == AssetType.credit &&
-                  (showHiddenAccounts || a.status != AssetStatus.hidden),
-            )
-            .toList();
-        final debts = list
-            .where(
-              (a) =>
-                  a.type == AssetType.debt &&
-                  (showHiddenAccounts || a.status == AssetStatus.active),
-            )
-            .toList();
+        final normal = _applyOptimisticOrder(
+          'normal',
+          list
+              .where(
+                (a) =>
+                    a.type != AssetType.credit &&
+                    a.type != AssetType.debt &&
+                    a.status == AssetStatus.active,
+              )
+              .toList(),
+        );
+        final credit = _applyOptimisticOrder(
+          'credit',
+          list
+              .where(
+                (a) =>
+                    a.type == AssetType.credit &&
+                    a.status == AssetStatus.active,
+              )
+              .toList(),
+        );
+        final debts = _applyOptimisticOrder(
+          'debts',
+          list
+              .where(
+                (a) =>
+                    a.type == AssetType.debt && a.status == AssetStatus.active,
+              )
+              .toList(),
+        );
         final allVisibleEmpty =
             normal.isEmpty && credit.isEmpty && debts.isEmpty;
 
@@ -261,7 +318,11 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
           );
         }
 
-        Widget buildAccountTile(Asset a, {bool isDebtSection = false}) {
+        Widget buildAccountTile(
+          Asset a, {
+          required int index,
+          bool isDebtSection = false,
+        }) {
           final isDebt = isDebtSection || a.type == AssetType.debt;
           void openAssetOrDebtDetail() {
             if (isDebt) {
@@ -282,15 +343,21 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
           }
 
           if (!isDesktop) {
-            return _AssetTile(
-              asset: a,
-              hidden: hidden,
-              isDebtSection: isDebtSection,
-              onCustomizeIcon: () => _customizeAssetIcon(a),
-              onTap: openAssetOrDebtDetail,
+            return ReorderableDelayedDragStartListener(
+              key: ValueKey('asset-item-${a.id}'),
+              index: index,
+              child: _AssetTile(
+                asset: a,
+                hidden: hidden,
+                isDebtSection: isDebtSection,
+                onCustomizeIcon: () => _customizeAssetIcon(a),
+                onTap: openAssetOrDebtDetail,
+              ),
             );
           }
           return _DesktopAssetTile(
+            key: ValueKey('asset-item-${a.id}'),
+            index: index,
             asset: a,
             hidden: hidden,
             isDebtSection: isDebt,
@@ -315,181 +382,244 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
           );
         }
 
-        final accountTreeList = ListView(
-          children: [
-            Card(
-              margin: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                child: Column(
-                  children: [
-                    Row(
-                      children: [
-                        cell('净资产', overview?.netAsset, const Key('net-asset')),
-                        cell(
-                          '总资产',
-                          overview?.totalAsset,
-                          const Key('total-asset'),
-                        ),
-                        cell(
-                          '总负债',
-                          overview?.totalLiabilities,
-                          const Key('total-liabilities'),
-                        ),
-                      ],
-                    ),
-                    if (overview != null && overview.missingRates.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 8),
-                        child: Text(
-                          '缺少汇率：${overview.missingRates.join('、')}（暂按 1:1 计算）',
-                          style: TextStyle(color: theme.colorScheme.error),
-                        ),
-                      ),
-                  ],
-                ),
+        Widget proxyDecorator(
+          Widget child,
+          int index,
+          Animation<double> animation,
+        ) {
+          return Material(
+            elevation: 6,
+            color: theme.colorScheme.surface,
+            borderRadius: BorderRadius.circular(12),
+            clipBehavior: Clip.antiAlias,
+            child: child,
+          );
+        }
+
+        List<Widget> buildReorderableSection(
+          String groupKey,
+          String title,
+          List<Asset> items, {
+          bool isDebtSection = false,
+        }) {
+          return <Widget>[
+            SliverToBoxAdapter(child: header(title)),
+            SliverReorderableList(
+              key: Key('assets-reorder-$groupKey'),
+              itemCount: items.length,
+              onReorderStart: (_) {
+                if (!isDesktop) {
+                  HapticFeedback.selectionClick();
+                }
+              },
+              proxyDecorator: proxyDecorator,
+              onReorderItem: (oldIndex, newIndex) =>
+                  _reorderGroup(groupKey, items, oldIndex, newIndex),
+              itemBuilder: (context, index) => buildAccountTile(
+                items[index],
+                index: index,
+                isDebtSection: isDebtSection,
               ),
             ),
-            Container(
-              key: const Key('assets-quick-bar'),
-              margin: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-              child: Material(
-                color: theme.colorScheme.surfaceContainerLow,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                  side: BorderSide(
-                    color: theme.colorScheme.outlineVariant.withValues(
-                      alpha: 0.45,
+          ];
+        }
+
+        final accountTreeList = CustomScrollView(
+          slivers: [
+            SliverToBoxAdapter(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Card(
+                    margin: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      child: Column(
+                        children: [
+                          Row(
+                            children: [
+                              cell(
+                                '净资产',
+                                overview?.netAsset,
+                                const Key('net-asset'),
+                              ),
+                              cell(
+                                '总资产',
+                                overview?.totalAsset,
+                                const Key('total-asset'),
+                              ),
+                              cell(
+                                '总负债',
+                                overview?.totalLiabilities,
+                                const Key('total-liabilities'),
+                              ),
+                            ],
+                          ),
+                          if (overview != null &&
+                              overview.missingRates.isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 8),
+                              child: Text(
+                                '缺少汇率：${overview.missingRates.join('、')}（暂按 1:1 计算）',
+                                style: TextStyle(
+                                  color: theme.colorScheme.error,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
                     ),
                   ),
-                ),
+                  Container(
+                    key: const Key('assets-quick-bar'),
+                    margin: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+                    child: Material(
+                      color: theme.colorScheme.surfaceContainerLow,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                        side: BorderSide(
+                          color: theme.colorScheme.outlineVariant.withValues(
+                            alpha: 0.45,
+                          ),
+                        ),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          vertical: 10,
+                          horizontal: 6,
+                        ),
+                        child: Row(
+                          children: [
+                            _AssetQuickEntryItem(
+                              itemKey: const Key('assets-quick-debts'),
+                              icon: Icons.swap_horiz_rounded,
+                              label: '借贷管理',
+                              onTap: () => _pushFullPageOrModal(
+                                '/debts',
+                                () => const DebtPage(),
+                              ),
+                            ),
+                            _AssetQuickEntryItem(
+                              itemKey: const Key('assets-quick-installments'),
+                              icon: Icons.calendar_view_month_rounded,
+                              label: '分期管理',
+                              onTap: () => _pushFullPageOrModal(
+                                '/installments',
+                                () => const InstallmentPage(),
+                              ),
+                            ),
+                            _AssetQuickEntryItem(
+                              itemKey: const Key('assets-quick-deposits'),
+                              icon: Icons.lock_clock_rounded,
+                              label: '定期存款',
+                              onTap: () => _pushFullPageOrModal(
+                                '/deposits',
+                                () => const FixedDepositPage(),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  if (allVisibleEmpty)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 32,
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(isDesktop ? '还没有账户，点右上角或下方添加' : '还没有账户，点右下角添加'),
+                          const SizedBox(height: 16),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: OutlinedButton.icon(
+                                  key: const Key('empty-add-normal-asset'),
+                                  onPressed: _openCreateAsset,
+                                  style: OutlinedButton.styleFrom(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                    ),
+                                  ),
+                                  icon: const Icon(
+                                    Icons.account_balance_wallet_outlined,
+                                    size: 18,
+                                  ),
+                                  label: const FittedBox(
+                                    fit: BoxFit.scaleDown,
+                                    child: Text(
+                                      '新建资金账户',
+                                      maxLines: 1,
+                                      softWrap: false,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: OutlinedButton.icon(
+                                  key: const Key('empty-add-credit-asset'),
+                                  onPressed: () => _openCreateAsset(
+                                    initialType: AssetType.credit,
+                                  ),
+                                  style: OutlinedButton.styleFrom(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                    ),
+                                  ),
+                                  icon: const Icon(
+                                    Icons.credit_card_outlined,
+                                    size: 18,
+                                  ),
+                                  label: const FittedBox(
+                                    fit: BoxFit.scaleDown,
+                                    child: Text(
+                                      '新建信用账户',
+                                      maxLines: 1,
+                                      softWrap: false,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            if (normal.isNotEmpty)
+              ...buildReorderableSection('normal', '资金账户', normal),
+            if (credit.isNotEmpty)
+              ...buildReorderableSection('credit', '信用账户', credit),
+            if (debts.isNotEmpty)
+              ...buildReorderableSection(
+                'debts',
+                '借入 / 借出',
+                debts,
+                isDebtSection: true,
+              ),
+            if (archivedAssets.isNotEmpty)
+              SliverToBoxAdapter(
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    vertical: 10,
-                    horizontal: 6,
-                  ),
-                  child: Row(
-                    children: [
-                      _AssetQuickEntryItem(
-                        itemKey: const Key('assets-quick-debts'),
-                        icon: Icons.swap_horiz_rounded,
-                        label: '借贷管理',
-                        onTap: () => _pushFullPageOrModal(
-                          '/debts',
-                          () => const DebtPage(),
-                        ),
+                  padding: const EdgeInsets.only(top: 12),
+                  child: Center(
+                    child: TextButton(
+                      key: const Key('toggle-hidden-assets'),
+                      onPressed: () => showArchivedAssetsSheet(
+                        context,
+                        hiddenAmounts: hidden,
                       ),
-                      _AssetQuickEntryItem(
-                        itemKey: const Key('assets-quick-installments'),
-                        icon: Icons.calendar_view_month_rounded,
-                        label: '分期管理',
-                        onTap: () => _pushFullPageOrModal(
-                          '/installments',
-                          () => const InstallmentPage(),
-                        ),
-                      ),
-                      _AssetQuickEntryItem(
-                        itemKey: const Key('assets-quick-deposits'),
-                        icon: Icons.lock_clock_rounded,
-                        label: '定期存款',
-                        onTap: () => _pushFullPageOrModal(
-                          '/deposits',
-                          () => const FixedDepositPage(),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-            if (allVisibleEmpty)
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 32,
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(isDesktop ? '还没有账户，点右上角或下方添加' : '还没有账户，点右下角添加'),
-                    const SizedBox(height: 16),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            key: const Key('empty-add-normal-asset'),
-                            onPressed: _openCreateAsset,
-                            style: OutlinedButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                              ),
-                            ),
-                            icon: const Icon(
-                              Icons.account_balance_wallet_outlined,
-                              size: 18,
-                            ),
-                            label: const FittedBox(
-                              fit: BoxFit.scaleDown,
-                              child: Text(
-                                '新建资金账户',
-                                maxLines: 1,
-                                softWrap: false,
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            key: const Key('empty-add-credit-asset'),
-                            onPressed: () =>
-                                _openCreateAsset(initialType: AssetType.credit),
-                            style: OutlinedButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                              ),
-                            ),
-                            icon: const Icon(
-                              Icons.credit_card_outlined,
-                              size: 18,
-                            ),
-                            label: const FittedBox(
-                              fit: BoxFit.scaleDown,
-                              child: Text(
-                                '新建信用账户',
-                                maxLines: 1,
-                                softWrap: false,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
+                      child: Text('已归档账户（${archivedAssets.length}） ›'),
                     ),
-                  ],
+                  ),
                 ),
               ),
-            if (normal.isNotEmpty) ...[
-              header('资金账户'),
-              for (final a in normal) buildAccountTile(a),
-            ],
-            if (credit.isNotEmpty) ...[
-              header('信用账户'),
-              for (final a in credit) buildAccountTile(a),
-            ],
-            if (debts.isNotEmpty) ...[
-              header('借入 / 借出'),
-              for (final a in debts) buildAccountTile(a, isDebtSection: true),
-            ],
-            if (archivedCount > 0)
-              TextButton(
-                key: const Key('toggle-hidden-assets'),
-                onPressed: () =>
-                    setState(() => showHiddenAccounts = !showHiddenAccounts),
-                child: Text(
-                  showHiddenAccounts ? '收起已隐藏账户' : '显示已隐藏账户（$archivedCount）',
-                ),
-              ),
-            SizedBox(height: isDesktop ? 32 : 96),
+            SliverToBoxAdapter(child: SizedBox(height: isDesktop ? 32 : 96)),
           ],
         );
 
@@ -529,6 +659,7 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
                   child: effectiveSelectedAssetId == null
                       ? const _DesktopEmptyAssetDetailGuide()
                       : AssetDetailPage(
+                          key: ValueKey('pane-asset-$effectiveSelectedAssetId'),
                           assetId: effectiveSelectedAssetId,
                           embeddedInPane: true,
                           onDeleted: () =>
@@ -683,6 +814,8 @@ enum _AssetContextAction {
 
 class _DesktopAssetTile extends StatefulWidget {
   const _DesktopAssetTile({
+    super.key,
+    required this.index,
     required this.asset,
     required this.hidden,
     required this.onCustomizeIcon,
@@ -695,6 +828,7 @@ class _DesktopAssetTile extends StatefulWidget {
     this.standaloneManagement = false,
   });
 
+  final int index;
   final Asset asset;
   final bool hidden;
   final VoidCallback onCustomizeIcon;
@@ -718,8 +852,11 @@ class _DesktopAssetTileState extends State<_DesktopAssetTile> {
     final isDebt = widget.isDebtSection || asset.type == AssetType.debt;
     final overlay =
         Overlay.of(context).context.findRenderObject() as RenderBox?;
+    final localPosition = overlay != null
+        ? overlay.globalToLocal(globalPosition)
+        : globalPosition;
     final position = RelativeRect.fromRect(
-      globalPosition & const Size(1, 1),
+      localPosition & const Size(1, 1),
       Offset.zero & (overlay?.size ?? const Size(1280, 800)),
     );
 
@@ -766,7 +903,23 @@ class _DesktopAssetTileState extends State<_DesktopAssetTile> {
       case _AssetContextAction.viewFlows:
         widget.onOpenOrSelect();
       case _AssetContextAction.newRecord:
-        await context.push('/record/new?assetId=${asset.id}&asset=${asset.id}');
+        final route = ModalRoute.of(context);
+        final useImperativeModal =
+            (route != null &&
+                (route is PopupRoute || route.settings is! Page)) ||
+            GoRouter.maybeOf(context) == null;
+        if (!useImperativeModal) {
+          await context.push(
+            '/record/new?assetId=${asset.id}&asset=${asset.id}',
+          );
+        } else {
+          await pushDesktopModalOrMaterialRoute<void>(
+            context,
+            maxWidth: 900,
+            maxHeight: 740,
+            child: RecordEditorPage(initialAsset: asset.id),
+          );
+        }
       case _AssetContextAction.editAsset:
         widget.onEdit();
       case _AssetContextAction.assetTrend:
@@ -832,7 +985,7 @@ class _DesktopAssetTileState extends State<_DesktopAssetTile> {
     }
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
       child: MouseRegion(
         onEnter: (_) => setState(() => _hovered = true),
         onExit: (_) => setState(() => _hovered = false),
@@ -848,18 +1001,34 @@ class _DesktopAssetTileState extends State<_DesktopAssetTile> {
               key: Key('asset-${asset.name}'),
               onTap: widget.onOpenOrSelect,
               child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 9,
-                ),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 9),
                 child: Row(
                   children: [
+                    ReorderableDragStartListener(
+                      index: widget.index,
+                      child: MouseRegion(
+                        cursor: SystemMouseCursors.grab,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 2,
+                            vertical: 6,
+                          ),
+                          child: Icon(
+                            Icons.drag_handle_rounded,
+                            key: Key('asset-drag-handle-${asset.id}'),
+                            size: 18,
+                            color: scheme.outline,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
                     _CustomizableAssetAvatar(
                       asset: asset,
                       isArchived: isArchived,
                       onCustomize: widget.onCustomizeIcon,
                     ),
-                    const SizedBox(width: 12),
+                    const SizedBox(width: 10),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -891,7 +1060,7 @@ class _DesktopAssetTileState extends State<_DesktopAssetTile> {
                     ),
                     const SizedBox(width: 8),
                     ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 140),
+                      constraints: const BoxConstraints(maxWidth: 120),
                       child: FittedBox(
                         fit: BoxFit.scaleDown,
                         alignment: Alignment.centerRight,

@@ -474,8 +474,8 @@ class _DesktopShortcutsCard extends StatelessWidget {
       (label: '新建记一笔', keys: '$primaryMod + N'),
       (label: '搜索账单', keys: '$primaryMod + F / K'),
       (label: '切换四大主栏目', keys: '$primaryMod + 1 .. 4'),
-      (label: '切换上一账期 / 下一账期', keys: '$altMod + ← / → 或 [ / ]'),
-      (label: '回到当前账期', keys: 'T'),
+      (label: '切换账期（明细 / 日历 / 预算 / 统计）', keys: '$altMod + ← / → 或 [ / ]'),
+      (label: '回到当期（明细 / 日历 / 预算 / 统计）', keys: 'T'),
       (label: '关闭弹窗 / 清空搜索返回', keys: 'Esc'),
       (label: '应用安全锁解锁', keys: '数字键 0–9 / Backspace'),
     ];
@@ -498,6 +498,7 @@ class _DesktopShortcutsCard extends StatelessWidget {
                         style: theme.textTheme.bodyMedium,
                       ),
                     ),
+                    const SizedBox(width: 12),
                     Container(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 8,

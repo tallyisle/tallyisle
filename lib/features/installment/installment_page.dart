@@ -163,6 +163,7 @@ class _InstallmentPageState extends ConsumerState<InstallmentPage> {
             ? null
             : FloatingActionButton.extended(
                 key: const Key('add_installment_fab'),
+                heroTag: 'fab-installment',
                 onPressed: () => pushDesktopModalOrMaterialRoute<Object?>(
                   context,
                   child: const InstallmentEditorPage(),

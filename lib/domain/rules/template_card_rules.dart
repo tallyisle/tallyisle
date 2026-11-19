@@ -754,15 +754,51 @@ BankCardVisualMeta tryParseBankCardVisualMeta(String? raw) {
   return BankCardVisualMeta(colorHex: validColor, iconKey: validIcon);
 }
 
+String? _sanitizeBankCardIconKeyForPreview(String? raw) {
+  if (raw == null) return null;
+  final trimmed = raw.trim();
+  if (trimmed.isEmpty) return null;
+  if (trimmed.startsWith('text:')) {
+    final cleanText = trimmed
+        .substring(5)
+        .replaceAll(RegExp(r'[|\s\x00-\x1F]'), '');
+    if (cleanText.isEmpty) return null;
+    final candidate = 'text:$cleanText';
+    return candidate.length <= 96 ? candidate : null;
+  }
+  final withoutPipesOrWs = trimmed.replaceAll(RegExp(r'[|\s\x00-\x1F]'), '');
+  if (withoutPipesOrWs.isEmpty || withoutPipesOrWs.length > 96) {
+    return null;
+  }
+  return withoutPipesOrWs;
+}
+
 /// Encodes an optional hex color and optional manual icon override back into
 /// `bank_card.card_color` (`null`, `#RRGGBB`, or `[#RRGGBB]|icon:<iconKey>`).
+///
+/// Safely strips any `|` or control/whitespace characters from [iconKey] so
+/// live UI previews never crash even if raw user badge text contained `|`.
 String? encodeBankCardVisualMeta({String? colorHex, String? iconKey}) {
   final normColor = (colorHex == null || colorHex.trim().isEmpty)
       ? null
       : _validatePureHexColor(colorHex.trim());
-  final normIcon = (iconKey == null || iconKey.trim().isEmpty)
-      ? null
-      : _validateBankCardIconKey(iconKey);
+  final normIcon = _sanitizeBankCardIconKeyForPreview(iconKey);
+  if (normIcon == null) return normColor;
+  return '${normColor ?? ''}$bankCardIconMetaDelimiter$normIcon';
+}
+
+/// Non-throwing preview variant of [encodeBankCardVisualMeta] that also
+/// tolerates malformed [colorHex].
+String? tryEncodeBankCardVisualMeta({String? colorHex, String? iconKey}) {
+  String? normColor;
+  if (colorHex != null && colorHex.trim().isNotEmpty) {
+    try {
+      normColor = _validatePureHexColor(colorHex.trim());
+    } on Failure {
+      normColor = null;
+    }
+  }
+  final normIcon = _sanitizeBankCardIconKeyForPreview(iconKey);
   if (normIcon == null) return normColor;
   return '${normColor ?? ''}$bankCardIconMetaDelimiter$normIcon';
 }
@@ -771,10 +807,8 @@ String? encodeBankCardVisualMeta({String? colorHex, String? iconKey}) {
 /// `[#RRGGBB]|icon:<iconKey>`).
 String? normalizeCardColorHex(String? raw) {
   final meta = parseBankCardVisualMeta(raw);
-  return encodeBankCardVisualMeta(
-    colorHex: meta.colorHex,
-    iconKey: meta.iconKey,
-  );
+  if (meta.iconKey == null) return meta.colorHex;
+  return '${meta.colorHex ?? ''}$bankCardIconMetaDelimiter${meta.iconKey}';
 }
 
 /// Validates and trims `bank_card.card_name`.

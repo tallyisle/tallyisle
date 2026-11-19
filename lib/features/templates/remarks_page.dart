@@ -269,6 +269,7 @@ class _RemarksPageState extends ConsumerState<RemarksPage> {
             ? null
             : FloatingActionButton.extended(
                 key: const Key('add_remark_fab'),
+                heroTag: 'fab-remarks',
                 onPressed: () => _openEditor(categories: bookCategories),
                 icon: const Icon(Icons.add),
                 label: const Text('新增备注'),

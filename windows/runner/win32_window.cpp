@@ -137,7 +137,7 @@ bool Win32Window::Create(const std::wstring& title,
 
   RECT window_rect = {0, 0, Scale(size.width, scale_factor),
                       Scale(size.height, scale_factor)};
-  AdjustWindowRectEx(&window_rect, WS_OVERLAPPEDWINDOW, FALSE, 0);
+  AdjustWindowRectExForDpi(&window_rect, WS_OVERLAPPEDWINDOW, FALSE, 0, dpi);
   const int outer_width = window_rect.right - window_rect.left;
   const int outer_height = window_rect.bottom - window_rect.top;
 
@@ -216,7 +216,7 @@ Win32Window::MessageHandler(HWND hwnd,
       double scale_factor = dpi / 96.0;
       RECT min_rect = {0, 0, Scale(420, scale_factor),
                        Scale(600, scale_factor)};
-      AdjustWindowRectEx(&min_rect, WS_OVERLAPPEDWINDOW, FALSE, 0);
+      AdjustWindowRectExForDpi(&min_rect, WS_OVERLAPPEDWINDOW, FALSE, 0, dpi);
       info->ptMinTrackSize.x = min_rect.right - min_rect.left;
       info->ptMinTrackSize.y = min_rect.bottom - min_rect.top;
       return 0;

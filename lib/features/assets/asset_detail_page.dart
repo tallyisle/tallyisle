@@ -13,10 +13,46 @@ import '../../domain/ledger/asset_json.dart';
 import '../../domain/model/codes.dart';
 import '../common/catalog_icons.dart';
 import '../common/common.dart';
+import '../common/desktop_modal_page.dart';
+import '../debt/debt_detail_page.dart';
+import '../debt/debt_providers.dart' show debtServiceProvider;
+import '../deposit/fixed_deposit_page.dart';
+import '../installment/installment_page.dart';
 import '../receipt/receipt_diy_providers.dart' show diyToolbarConfigProvider;
+import '../records/record_editor_page.dart';
+import '../stats/asset_trend_page.dart';
 import 'asset_editor_page.dart';
 import 'asset_flow_section.dart';
 import 'credit_section.dart';
+
+Future<void> _pushRouteOrModal(
+  BuildContext context,
+  String path,
+  Widget Function() modalBuilder, {
+  double maxWidth = 560,
+  double maxHeight = 700,
+  bool replaceIfPageCanPop = false,
+  bool embeddedInPane = false,
+}) {
+  final route = ModalRoute.of(context);
+  final useImperativeModal =
+      (route != null && (route is PopupRoute || route.settings is! Page)) ||
+      GoRouter.maybeOf(context) == null;
+  if (!useImperativeModal) {
+    if (replaceIfPageCanPop &&
+        !embeddedInPane &&
+        (GoRouter.maybeOf(context)?.canPop() ?? false)) {
+      return Future<void>.sync(() => context.pushReplacement(path));
+    }
+    return context.push<void>(path);
+  }
+  return pushDesktopModalOrMaterialRoute<void>(
+    context,
+    maxWidth: maxWidth,
+    maxHeight: maxHeight,
+    child: modalBuilder(),
+  );
+}
 
 final _maxAdjustAmount = Money.parse('88888888888.00');
 
@@ -98,7 +134,11 @@ class AssetDetailPage extends ConsumerWidget {
         slivers: [
           SliverToBoxAdapter(
             key: const ValueKey('asset-header'),
-            child: _Header(asset: a, isDefaultAccount: isDefaultAccount),
+            child: _Header(
+              asset: a,
+              isDefaultAccount: isDefaultAccount,
+              embeddedInPane: embeddedInPane,
+            ),
           ),
           if (a.type == AssetType.credit)
             SliverToBoxAdapter(
@@ -174,32 +214,40 @@ class AssetDetailPage extends ConsumerWidget {
         ModalRoute.of(context) is PopupRoute &&
         Navigator.of(context).canPop();
 
-    return Scaffold(
-      appBar: AppBar(
-        leading: isDesktopModal ? const CloseButton() : null,
-        title: Text(asset.value?.name ?? '账户详情'),
-        actions: [
-          if (asset.value != null)
-            _AssetMenu(asset: asset.value!, key: const Key('asset-menu')),
-        ],
+    return DesktopModalEscapeScope(
+      enabled: isDesktopModal,
+      child: Scaffold(
+        appBar: AppBar(
+          leading: isDesktopModal ? const CloseButton() : null,
+          title: Text(asset.value?.name ?? '账户详情'),
+          actions: [
+            if (asset.value != null)
+              _AssetMenu(asset: asset.value!, key: const Key('asset-menu')),
+          ],
+        ),
+        body: isDesktop
+            ? Align(
+                alignment: Alignment.topCenter,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 820),
+                  child: detailBody,
+                ),
+              )
+            : detailBody,
       ),
-      body: isDesktop
-          ? Align(
-              alignment: Alignment.topCenter,
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 820),
-                child: detailBody,
-              ),
-            )
-          : detailBody,
     );
   }
 }
 
 class _Header extends StatelessWidget {
-  const _Header({required this.asset, this.isDefaultAccount = false});
+  const _Header({
+    required this.asset,
+    this.isDefaultAccount = false,
+    this.embeddedInPane = false,
+  });
   final Asset asset;
   final bool isDefaultAccount;
+  final bool embeddedInPane;
 
   @override
   Widget build(BuildContext context) {
@@ -229,12 +277,27 @@ class _Header extends StatelessWidget {
             fit: BoxFit.scaleDown,
             child: Text('还款', maxLines: 1, softWrap: false),
           ),
-          onPressed: () => context.push(
-            repayRoute(
-              asset,
-              asset.balanceMinor.isNegative ? -asset.balanceMinor : BigInt.zero,
-            ),
-          ),
+          onPressed: () {
+            final repayAmount = asset.balanceMinor.isNegative
+                ? -asset.balanceMinor
+                : BigInt.zero;
+            final from = AssetExtra.parse(asset.extraInfo).repayAssetId;
+            _pushRouteOrModal(
+              context,
+              repayRoute(asset, repayAmount),
+              () => RecordEditorPage(
+                initialType: RecordType.transfer,
+                initialTo: asset.id,
+                initialFrom: from,
+                initialAmount: repayAmount > BigInt.zero
+                    ? formatMinor(repayAmount)
+                    : null,
+                initialRemark: '信用账户还款',
+              ),
+              maxWidth: 900,
+              maxHeight: 740,
+            );
+          },
         ),
       if (asset.type != AssetType.debt)
         OutlinedButton.icon(
@@ -246,7 +309,13 @@ class _Header extends StatelessWidget {
             fit: BoxFit.scaleDown,
             child: Text('记一笔', maxLines: 1, softWrap: false),
           ),
-          onPressed: () => context.push('/record/new?asset=${asset.id}'),
+          onPressed: () => _pushRouteOrModal(
+            context,
+            '/record/new?asset=${asset.id}',
+            () => RecordEditorPage(initialAsset: asset.id),
+            maxWidth: 900,
+            maxHeight: 740,
+          ),
         ),
       if (!credit && asset.type != AssetType.debt)
         OutlinedButton.icon(
@@ -259,7 +328,13 @@ class _Header extends StatelessWidget {
             fit: BoxFit.scaleDown,
             child: Text('定期存款', maxLines: 1, softWrap: false),
           ),
-          onPressed: () => context.push('/deposits?assetId=${asset.id}'),
+          onPressed: () => _pushRouteOrModal(
+            context,
+            '/deposits?assetId=${asset.id}',
+            () => FixedDepositPage(initialAssetId: asset.id),
+            maxWidth: 860,
+            maxHeight: 740,
+          ),
         ),
       if (credit)
         OutlinedButton.icon(
@@ -272,7 +347,13 @@ class _Header extends StatelessWidget {
             fit: BoxFit.scaleDown,
             child: Text('分期管理', maxLines: 1, softWrap: false),
           ),
-          onPressed: () => context.push('/installments'),
+          onPressed: () => _pushRouteOrModal(
+            context,
+            '/installments',
+            () => const InstallmentPage(),
+            maxWidth: 860,
+            maxHeight: 740,
+          ),
         ),
       if (asset.type == AssetType.debt)
         OutlinedButton.icon(
@@ -285,7 +366,15 @@ class _Header extends StatelessWidget {
             fit: BoxFit.scaleDown,
             child: Text('借贷详情', maxLines: 1, softWrap: false),
           ),
-          onPressed: () => context.pushReplacement('/debts/${asset.id}'),
+          onPressed: () => _pushRouteOrModal(
+            context,
+            '/debts/${asset.id}',
+            () => DebtDetailPage(debtId: asset.id),
+            maxWidth: 680,
+            maxHeight: 740,
+            replaceIfPageCanPop: true,
+            embeddedInPane: embeddedInPane,
+          ),
         ),
     ];
 
@@ -424,6 +513,7 @@ class _AssetMenu extends ConsumerStatefulWidget {
 
 class _AssetMenuState extends ConsumerState<_AssetMenu> {
   final ids = CommandIds();
+  int _actionSeq = 0;
 
   void _toast(String text) {
     if (!mounted) return;
@@ -436,25 +526,48 @@ class _AssetMenuState extends ConsumerState<_AssetMenu> {
       final service = await ref.read(ledgerServiceProvider.future);
       switch (action) {
         case _Action.trend:
-          if (mounted) await context.push('/stats/trend?assetId=${a.id}');
+          if (mounted) {
+            await _pushRouteOrModal(
+              context,
+              '/stats/trend?assetId=${a.id}',
+              () => AssetTrendPage(initialAssetId: a.id),
+              maxWidth: 860,
+              maxHeight: 740,
+            );
+          }
         case _Action.edit:
-          if (mounted) await context.push('/assets/${a.id}/edit');
+          if (mounted) {
+            await _pushRouteOrModal(
+              context,
+              '/assets/${a.id}/edit',
+              () => AssetEditorPage(assetId: a.id),
+            );
+          }
         case _Action.adjust:
           await _adjust(a);
         case _Action.hide ||
             _Action.unhide ||
             _Action.settle ||
             _Action.unsettle:
-          final status = switch (action) {
-            _Action.hide => AssetStatus.hidden,
-            _Action.settle => AssetStatus.settled,
-            _ => AssetStatus.active,
-          };
-          await service.setAssetStatus(
-            commandId: ids.forPayload(['status', a.id, status]),
-            assetId: a.id,
-            status: status,
-          );
+          final seq = _actionSeq++;
+          if (a.type == AssetType.debt && action == _Action.unsettle) {
+            final debtService = await ref.read(debtServiceProvider.future);
+            await debtService.reopenDebt(
+              commandId: ids.forPayload(['reopen-debt', a.id, seq]),
+              debtId: a.id,
+            );
+          } else {
+            final status = switch (action) {
+              _Action.hide => AssetStatus.hidden,
+              _Action.settle => AssetStatus.settled,
+              _ => AssetStatus.active,
+            };
+            await service.setAssetStatus(
+              commandId: ids.forPayload(['status', a.id, status, seq]),
+              assetId: a.id,
+              status: status,
+            );
+          }
         case _Action.delete:
           if (!mounted) return;
           final ok = await confirm(
@@ -471,10 +584,15 @@ class _AssetMenuState extends ConsumerState<_AssetMenu> {
           if (mounted) {
             if (widget.embeddedInPane) {
               widget.onDeleted?.call();
-            } else if (GoRouter.maybeOf(context) != null && context.canPop()) {
-              context.pop();
             } else {
-              await Navigator.of(context).maybePop();
+              final route = ModalRoute.of(context);
+              if (route != null && route.settings is! Page) {
+                await Navigator.of(context).maybePop();
+              } else if (GoRouter.maybeOf(context)?.canPop() ?? false) {
+                context.pop();
+              } else {
+                await Navigator.of(context).maybePop();
+              }
             }
           }
       }

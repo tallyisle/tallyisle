@@ -36,24 +36,52 @@ class StatsPage extends ConsumerStatefulWidget {
 
 class _StatsPageState extends ConsumerState<StatsPage> {
   bool _pickingBook = false;
-  bool? _lastTickerEnabled;
+  bool? _lastStatsBranchSelected;
+  bool _leftStatsBranch = false;
+
+  void _scheduleBudgetReset() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !TickerMode.valuesOf(context).enabled) return;
+      if (ref.read(budgetOffsetProvider) != 0) {
+        ref.read(budgetOffsetProvider.notifier).reset();
+      }
+    });
+  }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     final tickerEnabled = TickerMode.valuesOf(context).enabled;
-    final shouldReset =
-        _lastTickerEnabled == null ||
-        (_lastTickerEnabled == false && tickerEnabled);
-    _lastTickerEnabled = tickerEnabled;
-    if (shouldReset && tickerEnabled) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted || !TickerMode.valuesOf(context).enabled) return;
-        if (ref.read(budgetOffsetProvider) != 0) {
-          ref.read(budgetOffsetProvider.notifier).reset();
-        }
-      });
+    final shellState = StatefulNavigationShell.maybeOf(context);
+    final bool isStatsBranchSelected;
+    if (shellState != null) {
+      isStatsBranchSelected = shellState.currentIndex == 1;
+    } else {
+      final router = GoRouter.maybeOf(context);
+      if (router != null) {
+        final matches = router.routerDelegate.currentConfiguration.matches;
+        isStatsBranchSelected =
+            matches.isEmpty || matches.first.matchedLocation == '/stats';
+      } else {
+        isStatsBranchSelected = tickerEnabled;
+      }
     }
+
+    if (_lastStatsBranchSelected == null) {
+      _lastStatsBranchSelected = isStatsBranchSelected;
+      if (isStatsBranchSelected && tickerEnabled) {
+        _scheduleBudgetReset();
+      }
+      return;
+    }
+
+    if (!isStatsBranchSelected) {
+      _leftStatsBranch = true;
+    } else if (_leftStatsBranch && tickerEnabled) {
+      _leftStatsBranch = false;
+      _scheduleBudgetReset();
+    }
+    _lastStatsBranchSelected = isStatsBranchSelected;
   }
 
   Future<void> _openBudgetPage({required int initialOffset}) async {
@@ -115,7 +143,12 @@ class _StatsPageState extends ConsumerState<StatsPage> {
     final tagCard = _TagStatsOverviewCard(
       key: const Key('stats-tag-overview-card'),
       onOpenAll: _openTagRankings,
-      onTapTag: (item) => context.push('/stats/tag/${item.tagId}'),
+      onTapTag: (item) {
+        if (ref.read(tagRankingsOffsetProvider) != 0) {
+          ref.read(tagRankingsOffsetProvider.notifier).reset();
+        }
+        context.push('/stats/tag/${item.tagId}');
+      },
     );
     final budgetCard = BudgetSummaryCard(
       enablePeriodControls: true,

@@ -29,6 +29,9 @@ final categoryStatsDimensionProvider =
       CategoryStatsDimensionNotifier.new,
     );
 
+/// Alias for period mode granularity (`month` / `year` / `custom`).
+typedef CategoryStatsPeriodMode = StatRangeKind;
+
 /// Granularity notifier (Month / Year / Custom).
 final class CategoryStatsRangeKindNotifier extends Notifier<StatRangeKind> {
   @override
@@ -40,6 +43,8 @@ final categoryStatsRangeKindProvider =
     NotifierProvider<CategoryStatsRangeKindNotifier, StatRangeKind>(
       CategoryStatsRangeKindNotifier.new,
     );
+
+final categoryStatsPeriodModeProvider = categoryStatsRangeKindProvider;
 
 /// Period offset from current month or year.
 final class CategoryStatsOffsetNotifier extends Notifier<int> {
@@ -364,14 +369,13 @@ final _statsHubCategoryFilterProvider = FutureProvider<AnalyzeFilter>((
 ) async {
   final currentBookId = await ref.watch(currentBookIdProvider.future);
   final period = await ref.watch(_statsHubCurrentMonthPeriodProvider.future);
-  final dimension = ref.watch(categoryStatsDimensionProvider);
 
   return AnalyzeFilter(
     bookIds: [currentBookId],
     startMs: period.startMs,
     endMs: period.endMs,
     includeExcludeBudget: true,
-    dimension: dimension,
+    dimension: StatDimension.expense,
     rangeKind: StatRangeKind.month,
     outlierSmoothing: OutlierSmoothing.none,
   );

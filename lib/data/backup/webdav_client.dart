@@ -183,9 +183,8 @@ final class WebDavConfig {
 
 /// Pure `dart:io` [HttpClient] WebDAV client supporting Basic Auth,
 /// `PROPFIND`, recursive `MKCOL`, two-phase `.tmp -> MOVE` atomic upload (with
-/// delete-before-MOVE retry on `409`/`412` and `PUT + HEAD Content-Length`
-/// fallback when `MOVE` returns `405`/`501`/`502`/`400`), `GET`, and `DELETE`
-/// (R4, R6, ADR-017).
+/// direct in-place `PUT + HEAD Content-Length` fallback when `MOVE` returns
+/// `409`/`412`/`405`/`501`/`502`/`400`), `GET`, and `DELETE` (R4, R6, ADR-017).
 final class WebDavClient {
   WebDavClient(
     this.config, {
@@ -294,15 +293,12 @@ final class WebDavClient {
     return 'Basic $token';
   }
 
-  Future<T> _withClient<T>(
-    Future<T> Function(HttpClient client) action, {
-    Duration? timeout,
-  }) {
+  Future<T> _withClient<T>(Future<T> Function(HttpClient client) action) {
     final completer = Completer<T>();
     Zone.root.run(() async {
       final client = _httpClientFactory();
       try {
-        final result = await action(client).timeout(timeout ?? transferTimeout);
+        final result = await action(client);
         completer.complete(result);
       } on Failure catch (e, st) {
         completer.completeError(e, st);
@@ -384,10 +380,8 @@ final class WebDavClient {
   }
 
   /// Ensures the configured remote WebDAV folder hierarchy exists (`PROPFIND` + `MKCOL`).
-  Future<void> ensureRemoteDirectory() => _withClient(
-    (client) => _ensureCollectionHierarchyOn(client, const []),
-    timeout: controlTimeout,
-  );
+  Future<void> ensureRemoteDirectory() =>
+      _withClient((client) => _ensureCollectionHierarchyOn(client, const []));
 
   Future<void> _ensureCollectionHierarchyOn(
     HttpClient client,
@@ -472,7 +466,9 @@ final class WebDavClient {
   /// `PROPFIND` (`Depth: 1`), excluding temporary `.tmp` uploads (§1.6, R4).
   Future<List<BackupFileMetadata>> listBackups() => _withClient((client) async {
     final dirUri = _directoryUri();
-    final req = await client.openUrl('PROPFIND', dirUri);
+    final req = await client
+        .openUrl('PROPFIND', dirUri)
+        .timeout(controlTimeout);
     req.headers.set(HttpHeaders.authorizationHeader, _basicAuthHeader);
     req.headers.set('Depth', '1');
     req.headers.set(
@@ -483,8 +479,10 @@ final class WebDavClient {
     req.contentLength = reqBytes.length;
     req.add(reqBytes);
 
-    final res = await req.close();
-    final xmlBody = await utf8.decoder.bind(res).join();
+    final res = await req.close().timeout(controlTimeout);
+    final xmlBody = await utf8.decoder
+        .bind(res.timeout(transferTimeout))
+        .join();
     if (res.statusCode == 404) {
       return const <BackupFileMetadata>[];
     }
@@ -644,7 +642,9 @@ final class WebDavClient {
           ..._remoteDirSegments(),
           ...subSegments,
         ]);
-        final req = await client.openUrl('PROPFIND', dirUri);
+        final req = await client
+            .openUrl('PROPFIND', dirUri)
+            .timeout(controlTimeout);
         req.headers.set(HttpHeaders.authorizationHeader, _basicAuthHeader);
         req.headers.set('Depth', '1');
         req.headers.set(
@@ -655,8 +655,10 @@ final class WebDavClient {
         req.contentLength = reqBytes.length;
         req.add(reqBytes);
 
-        final res = await req.close();
-        final xmlBody = await utf8.decoder.bind(res).join();
+        final res = await req.close().timeout(controlTimeout);
+        final xmlBody = await utf8.decoder
+            .bind(res.timeout(transferTimeout))
+            .join();
         if (res.statusCode == 404) {
           return const <String>{};
         }
@@ -703,10 +705,9 @@ final class WebDavClient {
       parentExtraSegments: parentExtraSegments,
       contentType: contentType,
       onProgress: onProgress,
-      replaceOnConflict: true,
     );
 
-    var moveStatus = await _sendMoveOn(
+    final moveStatus = await _sendMoveOn(
       client,
       tmpUri: tmpUri,
       finalUri: finalUri,
@@ -716,29 +717,16 @@ final class WebDavClient {
       return;
     }
 
-    // Many WebDAV servers (e.g. Nutstore/Jianguoyun, Alist/OpenList, SMB/cloud
-    // gateways) return 409 Conflict or 412 Precondition Failed when MOVE
-    // targets an already-existing destination even with `Overwrite: T`. Since
-    // `.tmp` is already intact on the server, remove the old destination and
-    // retry MOVE once without re-uploading bytes!
-    if (moveStatus == 409 || moveStatus == 412) {
-      await _deleteUriOn(client, finalUri, ignoreNotFound: true);
-      moveStatus = await _sendMoveOn(
-        client,
-        tmpUri: tmpUri,
-        finalUri: finalUri,
-      );
-      if (moveStatus == 200 || moveStatus == 201 || moveStatus == 204) {
-        return;
-      }
-    }
-
-    if (moveStatus == 405 ||
+    // Never pre-DELETE `finalUri` before a confirmed overwrite! When `MOVE`
+    // (with `Overwrite: T`) returns 409/412/405/501/502/400, clean up `tmpUri`
+    // first (freeing server quota without touching live `finalUri`), then fall
+    // back directly to standard in-place HTTP `PUT finalUri` + `HEAD` check.
+    if (moveStatus == 409 ||
+        moveStatus == 412 ||
+        moveStatus == 405 ||
         moveStatus == 501 ||
         moveStatus == 502 ||
-        moveStatus == 400 ||
-        moveStatus == 409 ||
-        moveStatus == 412) {
+        moveStatus == 400) {
       try {
         await _deleteUriOn(client, tmpUri, ignoreNotFound: true);
       } catch (_) {
@@ -751,7 +739,6 @@ final class WebDavClient {
         parentExtraSegments: parentExtraSegments,
         contentType: contentType,
         onProgress: onProgress,
-        replaceOnConflict: true,
       );
       await _verifyHeadContentLengthOn(client, finalUri, bytes.length);
       return;
@@ -811,7 +798,7 @@ final class WebDavClient {
     List<String> parentExtraSegments = const <String>[],
     String contentType = 'application/octet-stream',
     BackupProgressCallback? onProgress,
-    bool replaceOnConflict = false,
+    bool retryMissingParent = true,
   }) async {
     final req = await client.putUrl(uri).timeout(controlTimeout);
     req.headers.set(HttpHeaders.authorizationHeader, _basicAuthHeader);
@@ -827,6 +814,7 @@ final class WebDavClient {
             ? offset + _uploadChunkSize
             : bytes.length;
         req.add(Uint8List.sublistView(bytes, offset, end));
+        await req.flush().timeout(transferTimeout);
         offset = end;
         onProgress?.call(offset, bytes.length);
       }
@@ -834,16 +822,16 @@ final class WebDavClient {
 
     final res = await req.close().timeout(transferTimeout);
     await res.drain<void>().timeout(controlTimeout);
-    if ((res.statusCode == 409 || res.statusCode == 412) && replaceOnConflict) {
-      // Either a stale target exists on a server that forbids PUT overwrite,
-      // or a cached collection was externally removed. Ensure parent & clear target!
+    if (res.statusCode == 409 && retryMissingParent) {
+      // RFC 4918 §9.7.1: 409 on PUT indicates a missing ancestor collection
+      // (e.g. cached folder removed externally). Re-verify parent folders and
+      // retry PUT once WITHOUT ever deleting the live target URI!
       _verifiedCollectionPaths.clear();
       await _ensureCollectionHierarchyOn(
         client,
         parentExtraSegments,
         forceCheck: true,
       );
-      await _deleteUriOn(client, uri, ignoreNotFound: true);
       await _putBytesOn(
         client,
         uri,
@@ -851,7 +839,7 @@ final class WebDavClient {
         parentExtraSegments: parentExtraSegments,
         contentType: contentType,
         onProgress: onProgress,
-        replaceOnConflict: false,
+        retryMissingParent: false,
       );
       return;
     }

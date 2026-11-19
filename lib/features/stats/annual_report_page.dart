@@ -1,3 +1,5 @@
+import 'dart:ui' show PointerDeviceKind;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -9,6 +11,23 @@ import '../common/common.dart';
 import '../common/desktop_modal_page.dart';
 import '../records/record_detail_page.dart';
 import 'annual_report_providers.dart';
+
+/// Active year notifier for [AnnualReportPage] (`/stats/annual`), synced with
+/// desktop global period shortcuts (`[` / `]` / `Alt+←/→` / `T`).
+final class AnnualReportYearNotifier extends Notifier<int> {
+  @override
+  int build() => DateTime.now().year;
+
+  void previous() => state = state - 1;
+  void next() => state = state + 1;
+  void reset() => state = DateTime.now().year;
+  void setYear(int year) => state = year;
+}
+
+final annualReportYearProvider =
+    NotifierProvider<AnnualReportYearNotifier, int>(
+      AnnualReportYearNotifier.new,
+    );
 
 /// Full page for Annual Bill and Annual Report (F-030).
 class AnnualReportPage extends ConsumerStatefulWidget {
@@ -28,20 +47,60 @@ class AnnualReportPage extends ConsumerStatefulWidget {
 }
 
 class _AnnualReportPageState extends ConsumerState<AnnualReportPage> {
-  late int _selectedYear;
   late bool _allBooks;
+  bool _yearSynced = false;
   int _activeTab = 0; // 0: 年度账单, 1: 年度报告
   bool _sortDescending = false; // 月份表排序
+  late final PageController _tabPageController;
 
   @override
   void initState() {
     super.initState();
-    _selectedYear = widget.initialYear ?? DateTime.now().year;
     _allBooks = false;
+    _tabPageController = PageController(initialPage: _activeTab);
+    _scheduleYearInit();
+  }
+
+  @override
+  void didUpdateWidget(covariant AnnualReportPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.initialYear != widget.initialYear) {
+      _yearSynced = false;
+      _scheduleYearInit();
+    }
+  }
+
+  void _scheduleYearInit() {
+    final targetYear = widget.initialYear ?? DateTime.now().year;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (!_yearSynced) {
+        ref.read(annualReportYearProvider.notifier).setYear(targetYear);
+        setState(() => _yearSynced = true);
+      }
+    });
+  }
+
+  int _effectiveYear(int watchedYear) =>
+      _yearSynced ? watchedYear : (widget.initialYear ?? DateTime.now().year);
+
+  void _setSelectedYear(int year) {
+    if (!_yearSynced) {
+      setState(() => _yearSynced = true);
+    }
+    ref.read(annualReportYearProvider.notifier).setYear(year);
+  }
+
+  @override
+  void dispose() {
+    _tabPageController.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final watchedYear = ref.watch(annualReportYearProvider);
+    final selectedYear = _effectiveYear(watchedYear);
     final currentBook = ref.watch(currentBookProvider).value;
     final currentBookId = currentBook?.id;
     final startDay = currentBook?.startDay ?? 1;
@@ -51,15 +110,36 @@ class _AnnualReportPageState extends ConsumerState<AnnualReportPage> {
     final availableYearsAsync = ref.watch(
       annualAvailableYearsProvider(targetBookId),
     );
-    final availableYears = availableYearsAsync.value ?? [_selectedYear];
+    final availableYears = availableYearsAsync.value ?? [selectedYear];
 
     final reportAsync = ref.watch(
       annualReportDataProvider((
-        year: _selectedYear,
+        year: selectedYear,
         bookId: targetBookId,
         startDay: startDay,
       )),
     );
+
+    void handleRecordTap(String recordId) {
+      if (widget.onRecordTap != null) {
+        widget.onRecordTap!(recordId);
+        return;
+      }
+      if (GoRouter.maybeOf(context) != null &&
+          ModalRoute.of(context)?.settings is Page) {
+        try {
+          context.push('/record/$recordId');
+          return;
+        } catch (_) {}
+      }
+      pushDesktopModalOrMaterialRoute<void>(
+        context,
+        maxWidth: 560,
+        maxHeight: 740,
+        barrierDismissible: true,
+        child: RecordDetailPage(recordId: recordId),
+      );
+    }
 
     return Scaffold(
       appBar: AppBar(
@@ -87,47 +167,53 @@ class _AnnualReportPageState extends ConsumerState<AnnualReportPage> {
       body: Column(
         children: [
           // Year Picker & Tab Switcher Bar
-          _buildTopControls(availableYears),
+          _buildTopControls(availableYears, selectedYear),
           const Divider(height: 1),
 
-          // Content Area
+          // Content Area: Synced 2-page PageView (年度账单 ⇄ 年度报告)
           Expanded(
-            child: reportAsync.when(
-              loading: () => const Center(child: CircularProgressIndicator()),
-              error: (err, _) => ErrorView(err),
-              data: (report) {
-                return _activeTab == 0
-                    ? _YearlyBillView(
-                        key: const Key('annual-report-bill-view'),
-                        data: report,
-                        sortDescending: _sortDescending,
-                        onToggleSort: () {
-                          setState(() => _sortDescending = !_sortDescending);
-                        },
-                      )
-                    : _AnnualReportHighlightView(
-                        key: const Key('annual-report-highlight-view'),
-                        data: report,
-                        onRecordTap:
-                            widget.onRecordTap ??
-                            (recordId) {
-                              if (GoRouter.maybeOf(context) != null &&
-                                  ModalRoute.of(context)?.settings is Page) {
-                                try {
-                                  context.push('/record/$recordId');
-                                  return;
-                                } catch (_) {}
-                              }
-                              pushDesktopModalOrMaterialRoute<void>(
-                                context,
-                                maxWidth: 560,
-                                maxHeight: 740,
-                                barrierDismissible: true,
-                                child: RecordDetailPage(recordId: recordId),
-                              );
-                            },
-                      );
+            child: PageView(
+              key: const Key('annual-report-tab-pageview'),
+              controller: _tabPageController,
+              scrollBehavior: ScrollConfiguration.of(context).copyWith(
+                dragDevices: const <PointerDeviceKind>{
+                  PointerDeviceKind.touch,
+                  PointerDeviceKind.mouse,
+                  PointerDeviceKind.trackpad,
+                  PointerDeviceKind.stylus,
+                  PointerDeviceKind.invertedStylus,
+                },
+              ),
+              onPageChanged: (index) {
+                if (_activeTab != index) {
+                  setState(() => _activeTab = index);
+                }
               },
+              children: [
+                reportAsync.when(
+                  loading: () =>
+                      const Center(child: CircularProgressIndicator()),
+                  error: (err, _) => ErrorView(err),
+                  data: (report) => _YearlyBillView(
+                    key: const Key('annual-report-bill-view'),
+                    data: report,
+                    sortDescending: _sortDescending,
+                    onToggleSort: () {
+                      setState(() => _sortDescending = !_sortDescending);
+                    },
+                  ),
+                ),
+                reportAsync.when(
+                  loading: () =>
+                      const Center(child: CircularProgressIndicator()),
+                  error: (err, _) => ErrorView(err),
+                  data: (report) => _AnnualReportHighlightView(
+                    key: const Key('annual-report-highlight-view'),
+                    data: report,
+                    onRecordTap: handleRecordTap,
+                  ),
+                ),
+              ],
             ),
           ),
         ],
@@ -135,7 +221,7 @@ class _AnnualReportPageState extends ConsumerState<AnnualReportPage> {
     );
   }
 
-  Widget _buildTopControls(List<int> availableYears) {
+  Widget _buildTopControls(List<int> availableYears, int selectedYear) {
     final isExpandedDesktop = DesktopAdaptive.isExpandedDesktop(context);
 
     final yearSelectorRow = Row(
@@ -147,19 +233,19 @@ class _AnnualReportPageState extends ConsumerState<AnnualReportPage> {
           icon: const Icon(Icons.chevron_left),
           tooltip: '上一年',
           onPressed: () {
-            setState(() => _selectedYear -= 1);
+            _setSelectedYear(selectedYear - 1);
           },
         ),
         InkWell(
           key: const Key('annual-report-year-picker-button'),
           borderRadius: BorderRadius.circular(8),
-          onTap: () => _showYearPickerDialog(availableYears),
+          onTap: () => _showYearPickerDialog(availableYears, selectedYear),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             child: Row(
               children: [
                 Text(
-                  '$_selectedYear年',
+                  '$selectedYear年',
                   style: const TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
@@ -175,7 +261,7 @@ class _AnnualReportPageState extends ConsumerState<AnnualReportPage> {
           icon: const Icon(Icons.chevron_right),
           tooltip: '下一年',
           onPressed: () {
-            setState(() => _selectedYear += 1);
+            _setSelectedYear(selectedYear + 1);
           },
         ),
       ],
@@ -209,7 +295,12 @@ class _AnnualReportPageState extends ConsumerState<AnnualReportPage> {
       ],
       selected: {_activeTab},
       onSelectionChanged: (set) {
-        setState(() => _activeTab = set.first);
+        final target = set.first;
+        if (target == _activeTab) return;
+        setState(() => _activeTab = target);
+        if (_tabPageController.hasClients) {
+          _tabPageController.jumpToPage(target);
+        }
       },
     );
 
@@ -252,16 +343,16 @@ class _AnnualReportPageState extends ConsumerState<AnnualReportPage> {
     );
   }
 
-  void _showYearPickerDialog(List<int> availableYears) {
+  void _showYearPickerDialog(List<int> availableYears, int selectedYear) {
     showDialog<int>(
       context: context,
       builder: (ctx) {
-        final sortedYears = {...availableYears, _selectedYear}.toList()
+        final sortedYears = {...availableYears, selectedYear}.toList()
           ..sort((a, b) => b.compareTo(a));
         return SimpleDialog(
           title: const Text('选择年份'),
           children: sortedYears.map((y) {
-            final isSelected = y == _selectedYear;
+            final isSelected = y == selectedYear;
             return SimpleDialogOption(
               onPressed: () => Navigator.pop(ctx, y),
               child: Padding(
@@ -296,7 +387,7 @@ class _AnnualReportPageState extends ConsumerState<AnnualReportPage> {
       },
     ).then((picked) {
       if (picked != null) {
-        setState(() => _selectedYear = picked);
+        _setSelectedYear(picked);
       }
     });
   }

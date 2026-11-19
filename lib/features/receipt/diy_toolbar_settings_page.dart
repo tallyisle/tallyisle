@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/adaptive.dart';
@@ -21,6 +22,7 @@ class _DiyToolbarSettingsPageState
   final _ids = CommandIds();
   bool _busy = false;
   int _saveSeq = 0;
+  DiyToolbarConfig? _optimisticConfig;
 
   static IconData _iconFor(DiyToolbarAction action) => switch (action) {
     DiyToolbarAction.tags => Icons.sell_outlined,
@@ -37,7 +39,10 @@ class _DiyToolbarSettingsPageState
   };
 
   Future<void> _persist(DiyToolbarConfig next) async {
-    setState(() => _busy = true);
+    setState(() {
+      _busy = true;
+      _optimisticConfig = next;
+    });
     try {
       final service = await ref.read(billAttachmentServiceProvider.future);
       final seq = _saveSeq++;
@@ -47,51 +52,23 @@ class _DiyToolbarSettingsPageState
       );
     } catch (e) {
       if (!mounted) return;
+      setState(() => _optimisticConfig = null);
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text(safeMessage(e))));
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _optimisticConfig = null;
+        });
+      }
     }
   }
 
   static Color _groupColor(ColorScheme scheme, bool isDark) => isDark
       ? scheme.surfaceContainerLow
       : Color.lerp(scheme.surfaceContainerLow, scheme.surfaceContainer, 0.55)!;
-
-  Widget _sectionHeader(BuildContext context, String title, {String? hint}) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    final isDark = theme.brightness == Brightness.dark;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(22, 14, 22, 6),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            title,
-            style: theme.textTheme.labelMedium?.copyWith(
-              color: scheme.onSurfaceVariant.withValues(
-                alpha: isDark ? 0.78 : 0.85,
-              ),
-              fontWeight: FontWeight.w600,
-              letterSpacing: 0.3,
-            ),
-          ),
-          if (hint != null) ...[
-            const SizedBox(height: 2),
-            Text(
-              hint,
-              style: theme.textTheme.bodySmall?.copyWith(
-                fontSize: 11.5,
-                color: scheme.onSurfaceVariant.withValues(alpha: 0.72),
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
 
   Widget _buildToolbarRow(
     BuildContext context, {
@@ -110,7 +87,7 @@ class _DiyToolbarSettingsPageState
 
     final tile = ListTile(
       visualDensity: isDesktop ? null : const VisualDensity(vertical: -1),
-      contentPadding: const EdgeInsets.only(left: 16, right: 8),
+      contentPadding: const EdgeInsets.only(left: 16, right: 12),
       leading: isDesktop
           ? Row(
               mainAxisSize: MainAxisSize.min,
@@ -121,6 +98,7 @@ class _DiyToolbarSettingsPageState
                       : SystemMouseCursors.grab,
                   child: Icon(
                     Icons.drag_handle_rounded,
+                    key: Key('diy-drag-handle-${action.key}'),
                     size: 20,
                     color: scheme.outline,
                   ),
@@ -132,46 +110,17 @@ class _DiyToolbarSettingsPageState
           : Icon(_iconFor(action)),
       title: Text(action.label),
       subtitle: Text(action.description),
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          IconButton(
-            key: Key('diy-up-${action.key}'),
-            tooltip: '上移',
-            visualDensity: VisualDensity.compact,
-            style: IconButton.styleFrom(
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            ),
-            icon: const Icon(Icons.arrow_upward, size: 18),
-            onPressed: _busy || isFirst
-                ? null
-                : () => _persist(config.moveItem(index, index - 1)),
-          ),
-          IconButton(
-            key: Key('diy-down-${action.key}'),
-            tooltip: '下移',
-            visualDensity: VisualDensity.compact,
-            style: IconButton.styleFrom(
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            ),
-            icon: const Icon(Icons.arrow_downward, size: 18),
-            onPressed: _busy || isLast
-                ? null
-                : () => _persist(config.moveItem(index, index + 1)),
-          ),
-          Switch(
-            key: Key('diy-switch-${action.key}'),
-            value: item.enabled,
-            onChanged: _busy
-                ? null
-                : (enabled) => _persist(config.setEnabled(action, enabled)),
-          ),
-        ],
+      trailing: Switch(
+        key: Key('diy-switch-${action.key}'),
+        value: item.enabled,
+        onChanged: _busy
+            ? null
+            : (enabled) => _persist(config.setEnabled(action, enabled)),
       ),
     );
 
     final grouped = Padding(
-      padding: EdgeInsets.fromLTRB(16, 0, 16, isLast ? 16 : 0),
+      padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Material(
         color: _groupColor(scheme, isDark),
         borderRadius: BorderRadius.vertical(
@@ -231,44 +180,46 @@ class _DiyToolbarSettingsPageState
         actions: [
           TextButton(
             key: const Key('diy-toolbar-reset-btn'),
-            onPressed: _busy
+            onPressed: _busy || !configAsync.hasValue
                 ? null
                 : () {
-                    final current = configAsync.value;
-                    final reset = current == null
-                        ? DiyToolbarConfig.defaults()
-                        : DiyToolbarConfig.defaults().copyWithDefaultAccount(
-                            autoSelectDefaultAccount:
-                                current.autoSelectDefaultAccount,
-                            defaultAccountId: current.defaultAccountId,
-                          );
+                    final current = configAsync.requireValue;
+                    final reset = DiyToolbarConfig.defaults()
+                        .copyWithStyles(
+                          datePickerStyle: current.datePickerStyle,
+                          timePickerStyle: current.timePickerStyle,
+                        )
+                        .copyWithDefaultAccount(
+                          autoSelectDefaultAccount:
+                              current.autoSelectDefaultAccount,
+                          defaultAccountId: current.defaultAccountId,
+                        );
                     _persist(reset);
                   },
             child: const Text('恢复默认'),
           ),
         ],
       ),
-      body: asyncBody(configAsync, (config) {
+      body: asyncBody(configAsync, (rawConfig) {
+        final config = _optimisticConfig ?? rawConfig;
         final list = ReorderableListView.builder(
           key: const Key('diy-toolbar-list'),
           buildDefaultDragHandles: false,
-          padding: const EdgeInsets.only(bottom: 12),
+          padding: const EdgeInsets.only(top: 12, bottom: 16),
+          onReorderStart: (_) {
+            if (!isDesktop) {
+              HapticFeedback.selectionClick();
+            }
+          },
           proxyDecorator: (child, index, animation) => Material(
             elevation: 6,
             color: Colors.transparent,
             borderRadius: BorderRadius.circular(16),
             child: child,
           ),
-          header: _sectionHeader(
-            context,
-            '工具栏项目与顺序',
-            hint: isDesktop
-                ? '拖拽左侧手柄或点击箭头调整顺序，开关控制是否在记一笔弹窗展示'
-                : '长按拖拽或点击箭头调整顺序，开关控制是否在记一笔页面展示',
-          ),
           itemCount: config.items.length,
           onReorderItem: (oldIndex, newIndex) {
-            if (_busy) return;
+            if (_busy || oldIndex == newIndex) return;
             _persist(config.moveItem(oldIndex, newIndex));
           },
           itemBuilder: (context, index) => _buildToolbarRow(

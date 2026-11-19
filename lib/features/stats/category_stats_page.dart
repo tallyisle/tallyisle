@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../app/adaptive.dart';
+import '../../app/desktop_shell.dart' show PeriodSwipeRegion;
 import '../../app/providers.dart';
 import '../../data/db/database.dart';
 import '../../domain/model/codes.dart';
@@ -133,8 +134,19 @@ class _CategoryStatsPageState extends ConsumerState<CategoryStatsPage> {
       ),
     );
 
+    final swipeEnabled = rangeKind != StatRangeKind.custom;
+    Widget wrapSwipe(Widget child) => PeriodSwipeRegion(
+      enabled: swipeEnabled,
+      onPrevious: () =>
+          ref.read(categoryStatsOffsetProvider.notifier).previous(),
+      onNext: () => ref.read(categoryStatsOffsetProvider.notifier).next(),
+      child: child,
+    );
+
     return Scaffold(
       key: _scaffoldKey,
+      drawerEdgeDragWidth: 0,
+      endDrawerEnableOpenDragGesture: false,
       appBar: AppBar(
         title: const Text('分类统计'),
         actions: [
@@ -167,26 +179,28 @@ class _CategoryStatsPageState extends ConsumerState<CategoryStatsPage> {
       body: isExpandedDesktop
           ? Column(
               children: [
-                Center(
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 1440),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 20,
-                        vertical: 8,
-                      ),
-                      child: Row(
-                        children: [
-                          SizedBox(width: 210, child: dimensionSwitch),
-                          const SizedBox(width: 20),
-                          Expanded(
-                            child: _PeriodNavigationBar(
-                              rangeKind: rangeKind,
-                              periodAsync: periodAsync,
-                              compactDesktop: true,
+                wrapSwipe(
+                  Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 1440),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 20,
+                          vertical: 8,
+                        ),
+                        child: Row(
+                          children: [
+                            SizedBox(width: 210, child: dimensionSwitch),
+                            const SizedBox(width: 20),
+                            Expanded(
+                              child: _PeriodNavigationBar(
+                                rangeKind: rangeKind,
+                                periodAsync: periodAsync,
+                                compactDesktop: true,
+                              ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -211,18 +225,32 @@ class _CategoryStatsPageState extends ConsumerState<CategoryStatsPage> {
                                 24,
                               ),
                               children: [
-                                headerSummaryWidget,
-                                const SizedBox(height: 16),
-                                resultAsync.when(
-                                  data: (res) => _CategoryDonutChartCard(
-                                    key: const Key('category-stats-donut-card'),
-                                    result: res,
-                                    isFlatten: isFlatten,
+                                wrapSwipe(
+                                  Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.stretch,
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      headerSummaryWidget,
+                                      const SizedBox(height: 16),
+                                      resultAsync.when(
+                                        data: (res) => _CategoryDonutChartCard(
+                                          key: const Key(
+                                            'category-stats-donut-card',
+                                          ),
+                                          result: res,
+                                          isFlatten: isFlatten,
+                                        ),
+                                        loading: () => const SizedBox.shrink(),
+                                        error: (_, _) =>
+                                            const SizedBox.shrink(),
+                                      ),
+                                    ],
                                   ),
-                                  loading: () => const SizedBox.shrink(),
-                                  error: (_, _) => const SizedBox.shrink(),
                                 ),
                                 const SizedBox(height: 16),
+                                // Strictly excluded from PeriodSwipeRegion so
+                                // scrubbing line-chart points never switches periods.
                                 trendChartWidget,
                               ],
                             ),
@@ -230,15 +258,17 @@ class _CategoryStatsPageState extends ConsumerState<CategoryStatsPage> {
                           const VerticalDivider(width: 1),
                           Expanded(
                             flex: 54,
-                            child: ListView(
-                              key: const Key('category-stats-right-pane'),
-                              padding: const EdgeInsets.fromLTRB(
-                                10,
-                                14,
-                                20,
-                                24,
+                            child: wrapSwipe(
+                              ListView(
+                                key: const Key('category-stats-right-pane'),
+                                padding: const EdgeInsets.fromLTRB(
+                                  10,
+                                  14,
+                                  20,
+                                  24,
+                                ),
+                                children: [rankingsWidget],
                               ),
-                              children: [rankingsWidget],
                             ),
                           ),
                         ],
@@ -255,27 +285,37 @@ class _CategoryStatsPageState extends ConsumerState<CategoryStatsPage> {
                   vertical: 8,
                 ),
                 children: [
-                  // 1. Dimension Switch: Expense / Income
-                  SizedBox(width: double.infinity, child: dimensionSwitch),
-                  const SizedBox(height: 12),
+                  wrapSwipe(
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        // 1. Dimension Switch: Expense / Income
+                        SizedBox(
+                          width: double.infinity,
+                          child: dimensionSwitch,
+                        ),
+                        const SizedBox(height: 12),
 
-                  // 2. Period Navigation Bar
-                  _PeriodNavigationBar(
-                    rangeKind: rangeKind,
-                    periodAsync: periodAsync,
+                        // 2. Period Navigation Bar
+                        _PeriodNavigationBar(
+                          rangeKind: rangeKind,
+                          periodAsync: periodAsync,
+                        ),
+                        const SizedBox(height: 12),
+
+                        // 3. Header Summary Card
+                        headerSummaryWidget,
+                      ],
+                    ),
                   ),
-                  const SizedBox(height: 12),
-
-                  // 3. Header Summary Card
-                  headerSummaryWidget,
                   const SizedBox(height: 16),
 
-                  // 4. Trend Line Chart
+                  // 4. Trend Line Chart (strictly outside PeriodSwipeRegion)
                   trendChartWidget,
                   const SizedBox(height: 16),
 
                   // 5. Category Rankings Card
-                  rankingsWidget,
+                  wrapSwipe(rankingsWidget),
                   const SizedBox(height: 24),
                 ],
               );
@@ -419,7 +459,9 @@ class _PeriodNavigationBar extends ConsumerWidget {
                             .setRange(picked.start, picked.end);
                       }
                     }
-                  : null,
+                  : () {
+                      ref.read(categoryStatsOffsetProvider.notifier).reset();
+                    },
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
                 child: FittedBox(

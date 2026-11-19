@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../app/adaptive.dart';
@@ -95,7 +96,16 @@ class _DebtDetailPageState extends ConsumerState<DebtDetailPage> {
             commandId: _ids.forPayload(['delete-debt', debt.id]),
             debtId: debt.id,
           );
-          if (mounted) Navigator.of(context).pop(true);
+          if (mounted) {
+            final route = ModalRoute.of(context);
+            if (route != null && route.settings is! Page) {
+              await Navigator.of(context).maybePop(true);
+            } else if (GoRouter.maybeOf(context)?.canPop() ?? false) {
+              context.pop(true);
+            } else {
+              await Navigator.of(context).maybePop(true);
+            }
+          }
       }
     } catch (e) {
       _toast(safeMessage(e));

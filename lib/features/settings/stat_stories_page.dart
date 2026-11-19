@@ -306,6 +306,7 @@ class _StatStoriesPageState extends ConsumerState<StatStoriesPage> {
             ? null
             : FloatingActionButton.extended(
                 key: const Key('stat_story_add_fab'),
+                heroTag: 'fab-stat-stories',
                 onPressed: () => _openEditor(books: books),
                 icon: const Icon(Icons.add),
                 label: const Text('新增故事'),

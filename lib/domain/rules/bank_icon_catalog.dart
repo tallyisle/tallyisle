@@ -699,7 +699,7 @@ final class BankIconCatalog {
       BankIconDescriptor(
         reference: 'builtin:bank-icon.norincogroup',
         assetPath: 'assets/icons/banks/library/norincogroup.svg',
-        displayName: '中国银行业协会',
+        displayName: '兵器财务',
         aliases: const <String>['norincogroup'],
         relatedEntityCode: null,
         reviewStatus: 'source_label_only',
@@ -771,7 +771,7 @@ final class BankIconCatalog {
       BankIconDescriptor(
         reference: 'builtin:bank-icon.xmbankonline',
         assetPath: 'assets/icons/banks/library/xmbankonline.svg',
-        displayName: '浙江农村信用社联合社',
+        displayName: '厦门银行',
         aliases: const <String>['xmbankonline'],
         relatedEntityCode: null,
         reviewStatus: 'source_label_only',
@@ -789,7 +789,7 @@ final class BankIconCatalog {
       BankIconDescriptor(
         reference: 'builtin:bank-icon.bankoftianjin',
         assetPath: 'assets/icons/banks/library/bankoftianjin.svg',
-        displayName: '天津农商',
+        displayName: '天津银行',
         aliases: const <String>['bankoftianjin'],
         relatedEntityCode: null,
         reviewStatus: 'source_label_only',
@@ -1860,7 +1860,7 @@ final class BankIconCatalog {
       BankIconDescriptor(
         reference: 'builtin:bank-icon.jnbank',
         assetPath: 'assets/icons/banks/library/jnbank.svg',
-        displayName: '合肥科技农商',
+        displayName: '济宁银行',
         aliases: const <String>['jnbank'],
         relatedEntityCode: null,
         reviewStatus: 'source_label_only',
@@ -2121,8 +2121,8 @@ final class BankIconCatalog {
       BankIconDescriptor(
         reference: 'builtin:bank-icon.sc',
         assetPath: 'assets/icons/banks/library/sc.svg',
-        displayName: '枣庄银行',
-        aliases: const <String>['sc'],
+        displayName: '渣打银行',
+        aliases: const <String>['sc', '渣打', 'Standard Chartered'],
         relatedEntityCode: null,
         reviewStatus: 'source_label_only',
         defaultColorHex: '#82B9D8',

@@ -190,6 +190,7 @@ class _NotesPageState extends ConsumerState<NotesPage> {
           ? null
           : FloatingActionButton.extended(
               key: const Key('add_note_fab'),
+              heroTag: 'fab-notes',
               onPressed: _openEditor,
               icon: const Icon(Icons.edit_note),
               label: const Text('新建便签'),

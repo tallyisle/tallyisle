@@ -10,7 +10,9 @@ import 'package:path_provider/path_provider.dart';
 import '../../core/app_version.dart';
 import '../../core/failure.dart';
 import '../../core/zip_archive.dart';
+import '../../domain/model/codes.dart';
 import '../../domain/rules/cloud_sync_rules.dart';
+import '../../domain/rules/receipt_diy_rules.dart';
 import '../../domain/rules/s3_sigv4_rules.dart';
 import '../../domain/rules/tally_backup.dart';
 import '../../platform/files.dart';
@@ -1626,12 +1628,17 @@ final class TallyBackupService {
     final rawCursor = await getSyncCursor();
     final cursor = rawCursor.scopedToTarget(store.targetFingerprint);
     final remoteHead = await _readRemoteHeadOrNull(store);
+    final orphanRemoteLatestDbBytes = remoteHead == null
+        ? await store.getObjectOrNull(cloudSyncLatestDbPath)
+        : null;
+    final hasRemoteOrphanLatestDb = orphanRemoteLatestDbBytes != null;
 
     final decision = decideSyncAction(
       cursor: cursor,
       localDataSha256: localDataSha256,
       isLocalFreshEmpty: isLocalFreshEmpty,
       remoteHead: remoteHead,
+      hasRemoteOrphanLatestDb: hasRemoteOrphanLatestDb,
       resolution: resolution,
     );
 
@@ -1661,16 +1668,31 @@ final class TallyBackupService {
         );
 
       case SyncActionType.pullRemote:
+        if (remoteHead == null) {
+          return _executeOrphanRemotePull(
+            settings: settings,
+            store: store,
+            orphanLatestDbBytes: orphanRemoteLatestDbBytes!,
+            localAttachments: localAttachments,
+            localAttChecksums: localAttChecksums,
+          );
+        }
         return _executeSyncPull(
           settings: settings,
           store: store,
-          remoteHead: remoteHead!,
+          remoteHead: remoteHead,
           localAttachments: localAttachments,
           localAttChecksums: localAttChecksums,
           onProgress: onProgress,
         );
 
       case SyncActionType.pushLocal:
+        if (orphanRemoteLatestDbBytes != null) {
+          await _archiveOrphanRemoteLatestDbIfNeeded(
+            orphanBytes: orphanRemoteLatestDbBytes,
+            cloudBackupTarget: cloudBackupTarget,
+          );
+        }
         return _executeSyncPush(
           settings: settings,
           store: store,
@@ -1694,7 +1716,9 @@ final class TallyBackupService {
           store: store,
           cloudBackupTarget: cloudBackupTarget,
           cursor: cursor,
-          remoteHead: remoteHead!,
+          remoteHead: remoteHead,
+          orphanRemoteLatestDbBytes: orphanRemoteLatestDbBytes,
+          isLocalFreshEmpty: isLocalFreshEmpty,
           localTables: localTables,
           localAttachments: localAttachments,
           localDataSha256: localDataSha256,
@@ -1823,6 +1847,7 @@ final class TallyBackupService {
             await _clearAll22TablesInTransaction();
             await db.delete(db.writeCommands).go();
             await _insertAll22TablesInTransaction(parsedRows);
+            await _sanitizeDiyDefaultAccountInTransaction(parsedRows.assets);
 
             final activeBookId = resolveRestoredActiveBookId(
               parsedRows.accountBooks.map((b) => (id: b.id, sort: b.sort)),
@@ -1947,17 +1972,21 @@ final class TallyBackupService {
       }
     }
 
-    // 2. Re-read `sync/head.json` right before commit when attachment uploads
-    // or test hooks elapsed between initial read and commit!
-    final CloudSyncHead? freshHead;
-    if (beforePushCommitForTest != null || uploadedCount > 0) {
-      if (beforePushCommitForTest != null) {
-        await beforePushCommitForTest();
-      }
-      freshHead = await _readRemoteHeadOrNull(store);
-    } else {
-      freshHead = initialRemoteHead;
+    // 2. Always re-read `sync/head.json` from remote right before committing
+    // `sync/latest_db.tally` and `sync/head.json` to catch concurrent pushes
+    // even when `uploadedCount == 0`!
+    final now = _nowMs();
+    final lightweightDb = packTallyArchive(
+      tables: localTables,
+      createdAtMs: now,
+      appVersion: appVersion,
+      includeAttachments: false,
+    );
+
+    if (beforePushCommitForTest != null) {
+      await beforePushCommitForTest();
     }
+    final freshHead = await _readRemoteHeadOrNull(store);
     if (!forceOverwriteRemote) {
       final raced =
           (initialRemoteHead == null && freshHead != null) ||
@@ -1982,36 +2011,33 @@ final class TallyBackupService {
             remoteHead: freshHead,
           );
         }
-        if (freshHead != null) {
-          return _preserveConflictAndReport(
-            settings: settings,
-            store: store,
-            cloudBackupTarget: cloudBackupTarget,
-            cursor: cursor,
-            remoteHead: freshHead,
-            localTables: localTables,
-            localAttachments: localAttachments,
-            localDataSha256: localDataSha256,
-          );
-        }
+        final racedOrphanBytes = freshHead == null
+            ? await store.getObjectOrNull(cloudSyncLatestDbPath)
+            : null;
+        return _preserveConflictAndReport(
+          settings: settings,
+          store: store,
+          cloudBackupTarget: cloudBackupTarget,
+          cursor: cursor,
+          remoteHead: freshHead,
+          orphanRemoteLatestDbBytes: racedOrphanBytes,
+          isLocalFreshEmpty: false,
+          localTables: localTables,
+          localAttachments: localAttachments,
+          localDataSha256: localDataSha256,
+        );
       }
     }
 
     // 3. Upload lightweight `sync/latest_db.tally` + updated `sync/head.json`.
-    final now = _nowMs();
-    final lightweightDb = packTallyArchive(
-      tables: localTables,
-      createdAtMs: now,
-      appVersion: appVersion,
-      includeAttachments: false,
-    );
     await store.putObject(
       cloudSyncLatestDbPath,
       lightweightDb.bytes,
       onProgress: onProgress,
     );
 
-    final nextRevision = (freshHead?.revision ?? 0) + 1;
+    final nextRevision =
+        (freshHead?.revision ?? initialRemoteHead?.revision ?? 0) + 1;
     final newHead = CloudSyncHead(
       revision: nextRevision,
       dataSha256: localDataSha256,
@@ -2081,18 +2107,287 @@ final class TallyBackupService {
     );
   }
 
+  String? _lastArchivedOrphanRemoteSha256;
+  String? _lastArchivedOrphanRemoteFileName;
+
+  Future<String> _archiveOrphanRemoteLatestDbIfNeeded({
+    required Uint8List orphanBytes,
+    required BackupTarget cloudBackupTarget,
+  }) async {
+    final orphanSha = sha256Hex(orphanBytes);
+    if (_lastArchivedOrphanRemoteSha256 == orphanSha &&
+        _lastArchivedOrphanRemoteFileName != null) {
+      final localDir = await _localBackupsDirProvider();
+      final existing = File(
+        p.join(localDir.path, _lastArchivedOrphanRemoteFileName!),
+      );
+      if (await existing.exists()) {
+        return _lastArchivedOrphanRemoteFileName!;
+      }
+    }
+
+    final now = _nowMs();
+    final orphanConflictName = formatConflictBackupFileName(
+      deviceId: 'remote${orphanSha.substring(0, 4)}',
+      when: DateTime.fromMillisecondsSinceEpoch(now),
+    );
+    await localTarget.writeBackup(orphanConflictName, orphanBytes);
+    await cloudBackupTarget.writeBackup(orphanConflictName, orphanBytes);
+    _lastArchivedOrphanRemoteSha256 = orphanSha;
+    _lastArchivedOrphanRemoteFileName = orphanConflictName;
+    return orphanConflictName;
+  }
+
+  Future<CloudSyncOutcome> _executeOrphanRemotePull({
+    required CloudSyncSettings settings,
+    required CloudSyncObjectStore store,
+    required Uint8List orphanLatestDbBytes,
+    required Map<String, Uint8List> localAttachments,
+    required Map<String, String> localAttChecksums,
+  }) async {
+    final verifiedDb = unpackAndVerifyTallyArchive(orphanLatestDbBytes);
+    final Object? rawDbJson;
+    try {
+      final zip = ZipArchive.decode(orphanLatestDbBytes);
+      rawDbJson = jsonDecode(
+        utf8.decode(zip[verifiedDb.manifest.databaseFile]!.bytes),
+      );
+    } catch (_) {
+      throw const Failure(FailureCode.corruptData, '远端同步数据库 JSON 损坏');
+    }
+    if (rawDbJson is! Map<String, Object?>) {
+      throw const Failure(FailureCode.corruptData, '远端同步数据库顶层结构损坏');
+    }
+    final parsedRows = _parseAndValidateAll22Tables(
+      rawDbJson,
+      verifiedDb.manifest,
+    );
+
+    // Match referenced attachment filenames from restored rows against actual
+    // objects in remote `sync/attachments/` (never from local-only files!).
+    final referencedBasenames = collectReferencedAttachmentNames(<String?>[
+      for (final r in parsedRows.records) r.images,
+      for (final r in parsedRows.recordPeriods) r.images,
+      for (final r in parsedRows.installments) r.images,
+    ]);
+    final sanitizedToOriginal = <String, String>{
+      for (final name in referencedBasenames)
+        sanitizeAttachmentBasename(name): name,
+    };
+    final localBytesBySha = <String, Uint8List>{
+      for (final entry in localAttChecksums.entries)
+        entry.value: localAttachments[entry.key]!,
+    };
+
+    final verifiedPulledAttachments = <String, Uint8List>{};
+    final pulledAttChecksums = <String, String>{};
+    final objectNames = <String>[];
+    var downloadedCount = 0;
+
+    if (sanitizedToOriginal.isNotEmpty) {
+      final remoteObjects = (await store.listRelativeFileNames(
+        cloudSyncAttachmentsDir,
+      )).toList()..sort();
+      for (final objName in remoteObjects) {
+        final ({String sha256, String basename}) parsed;
+        try {
+          parsed = parseAttachmentObjectName(objName);
+        } on Failure {
+          continue;
+        }
+        final matchedRelName = sanitizedToOriginal[parsed.basename];
+        if (matchedRelName == null) continue;
+        final archivePath = normalizeAttachmentArchivePath(matchedRelName);
+        if (verifiedPulledAttachments.containsKey(archivePath)) continue;
+
+        Uint8List bytes;
+        final cachedLocal = localBytesBySha[parsed.sha256];
+        if (cachedLocal != null) {
+          bytes = cachedLocal;
+        } else {
+          bytes = await store.getObject('$cloudSyncAttachmentsDir/$objName');
+          final actualSha = sha256Hex(bytes);
+          if (actualSha != parsed.sha256) {
+            throw Failure(
+              FailureCode.corruptData,
+              '远端同步附件哈希校验失败（$objName），已拒绝拉取覆盖',
+            );
+          }
+          localBytesBySha[parsed.sha256] = bytes;
+          downloadedCount++;
+        }
+        verifiedPulledAttachments[archivePath] = bytes;
+        pulledAttChecksums[archivePath] = parsed.sha256;
+        objectNames.add(
+          buildAttachmentObjectName(
+            sha256: parsed.sha256,
+            archivePath: archivePath,
+          ),
+        );
+      }
+    }
+    objectNames.sort();
+
+    final stagingDir = await Directory.systemTemp.createTemp(
+      'tally_orphan_sync_pull_',
+    );
+    try {
+      final stagedAttRoot = Directory(p.join(stagingDir.path, 'attachments'));
+      for (final entry in verifiedPulledAttachments.entries) {
+        final relUnderAtt = entry.key.substring(tallyAttachmentsPrefix.length);
+        final stagedFile = File(
+          p.joinAll(<String>[stagedAttRoot.path, ...relUnderAtt.split('/')]),
+        );
+        await stagedFile.parent.create(recursive: true);
+        await stagedFile.writeAsBytes(entry.value, flush: true);
+      }
+
+      final now = _nowMs();
+      final healedDataSha = computeCanonicalSyncDataSha256(
+        tables: verifiedDb.tables,
+        attachmentChecksums: pulledAttChecksums,
+      );
+      final healedHead = CloudSyncHead(
+        revision: 1,
+        dataSha256: healedDataSha,
+        updatedAtMs: now,
+        deviceId: settings.deviceId,
+        deviceName: settings.deviceName,
+        recordCount: parsedRows.records.length,
+        attachmentFiles: objectNames,
+        attachmentManifest: pulledAttChecksums,
+      );
+      final newCursor = LocalSyncCursor(
+        lastSyncedRevision: 1,
+        lastSyncedDataSha256: healedDataSha,
+        lastSyncedAtMs: now,
+        targetFingerprint: store.targetFingerprint,
+      );
+
+      _internalRestoreDepth++;
+      try {
+        await guardDatabase(
+          () => db.transaction(() async {
+            await _clearAll22TablesInTransaction();
+            await db.delete(db.writeCommands).go();
+            await _insertAll22TablesInTransaction(parsedRows);
+            await _sanitizeDiyDefaultAccountInTransaction(parsedRows.assets);
+
+            final activeBookId = resolveRestoredActiveBookId(
+              parsedRows.accountBooks.map((b) => (id: b.id, sort: b.sort)),
+            );
+            await db
+                .into(db.preferences)
+                .insertOnConflictUpdate(
+                  PreferencesCompanion.insert(
+                    key: _prefKeyCurrentBookId,
+                    value: '$activeBookId',
+                  ),
+                );
+            await db
+                .into(db.preferences)
+                .insertOnConflictUpdate(
+                  PreferencesCompanion.insert(
+                    key: prefKeyCloudSyncCursor,
+                    value: jsonEncode(newCursor.toJson()),
+                  ),
+                );
+            await db
+                .into(db.preferences)
+                .insert(
+                  PreferencesCompanion.insert(
+                    key: prefKeyCloudSyncSettings,
+                    value: jsonEncode(settings.toJson()),
+                  ),
+                  mode: InsertMode.insertOrIgnore,
+                );
+          }),
+        );
+
+        final targetAttDir = await _attachmentsDirProvider();
+        if (await targetAttDir.exists()) {
+          await for (final child in targetAttDir.list(followLinks: false)) {
+            await child.delete(recursive: true);
+          }
+        }
+        if (verifiedPulledAttachments.isNotEmpty) {
+          await targetAttDir.create(recursive: true);
+          for (final archivePath in verifiedPulledAttachments.keys) {
+            final relUnderAtt = archivePath.substring(
+              tallyAttachmentsPrefix.length,
+            );
+            final srcFile = File(
+              p.joinAll(<String>[
+                stagedAttRoot.path,
+                ...relUnderAtt.split('/'),
+              ]),
+            );
+            final dstFile = File(
+              p.joinAll(<String>[targetAttDir.path, ...relUnderAtt.split('/')]),
+            );
+            await dstFile.parent.create(recursive: true);
+            await srcFile.copy(dstFile.path);
+          }
+        }
+
+        await reminderService.resyncAll();
+      } finally {
+        await Future<void>.microtask(() {});
+        await Future<void>.microtask(() {});
+        _internalRestoreDepth--;
+      }
+
+      final headBytes = Uint8List.fromList(
+        utf8.encode(
+          const JsonEncoder.withIndent('  ').convert(healedHead.toJson()),
+        ),
+      );
+      await store.putObject(
+        cloudSyncHeadPath,
+        headBytes,
+        contentType: 'application/json; charset=utf-8',
+      );
+
+      return CloudSyncOutcome(
+        status: CloudSyncStatus.pulled,
+        revision: 1,
+        localDataSha256: healedDataSha,
+        remoteHead: healedHead,
+        downloadedAttachments: downloadedCount,
+      );
+    } finally {
+      try {
+        if (await stagingDir.exists()) {
+          await stagingDir.delete(recursive: true);
+        }
+      } catch (_) {}
+    }
+  }
+
   Future<CloudSyncOutcome> _preserveConflictAndReport({
     required CloudSyncSettings settings,
     required CloudSyncObjectStore store,
     required BackupTarget cloudBackupTarget,
     required LocalSyncCursor cursor,
-    required CloudSyncHead remoteHead,
+    required CloudSyncHead? remoteHead,
+    Uint8List? orphanRemoteLatestDbBytes,
+    bool isLocalFreshEmpty = false,
     required Map<String, List<Map<String, Object?>>> localTables,
     required Map<String, Uint8List> localAttachments,
     required String localDataSha256,
   }) async {
+    String? orphanConflictFileName;
+    if (orphanRemoteLatestDbBytes != null) {
+      orphanConflictFileName = await _archiveOrphanRemoteLatestDbIfNeeded(
+        orphanBytes: orphanRemoteLatestDbBytes,
+        cloudBackupTarget: cloudBackupTarget,
+      );
+    }
+
     String? conflictFileName;
-    if (cursor.lastConflictSha256 == localDataSha256 &&
+    if (orphanConflictFileName != null && isLocalFreshEmpty) {
+      conflictFileName = orphanConflictFileName;
+    } else if (cursor.lastConflictSha256 == localDataSha256 &&
         cursor.lastConflictFileName != null &&
         cursor.lastConflictFileName!.isNotEmpty) {
       final localDir = await _localBackupsDirProvider();
@@ -2132,7 +2427,7 @@ final class TallyBackupService {
     }
 
     return CloudSyncOutcome.conflict(
-      revision: remoteHead.revision,
+      revision: remoteHead?.revision ?? 0,
       localDataSha256: localDataSha256,
       remoteHead: remoteHead,
       conflictBackupFileName: conflictFileName,
@@ -2269,6 +2564,7 @@ final class TallyBackupService {
             await _clearAll22TablesInTransaction();
             await db.delete(db.writeCommands).go();
             await _insertAll22TablesInTransaction(parsedRows);
+            await _sanitizeDiyDefaultAccountInTransaction(parsedRows.assets);
 
             final activeBookId = resolveRestoredActiveBookId(
               parsedRows.accountBooks.map((b) => (id: b.id, sort: b.sort)),
@@ -2838,6 +3134,42 @@ final class TallyBackupService {
           },
       ],
     };
+  }
+
+  Future<void> _sanitizeDiyDefaultAccountInTransaction(
+    List<Asset> restoredAssets,
+  ) async {
+    final diyRow = await (db.select(
+      db.preferences,
+    )..where((t) => t.key.equals(prefKeyRecordDiyToolbar))).getSingleOrNull();
+    if (diyRow == null || diyRow.value.isEmpty) return;
+    final current = DiyToolbarConfig.decode(diyRow.value);
+    if (current.defaultAccountId == noRef &&
+        !current.autoSelectDefaultAccount) {
+      return;
+    }
+    final isValidActiveNonDebt =
+        current.defaultAccountId != noRef &&
+        restoredAssets.any(
+          (a) =>
+              a.id == current.defaultAccountId &&
+              a.status == AssetStatus.active &&
+              a.type != AssetType.debt,
+        );
+    if (!isValidActiveNonDebt) {
+      final resetDiy = current.copyWithDefaultAccount(
+        defaultAccountId: noRef,
+        autoSelectDefaultAccount: false,
+      );
+      await db
+          .into(db.preferences)
+          .insertOnConflictUpdate(
+            PreferencesCompanion.insert(
+              key: prefKeyRecordDiyToolbar,
+              value: resetDiy.encode(),
+            ),
+          );
+    }
   }
 
   Future<void> _clearAll22TablesInTransaction() async {

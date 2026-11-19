@@ -175,12 +175,19 @@ final class S3Client {
     this.config, {
     HttpClient Function()? httpClientFactory,
     this.nowMs,
+    Duration? controlTimeout,
     this.transferTimeout = const Duration(seconds: 90),
-  }) : _httpClientFactory = httpClientFactory ?? _defaultHttpClient;
+  }) : controlTimeout =
+           controlTimeout ??
+           (transferTimeout < const Duration(seconds: 25)
+               ? transferTimeout
+               : const Duration(seconds: 25)),
+       _httpClientFactory = httpClientFactory ?? _defaultHttpClient;
 
   final S3Config config;
   final HttpClient Function() _httpClientFactory;
   final int Function()? nowMs;
+  final Duration controlTimeout;
   final Duration transferTimeout;
 
   static const int _uploadChunkSize = 32 * 1024;
@@ -210,7 +217,7 @@ final class S3Client {
     Zone.root.run(() async {
       final client = _httpClientFactory();
       try {
-        final result = await action(client).timeout(transferTimeout);
+        final result = await action(client);
         completer.complete(result);
       } on Failure catch (e, st) {
         completer.completeError(e, st);
@@ -337,12 +344,17 @@ final class S3Client {
     BackupProgressCallback? onProgress,
   }) async {
     final signed = _sign(method: 'GET', objectKey: objectKey);
-    final req = await client.openUrl('GET', signed.target.requestUri);
+    final req = await client
+        .openUrl('GET', signed.target.requestUri)
+        .timeout(controlTimeout);
     _applySignedHeaders(req, signed);
-    final res = await req.close();
+    final res = await req.close().timeout(transferTimeout);
 
     if (res.statusCode == 404) {
-      final errXml = await utf8.decoder.bind(res).join().catchError((_) => '');
+      final errXml = await utf8.decoder
+          .bind(res.timeout(controlTimeout))
+          .join()
+          .catchError((_) => '');
       if (errXml.contains('NoSuchBucket')) {
         _throwForErrorStatus(404, errXml, action: '读取远端对象');
       }
@@ -350,14 +362,17 @@ final class S3Client {
     }
 
     if (res.statusCode != 200) {
-      final errXml = await utf8.decoder.bind(res).join().catchError((_) => '');
+      final errXml = await utf8.decoder
+          .bind(res.timeout(controlTimeout))
+          .join()
+          .catchError((_) => '');
       _throwForErrorStatus(res.statusCode, errXml, action: '读取远端对象');
     }
 
     final expectedLength = res.contentLength;
     final builder = BytesBuilder(copy: false);
     var received = 0;
-    await for (final chunk in res) {
+    await for (final chunk in res.timeout(transferTimeout)) {
       builder.add(chunk);
       received += chunk.length;
       if (expectedLength > 0) {
@@ -417,7 +432,9 @@ final class S3Client {
       payloadBytes: bytes,
       extraHeaders: <String, String>{'content-type': contentType},
     );
-    final req = await client.openUrl('PUT', signed.target.requestUri);
+    final req = await client
+        .openUrl('PUT', signed.target.requestUri)
+        .timeout(controlTimeout);
     _applySignedHeaders(req, signed);
     req.contentLength = bytes.length;
 
@@ -430,17 +447,21 @@ final class S3Client {
             ? offset + _uploadChunkSize
             : bytes.length;
         req.add(Uint8List.sublistView(bytes, offset, end));
+        await req.flush().timeout(transferTimeout);
         offset = end;
         onProgress?.call(offset, bytes.length);
       }
     }
 
-    final res = await req.close();
+    final res = await req.close().timeout(transferTimeout);
     if (res.statusCode < 200 || res.statusCode >= 300) {
-      final errBody = await utf8.decoder.bind(res).join().catchError((_) => '');
+      final errBody = await utf8.decoder
+          .bind(res.timeout(controlTimeout))
+          .join()
+          .catchError((_) => '');
       _throwForErrorStatus(res.statusCode, errBody, action: '上传 S3 对象');
     }
-    await res.drain<void>();
+    await res.drain<void>().timeout(controlTimeout);
   }
 
   /// Deletes an object relative to `config.remotePrefix`.
@@ -460,21 +481,26 @@ final class S3Client {
     required bool ignoreNotFound,
   }) async {
     final signed = _sign(method: 'DELETE', objectKey: objectKey);
-    final req = await client.openUrl('DELETE', signed.target.requestUri);
+    final req = await client
+        .openUrl('DELETE', signed.target.requestUri)
+        .timeout(controlTimeout);
     _applySignedHeaders(req, signed);
     req.contentLength = 0;
-    final res = await req.close();
+    final res = await req.close().timeout(controlTimeout);
     if (ignoreNotFound && res.statusCode == 404) {
-      await res.drain<void>();
+      await res.drain<void>().timeout(controlTimeout);
       return;
     }
     if (res.statusCode != 200 &&
         res.statusCode != 202 &&
         res.statusCode != 204) {
-      final errBody = await utf8.decoder.bind(res).join().catchError((_) => '');
+      final errBody = await utf8.decoder
+          .bind(res.timeout(controlTimeout))
+          .join()
+          .catchError((_) => '');
       _throwForErrorStatus(res.statusCode, errBody, action: '删除 S3 对象');
     }
-    await res.drain<void>();
+    await res.drain<void>().timeout(controlTimeout);
   }
 
   /// Lists objects under `config.remotePrefix/[relativePrefix]` via S3
@@ -500,10 +526,14 @@ final class S3Client {
               'continuation-token': continuationToken,
           };
           final signed = _sign(method: 'GET', queryParameters: query);
-          final req = await client.openUrl('GET', signed.target.requestUri);
+          final req = await client
+              .openUrl('GET', signed.target.requestUri)
+              .timeout(controlTimeout);
           _applySignedHeaders(req, signed);
-          final res = await req.close();
-          final xmlBody = await utf8.decoder.bind(res).join();
+          final res = await req.close().timeout(controlTimeout);
+          final xmlBody = await utf8.decoder
+              .bind(res.timeout(transferTimeout))
+              .join();
 
           if (res.statusCode != 200) {
             _throwForErrorStatus(res.statusCode, xmlBody, action: '获取 S3 对象列表');

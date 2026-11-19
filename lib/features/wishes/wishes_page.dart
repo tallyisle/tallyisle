@@ -203,6 +203,7 @@ class _WishesPageState extends ConsumerState<WishesPage>
           ? null
           : FloatingActionButton.extended(
               key: const Key('add_wish_fab'),
+              heroTag: 'fab-wishes',
               onPressed: _openEditor,
               icon: const Icon(Icons.add),
               label: const Text('新建心愿'),

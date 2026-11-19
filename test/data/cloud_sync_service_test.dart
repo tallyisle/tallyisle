@@ -17,6 +17,7 @@ import 'package:tallyisle/data/ledger/ledger_service.dart';
 import 'package:tallyisle/data/reminder/reminder_service.dart';
 import 'package:tallyisle/domain/model/codes.dart';
 import 'package:tallyisle/domain/rules/cloud_sync_rules.dart';
+import 'package:tallyisle/domain/rules/receipt_diy_rules.dart';
 import 'package:tallyisle/domain/rules/s3_sigv4_rules.dart';
 import 'package:tallyisle/domain/rules/tally_backup.dart';
 import 'package:tallyisle/platform/notifications.dart';
@@ -225,8 +226,12 @@ final class _LoopbackSyncWebDavServer {
   final Map<String, Uint8List> files = <String, Uint8List>{};
   final Map<String, DateTime> modifiedAt = <String, DateTime>{};
   final Set<String> collections = <String>{'/dav'};
+  final List<String> deletedPaths = <String>[];
   bool rejectMoveOverwriteWith409 = false;
+  bool rejectAllMoveWith409 = false;
+  bool failPutOnNonTmp = false;
   bool rejectExistingMkcolWith409 = false;
+  Future<void> Function(String path)? onBeforeGet;
   int _tick = 0;
 
   String get baseUrl => 'http://127.0.0.1:${_server.port}/dav';
@@ -322,7 +327,9 @@ final class _LoopbackSyncWebDavServer {
           b.add(c);
         }
         final parent = p.posix.dirname(path);
-        if (!collections.contains(parent)) {
+        if (failPutOnNonTmp && !path.toLowerCase().endsWith('.tmp')) {
+          req.response.statusCode = HttpStatus.badGateway;
+        } else if (!collections.contains(parent)) {
           req.response.statusCode = HttpStatus.conflict;
         } else {
           files[path] = b.takeBytes();
@@ -334,7 +341,8 @@ final class _LoopbackSyncWebDavServer {
       case 'MOVE':
         await req.drain<void>();
         final dest = _norm(Uri.parse(req.headers.value('Destination')!).path);
-        if (rejectMoveOverwriteWith409 && files.containsKey(dest)) {
+        if (rejectAllMoveWith409 ||
+            (rejectMoveOverwriteWith409 && files.containsKey(dest))) {
           req.response.statusCode = HttpStatus.conflict;
           await req.response.close();
           return;
@@ -346,8 +354,25 @@ final class _LoopbackSyncWebDavServer {
         req.response.statusCode = HttpStatus.created;
         await req.response.close();
 
+      case 'HEAD':
+        await req.drain<void>();
+        final headData = files[path];
+        if (headData == null) {
+          req.response.statusCode = HttpStatus.notFound;
+        } else {
+          req.response.statusCode = HttpStatus.ok;
+          req.response.headers.set(
+            HttpHeaders.contentLengthHeader,
+            '${headData.length}',
+          );
+        }
+        await req.response.close();
+
       case 'GET':
         await req.drain<void>();
+        if (onBeforeGet != null) {
+          await onBeforeGet!(path);
+        }
         final data = files[path];
         if (data == null) {
           req.response.statusCode = HttpStatus.notFound;
@@ -360,6 +385,7 @@ final class _LoopbackSyncWebDavServer {
 
       case 'DELETE':
         await req.drain<void>();
+        deletedPaths.add(path);
         files.remove(path);
         modifiedAt.remove(path);
         req.response.statusCode = HttpStatus.noContent;
@@ -835,21 +861,22 @@ void main() {
     );
 
     test(
-      'recovers cleanly when interrupted first sync leaves latest_db.tally without head.json and WebDAV returns 409 on MOVE overwrite, and enforces request timeout',
+      'B-01/B-04/B-05: WebDAV never pre-DELETEs live targets on MOVE 409, surfaces conflict on missing head.json with existing latest_db.tally, always re-reads head.json on push (even uploadedCount == 0), and enforces per-chunk stream idle timeouts',
       () async {
         final davServer = await _LoopbackSyncWebDavServer.start()
           ..rejectMoveOverwriteWith409 = true
           ..rejectExistingMkcolWith409 = true;
         addTearDown(davServer.close);
 
-        // Simulate interrupted first sync: `sync/latest_db.tally` already created
-        // on server while `sync/head.json` is still missing!
+        // Simulate missing `sync/head.json` while `sync/latest_db.tally` ALREADY exists!
+        final stalePayload = Uint8List.fromList(
+          utf8.encode('stale-interrupted-latest-db'),
+        );
         davServer.collections.addAll(<String>[
           '/dav/TallySync',
           '/dav/TallySync/sync',
         ]);
-        davServer.files['/dav/TallySync/sync/latest_db.tally'] =
-            Uint8List.fromList(utf8.encode('stale-interrupted-latest-db'));
+        davServer.files['/dav/TallySync/sync/latest_db.tally'] = stalePayload;
 
         final tempRoot = await Directory.systemTemp.createTemp(
           'dav_409_recovery_',
@@ -861,8 +888,10 @@ void main() {
         var now = 1794600000000;
         final dbA = AppDatabase(NativeDatabase.memory(), nowMs: () => now);
         final dbB = AppDatabase(NativeDatabase.memory(), nowMs: () => now);
+        final dbEmpty = AppDatabase(NativeDatabase.memory(), nowMs: () => now);
         addTearDown(dbA.close);
         addTearDown(dbB.close);
+        addTearDown(dbEmpty.close);
 
         final serviceA = TallyBackupService(
           dbA,
@@ -886,6 +915,17 @@ void main() {
           attachmentsDirectoryProvider: () async =>
               Directory(p.join(tempRoot.path, 'att_b')),
         );
+        final serviceEmpty = TallyBackupService(
+          dbEmpty,
+          reminderService: ReminderService(
+            dbEmpty,
+            scheduler: InMemoryReminderScheduler(),
+          ),
+          localBackupsDirectoryProvider: () async =>
+              Directory(p.join(tempRoot.path, 'bk_empty')),
+          attachmentsDirectoryProvider: () async =>
+              Directory(p.join(tempRoot.path, 'att_empty')),
+        );
 
         final davCfg = WebDavConfig(
           serverUrl: davServer.baseUrl,
@@ -895,9 +935,14 @@ void main() {
         );
         await serviceA.saveWebDavConfig(davCfg);
         await serviceB.saveWebDavConfig(davCfg);
+        await serviceEmpty.saveWebDavConfig(davCfg);
+        await serviceA.setAutoArchiveBackupEnabled(false);
+        await serviceB.setAutoArchiveBackupEnabled(false);
+        await serviceEmpty.setAutoArchiveBackupEnabled(false);
 
         await dbA.select(dbA.accountBooks).get();
         await dbB.select(dbB.accountBooks).get();
+        await dbEmpty.select(dbEmpty.accountBooks).get();
         final ledgerA = LedgerService(dbA);
         final walletId = await ledgerA.createAsset(
           commandId: 'dav-409-wallet',
@@ -906,12 +951,32 @@ void main() {
           initial: Money.parse('300.00'),
         );
 
-        // 1. Retry sync on Device A succeeds (deletes stale latest_db.tally & moves .tmp -> r1)!
+        // 1. B-01 defense-in-depth: Fresh empty Device (`isLocalFreshEmpty == true`)
+        // MUST NOT overwrite orphan `sync/latest_db.tally` when `head.json` is missing!
+        final emptyConflict = await serviceEmpty.syncNow();
+        expect(emptyConflict.status, CloudSyncStatus.conflict);
+        expect(emptyConflict.conflictBackupFileName, startsWith('conflict_'));
+        expect(
+          davServer.files['/dav/TallySync/sync/latest_db.tally'],
+          equals(stalePayload),
+        );
+
+        // Populated Device A ALSO surfaces conflict until explicit resolution:
         final progressStates = <bool>[];
         final sub = serviceA.watchSyncInProgress().listen(progressStates.add);
         addTearDown(sub.cancel);
 
-        final push1 = await serviceA.syncNow();
+        final conflictA = await serviceA.syncNow();
+        expect(conflictA.status, CloudSyncStatus.conflict);
+        expect(
+          davServer.files['/dav/TallySync/sync/latest_db.tally'],
+          equals(stalePayload),
+        );
+
+        // Explicit `useLocal` archives orphan `latest_db.tally` and pushes r1 cleanly!
+        final push1 = await serviceA.syncNow(
+          resolution: SyncConflictResolution.useLocal,
+        );
         expect(push1.status, CloudSyncStatus.pushed);
         expect(push1.revision, 1);
         expect(
@@ -922,10 +987,31 @@ void main() {
           ]),
         );
 
-        // 2. Subsequent sync r2 (when BOTH latest_db.tally AND head.json already exist
-        // on the 409-on-MOVE-overwrite server) ALSO succeeds cleanly!
+        // 2. Subsequent sync r2 on 409-on-MOVE-overwrite server succeeds via
+        // in-place PUT + HEAD fallback WITHOUT EVER sending DELETE on live files!
+        davServer.deletedPaths.clear();
         now += 5000;
-        await ledgerA.saveRecord(
+        final attADir = Directory(p.join(tempRoot.path, 'att_a'));
+        await attADir.create(recursive: true);
+        final receiptABytes = Uint8List.fromList(<int>[
+          0x89,
+          0x50,
+          0x4E,
+          0x47,
+          0x0D,
+          0x0A,
+          0x1A,
+          0x0A,
+          1,
+          2,
+          3,
+          4,
+        ]);
+        await File(
+          p.join(attADir.path, 'receipt_a.png'),
+        ).writeAsBytes(receiptABytes, flush: true);
+
+        final rec2Id = await ledgerA.saveRecord(
           commandId: 'dav-409-rec2',
           draft: RecordDraft(
             bookId: 1,
@@ -937,46 +1023,319 @@ void main() {
             remark: '二次覆盖同步成功',
           ),
         );
+        await (dbA.update(dbA.records)..where((t) => t.recordId.equals(rec2Id)))
+            .write(const RecordsCompanion(images: Value('receipt_a.png')));
         final push2 = await serviceA.syncNow();
         expect(push2.status, CloudSyncStatus.pushed);
         expect(push2.revision, 2);
+        expect(push2.uploadedAttachments, 1);
         expect(progressStates, contains(true));
         expect(serviceA.isSyncInProgress, isFalse);
+        // Every DELETE on the WebDAV server was strictly for `.tmp` cleanup, NEVER live targets!
+        expect(davServer.deletedPaths, isNotEmpty);
+        for (final delPath in davServer.deletedPaths) {
+          expect(
+            delPath.endsWith('.tmp'),
+            isTrue,
+            reason: 'Pre-DELETE hit live WebDAV path: $delPath',
+          );
+        }
 
-        // Device B pulls r2 with exact 275.00 balance!
+        // Simulate network/gateway failure during fallback PUT: live `head.json` &
+        // `latest_db.tally` MUST survive untouched!
+        final savedHeadBytes = Uint8List.fromList(
+          davServer.files['/dav/TallySync/sync/head.json']!,
+        );
+        davServer.failPutOnNonTmp = true;
+        now += 5000;
+        await ledgerA.saveRecord(
+          commandId: 'dav-409-fail-put',
+          draft: RecordDraft(
+            bookId: 1,
+            type: RecordType.expense,
+            money: Money.parse('10.00'),
+            recordTime: now,
+            categoryId: 1,
+            assetId: walletId,
+            remark: '断网未覆盖',
+          ),
+        );
+        await expectLater(serviceA.syncNow(), throwsA(isA<Failure>()));
+        expect(
+          davServer.files['/dav/TallySync/sync/head.json'],
+          equals(savedHeadBytes),
+        );
+        davServer.failPutOnNonTmp = false;
+
+        // Device B pulls r2 with exact 275.00 balance & clears stale defaultAccountId!
+        await dbB
+            .into(dbB.preferences)
+            .insertOnConflictUpdate(
+              PreferencesCompanion.insert(
+                key: prefKeyRecordDiyToolbar,
+                value: DiyToolbarConfig.defaults()
+                    .copyWithDefaultAccount(
+                      autoSelectDefaultAccount: true,
+                      defaultAccountId: 999,
+                    )
+                    .encode(),
+              ),
+            );
         final pullB = await serviceB.syncNow();
         expect(pullB.status, CloudSyncStatus.pulled);
         expect(pullB.revision, 2);
+        expect(pullB.downloadedAttachments, 1);
         final assetOnB = await (dbB.select(
           dbB.assets,
         )..where((t) => t.id.equals(walletId))).getSingle();
         expect(assetOnB.balanceMinor, BigInt.from(27500));
+        final diyOnB = DiyToolbarConfig.decode(
+          (await (dbB.select(dbB.preferences)
+                    ..where((t) => t.key.equals(prefKeyRecordDiyToolbar)))
+                  .getSingle())
+              .value,
+        );
+        expect(diyOnB.defaultAccountId, noRef);
+        expect(diyOnB.autoSelectDefaultAccount, isFalse);
 
-        // 3. Stalled HTTP server that accepts TCP but never responds times out cleanly!
-        final stalledServer = await HttpServer.bind(
+        // If `head.json` is accidentally lost on server while valid `latest_db.tally`
+        // + remote `sync/attachments/` remain, `useRemote` recovers `latest_db.tally`
+        // + remote attachments, purges un-uploaded local-only attachments on the
+        // pulling device, sanitizes stale `defaultAccountId`, and heals `head.json`
+        // so Device C pulls cleanly with zero 404s!
+        final attEmptyDir = Directory(p.join(tempRoot.path, 'att_empty'));
+        await attEmptyDir.create(recursive: true);
+        await File(
+          p.join(attEmptyDir.path, 'unrelated_local_only.png'),
+        ).writeAsBytes(Uint8List.fromList(<int>[9, 9, 9, 9]), flush: true);
+        await dbEmpty
+            .into(dbEmpty.preferences)
+            .insertOnConflictUpdate(
+              PreferencesCompanion.insert(
+                key: prefKeyRecordDiyToolbar,
+                value: DiyToolbarConfig.defaults()
+                    .copyWithDefaultAccount(
+                      autoSelectDefaultAccount: true,
+                      defaultAccountId: 888,
+                    )
+                    .encode(),
+              ),
+            );
+
+        davServer.files.remove('/dav/TallySync/sync/head.json');
+        final emptyConflict2 = await serviceEmpty.syncNow();
+        expect(emptyConflict2.status, CloudSyncStatus.conflict);
+        final healedPull = await serviceEmpty.syncNow(
+          resolution: SyncConflictResolution.useRemote,
+        );
+        expect(healedPull.status, CloudSyncStatus.pulled);
+        expect(healedPull.revision, 1);
+        expect(healedPull.downloadedAttachments, 1);
+        expect(
+          davServer.files.containsKey('/dav/TallySync/sync/head.json'),
+          isTrue,
+        );
+        expect(
+          await File(p.join(attEmptyDir.path, 'receipt_a.png')).exists(),
+          isTrue,
+        );
+        expect(
+          await File(
+            p.join(attEmptyDir.path, 'unrelated_local_only.png'),
+          ).exists(),
+          isFalse,
+        );
+        final healedAsset = await (dbEmpty.select(
+          dbEmpty.assets,
+        )..where((t) => t.id.equals(walletId))).getSingle();
+        expect(healedAsset.balanceMinor, BigInt.from(27500));
+        final healedDiy = DiyToolbarConfig.decode(
+          (await (dbEmpty.select(dbEmpty.preferences)
+                    ..where((t) => t.key.equals(prefKeyRecordDiyToolbar)))
+                  .getSingle())
+              .value,
+        );
+        expect(healedDiy.defaultAccountId, noRef);
+        expect(healedDiy.autoSelectDefaultAccount, isFalse);
+
+        // Device C pulls the healed snapshot + remote attachment without 404!
+        final dbC = AppDatabase(NativeDatabase.memory(), nowMs: () => now);
+        addTearDown(dbC.close);
+        await dbC.select(dbC.accountBooks).get();
+        final attCDir = Directory(p.join(tempRoot.path, 'att_c'));
+        final serviceC = TallyBackupService(
+          dbC,
+          reminderService: ReminderService(
+            dbC,
+            scheduler: InMemoryReminderScheduler(),
+          ),
+          localBackupsDirectoryProvider: () async =>
+              Directory(p.join(tempRoot.path, 'bk_c')),
+          attachmentsDirectoryProvider: () async => attCDir,
+        );
+        await serviceC.saveWebDavConfig(davCfg);
+        await serviceC.setAutoArchiveBackupEnabled(false);
+        final pullC = await serviceC.syncNow();
+        expect(pullC.status, CloudSyncStatus.pulled);
+        expect(pullC.revision, 1);
+        expect(pullC.downloadedAttachments, 1);
+        expect(
+          await File(p.join(attCDir.path, 'receipt_a.png')).readAsBytes(),
+          equals(receiptABytes),
+        );
+
+        // Also verify `restoreFromBytes` clears stale `defaultAccountId` while
+        // preserving valid active non-debt `defaultAccountId`:
+        final fullBackupFromC = await serviceC.createBackupBytes();
+        await dbC
+            .into(dbC.preferences)
+            .insertOnConflictUpdate(
+              PreferencesCompanion.insert(
+                key: prefKeyRecordDiyToolbar,
+                value: DiyToolbarConfig.defaults()
+                    .copyWithDefaultAccount(
+                      autoSelectDefaultAccount: true,
+                      defaultAccountId: 777,
+                    )
+                    .encode(),
+              ),
+            );
+        await serviceC.restoreFromBytes(fullBackupFromC.bytes);
+        final restoredStaleDiy = DiyToolbarConfig.decode(
+          (await (dbC.select(dbC.preferences)
+                    ..where((t) => t.key.equals(prefKeyRecordDiyToolbar)))
+                  .getSingle())
+              .value,
+        );
+        expect(restoredStaleDiy.defaultAccountId, noRef);
+        expect(restoredStaleDiy.autoSelectDefaultAccount, isFalse);
+
+        await dbC
+            .into(dbC.preferences)
+            .insertOnConflictUpdate(
+              PreferencesCompanion.insert(
+                key: prefKeyRecordDiyToolbar,
+                value: DiyToolbarConfig.defaults()
+                    .copyWithDefaultAccount(
+                      autoSelectDefaultAccount: true,
+                      defaultAccountId: walletId,
+                    )
+                    .encode(),
+              ),
+            );
+        await serviceC.restoreFromBytes(fullBackupFromC.bytes);
+        final restoredValidDiy = DiyToolbarConfig.decode(
+          (await (dbC.select(dbC.preferences)
+                    ..where((t) => t.key.equals(prefKeyRecordDiyToolbar)))
+                  .getSingle())
+              .value,
+        );
+        expect(restoredValidDiy.defaultAccountId, walletId);
+        expect(restoredValidDiy.autoSelectDefaultAccount, isTrue);
+
+        // 3. B-04: Concurrent push race WITHOUT `beforePushCommitForTest` and
+        // with `uploadedCount == 0`! Re-sync B to r1 first, then mutate remote
+        // `head.json` on the 2nd GET during A's push!
+        final alignA = await serviceA.syncNow(
+          resolution: SyncConflictResolution.useLocal,
+        );
+        expect(alignA.status, CloudSyncStatus.pushed);
+        expect((await serviceB.syncNow()).status, CloudSyncStatus.pulled);
+
+        var headGetCount = 0;
+        davServer.onBeforeGet = (path) async {
+          if (path == '/dav/TallySync/sync/head.json') {
+            headGetCount++;
+            if (headGetCount == 2) {
+              // Simulate another device committing a new revision right before A commits!
+              final concurrentHead = CloudSyncHead(
+                revision: alignA.revision + 1,
+                dataSha256: 'f' * 64,
+                updatedAtMs: now + 9000,
+                deviceId: 'other-device-99',
+                deviceName: '另一台手机',
+                recordCount: 9,
+                attachmentFiles: const <String>[],
+              );
+              davServer.files[path] = Uint8List.fromList(
+                utf8.encode(jsonEncode(concurrentHead.toJson())),
+              );
+            }
+          }
+        };
+        now += 10000;
+        await ledgerA.saveRecord(
+          commandId: 'dav-b04-zero-att-race',
+          draft: RecordDraft(
+            bookId: 1,
+            type: RecordType.expense,
+            money: Money.parse('12.00'),
+            recordTime: now,
+            categoryId: 1,
+            assetId: walletId,
+            remark: '无附件并发抢占检测',
+          ),
+        );
+        // Notice: `beforePushCommitForTest` is NOT passed and `uploadedCount == 0`!
+        final b04Outcome = await serviceA.syncNow();
+        davServer.onBeforeGet = null;
+        expect(headGetCount, 2);
+        expect(b04Outcome.isConflict, isTrue);
+        expect(b04Outcome.revision, alignA.revision + 1);
+
+        // 4. B-05: Active multi-chunk download exceeding single `transferTimeout`
+        // wall-clock duration succeeds, while stalled socket times out cleanly!
+        final slowStreamServer = await HttpServer.bind(
           InternetAddress.loopbackIPv4,
           0,
         );
-        final stalledSubs = stalledServer.listen((_) {
-          // Intentionally never respond to simulate half-open / tarpitted WebDAV socket.
+        final slowStreamSub = slowStreamServer.listen((req) async {
+          await req.drain<void>();
+          if (req.uri.path.endsWith('/active.bin')) {
+            // Total 5 chunks * 55ms = 275ms > transferTimeout (150ms),
+            // but idle gap between chunks (55ms) < 150ms!
+            req.response.statusCode = HttpStatus.ok;
+            req.response.bufferOutput = false;
+            req.response.contentLength = 50;
+            for (var i = 0; i < 5; i++) {
+              await Future<void>.delayed(const Duration(milliseconds: 55));
+              req.response.add(List<int>.filled(10, 65 + i));
+              await req.response.flush();
+            }
+            await req.response.close();
+          } else {
+            // Intentionally stall mid-stream longer than transferTimeout!
+            req.response.statusCode = HttpStatus.ok;
+            req.response.bufferOutput = false;
+            req.response.contentLength = 20;
+            req.response.add(List<int>.filled(10, 90));
+            await req.response.flush();
+            // Never send second half.
+          }
         });
         addTearDown(() async {
-          await stalledSubs.cancel();
-          await stalledServer.close(force: true);
+          await slowStreamSub.cancel();
+          await slowStreamServer.close(force: true);
         });
 
-        final timeoutClient = WebDavClient(
+        final streamClient = WebDavClient(
           WebDavConfig(
-            serverUrl: 'http://127.0.0.1:${stalledServer.port}/dav',
+            serverUrl: 'http://127.0.0.1:${slowStreamServer.port}/dav',
             username: 'alice',
             password: 'pw',
             remoteDirectory: '/TallySync',
           ),
-          controlTimeout: const Duration(milliseconds: 80),
-          transferTimeout: const Duration(milliseconds: 120),
+          controlTimeout: const Duration(milliseconds: 120),
+          transferTimeout: const Duration(milliseconds: 150),
         );
+        final activeBytes = await streamClient.getRelativeFileOrNull(
+          'active.bin',
+        );
+        expect(activeBytes, isNotNull);
+        expect(activeBytes!.length, 50);
+
         await expectLater(
-          timeoutClient.getRelativeFileOrNull('sync/head.json'),
+          streamClient.getRelativeFileOrNull('stalled_mid_stream.bin'),
           throwsA(
             isA<Failure>()
                 .having((f) => f.code, 'code', FailureCode.remoteUnavailable)

@@ -689,4 +689,80 @@ void main() {
       await closeCleanly();
     },
   );
+
+  testWidgets(
+    '5) B-06 atomic setAsDefaultAccount in LedgerService.createAsset & updateAsset rolls back cleanly on validation failure',
+    (tester) async {
+      final (db, closeCleanly) = await _openTestDb(tester);
+      final ledger = LedgerService(db);
+      final attSvc = BillAttachmentService(db);
+
+      late int createdDefaultId;
+      late int secondId;
+      await tester.runAsync(() async {
+        createdDefaultId = await ledger.createAsset(
+          commandId: 'atomic-create-def',
+          name: '原子默认卡',
+          initial: Money.parse('600.00'),
+          setAsDefaultAccount: true,
+        );
+        secondId = await ledger.createAsset(
+          commandId: 'atomic-create-2',
+          name: '第二张卡',
+          initial: Money.parse('200.00'),
+          setAsDefaultAccount: false,
+        );
+      });
+
+      var cfg = await tester.runAsync(attSvc.getDiyToolbarConfig);
+      expect(cfg!.autoSelectDefaultAccount, isTrue);
+      expect(cfg.defaultAccountId, createdDefaultId);
+
+      // Failing updateAsset (negative credit limit) must roll back and NOT touch ti_preference!
+      await tester.runAsync(() async {
+        await expectLater(
+          () => ledger.updateAsset(
+            commandId: 'atomic-fail-upd',
+            assetId: secondId,
+            name: '第二张卡',
+            countedInNetWorth: true,
+            limit: Money.parse('-1.00'),
+            setAsDefaultAccount: true,
+          ),
+          throwsA(anything),
+        );
+      });
+      cfg = await tester.runAsync(attSvc.getDiyToolbarConfig);
+      expect(cfg!.defaultAccountId, createdDefaultId);
+
+      // Valid updateAsset switches default atomically to secondId, then unsets it atomically.
+      await tester.runAsync(() async {
+        await ledger.updateAsset(
+          commandId: 'atomic-ok-upd-on',
+          assetId: secondId,
+          name: '第二张主力卡',
+          countedInNetWorth: true,
+          setAsDefaultAccount: true,
+        );
+      });
+      cfg = await tester.runAsync(attSvc.getDiyToolbarConfig);
+      expect(cfg!.autoSelectDefaultAccount, isTrue);
+      expect(cfg.defaultAccountId, secondId);
+
+      await tester.runAsync(() async {
+        await ledger.updateAsset(
+          commandId: 'atomic-ok-upd-off',
+          assetId: secondId,
+          name: '第二张主力卡',
+          countedInNetWorth: true,
+          setAsDefaultAccount: false,
+        );
+      });
+      cfg = await tester.runAsync(attSvc.getDiyToolbarConfig);
+      expect(cfg!.autoSelectDefaultAccount, isFalse);
+      expect(cfg.defaultAccountId, noRef);
+
+      await closeCleanly();
+    },
+  );
 }

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/adaptive.dart';
 import '../../app/providers.dart';
+import '../../core/failure.dart';
 import '../../data/db/database.dart';
 import '../../data/tools/bank_card_service.dart';
 import '../../domain/model/codes.dart';
@@ -32,9 +33,14 @@ Color? parseCardColorOrNull(String? hex) {
 
 /// Add / edit page for `BankCard` (`F-023`).
 class BankCardEditorPage extends ConsumerStatefulWidget {
-  const BankCardEditorPage({super.key, this.cardId});
+  const BankCardEditorPage({
+    super.key,
+    this.cardId,
+    @visibleForTesting this.debugInitialIconKey,
+  });
 
   final int? cardId;
+  final String? debugInitialIconKey;
 
   @override
   ConsumerState<BankCardEditorPage> createState() => _BankCardEditorPageState();
@@ -57,10 +63,51 @@ class _BankCardEditorPageState extends ConsumerState<BankCardEditorPage> {
 
   bool get _editing => widget.cardId != null;
 
-  String? _encodedCardColorMeta() => encodeBankCardVisualMeta(
-    colorHex: _explicitColorHex,
-    iconKey: _manualIconKey,
-  );
+  static String? _sanitizeIconKeyForPreview(String? raw) {
+    if (raw == null) return null;
+    final cleaned = raw
+        .replaceAll('|', '')
+        .replaceAll(RegExp(r'[\s\x00-\x1F]'), '')
+        .trim();
+    if (cleaned.isEmpty || cleaned == assetTextIconPrefix) return null;
+    return cleaned.length > 96 ? cleaned.substring(0, 96) : cleaned;
+  }
+
+  /// Non-throwing visual metadata encoder for live UI preview inside `build()`.
+  String? _encodedCardColorMeta() {
+    String? safeColor;
+    final rawColor = _explicitColorHex?.trim();
+    if (rawColor != null && rawColor.isNotEmpty) {
+      try {
+        safeColor = encodeBankCardVisualMeta(colorHex: rawColor);
+      } on Object {
+        safeColor = null;
+      }
+    }
+    final safeIcon = _sanitizeIconKeyForPreview(_manualIconKey);
+    if (safeIcon == null) return safeColor;
+    try {
+      return encodeBankCardVisualMeta(colorHex: safeColor, iconKey: safeIcon);
+    } on Object {
+      return safeColor;
+    }
+  }
+
+  /// Strict visual metadata encoder validated during `_submit()`.
+  String? _strictEncodedCardColorMeta() {
+    final rawIcon = _manualIconKey?.trim();
+    if (rawIcon != null && rawIcon.isNotEmpty) {
+      if (rawIcon.contains('|') ||
+          rawIcon.length > 96 ||
+          RegExp(r'[\s\x00-\x1F]').hasMatch(rawIcon)) {
+        throw const Failure(FailureCode.validation, '卡片图标标识无效');
+      }
+    }
+    return encodeBankCardVisualMeta(
+      colorHex: _explicitColorHex,
+      iconKey: rawIcon,
+    );
+  }
 
   @override
   void initState() {
@@ -87,6 +134,9 @@ class _BankCardEditorPageState extends ConsumerState<BankCardEditorPage> {
           _cardAssetId = card.cardAssetId;
         }
       }
+      if (widget.debugInitialIconKey != null) {
+        _manualIconKey = widget.debugInitialIconKey;
+      }
     } catch (e) {
       _error = safeMessage(e);
     }
@@ -96,22 +146,24 @@ class _BankCardEditorPageState extends ConsumerState<BankCardEditorPage> {
   }
 
   Future<void> _pickCardIcon() async {
+    final safeInitialColor = parseCardColorOrNull(_explicitColorHex) == null
+        ? null
+        : _explicitColorHex?.trim();
     final picked = await showBankCardVisualPicker(
       context,
-      initialIcon: _manualIconKey,
-      initialColor: _explicitColorHex,
+      initialIcon: _sanitizeIconKeyForPreview(_manualIconKey),
+      initialColor: safeInitialColor,
       cardType: _cardType,
       previewName: _nameController.text.trim(),
     );
     if (picked == null || !mounted) return;
     setState(() {
+      final chosenColor = picked.colorHex.trim();
+      _explicitColorHex = chosenColor.isEmpty
+          ? null
+          : chosenColor.toUpperCase();
       if (picked.icon.isEmpty) {
         _manualIconKey = null;
-        if (picked.colorHex.isEmpty) {
-          _explicitColorHex = null;
-        } else {
-          _explicitColorHex = picked.colorHex;
-        }
       } else {
         _manualIconKey = picked.icon;
       }
@@ -134,13 +186,14 @@ class _BankCardEditorPageState extends ConsumerState<BankCardEditorPage> {
       _error = null;
     });
     try {
+      final encodedCardColor = _strictEncodedCardColorMeta();
       final draft = BankCardDraft(
         cardType: _cardType,
         cardName: _nameController.text,
         cardNo: _noController.text,
         cardOwner: _ownerController.text,
         remark: _remarkController.text,
-        cardColor: _encodedCardColorMeta(),
+        cardColor: encodedCardColor,
         cardAssetId: _cardAssetId,
       );
       final svc = await ref.read(bankCardServiceProvider.future);

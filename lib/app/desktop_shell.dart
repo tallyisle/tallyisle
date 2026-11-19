@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -11,51 +12,250 @@ import '../features/automation/automation_providers.dart'
     show autoBillDraftCountProvider;
 import '../features/backup/backup_providers.dart';
 import '../features/books/book_switcher_modal.dart';
+import '../features/budget/budget_providers.dart' show budgetOffsetProvider;
 import '../features/records/desktop_record_editor_dialog.dart';
 import '../features/security/app_lock_providers.dart';
+import '../features/stats/annual_report_page.dart'
+    show annualReportYearProvider;
+import '../features/stats/category_stats_providers.dart'
+    show
+        CategoryStatsPeriodMode,
+        categoryStatsOffsetProvider,
+        categoryStatsPeriodModeProvider;
+import '../features/stats/tag_stats_providers.dart'
+    show TagStatsPeriodMode, tagStatsOffsetProvider, tagStatsPeriodModeProvider;
 import 'adaptive.dart';
 import 'providers.dart';
 
-/// Tracks whether a modal [PopupRoute] (dialog, bottom sheet, popup menu) is
-/// currently pushed on the router's root navigator so global shortcuts yield.
-class DesktopPopupRouteObserver extends NavigatorObserver {
-  int _activePopupCount = 0;
+/// Resolves the actual topmost matched route location in [router], including
+/// imperative routes pushed via `GoRouter.push` (`ImperativeRouteMatch`).
+String topmostRouterLocation(GoRouter router) {
+  final config = router.routerDelegate.currentConfiguration;
+  if (config.matches.isEmpty) {
+    return config.uri.path;
+  }
+  return config.last.matchedLocation;
+}
 
-  bool get hasActivePopup => _activePopupCount > 0;
+/// Tracks whether a modal [PopupRoute] (dialog, bottom sheet, popup menu) is
+/// currently pushed on the router's root navigator or any shell branch
+/// navigator so global shortcuts yield cleanly.
+class DesktopPopupRouteObserver extends NavigatorObserver {
+  final Set<PopupRoute<dynamic>> _activePopups = <PopupRoute<dynamic>>{};
+
+  bool get hasActivePopup => _activePopups.isNotEmpty;
+
+  /// Creates a distinct [NavigatorObserver] instance for a nested shell branch
+  /// [Navigator] that reports popup lifecycle events into this root observer.
+  NavigatorObserver createChildObserver() => _ChildPopupRouteObserver(this);
+
+  void _trackPush(Route<dynamic> route) {
+    if (route is PopupRoute<dynamic>) {
+      _activePopups.add(route);
+    }
+  }
+
+  void _trackRemove(Route<dynamic> route) {
+    if (route is PopupRoute<dynamic>) {
+      _activePopups.remove(route);
+    }
+  }
+
+  void _trackReplace(Route<dynamic>? newRoute, Route<dynamic>? oldRoute) {
+    if (oldRoute is PopupRoute<dynamic>) {
+      _activePopups.remove(oldRoute);
+    }
+    if (newRoute is PopupRoute<dynamic>) {
+      _activePopups.add(newRoute);
+    }
+  }
 
   @override
   void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
-    if (route is PopupRoute) {
-      _activePopupCount++;
-    }
+    _trackPush(route);
     super.didPush(route, previousRoute);
   }
 
   @override
   void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
-    if (route is PopupRoute && _activePopupCount > 0) {
-      _activePopupCount--;
-    }
+    _trackRemove(route);
     super.didPop(route, previousRoute);
   }
 
   @override
   void didRemove(Route<dynamic> route, Route<dynamic>? previousRoute) {
-    if (route is PopupRoute && _activePopupCount > 0) {
-      _activePopupCount--;
-    }
+    _trackRemove(route);
     super.didRemove(route, previousRoute);
   }
 
   @override
   void didReplace({Route<dynamic>? newRoute, Route<dynamic>? oldRoute}) {
-    if (oldRoute is PopupRoute && _activePopupCount > 0) {
-      _activePopupCount--;
-    }
-    if (newRoute is PopupRoute) {
-      _activePopupCount++;
-    }
+    _trackReplace(newRoute, oldRoute);
     super.didReplace(newRoute: newRoute, oldRoute: oldRoute);
+  }
+}
+
+final class _ChildPopupRouteObserver extends NavigatorObserver {
+  _ChildPopupRouteObserver(this._parent);
+
+  final DesktopPopupRouteObserver _parent;
+
+  @override
+  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    _parent._trackPush(route);
+    super.didPush(route, previousRoute);
+  }
+
+  @override
+  void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    _parent._trackRemove(route);
+    super.didPop(route, previousRoute);
+  }
+
+  @override
+  void didRemove(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    _parent._trackRemove(route);
+    super.didRemove(route, previousRoute);
+  }
+
+  @override
+  void didReplace({Route<dynamic>? newRoute, Route<dynamic>? oldRoute}) {
+    _parent._trackReplace(newRoute, oldRoute);
+    super.didReplace(newRoute: newRoute, oldRoute: oldRoute);
+  }
+}
+
+/// Shared horizontal swipe/fling + desktop trackpad two-finger horizontal
+/// scroll detector for period-based pages (`HomePage`, `BudgetPage`,
+/// `CategoryStatsPage`, `TagRankingsPage`, `TagDetailStatsPage`).
+class PeriodSwipeRegion extends StatefulWidget {
+  const PeriodSwipeRegion({
+    super.key,
+    required this.child,
+    required this.onPrevious,
+    required this.onNext,
+    this.enabled = true,
+  });
+
+  final Widget child;
+  final VoidCallback onPrevious;
+  final VoidCallback onNext;
+  final bool enabled;
+
+  @override
+  State<PeriodSwipeRegion> createState() => _PeriodSwipeRegionState();
+}
+
+class _PeriodSwipeRegionState extends State<PeriodSwipeRegion> {
+  static const Duration _trackpadCooldown = Duration(milliseconds: 320);
+
+  int? _activePointer;
+  Offset? _pointerStart;
+  Offset _pointerDelta = Offset.zero;
+  double _horizDragDx = 0.0;
+  Timer? _cooldownTimer;
+  bool _inCooldown = false;
+
+  @override
+  void dispose() {
+    _cooldownTimer?.cancel();
+    super.dispose();
+  }
+
+  void _startCooldown() {
+    _inCooldown = true;
+    _cooldownTimer?.cancel();
+    _cooldownTimer = Timer(_trackpadCooldown, () {
+      _inCooldown = false;
+    });
+  }
+
+  void _handlePointerDown(PointerDownEvent event) {
+    _activePointer = event.pointer;
+    _pointerStart = event.position;
+    _pointerDelta = Offset.zero;
+  }
+
+  void _handlePointerMove(PointerMoveEvent event) {
+    if (event.pointer == _activePointer && _pointerStart != null) {
+      _pointerDelta = event.position - _pointerStart!;
+    }
+  }
+
+  void _handlePointerSignal(PointerSignalEvent event) {
+    if (!widget.enabled || _inCooldown) return;
+    if (event is PointerScrollEvent) {
+      final dx = event.scrollDelta.dx;
+      final dy = event.scrollDelta.dy;
+      if (dx.abs() >= 18.0 && dx.abs() > dy.abs() * 1.3) {
+        _startCooldown();
+        if (dx > 0) {
+          widget.onNext();
+        } else {
+          widget.onPrevious();
+        }
+      }
+    }
+  }
+
+  void _handlePanZoomUpdate(PointerPanZoomUpdateEvent event) {
+    if (!widget.enabled || _inCooldown) return;
+    final dx = event.localPan.dx;
+    final dy = event.localPan.dy;
+    if (dx.abs() > 48.0 && dx.abs() > dy.abs() * 1.4) {
+      _startCooldown();
+      if (dx > 0) {
+        widget.onPrevious();
+      } else {
+        widget.onNext();
+      }
+    }
+  }
+
+  void _handleHorizontalDragEnd(DragEndDetails details) {
+    final dx = _pointerStart != null ? _pointerDelta.dx : _horizDragDx;
+    final dy = _pointerStart != null ? _pointerDelta.dy : 0.0;
+    _pointerStart = null;
+    _activePointer = null;
+    _horizDragDx = 0.0;
+
+    final vx = details.primaryVelocity ?? 0.0;
+    final passedDistance = dx.abs() > 48.0 && dx.abs() > dy.abs() * 1.4;
+    final passedVelocity =
+        vx.abs() > 320.0 && (dy.abs() == 0.0 || dx.abs() > dy.abs() * 1.1);
+    if (!passedDistance && !passedVelocity) return;
+
+    final dirSign = passedDistance ? dx : vx;
+    if (dirSign > 0) {
+      widget.onPrevious();
+    } else if (dirSign < 0) {
+      widget.onNext();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!widget.enabled) {
+      return widget.child;
+    }
+    return Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: _handlePointerDown,
+      onPointerMove: _handlePointerMove,
+      onPointerSignal: _handlePointerSignal,
+      onPointerPanZoomUpdate: _handlePanZoomUpdate,
+      child: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onHorizontalDragStart: (_) {
+          _horizDragDx = 0.0;
+        },
+        onHorizontalDragUpdate: (details) {
+          _horizDragDx += details.primaryDelta ?? 0.0;
+        },
+        onHorizontalDragEnd: _handleHorizontalDragEnd,
+        child: widget.child,
+      ),
+    );
   }
 }
 
@@ -180,8 +380,7 @@ class _DesktopGlobalShortcutsState
         : (hw.isControlPressed && !hw.isMetaPressed);
     final noExtraMod = !hw.isAltPressed && !hw.isShiftPressed;
 
-    final currentPath =
-        widget.router.routerDelegate.currentConfiguration.uri.path;
+    final currentPath = topmostRouterLocation(widget.router);
     final key = event.logicalKey;
 
     if (primaryMod && noExtraMod) {
@@ -213,6 +412,9 @@ class _DesktopGlobalShortcutsState
           _ => null,
         };
         if (targetBranchRoute != null) {
+          if (targetBranchRoute == '/stats') {
+            ref.read(budgetOffsetProvider.notifier).reset();
+          }
           if (currentPath != targetBranchRoute) {
             widget.router.go(targetBranchRoute);
           }
@@ -221,10 +423,11 @@ class _DesktopGlobalShortcutsState
       }
     }
 
-    // Period switching on Home (`/`):
+    // Period switching across `/`, `/calendar`, `/budget`, `/stats/category`,
+    // `/stats/tags` (`/stats/tag/...`), and `/stats/annual`:
     // - Alt/⌥ + ArrowLeft / ArrowRight
     // - `[` / `]` / `T` when no text input field is focused
-    if (currentPath == '/' && !_isTextInputFocused()) {
+    if (!_isTextInputFocused()) {
       final altOnly =
           hw.isAltPressed &&
           !hw.isControlPressed &&
@@ -238,20 +441,94 @@ class _DesktopGlobalShortcutsState
 
       if ((altOnly && key == LogicalKeyboardKey.arrowLeft) ||
           (bareKey && key == LogicalKeyboardKey.bracketLeft)) {
-        ref.read(periodOffsetProvider.notifier).previous();
-        return true;
+        return _dispatchPeriodShortcut(currentPath, step: -1);
       }
       if ((altOnly && key == LogicalKeyboardKey.arrowRight) ||
           (bareKey && key == LogicalKeyboardKey.bracketRight)) {
-        ref.read(periodOffsetProvider.notifier).next();
-        return true;
+        return _dispatchPeriodShortcut(currentPath, step: 1);
       }
       if (bareKey && key == LogicalKeyboardKey.keyT) {
-        ref.read(periodOffsetProvider.notifier).reset();
-        return true;
+        return _dispatchPeriodShortcut(currentPath, step: 0);
       }
     }
 
+    return false;
+  }
+
+  bool _dispatchPeriodShortcut(String currentPath, {required int step}) {
+    if (currentPath == '/') {
+      final n = ref.read(periodOffsetProvider.notifier);
+      if (step < 0) {
+        n.previous();
+      } else if (step > 0) {
+        n.next();
+      } else {
+        n.reset();
+      }
+      return true;
+    }
+    if (currentPath == '/calendar') {
+      final n = ref.read(calendarMonthOffsetProvider.notifier);
+      if (step < 0) {
+        n.previous();
+      } else if (step > 0) {
+        n.next();
+      } else {
+        n.reset();
+      }
+      return true;
+    }
+    if (currentPath == '/budget') {
+      final n = ref.read(budgetOffsetProvider.notifier);
+      if (step < 0) {
+        n.previous();
+      } else if (step > 0) {
+        n.next();
+      } else {
+        n.reset();
+      }
+      return true;
+    }
+    if (currentPath == '/stats/category') {
+      if (ref.read(categoryStatsPeriodModeProvider) ==
+          CategoryStatsPeriodMode.custom) {
+        return false;
+      }
+      final n = ref.read(categoryStatsOffsetProvider.notifier);
+      if (step < 0) {
+        n.previous();
+      } else if (step > 0) {
+        n.next();
+      } else {
+        n.reset();
+      }
+      return true;
+    }
+    if (currentPath == '/stats/tags' || currentPath.startsWith('/stats/tag/')) {
+      if (ref.read(tagStatsPeriodModeProvider) == TagStatsPeriodMode.all) {
+        return false;
+      }
+      final n = ref.read(tagStatsOffsetProvider.notifier);
+      if (step < 0) {
+        n.previous();
+      } else if (step > 0) {
+        n.next();
+      } else {
+        n.reset();
+      }
+      return true;
+    }
+    if (currentPath == '/stats/annual') {
+      final n = ref.read(annualReportYearProvider.notifier);
+      if (step < 0) {
+        n.previous();
+      } else if (step > 0) {
+        n.next();
+      } else {
+        n.reset();
+      }
+      return true;
+    }
     return false;
   }
 
@@ -287,6 +564,9 @@ class _DesktopNavigationScaffoldState
   }
 
   void _goBranch(int index) {
+    if (index == 1) {
+      ref.read(budgetOffsetProvider.notifier).reset();
+    }
     widget.shell.goBranch(
       index,
       initialLocation: index == widget.shell.currentIndex,
@@ -301,7 +581,27 @@ class _DesktopNavigationScaffoldState
     final bookName = ref.watch(currentBookProvider).value?.name ?? '帐屿';
     final draftCount = ref.watch(autoBillDraftCountProvider);
     final syncSettings = ref.watch(cloudSyncSettingsProvider).value;
-    final syncCursor = ref.watch(cloudSyncCursorProvider).value;
+    final rawSyncCursor = ref.watch(cloudSyncCursorProvider).value;
+    final davConfig = ref.watch(webDavConfigProvider).value;
+    final s3Config = ref.watch(s3ConfigProvider).value;
+    final activeBackend = syncSettings?.backend ?? CloudBackendType.none;
+    final targetFingerprint = switch (activeBackend) {
+      CloudBackendType.webdav =>
+        davConfig != null && davConfig.isConfigured
+            ? davConfig.targetFingerprint
+            : null,
+      CloudBackendType.s3 =>
+        s3Config != null && s3Config.isConfigured
+            ? s3Config.targetFingerprint
+            : null,
+      CloudBackendType.none => null,
+    };
+    final LocalSyncCursor? syncCursor =
+        activeBackend == CloudBackendType.none ||
+            targetFingerprint == null ||
+            targetFingerprint.isEmpty
+        ? null
+        : rawSyncCursor?.scopedToTarget(targetFingerprint);
     final modLabel = DesktopAdaptive.primaryModifierLabel(context);
 
     return Scaffold(
@@ -1042,7 +1342,7 @@ _describeSyncStatus(CloudSyncSettings? settings, LocalSyncCursor? cursor) {
   }
 
   final lastMs = cursor?.lastSyncedAtMs;
-  if (lastMs == null || lastMs <= 0) {
+  if (cursor == null || cursor.isNeverSynced || lastMs == null || lastMs <= 0) {
     return (
       isCloudActive: true,
       icon: Icons.cloud_sync_outlined,
@@ -1055,10 +1355,11 @@ _describeSyncStatus(CloudSyncSettings? settings, LocalSyncCursor? cursor) {
   String pad2(int v) => v.toString().padLeft(2, '0');
   final stamp =
       '${pad2(dt.month)}-${pad2(dt.day)} ${pad2(dt.hour)}:${pad2(dt.minute)}';
+  final rev = cursor.lastSyncedRevision;
   return (
     isCloudActive: true,
     icon: Icons.cloud_done_outlined,
     shortLabel: '${backend.displayLabel} · $stamp',
-    tooltip: '${backend.displayLabel} 最近同步于 $stamp（点击管理）',
+    tooltip: '${backend.displayLabel} 已同步 r$rev · $stamp（点击管理）',
   );
 }

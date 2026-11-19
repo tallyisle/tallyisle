@@ -456,7 +456,7 @@
     {
       "ref": "builtin:bank-icon.norincogroup",
       "relatedEntityCode": null,
-      "displayName": "中国银行业协会",
+      "displayName": "兵器财务",
       "aliases": [
         "norincogroup"
       ],
@@ -544,7 +544,7 @@
     {
       "ref": "builtin:bank-icon.xmbankonline",
       "relatedEntityCode": null,
-      "displayName": "浙江农村信用社联合社",
+      "displayName": "厦门银行",
       "aliases": [
         "xmbankonline"
       ],
@@ -566,7 +566,7 @@
     {
       "ref": "builtin:bank-icon.bankoftianjin",
       "relatedEntityCode": null,
-      "displayName": "天津农商",
+      "displayName": "天津银行",
       "aliases": [
         "bankoftianjin"
       ],
@@ -1875,7 +1875,7 @@
     {
       "ref": "builtin:bank-icon.jnbank",
       "relatedEntityCode": null,
-      "displayName": "合肥科技农商",
+      "displayName": "济宁银行",
       "aliases": [
         "jnbank"
       ],
@@ -2194,9 +2194,11 @@
     {
       "ref": "builtin:bank-icon.sc",
       "relatedEntityCode": null,
-      "displayName": "枣庄银行",
+      "displayName": "渣打银行",
       "aliases": [
-        "sc"
+        "sc",
+        "渣打",
+        "Standard Chartered"
       ],
       "assetPath": "assets/icons/banks/library/sc.svg",
       "sourceFile": "logos/sc-rect.svg",

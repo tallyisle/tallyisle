@@ -4,7 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../app/adaptive.dart';
-import '../../app/desktop_shell.dart' show DesktopNavigationScaffold;
+import '../../app/desktop_shell.dart'
+    show DesktopNavigationScaffold, PeriodSwipeRegion, topmostRouterLocation;
 import '../../app/providers.dart';
 import '../../data/db/database.dart';
 import '../../domain/model/codes.dart';
@@ -40,7 +41,7 @@ bool _isHomeTopmostActive(BuildContext context) {
   }
   final router = GoRouter.maybeOf(context);
   if (router != null) {
-    final path = router.routerDelegate.currentConfiguration.uri.path;
+    final path = topmostRouterLocation(router);
     if (path != '/') return false;
   }
   return true;
@@ -94,6 +95,7 @@ class _HomePageState extends ConsumerState<HomePage> {
   bool _pickingBook = false;
   String? _selectedRecordId;
   int? _lastBookId;
+  int? _lastPeriodOffset;
 
   @override
   void dispose() {
@@ -179,6 +181,19 @@ class _HomePageState extends ConsumerState<HomePage> {
       _lastBookId = bookId;
     }
 
+    final currentPeriodOffset = ref.watch(periodOffsetProvider);
+    if (_lastPeriodOffset != null && _lastPeriodOffset != currentPeriodOffset) {
+      _selectedRecordId = null;
+    }
+    _lastPeriodOffset = currentPeriodOffset;
+
+    final periodRecords = ref.watch(periodRecordsProvider);
+    if (_selectedRecordId != null &&
+        periodRecords is AsyncData<List<LedgerRecord>> &&
+        !periodRecords.value.any((r) => r.recordId == _selectedRecordId)) {
+      _selectedRecordId = null;
+    }
+
     final isDesktop = DesktopAdaptive.isDesktop(context);
     final isExpandedDesktop = DesktopAdaptive.isExpandedDesktop(context);
 
@@ -193,14 +208,12 @@ class _HomePageState extends ConsumerState<HomePage> {
         onOpenRecordDetail: _handleOpenRecordDetail,
         onDeleteRecord: _handleDeleteRecordFromMenu,
       );
-      if (selectedId == null) {
-        body = masterPane;
-      } else {
-        final scheme = Theme.of(context).colorScheme;
-        body = Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Expanded(child: masterPane),
+      final scheme = Theme.of(context).colorScheme;
+      body = Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(child: masterPane),
+          if (selectedId != null) ...[
             VerticalDivider(
               width: 1,
               thickness: 1,
@@ -222,8 +235,8 @@ class _HomePageState extends ConsumerState<HomePage> {
               ),
             ),
           ],
-        );
-      }
+        ],
+      );
     }
 
     final hasExpandedSidebar =
@@ -306,6 +319,40 @@ class _HomePageState extends ConsumerState<HomePage> {
   }
 }
 
+class _HomeResetPeriodPill extends StatelessWidget {
+  const _HomeResetPeriodPill({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Material(
+      color: scheme.secondaryContainer,
+      borderRadius: BorderRadius.circular(999),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        key: const Key('home-reset-period-btn'),
+        borderRadius: BorderRadius.circular(999),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          child: Text(
+            '回本月',
+            maxLines: 1,
+            softWrap: false,
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: scheme.onSecondaryContainer,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _HomeBody extends ConsumerWidget {
   const _HomeBody();
 
@@ -322,79 +369,111 @@ class _HomeBody extends ConsumerWidget {
     final settings =
         ref.watch(appSettingsProvider).value ?? AppSettings.defaults;
     final assetOverview = ref.watch(assetOverviewProvider).value;
+    final periodOffset = ref.watch(periodOffsetProvider);
     final offset = ref.read(periodOffsetProvider.notifier);
 
-    return CustomScrollView(
-      slivers: [
-        SliverToBoxAdapter(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-            child: Row(
-              children: [
-                IconButton(
-                  tooltip: '上一期',
-                  onPressed: offset.previous,
-                  icon: const Icon(Icons.chevron_left),
-                ),
-                Expanded(
-                  child: Center(
-                    child: Text(
-                      period.value == null
-                          ? ''
-                          : '${period.value!.year}年${period.value!.month}月',
-                      style: Theme.of(context).textTheme.titleMedium,
+    final periodTitle = period.value == null
+        ? ''
+        : '${period.value!.year}年${period.value!.month}月';
+
+    return PeriodSwipeRegion(
+      onPrevious: offset.previous,
+      onNext: offset.next,
+      child: CustomScrollView(
+        slivers: [
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              child: Row(
+                children: [
+                  IconButton(
+                    tooltip: '上一期',
+                    onPressed: offset.previous,
+                    icon: const Icon(Icons.chevron_left),
+                  ),
+                  Expanded(
+                    child: Center(
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Flexible(
+                            child: InkWell(
+                              borderRadius: BorderRadius.circular(6),
+                              onTap: periodOffset != 0 ? offset.reset : null,
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 4,
+                                  vertical: 2,
+                                ),
+                                child: Text(
+                                  periodTitle,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: Theme.of(
+                                    context,
+                                  ).textTheme.titleMedium,
+                                ),
+                              ),
+                            ),
+                          ),
+                          if (periodOffset != 0) ...[
+                            const SizedBox(width: 6),
+                            _HomeResetPeriodPill(onTap: offset.reset),
+                          ],
+                        ],
+                      ),
                     ),
                   ),
-                ),
-                IconButton(
-                  tooltip: '下一期',
-                  onPressed: offset.next,
-                  icon: const Icon(Icons.chevron_right),
-                ),
-              ],
+                  IconButton(
+                    tooltip: '下一期',
+                    onPressed: offset.next,
+                    icon: const Icon(Icons.chevron_right),
+                  ),
+                ],
+              ),
             ),
           ),
-        ),
-        if (settings.showHomeAssetSummaryBanner)
+          if (settings.showHomeAssetSummaryBanner)
+            SliverToBoxAdapter(
+              child: _HomeAssetSummaryBanner(
+                overview: assetOverview,
+                onTap: () => context.go('/assets'),
+              ),
+            ),
           SliverToBoxAdapter(
-            child: _HomeAssetSummaryBanner(
-              overview: assetOverview,
-              onTap: () => context.go('/assets'),
-            ),
+            child: _SummaryCard(summary.value ?? IncomeExpense.zero),
           ),
-        SliverToBoxAdapter(
-          child: _SummaryCard(summary.value ?? IncomeExpense.zero),
-        ),
-        if (settings.showHomeBudgetCard && ref.watch(periodOffsetProvider) == 0)
-          SliverToBoxAdapter(
-            child: BudgetSummaryCard(
-              fixedOffset: 0,
-              hideWhenEmpty: true,
-              onTap: () {
-                ref.read(budgetOffsetProvider.notifier).reset();
-                context.push('/budget');
-              },
+          if (settings.showHomeBudgetCard && periodOffset == 0)
+            SliverToBoxAdapter(
+              child: BudgetSummaryCard(
+                fixedOffset: 0,
+                hideWhenEmpty: true,
+                onTap: () {
+                  ref.read(budgetOffsetProvider.notifier).reset();
+                  context.push('/budget');
+                },
+              ),
             ),
-          ),
-        ...switch (records) {
-          AsyncData(:final value) when value.isEmpty => [
-            const SliverFillRemaining(
-              hasScrollBody: false,
-              child: Center(child: Text('本期暂无账单')),
-            ),
-          ],
-          AsyncData(:final value) => [
-            SliverList.list(
-              children: _grouped(context, value, categories, assets),
-            ),
-            const SliverToBoxAdapter(child: SizedBox(height: 96)),
-          ],
-          AsyncError(:final error) => [
-            SliverFillRemaining(child: ErrorView(error)),
-          ],
-          _ => [const SliverFillRemaining(child: Loading())],
-        },
-      ],
+          ...switch (records) {
+            AsyncData(:final value) when value.isEmpty => [
+              const SliverFillRemaining(
+                hasScrollBody: false,
+                child: Center(child: Text('本期暂无账单')),
+              ),
+            ],
+            AsyncData(:final value) => [
+              SliverList.list(
+                children: _grouped(context, value, categories, assets),
+              ),
+              const SliverToBoxAdapter(child: SizedBox(height: 96)),
+            ],
+            AsyncError(:final error) => [
+              SliverFillRemaining(child: ErrorView(error)),
+            ],
+            _ => [const SliverFillRemaining(child: Loading())],
+          },
+        ],
+      ),
     );
   }
 
@@ -510,99 +589,131 @@ class _DesktopHomeBody extends ConsumerWidget {
         ? ''
         : '${period.value!.year}年${period.value!.month}月';
 
-    return CustomScrollView(
-      slivers: [
-        if (isExpandedDesktop)
-          SliverToBoxAdapter(
-            child: _DesktopExpandedOverviewHeader(
-              periodTitle: periodTitle,
-              onPreviousPeriod: offset.previous,
-              onNextPeriod: offset.next,
-              summary: summary.value ?? IncomeExpense.zero,
-              showAssetBanner: settings.showHomeAssetSummaryBanner,
-              assetOverview: assetOverview,
-              onOpenAssets: () => context.go('/assets'),
-              showBudgetCard: settings.showHomeBudgetCard && periodOffset == 0,
-              onOpenBudget: () {
-                ref.read(budgetOffsetProvider.notifier).reset();
-                context.push('/budget');
-              },
-            ),
-          )
-        else ...[
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-              child: Row(
-                children: [
-                  IconButton(
-                    tooltip: '上一期',
-                    onPressed: offset.previous,
-                    icon: const Icon(Icons.chevron_left),
-                  ),
-                  Expanded(
-                    child: Center(
-                      child: Text(
-                        periodTitle,
-                        style: Theme.of(context).textTheme.titleMedium,
-                      ),
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: '下一期',
-                    onPressed: offset.next,
-                    icon: const Icon(Icons.chevron_right),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          if (settings.showHomeAssetSummaryBanner)
+    return PeriodSwipeRegion(
+      onPrevious: offset.previous,
+      onNext: offset.next,
+      child: CustomScrollView(
+        slivers: [
+          if (isExpandedDesktop)
             SliverToBoxAdapter(
-              child: _HomeAssetSummaryBanner(
-                overview: assetOverview,
-                onTap: () => context.go('/assets'),
-              ),
-            ),
-          SliverToBoxAdapter(
-            child: _SummaryCard(summary.value ?? IncomeExpense.zero),
-          ),
-          if (settings.showHomeBudgetCard && periodOffset == 0)
-            SliverToBoxAdapter(
-              child: BudgetSummaryCard(
-                fixedOffset: 0,
-                hideWhenEmpty: true,
-                onTap: () {
+              child: _DesktopExpandedOverviewHeader(
+                periodTitle: periodTitle,
+                periodOffset: periodOffset,
+                onPreviousPeriod: offset.previous,
+                onNextPeriod: offset.next,
+                onResetPeriod: offset.reset,
+                summary: summary.value ?? IncomeExpense.zero,
+                showAssetBanner: settings.showHomeAssetSummaryBanner,
+                assetOverview: assetOverview,
+                onOpenAssets: () => context.go('/assets'),
+                showBudgetCard:
+                    settings.showHomeBudgetCard && periodOffset == 0,
+                onOpenBudget: () {
                   ref.read(budgetOffsetProvider.notifier).reset();
                   context.push('/budget');
                 },
               ),
-            ),
-        ],
-        ...switch (records) {
-          AsyncData(:final value) when value.isEmpty => [
-            const SliverFillRemaining(
-              hasScrollBody: false,
-              child: Center(child: Text('本期暂无账单')),
-            ),
-          ],
-          AsyncData(:final value) => [
-            SliverList.list(
-              children: _buildDesktopGrouped(
-                context,
-                value,
-                categories,
-                assets,
+            )
+          else ...[
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                child: Row(
+                  children: [
+                    IconButton(
+                      tooltip: '上一期',
+                      onPressed: offset.previous,
+                      icon: const Icon(Icons.chevron_left),
+                    ),
+                    Expanded(
+                      child: Center(
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Flexible(
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(6),
+                                onTap: periodOffset != 0 ? offset.reset : null,
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 4,
+                                    vertical: 2,
+                                  ),
+                                  child: Text(
+                                    periodTitle,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: Theme.of(
+                                      context,
+                                    ).textTheme.titleMedium,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            if (periodOffset != 0) ...[
+                              const SizedBox(width: 6),
+                              _HomeResetPeriodPill(onTap: offset.reset),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: '下一期',
+                      onPressed: offset.next,
+                      icon: const Icon(Icons.chevron_right),
+                    ),
+                  ],
+                ),
               ),
             ),
-            const SliverToBoxAdapter(child: SizedBox(height: 64)),
+            if (settings.showHomeAssetSummaryBanner)
+              SliverToBoxAdapter(
+                child: _HomeAssetSummaryBanner(
+                  overview: assetOverview,
+                  onTap: () => context.go('/assets'),
+                ),
+              ),
+            SliverToBoxAdapter(
+              child: _SummaryCard(summary.value ?? IncomeExpense.zero),
+            ),
+            if (settings.showHomeBudgetCard && periodOffset == 0)
+              SliverToBoxAdapter(
+                child: BudgetSummaryCard(
+                  fixedOffset: 0,
+                  hideWhenEmpty: true,
+                  onTap: () {
+                    ref.read(budgetOffsetProvider.notifier).reset();
+                    context.push('/budget');
+                  },
+                ),
+              ),
           ],
-          AsyncError(:final error) => [
-            SliverFillRemaining(child: ErrorView(error)),
-          ],
-          _ => [const SliverFillRemaining(child: Loading())],
-        },
-      ],
+          ...switch (records) {
+            AsyncData(:final value) when value.isEmpty => [
+              const SliverFillRemaining(
+                hasScrollBody: false,
+                child: Center(child: Text('本期暂无账单')),
+              ),
+            ],
+            AsyncData(:final value) => [
+              SliverList.list(
+                children: _buildDesktopGrouped(
+                  context,
+                  value,
+                  categories,
+                  assets,
+                ),
+              ),
+              const SliverToBoxAdapter(child: SizedBox(height: 64)),
+            ],
+            AsyncError(:final error) => [
+              SliverFillRemaining(child: ErrorView(error)),
+            ],
+            _ => [const SliverFillRemaining(child: Loading())],
+          },
+        ],
+      ),
     );
   }
 
@@ -648,8 +759,10 @@ class _DesktopHomeBody extends ConsumerWidget {
 class _DesktopExpandedOverviewHeader extends ConsumerWidget {
   const _DesktopExpandedOverviewHeader({
     required this.periodTitle,
+    required this.periodOffset,
     required this.onPreviousPeriod,
     required this.onNextPeriod,
+    required this.onResetPeriod,
     required this.summary,
     required this.showAssetBanner,
     required this.assetOverview,
@@ -659,8 +772,10 @@ class _DesktopExpandedOverviewHeader extends ConsumerWidget {
   });
 
   final String periodTitle;
+  final int periodOffset;
   final VoidCallback onPreviousPeriod;
   final VoidCallback onNextPeriod;
+  final VoidCallback onResetPeriod;
   final IncomeExpense summary;
   final bool showAssetBanner;
   final AssetOverview? assetOverview;
@@ -700,13 +815,21 @@ class _DesktopExpandedOverviewHeader extends ConsumerWidget {
           ),
           ConstrainedBox(
             constraints: const BoxConstraints(minWidth: 96),
-            child: Center(
-              child: Text(
-                periodTitle,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.w600,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(6),
+              onTap: periodOffset != 0 ? onResetPeriod : null,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                child: Center(
+                  widthFactor: 1.0,
+                  child: Text(
+                    periodTitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -717,6 +840,13 @@ class _DesktopExpandedOverviewHeader extends ConsumerWidget {
             onPressed: onNextPeriod,
             icon: const Icon(Icons.chevron_right, size: 20),
           ),
+          if (periodOffset != 0) ...[
+            const SizedBox(width: 2),
+            Padding(
+              padding: const EdgeInsets.only(right: 4),
+              child: _HomeResetPeriodPill(onTap: onResetPeriod),
+            ),
+          ],
         ],
       ),
     );
@@ -997,8 +1127,9 @@ class _DesktopHomeRecordTileState
     final deletable = !isGeneratedTransferFeeRecord(r);
     final overlay =
         Overlay.of(context).context.findRenderObject() as RenderBox?;
+    final localPos = overlay?.globalToLocal(globalPosition) ?? globalPosition;
     final position = RelativeRect.fromRect(
-      globalPosition & const Size(1, 1),
+      localPos & const Size(1, 1),
       Offset.zero & (overlay?.size ?? const Size(1280, 800)),
     );
 

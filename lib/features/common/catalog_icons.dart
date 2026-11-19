@@ -1702,11 +1702,12 @@ const List<String> assetMonogramPresets = <String>[
   '🧧',
 ];
 
-/// Trims [raw] and safely extracts at most 2 Unicode grapheme clusters via
-/// Dart's [Characters] API so multi-codepoint emojis (flags, skin tones, ZWJ
-/// sequences like `👨‍👩‍👧`, `💳`, `🏦`) never split surrogate pairs.
+/// Trims [raw], strips `|` and whitespace/control characters, and safely
+/// extracts at most 2 Unicode grapheme clusters via Dart's [Characters] API so
+/// multi-codepoint emojis (flags, skin tones, ZWJ sequences like `👨‍👩‍👧`, `💳`,
+/// `🏦`) never split surrogate pairs or corrupt `|icon:` metadata encoding.
 String normalizeAssetCustomText(String raw) {
-  final cleaned = raw.replaceAll(RegExp(r'[\r\n\t]'), '').trim();
+  final cleaned = raw.replaceAll(RegExp(r'[|\s\x00-\x1F]'), '').trim();
   if (cleaned.isEmpty) return '';
   return cleaned.characters.take(2).toString();
 }
@@ -2668,6 +2669,7 @@ class AssetIconAvatar extends StatelessWidget {
         duration: const Duration(milliseconds: 160),
         width: size,
         height: size,
+        clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
           color: plateColor,
           shape: BoxShape.circle,
@@ -2832,7 +2834,7 @@ Future<({String icon, String colorHex})?> showBankCardVisualPicker(
       ? AssetType.credit
       : AssetType.normal;
   final current = resolveBankCardVisual(
-    cardColorMeta: encodeBankCardVisualMeta(
+    cardColorMeta: tryEncodeBankCardVisualMeta(
       colorHex: initialColor,
       iconKey: initialIcon,
     ),
@@ -3635,7 +3637,10 @@ class _AssetVisualPickerSheetState extends State<_AssetVisualPickerSheet> {
         TextField(
           key: const Key('asset-picker-custom-text-input'),
           controller: _customTextController,
-          inputFormatters: <TextInputFormatter>[_twoGraphemeInputFormatter],
+          inputFormatters: <TextInputFormatter>[
+            FilteringTextInputFormatter.deny(RegExp(r'[|]')),
+            _twoGraphemeInputFormatter,
+          ],
           decoration: InputDecoration(
             labelText: '自定义文字或 Emoji（1~2 字）',
             hintText: '输入 1~2 个字或 Emoji，如：招行、工资、💳',

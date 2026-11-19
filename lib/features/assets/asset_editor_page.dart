@@ -11,8 +11,6 @@ import '../../data/db/database.dart';
 import '../../domain/ledger/asset_json.dart';
 import '../../domain/model/codes.dart';
 import '../../domain/rules/bank_icon_catalog.dart';
-import '../attachments/attachment_providers.dart'
-    show billAttachmentServiceProvider;
 import '../common/catalog_icons.dart';
 import '../common/common.dart';
 import '../common/desktop_modal_page.dart';
@@ -71,7 +69,6 @@ class _AssetEditorPageState extends ConsumerState<AssetEditorPage> {
   bool counted = true, busy = false, loading = true;
   bool isDefaultAccount = false;
   bool _userTouchedDefaultSwitch = false;
-  int _defaultSaveSeq = 0;
   int billDay = 1;
   int repaymentDay = 20;
   bool repaymentAfter = false;
@@ -163,19 +160,12 @@ class _AssetEditorPageState extends ConsumerState<AssetEditorPage> {
         assetType: original!.type,
         subType: original!.subType,
       );
-      final wasGenericFallback =
-          (original!.icon == 'bank_card' &&
-              (original!.color == null ||
-                  original!.color!.toUpperCase() == '#1565C0')) ||
-          (original!.icon == 'credit_card' &&
-              (original!.color == null ||
-                  original!.color!.toUpperCase() == '#E53935'));
       final wasAutoVisual =
-          wasGenericFallback ||
-          ((original!.icon.isEmpty || original!.icon == origDefault.iconKey) &&
-              (original!.color == null ||
-                  original!.color!.toUpperCase() ==
-                      origDefault.colorHex.toUpperCase()));
+          (original!.icon.isEmpty || original!.icon == origDefault.iconKey) &&
+          (original!.color == null ||
+              original!.color!.trim().isEmpty ||
+              original!.color!.trim().toUpperCase() ==
+                  origDefault.colorHex.toUpperCase());
       final nameChanged = name.text.trim() != original!.name;
       if (nameChanged && wasAutoVisual) {
         effectiveIcon = null;
@@ -239,6 +229,9 @@ class _AssetEditorPageState extends ConsumerState<AssetEditorPage> {
       final visual = _currentVisual();
       final service = await ref.read(ledgerServiceProvider.future);
       final rem = remark.text.trim().isEmpty ? null : remark.text.trim();
+      final effectiveDefaultArg = type == AssetType.debt
+          ? null
+          : isDefaultAccount;
       if (editing) {
         await service.updateAsset(
           commandId: ids.forPayload([
@@ -253,6 +246,7 @@ class _AssetEditorPageState extends ConsumerState<AssetEditorPage> {
             creditLimit?.toJson(),
             creditJson,
             extraJson,
+            effectiveDefaultArg,
           ]),
           assetId: widget.assetId!,
           name: name.text,
@@ -265,52 +259,13 @@ class _AssetEditorPageState extends ConsumerState<AssetEditorPage> {
           limit: creditLimit,
           creditInfo: creditJson,
           extraInfo: extraJson,
+          setAsDefaultAccount: effectiveDefaultArg,
         );
-        final latestAsset = await (service.db.select(
-          service.db.assets,
-        )..where((a) => a.id.equals(widget.assetId!))).getSingleOrNull();
-        final statusNow = latestAsset?.status ?? original?.status;
-        final effectiveSetDefault =
-            statusNow == AssetStatus.active &&
-            type != AssetType.debt &&
-            isDefaultAccount;
-        final attService = await ref.read(billAttachmentServiceProvider.future);
-        final latestDiy = await attService.getDiyToolbarConfig();
-        if (effectiveSetDefault) {
-          if (!latestDiy.autoSelectDefaultAccount ||
-              latestDiy.defaultAccountId != widget.assetId!) {
-            await attService.saveDiyToolbarConfig(
-              commandId: ids.forPayload([
-                'asset-set-default',
-                _defaultSaveSeq++,
-                widget.assetId,
-                true,
-              ]),
-              config: latestDiy.copyWithDefaultAccount(
-                autoSelectDefaultAccount: true,
-                defaultAccountId: widget.assetId!,
-              ),
-            );
-          }
-        } else if (latestDiy.defaultAccountId == widget.assetId!) {
-          await attService.saveDiyToolbarConfig(
-            commandId: ids.forPayload([
-              'asset-clear-default',
-              _defaultSaveSeq++,
-              widget.assetId,
-              false,
-            ]),
-            config: latestDiy.copyWithDefaultAccount(
-              autoSelectDefaultAccount: false,
-              defaultAccountId: noRef,
-            ),
-          );
-        }
       } else {
         // Credit accounts: the user enters the current debt as a positive number.
         var initial = _parseAmount(balance.text);
         if (isCredit) initial = -initial;
-        final createdId = await service.createAsset(
+        await service.createAsset(
           commandId: ids.forPayload([
             'create',
             type,
@@ -324,6 +279,7 @@ class _AssetEditorPageState extends ConsumerState<AssetEditorPage> {
             creditLimit?.toJson(),
             creditJson,
             extraJson,
+            effectiveDefaultArg,
           ]),
           name: name.text,
           initial: initial,
@@ -336,31 +292,17 @@ class _AssetEditorPageState extends ConsumerState<AssetEditorPage> {
           limit: creditLimit,
           creditInfo: creditJson,
           extraInfo: extraJson,
+          setAsDefaultAccount: effectiveDefaultArg,
         );
-        if (isDefaultAccount && type != AssetType.debt) {
-          final attService = await ref.read(
-            billAttachmentServiceProvider.future,
-          );
-          final latestDiy = await attService.getDiyToolbarConfig();
-          await attService.saveDiyToolbarConfig(
-            commandId: ids.forPayload([
-              'asset-create-default',
-              _defaultSaveSeq++,
-              createdId,
-              true,
-            ]),
-            config: latestDiy.copyWithDefaultAccount(
-              autoSelectDefaultAccount: true,
-              defaultAccountId: createdId,
-            ),
-          );
-        }
       }
       if (mounted) {
-        if (GoRouter.maybeOf(context) != null) {
-          if (context.canPop()) context.pop();
-        } else if (Navigator.of(context).canPop()) {
-          Navigator.of(context).pop();
+        final route = ModalRoute.of(context);
+        if (route != null && route.settings is! Page) {
+          await Navigator.of(context).maybePop();
+        } else if (GoRouter.maybeOf(context)?.canPop() ?? false) {
+          context.pop();
+        } else {
+          await Navigator.of(context).maybePop();
         }
       }
     } catch (e) {

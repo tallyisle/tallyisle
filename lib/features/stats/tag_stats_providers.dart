@@ -8,7 +8,6 @@ import '../../domain/ledger/record_relations.dart';
 import '../../domain/rules/billing_period.dart';
 import '../../domain/rules/category_stats.dart';
 import '../../domain/rules/tag_stats.dart';
-import 'category_stats_providers.dart' show categoryStatsDimensionProvider;
 
 /// Period mode for tag statistics (`全部 | 按月 | 按年`).
 enum TagStatsPeriodMode { all, month, year }
@@ -204,10 +203,12 @@ final class TagRankingsPeriodModeNotifier extends Notifier<TagStatsPeriodMode> {
   void setMode(TagStatsPeriodMode mode) => state = mode;
 }
 
-final tagRankingsPeriodModeProvider =
+final tagStatsPeriodModeProvider =
     NotifierProvider<TagRankingsPeriodModeNotifier, TagStatsPeriodMode>(
       TagRankingsPeriodModeNotifier.new,
     );
+
+final tagRankingsPeriodModeProvider = tagStatsPeriodModeProvider;
 
 final class TagRankingsOffsetNotifier extends Notifier<int> {
   @override
@@ -215,12 +216,14 @@ final class TagRankingsOffsetNotifier extends Notifier<int> {
   void previous() => state = state - 1;
   void next() => state = state + 1;
   void reset() => state = 0;
+  void setOffset(int offset) => state = offset;
 }
 
-final tagRankingsOffsetProvider =
-    NotifierProvider<TagRankingsOffsetNotifier, int>(
-      TagRankingsOffsetNotifier.new,
-    );
+final tagStatsOffsetProvider = NotifierProvider<TagRankingsOffsetNotifier, int>(
+  TagRankingsOffsetNotifier.new,
+);
+
+final tagRankingsOffsetProvider = tagStatsOffsetProvider;
 
 final class TagRankingsBucketNotifier extends Notifier<StatBucket> {
   @override
@@ -411,7 +414,7 @@ final tagRankingsViewProvider = Provider<AsyncValue<TagRankingsViewData>>((
 // Stats Hub (/stats) Tag Overview Card provider
 // ---------------------------------------------------------------------------
 
-/// Top tag rankings for the current month (`offset = 0`) & dimension on `StatsPage`.
+/// Top tag rankings for the current month (`offset = 0`) expense on `StatsPage`.
 final statsHubTagRankingsProvider = Provider<AsyncValue<TagRankingsResult>>((
   ref,
 ) {
@@ -419,7 +422,6 @@ final statsHubTagRankingsProvider = Provider<AsyncValue<TagRankingsResult>>((
   final bookAsync = ref.watch(currentBookProvider);
   final tagsAsync = ref.watch(tagStatsAllTagsProvider);
   final baseCurrAsync = ref.watch(tagStatsBaseCurrencyProvider);
-  final dim = ref.watch(categoryStatsDimensionProvider);
 
   if (bookIdAsync.isLoading || bookAsync.isLoading || tagsAsync.isLoading) {
     return const AsyncValue.loading();
@@ -471,7 +473,7 @@ final statsHubTagRankingsProvider = Provider<AsyncValue<TagRankingsResult>>((
       entries: entries,
       recordTagIds: recordTagIds,
       tags: tagMetas,
-      bucket: StatBucket.fromStatDimension(dim),
+      bucket: StatBucket.expense,
       targetCurrency: baseCurrAsync.value ?? 'CNY',
     ),
   );

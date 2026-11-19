@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:drift/drift.dart' show driftRuntimeOptions;
 import 'package:drift/native.dart';
+import 'package:flutter/gestures.dart' show kLongPressTimeout;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -542,12 +543,14 @@ void main() {
       );
       await settle(tester);
 
-      // Only "工具栏项目与顺序" remains ("工具栏预览" and "默认账户" removed).
-      expect(find.text('工具栏项目与顺序'), findsOneWidget);
+      // Top section header, preview, default account, and up/down arrow buttons are absent.
+      expect(find.text('工具栏项目与顺序'), findsNothing);
       expect(find.text('工具栏预览'), findsNothing);
       expect(find.text('默认账户'), findsNothing);
       expect(find.byKey(const Key('diy-toolbar-preview')), findsNothing);
       expect(find.byKey(const Key('diy-default-account-switch')), findsNothing);
+      expect(find.byKey(const Key('diy-up-tags')), findsNothing);
+      expect(find.byKey(const Key('diy-down-tags')), findsNothing);
 
       Switch switchFor(String key) =>
           tester.widget<Switch>(find.byKey(Key('diy-switch-$key')));
@@ -616,13 +619,21 @@ void main() {
       await settle(tester);
       expect(switchFor('auto_select_first_cat').value, isTrue);
 
-      await tester.scrollUntilVisible(
-        find.byKey(const Key('diy-up-auto_select_first_cat')),
-        160,
-        scrollable: find.byType(Scrollable).last,
+      final rowAutoCat = find.byKey(
+        const ValueKey('diy-row-auto_select_first_cat'),
       );
+      final rowMulDiv = find.byKey(const ValueKey('diy-row-keypad_mul_div'));
+      await tester.ensureVisible(rowAutoCat);
       await settle(tester);
-      await tester.tap(find.byKey(const Key('diy-up-auto_select_first_cat')));
+      final dragStart = tester.getCenter(rowAutoCat);
+      final dragOffset = tester.getCenter(rowMulDiv) - dragStart;
+      final dragGesture = await tester.startGesture(dragStart);
+      await tester.pump(kLongPressTimeout + const Duration(milliseconds: 100));
+      for (var i = 0; i < 12; i++) {
+        await dragGesture.moveBy(dragOffset / 12.0);
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      await dragGesture.up();
       await settle(tester);
 
       final persistedAfterEdits = await tester.runAsync(
@@ -661,12 +672,9 @@ void main() {
         ),
         isFalse,
       );
-      expect(
-        persistedAfterReset.datePickerStyle,
-        RecordDatePickerStyle.calendar,
-      );
-      expect(persistedAfterReset.timePickerStyle, RecordTimePickerStyle.wheel);
-      // Resetting DIY toolbar items preserves default account configured in AssetEditorPage.
+      // B-09: Resetting DIY toolbar items preserves BOTH date/time picker styles AND default account!
+      expect(persistedAfterReset.datePickerStyle, RecordDatePickerStyle.wheel);
+      expect(persistedAfterReset.timePickerStyle, RecordTimePickerStyle.dial);
       expect(persistedAfterReset.autoSelectDefaultAccount, isTrue);
       expect(persistedAfterReset.defaultAccountId, 1);
 

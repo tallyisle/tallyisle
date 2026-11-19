@@ -959,12 +959,13 @@ SyncDecision decideSyncAction({
   required String localDataSha256,
   required bool isLocalFreshEmpty,
   required CloudSyncHead? remoteHead,
+  bool hasRemoteOrphanLatestDb = false,
   SyncConflictResolution? resolution,
 }) {
   final cleanLocalSha = localDataSha256.toLowerCase();
 
   if (resolution == SyncConflictResolution.useRemote) {
-    if (remoteHead == null) {
+    if (remoteHead == null && !hasRemoteOrphanLatestDb) {
       throw const Failure(FailureCode.validation, '云端尚无同步快照，无法采用云端版本');
     }
     return const SyncDecision(action: SyncActionType.pullRemote);
@@ -976,8 +977,12 @@ SyncDecision decideSyncAction({
     );
   }
 
-  // Remote head missing -> initialize cloud with local state at revision 1.
+  // Remote head missing: if `sync/latest_db.tally` already exists on remote
+  // without `sync/head.json`, NEVER treat the remote as an empty cloud!
   if (remoteHead == null) {
+    if (hasRemoteOrphanLatestDb) {
+      return const SyncDecision(action: SyncActionType.conflict);
+    }
     return const SyncDecision(
       action: SyncActionType.pushLocal,
       nextRevision: 1,

@@ -120,7 +120,10 @@ Page<Object?> _adaptiveRecordDetailPage(
 
 /// Semantic routes (ADR-015). Mapping to the original app's 73 routes is kept
 /// in docs/reference/ as modules are implemented.
-GoRouter buildRouter({List<NavigatorObserver>? observers}) => GoRouter(
+GoRouter buildRouter({
+  List<NavigatorObserver>? observers,
+  DesktopPopupRouteObserver? popupObserver,
+}) => GoRouter(
   initialLocation: '/',
   observers: observers,
   routes: [
@@ -128,19 +131,31 @@ GoRouter buildRouter({List<NavigatorObserver>? observers}) => GoRouter(
       builder: (context, state, shell) => _Shell(shell),
       branches: [
         StatefulShellBranch(
+          observers: popupObserver == null
+              ? null
+              : <NavigatorObserver>[popupObserver.createChildObserver()],
           routes: [GoRoute(path: '/', builder: (_, _) => const HomePage())],
         ),
         StatefulShellBranch(
+          observers: popupObserver == null
+              ? null
+              : <NavigatorObserver>[popupObserver.createChildObserver()],
           routes: [
             GoRoute(path: '/stats', builder: (_, _) => const StatsPage()),
           ],
         ),
         StatefulShellBranch(
+          observers: popupObserver == null
+              ? null
+              : <NavigatorObserver>[popupObserver.createChildObserver()],
           routes: [
             GoRoute(path: '/assets', builder: (_, _) => const AssetsPage()),
           ],
         ),
         StatefulShellBranch(
+          observers: popupObserver == null
+              ? null
+              : <NavigatorObserver>[popupObserver.createChildObserver()],
           routes: [GoRoute(path: '/me', builder: (_, _) => const MePage())],
         ),
       ],

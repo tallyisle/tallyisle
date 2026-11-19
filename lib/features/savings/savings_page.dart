@@ -145,6 +145,7 @@ class _SavingsPageState extends ConsumerState<SavingsPage>
       floatingActionButton: !isDesktop && _tabIndex == 0
           ? FloatingActionButton.extended(
               key: const Key('add_savings_plan_fab'),
+              heroTag: 'fab-savings',
               onPressed: _openEditor,
               icon: const Icon(Icons.add),
               label: const Text('新建计划'),

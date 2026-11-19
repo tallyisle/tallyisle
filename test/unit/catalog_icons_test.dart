@@ -516,6 +516,10 @@ void main() {
         expect(normalizeAssetCustomText('👨‍👩‍👧🏦🎉'), '👨‍👩‍👧🏦');
         expect(normalizeAssetCustomText('🇨🇳🧧✨'), '🇨🇳🧧');
         expect(normalizeAssetCustomText('   '), '');
+        // B-19: `|` and whitespace/control characters are stripped safely:
+        expect(normalizeAssetCustomText('A|B'), 'AB');
+        expect(normalizeAssetCustomText('||'), '');
+        expect(normalizeAssetCustomText('招|行|卡'), '招行');
 
         final zhaohang = resolveAssetVisual(
           iconKey: 'text:招商银行',

@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 
 import '../../app/adaptive.dart';
 import '../../app/providers.dart';
@@ -12,6 +11,8 @@ import '../../data/db/database.dart';
 import '../../domain/rules/csv_excel_rules.dart';
 import '../../platform/files.dart';
 import '../common/common.dart';
+import '../common/desktop_modal_page.dart';
+import '../me/me_page.dart' show MeEmbeddedNavigationScope;
 import 'csv_export_page.dart';
 import 'csv_transfer_providers.dart';
 import 'import_batches_page.dart';
@@ -214,20 +215,25 @@ class _CsvImportPageState extends ConsumerState<CsvImportPage> {
     }
   }
 
-  bool _canSwitchMeDualPane() {
-    if (!DesktopAdaptive.isExpandedDesktop(context)) return false;
-    final router = GoRouter.maybeOf(context);
-    if (router == null) return false;
-    try {
-      return GoRouterState.of(context).uri.path == '/me';
-    } on Object {
-      return router.routerDelegate.currentConfiguration.uri.path == '/me';
-    }
-  }
-
   void _openImportBatches() {
-    if (_canSwitchMeDualPane()) {
-      context.go('/me?section=${Uri.encodeComponent('/import/batches')}');
+    if (!mounted) return;
+    final route = ModalRoute.of(context);
+    final isPopupModal = route is PopupRoute;
+    final isImperativeRoute = route != null && route.settings is! Page;
+    final meScope = (isPopupModal || isImperativeRoute)
+        ? null
+        : MeEmbeddedNavigationScope.maybeOf(context);
+    if (meScope != null) {
+      meScope.onSelectRoute('/import/batches');
+      return;
+    }
+    if (isPopupModal || isImperativeRoute) {
+      unawaited(
+        pushDesktopModalOrMaterialRoute<void>(
+          context,
+          child: const ImportBatchesPage(),
+        ),
+      );
       return;
     }
     Navigator.of(
@@ -236,15 +242,28 @@ class _CsvImportPageState extends ConsumerState<CsvImportPage> {
   }
 
   void _openCsvExport() {
-    if (widget.saveFile == null && _canSwitchMeDualPane()) {
-      context.go('/me?section=${Uri.encodeComponent('/export/csv')}');
+    if (!mounted) return;
+    final route = ModalRoute.of(context);
+    final isPopupModal = route is PopupRoute;
+    final isImperativeRoute = route != null && route.settings is! Page;
+    final meScope =
+        (isPopupModal || isImperativeRoute || widget.saveFile != null)
+        ? null
+        : MeEmbeddedNavigationScope.maybeOf(context);
+    if (meScope != null) {
+      meScope.onSelectRoute('/export/csv');
       return;
     }
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => CsvExportPage(saveFile: widget.saveFile),
-      ),
-    );
+    final exportPage = CsvExportPage(saveFile: widget.saveFile);
+    if (isPopupModal || isImperativeRoute) {
+      unawaited(
+        pushDesktopModalOrMaterialRoute<void>(context, child: exportPage),
+      );
+      return;
+    }
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute<void>(builder: (_) => exportPage));
   }
 
   @override

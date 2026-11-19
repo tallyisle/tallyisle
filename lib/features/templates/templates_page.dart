@@ -1,4 +1,6 @@
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 
@@ -202,8 +204,11 @@ class _TemplatesPageState extends ConsumerState<TemplatesPage> {
 
   int _selectedBookFilter = _allBooksSentinel;
   bool _busy = false;
+  List<int>? _optimisticAllTemplateIds;
+  int _reorderSeq = 0;
   final CommandIds _toggleIds = CommandIds();
   final CommandIds _deleteIds = CommandIds();
+  final CommandIds _reorderIds = CommandIds();
 
   int? get _bookFilterOrNull =>
       _selectedBookFilter == _allBooksSentinel ? null : _selectedBookFilter;
@@ -308,6 +313,96 @@ class _TemplatesPageState extends ConsumerState<TemplatesPage> {
     }
   }
 
+  List<RecordTemplate> _applyOptimisticTemplates(
+    List<RecordTemplate> rawTemplates,
+  ) {
+    final optimisticIds = _optimisticAllTemplateIds;
+    if (optimisticIds == null || optimisticIds.length != rawTemplates.length) {
+      return rawTemplates;
+    }
+    final byId = <int, RecordTemplate>{for (final t in rawTemplates) t.id: t};
+    final ordered = <RecordTemplate>[];
+    for (final id in optimisticIds) {
+      final match = byId[id];
+      if (match == null) return rawTemplates;
+      ordered.add(match);
+    }
+    return ordered;
+  }
+
+  static List<int> _permuteSubsetSlots({
+    required List<int> fullIds,
+    required List<int> reorderedSubsetIds,
+  }) {
+    final subsetSet = reorderedSubsetIds.toSet();
+    var cursor = 0;
+    return <int>[
+      for (final id in fullIds)
+        if (subsetSet.contains(id)) reorderedSubsetIds[cursor++] else id,
+    ];
+  }
+
+  Future<void> _reorderVisibleTemplates({
+    required List<RecordTemplate> allTemplates,
+    required List<RecordTemplate> visibleRows,
+    required int oldIndex,
+    required int newIndex,
+  }) async {
+    if (_busy || oldIndex == newIndex) return;
+    final nextVisible = List<RecordTemplate>.from(visibleRows);
+    final moved = nextVisible.removeAt(oldIndex);
+    nextVisible.insert(newIndex, moved);
+
+    final mergedIds = _permuteSubsetSlots(
+      fullIds: allTemplates.map((t) => t.id).toList(),
+      reorderedSubsetIds: nextVisible.map((t) => t.id).toList(),
+    );
+
+    setState(() {
+      _optimisticAllTemplateIds = mergedIds;
+    });
+
+    try {
+      final svc = await ref.read(templateRemarkServiceProvider.future);
+      await svc.reorderTemplates(
+        commandId: _reorderIds.forPayload(<Object?>[
+          'reorder-tpl',
+          _reorderSeq++,
+          mergedIds,
+        ]),
+        orderedIds: mergedIds,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _optimisticAllTemplateIds = null;
+      });
+      _showTemplateSnack(context, safeMessage(e));
+    }
+  }
+
+  Widget _buildReorderProxy(
+    Widget child,
+    int index,
+    Animation<double> animation,
+  ) {
+    return AnimatedBuilder(
+      animation: animation,
+      builder: (context, child) {
+        final t = Curves.easeInOut.transform(animation.value);
+        final scheme = Theme.of(context).colorScheme;
+        return Material(
+          elevation: 6 * t,
+          color: Colors.transparent,
+          shadowColor: scheme.shadow.withValues(alpha: 0.28),
+          borderRadius: BorderRadius.circular(14),
+          child: child,
+        );
+      },
+      child: child,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final selectedType = ref.watch(templateTypeFilterProvider);
@@ -328,13 +423,22 @@ class _TemplatesPageState extends ConsumerState<TemplatesPage> {
         ? _selectedBookFilter
         : _allBooksSentinel;
 
-    final templatesAsync = ref.watch(
-      templatesQueryProvider((
-        bookId: controlledBookFilter == _allBooksSentinel
-            ? null
-            : controlledBookFilter,
-        type: selectedType,
-      )),
+    const allFilterQuery = (bookId: null, type: null);
+    final allTemplatesAsync = ref.watch(templatesQueryProvider(allFilterQuery));
+    ref.listen<AsyncValue<List<RecordTemplate>>>(
+      templatesQueryProvider(allFilterQuery),
+      (_, next) {
+        final rows = next.value;
+        final optimistic = _optimisticAllTemplateIds;
+        if (rows == null || optimistic == null) return;
+        final dbIds = rows.map((t) => t.id).toList();
+        if (dbIds.length != optimistic.length ||
+            listEquals(dbIds, optimistic)) {
+          if (mounted) {
+            setState(() => _optimisticAllTemplateIds = null);
+          }
+        }
+      },
     );
 
     final isDesktop = DesktopAdaptive.isDesktop(context);
@@ -393,6 +497,7 @@ class _TemplatesPageState extends ConsumerState<TemplatesPage> {
             ? null
             : FloatingActionButton.extended(
                 key: const Key('add_template_fab'),
+                heroTag: 'fab-templates',
                 onPressed: _openCreate,
                 icon: const Icon(Icons.add),
                 label: const Text('新建模板'),
@@ -472,7 +577,22 @@ class _TemplatesPageState extends ConsumerState<TemplatesPage> {
                   ),
                 ),
                 Expanded(
-                  child: asyncBody(templatesAsync, (rows) {
+                  child: asyncBody(allTemplatesAsync, (rawAll) {
+                    final allTemplates = _applyOptimisticTemplates(rawAll);
+                    final targetBookId =
+                        controlledBookFilter == _allBooksSentinel
+                        ? null
+                        : controlledBookFilter;
+                    final rows = allTemplates.where((t) {
+                      if (targetBookId != null && t.bookId != targetBookId) {
+                        return false;
+                      }
+                      if (selectedType != null && t.type != selectedType) {
+                        return false;
+                      }
+                      return true;
+                    }).toList();
+
                     if (rows.isEmpty) {
                       return Center(
                         key: const Key('templates_empty_state'),
@@ -487,7 +607,11 @@ class _TemplatesPageState extends ConsumerState<TemplatesPage> {
                         ),
                       );
                     }
-                    return ListView.separated(
+                    return ReorderableListView.builder(
+                      key: ValueKey(
+                        'templates-reorder-list-${targetBookId ?? "all"}-${selectedType ?? "all"}',
+                      ),
+                      buildDefaultDragHandles: false,
                       padding: EdgeInsets.fromLTRB(
                         16,
                         4,
@@ -495,20 +619,75 @@ class _TemplatesPageState extends ConsumerState<TemplatesPage> {
                         isDesktop ? 24 : 88,
                       ),
                       itemCount: rows.length,
-                      separatorBuilder: (_, _) => const SizedBox(height: 8),
+                      onReorderStart: (_) {
+                        if (!isDesktop) {
+                          HapticFeedback.selectionClick();
+                        }
+                      },
+                      proxyDecorator: _buildReorderProxy,
+                      onReorderItem: (oldIndex, newIndex) =>
+                          _reorderVisibleTemplates(
+                            allTemplates: allTemplates,
+                            visibleRows: rows,
+                            oldIndex: oldIndex,
+                            newIndex: newIndex,
+                          ),
                       itemBuilder: (context, index) {
                         final t = rows[index];
-                        return _TemplateCardTile(
-                          template: t,
-                          bookMap: bookMap,
-                          catMap: catMap,
-                          assetMap: assetMap,
-                          tagMap: tagMap,
-                          busy: _busy,
-                          onEdit: () => _openEdit(t),
-                          onDelete: () => _deleteTemplate(t),
-                          onApplyInstant: () => _applyInstant(t),
-                          onToggleAutoSave: (v) => _toggleAutoSave(t, v),
+                        final dragHandle = isDesktop
+                            ? ReorderableDragStartListener(
+                                index: index,
+                                enabled: !_busy,
+                                child: MouseRegion(
+                                  cursor: _busy
+                                      ? SystemMouseCursors.basic
+                                      : SystemMouseCursors.grab,
+                                  child: Padding(
+                                    key: Key('template-drag-handle-${t.id}'),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 2,
+                                      vertical: 2,
+                                    ),
+                                    child: Icon(
+                                      Icons.drag_handle_rounded,
+                                      size: 20,
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.outline,
+                                    ),
+                                  ),
+                                ),
+                              )
+                            : null;
+                        final cardWidget = Padding(
+                          padding: EdgeInsets.only(
+                            bottom: index == rows.length - 1 ? 0 : 8,
+                          ),
+                          child: _TemplateCardTile(
+                            template: t,
+                            bookMap: bookMap,
+                            catMap: catMap,
+                            assetMap: assetMap,
+                            tagMap: tagMap,
+                            busy: _busy,
+                            dragHandle: dragHandle,
+                            onEdit: () => _openEdit(t),
+                            onDelete: () => _deleteTemplate(t),
+                            onApplyInstant: () => _applyInstant(t),
+                            onToggleAutoSave: (v) => _toggleAutoSave(t, v),
+                          ),
+                        );
+                        if (isDesktop) {
+                          return KeyedSubtree(
+                            key: ValueKey('template-reorder-item-${t.id}'),
+                            child: cardWidget,
+                          );
+                        }
+                        return ReorderableDelayedDragStartListener(
+                          key: ValueKey('template-reorder-item-${t.id}'),
+                          index: index,
+                          enabled: !_busy,
+                          child: cardWidget,
                         );
                       },
                     );
@@ -531,6 +710,7 @@ class _TemplateCardTile extends StatelessWidget {
     required this.assetMap,
     required this.tagMap,
     required this.busy,
+    this.dragHandle,
     required this.onEdit,
     required this.onDelete,
     required this.onApplyInstant,
@@ -543,6 +723,7 @@ class _TemplateCardTile extends StatelessWidget {
   final Map<int, Asset> assetMap;
   final Map<String, Tag> tagMap;
   final bool busy;
+  final Widget? dragHandle;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
   final VoidCallback onApplyInstant;
@@ -603,6 +784,10 @@ class _TemplateCardTile extends StatelessWidget {
             children: [
               Row(
                 children: [
+                  if (dragHandle != null) ...[
+                    dragHandle!,
+                    const SizedBox(width: 8),
+                  ],
                   Expanded(
                     child: Text(
                       title,

@@ -13,9 +13,12 @@ import '../../data/migration/cross_migration_service.dart';
 import '../../domain/rules/penny_backup.dart';
 import '../../platform/files.dart';
 import '../common/common.dart';
+import '../common/desktop_modal_page.dart';
 import '../csv_transfer/csv_import_page.dart';
 import '../csv_transfer/import_batches_page.dart';
+import '../me/me_page.dart' show MeEmbeddedNavigationScope;
 import '../penny_import/penny_import_providers.dart';
+import '../receipt/receipt_diy_providers.dart' show diyToolbarConfigProvider;
 import '../reminder/reminder_providers.dart';
 import 'migration_providers.dart';
 
@@ -83,6 +86,7 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
       ..invalidate(assetBooksProvider)
       ..invalidate(currenciesProvider)
       ..invalidate(tagsProvider)
+      ..invalidate(diyToolbarConfigProvider)
       ..invalidate(remindersProvider)
       ..invalidate(reminderCountProvider);
   }
@@ -320,48 +324,40 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
     );
   }
 
-  bool _isInMeDualPane(GoRouter router) {
-    if (!DesktopAdaptive.isExpandedDesktop(context)) return false;
-    try {
-      return GoRouterState.of(context).uri.path == '/me';
-    } on Object {
-      return router.routerDelegate.currentConfiguration.uri.path == '/me';
+  void _navigateToChildPage({required String route, required Widget page}) {
+    if (!mounted) return;
+    final modalRoute = ModalRoute.of(context);
+    final isPopupModal = modalRoute is PopupRoute;
+    final isImperativeRoute =
+        modalRoute != null && modalRoute.settings is! Page;
+    final meScope = (isPopupModal || isImperativeRoute)
+        ? null
+        : MeEmbeddedNavigationScope.maybeOf(context);
+    if (meScope != null) {
+      meScope.onSelectRoute(route);
+      return;
     }
-  }
-
-  void _openCsvImport() {
+    if (isPopupModal || isImperativeRoute) {
+      unawaited(pushDesktopModalOrMaterialRoute<void>(context, child: page));
+      return;
+    }
     final router = GoRouter.maybeOf(context);
     if (router != null) {
-      if (_isInMeDualPane(router)) {
-        context.go('/me?section=${Uri.encodeComponent('/import/csv')}');
-        return;
-      }
-      unawaited(router.push('/import/csv'));
+      unawaited(router.push(route));
       return;
     }
     unawaited(
-      Navigator.of(
-        context,
-      ).push(MaterialPageRoute<void>(builder: (_) => const CsvImportPage())),
+      Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => page)),
     );
   }
 
-  void _openImportBatches() {
-    final router = GoRouter.maybeOf(context);
-    if (router != null) {
-      if (_isInMeDualPane(router)) {
-        context.go('/me?section=${Uri.encodeComponent('/import/batches')}');
-        return;
-      }
-      unawaited(router.push('/import/batches'));
-      return;
-    }
-    unawaited(
-      Navigator.of(context).push(
-        MaterialPageRoute<void>(builder: (_) => const ImportBatchesPage()),
-      ),
-    );
-  }
+  void _openCsvImport() =>
+      _navigateToChildPage(route: '/import/csv', page: const CsvImportPage());
+
+  void _openImportBatches() => _navigateToChildPage(
+    route: '/import/batches',
+    page: const ImportBatchesPage(),
+  );
 
   @override
   Widget build(BuildContext context) {

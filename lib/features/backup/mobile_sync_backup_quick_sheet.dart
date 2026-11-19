@@ -54,7 +54,7 @@ final mobileSyncQuickPreviewProvider = Provider<MobileSyncQuickPreview>((ref) {
           deviceId: 'pending',
         ),
       );
-  final cursor = ref
+  final rawCursor = ref
       .watch(cloudSyncCursorProvider)
       .maybeWhen(data: (c) => c, orElse: LocalSyncCursor.initial);
 
@@ -77,6 +77,15 @@ final mobileSyncQuickPreviewProvider = Provider<MobileSyncQuickPreview>((ref) {
       statusLine: status,
     );
   }
+
+  final targetFingerprint = switch (settings.backend) {
+    CloudBackendType.webdav => davConfig.targetFingerprint,
+    CloudBackendType.s3 => s3Config.targetFingerprint,
+    CloudBackendType.none => '',
+  };
+  final cursor = targetFingerprint.isEmpty
+      ? rawCursor
+      : rawCursor.scopedToTarget(targetFingerprint);
 
   final status = (cursor.isNeverSynced || cursor.lastSyncedAtMs == null)
       ? '${settings.backend.displayLabel} 已就绪 · 换设备前请先同步'
@@ -173,7 +182,8 @@ Future<void> showMobileSyncBackupQuickSheet(BuildContext context) {
     context: context,
     useSafeArea: true,
     isScrollControlled: true,
-    showDragHandle: true,
+    enableDrag: false,
+    showDragHandle: false,
     builder: (_) => const _MobileSyncBackupQuickSheet(),
   );
 }
@@ -191,6 +201,10 @@ class _MobileSyncBackupQuickSheetState
   bool _busy = false;
   String? _busyText;
 
+  bool get _isCloudSyncInProgress => ref
+      .read(cloudSyncInProgressProvider)
+      .maybeWhen(data: (v) => v, orElse: () => false);
+
   void _showToast(ScaffoldMessengerState? messenger, String text) {
     messenger
       ?..clearSnackBars()
@@ -198,7 +212,7 @@ class _MobileSyncBackupQuickSheetState
   }
 
   Future<void> _runSync({SyncConflictResolution? resolution}) async {
-    if (_busy) return;
+    if (_busy || _isCloudSyncInProgress) return;
     final messenger = ScaffoldMessenger.maybeOf(context);
     setState(() {
       _busy = true;
@@ -251,7 +265,7 @@ class _MobileSyncBackupQuickSheetState
   }
 
   Future<void> _runLocalBackup() async {
-    if (_busy) return;
+    if (_busy || _isCloudSyncInProgress) return;
     final messenger = ScaffoldMessenger.maybeOf(context);
     setState(() {
       _busy = true;
@@ -279,7 +293,7 @@ class _MobileSyncBackupQuickSheetState
   }
 
   Future<void> _runExportExternal() async {
-    if (_busy) return;
+    if (_busy || _isCloudSyncInProgress) return;
     final messenger = ScaffoldMessenger.maybeOf(context);
     final fileAccess = ref.read(backupFileAccessProvider);
     final canSave =
@@ -328,6 +342,10 @@ class _MobileSyncBackupQuickSheetState
     final isDark = theme.brightness == Brightness.dark;
     // Touch databaseProvider inside the sheet so status streams warm up cleanly.
     ref.watch(databaseProvider);
+    final syncInProgress = ref
+        .watch(cloudSyncInProgressProvider)
+        .maybeWhen(data: (v) => v, orElse: () => false);
+    final busy = _busy || syncInProgress;
     final preview = ref.watch(mobileSyncQuickPreviewProvider);
     final fileAccess = ref.watch(backupFileAccessProvider);
     final canSave =
@@ -335,208 +353,240 @@ class _MobileSyncBackupQuickSheetState
     final canShare =
         fileAccess.shareCapability.state == CapabilityState.available;
 
-    return Padding(
-      key: const Key('mobile_sync_backup_quick_sheet'),
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
+    return PopScope(
+      canPop: !busy,
+      child: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onVerticalDragEnd: busy
+            ? null
+            : (details) {
+                if ((details.primaryVelocity ?? 0) > 280) {
+                  Navigator.of(context).maybePop();
+                }
+              },
+        child: Padding(
+          key: const Key('mobile_sync_backup_quick_sheet'),
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Icon(Icons.cloud_sync_outlined, size: 22, color: scheme.primary),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  '快捷同步与备份',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
+              Center(
+                child: Container(
+                  width: 32,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: 12),
+                  decoration: BoxDecoration(
+                    color: scheme.onSurfaceVariant.withValues(alpha: 0.4),
+                    borderRadius: BorderRadius.circular(2),
                   ),
                 ),
               ),
-              TextButton(
-                key: const Key('quick_sheet_open_backup_page'),
-                style: TextButton.styleFrom(
-                  visualDensity: VisualDensity.compact,
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                ),
-                onPressed: _busy
-                    ? null
-                    : () {
-                        final parentCtx = Navigator.of(context).context;
-                        Navigator.of(context).pop();
-                        _openFullBackupPage(parentCtx);
-                      },
-                child: const Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text('完整设置'),
-                    Icon(Icons.chevron_right_rounded, size: 18),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Text(
-            preview.statusLine,
-            key: const Key('quick_sheet_status_text'),
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: scheme.onSurfaceVariant,
-            ),
-          ),
-          const SizedBox(height: 10),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(
-              color: isDark
-                  ? scheme.tertiaryContainer.withValues(alpha: 0.32)
-                  : scheme.tertiaryContainer.withValues(alpha: 0.55),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(
-                  Icons.info_outline_rounded,
-                  size: 16,
-                  color: scheme.onTertiaryContainer,
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    '提示：快照云同步适用于单设备主力记账，换设备前请先同步接力，避免多台设备离线并发记账。',
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: scheme.onTertiaryContainer,
-                      height: 1.35,
-                    ),
+              Row(
+                children: [
+                  Icon(
+                    Icons.cloud_sync_outlined,
+                    size: 22,
+                    color: scheme.primary,
                   ),
-                ),
-              ],
-            ),
-          ),
-          if (_busy) ...[
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                const SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    _busyText ?? '正在处理…',
-                    style: theme.textTheme.bodySmall,
-                  ),
-                ),
-              ],
-            ),
-          ],
-          const SizedBox(height: 14),
-          if (preview.isCloudReady) ...[
-            FilledButton.icon(
-              key: const Key('quick_sheet_sync_now_button'),
-              onPressed: _busy ? null : _runSync,
-              icon: const Icon(Icons.sync_rounded, size: 18),
-              label: const Text('立即多端同步'),
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    key: const Key('quick_sheet_local_backup_button'),
-                    onPressed: _busy ? null : _runLocalBackup,
-                    icon: const Icon(Icons.save_outlined, size: 17),
-                    label: const FittedBox(
-                      fit: BoxFit.scaleDown,
-                      child: Text('生成本地备份', maxLines: 1, softWrap: false),
-                    ),
-                  ),
-                ),
-                if (canSave || canShare) ...[
                   const SizedBox(width: 8),
                   Expanded(
-                    child: OutlinedButton.icon(
-                      key: const Key('quick_sheet_export_save_button'),
-                      onPressed: _busy ? null : _runExportExternal,
-                      icon: Icon(
-                        canSave
-                            ? Icons.download_outlined
-                            : Icons.ios_share_rounded,
-                        size: 17,
-                      ),
-                      label: FittedBox(
-                        fit: BoxFit.scaleDown,
-                        child: Text(
-                          canSave ? '另存为 .tally' : '分享 .tally',
-                          maxLines: 1,
-                          softWrap: false,
-                        ),
+                    child: Text(
+                      '快捷同步与备份',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
                       ),
                     ),
                   ),
-                ],
-              ],
-            ),
-          ] else ...[
-            FilledButton.icon(
-              key: const Key('quick_sheet_local_backup_button'),
-              onPressed: _busy ? null : _runLocalBackup,
-              icon: const Icon(Icons.save_outlined, size: 18),
-              label: const Text('立即生成本地备份'),
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    key: const Key('quick_sheet_configure_sync_button'),
-                    onPressed: _busy
+                  TextButton(
+                    key: const Key('quick_sheet_open_backup_page'),
+                    style: TextButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                    ),
+                    onPressed: busy
                         ? null
                         : () {
                             final parentCtx = Navigator.of(context).context;
                             Navigator.of(context).pop();
                             _openFullBackupPage(parentCtx);
                           },
-                    icon: const Icon(Icons.cloud_outlined, size: 17),
-                    label: const FittedBox(
-                      fit: BoxFit.scaleDown,
-                      child: Text('配置云同步', maxLines: 1, softWrap: false),
-                    ),
-                  ),
-                ),
-                if (canSave || canShare) ...[
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      key: const Key('quick_sheet_export_save_button'),
-                      onPressed: _busy ? null : _runExportExternal,
-                      icon: Icon(
-                        canSave
-                            ? Icons.download_outlined
-                            : Icons.ios_share_rounded,
-                        size: 17,
-                      ),
-                      label: FittedBox(
-                        fit: BoxFit.scaleDown,
-                        child: Text(
-                          canSave ? '另存为 .tally' : '分享 .tally',
-                          maxLines: 1,
-                          softWrap: false,
-                        ),
-                      ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text('完整设置'),
+                        Icon(Icons.chevron_right_rounded, size: 18),
+                      ],
                     ),
                   ),
                 ],
+              ),
+              const SizedBox(height: 6),
+              Text(
+                preview.statusLine,
+                key: const Key('quick_sheet_status_text'),
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  color: isDark
+                      ? scheme.tertiaryContainer.withValues(alpha: 0.32)
+                      : scheme.tertiaryContainer.withValues(alpha: 0.55),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(
+                      Icons.info_outline_rounded,
+                      size: 16,
+                      color: scheme.onTertiaryContainer,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        '提示：快照云同步适用于单设备主力记账，换设备前请先同步接力，避免多台设备离线并发记账。',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: scheme.onTertiaryContainer,
+                          height: 1.35,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (busy) ...[
+                const SizedBox(height: 12),
+                Row(
+                  key: const Key('quick_sheet_busy_indicator'),
+                  children: [
+                    const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        _busyText ?? (syncInProgress ? '正在执行多端云同步…' : '正在处理…'),
+                        style: theme.textTheme.bodySmall,
+                      ),
+                    ),
+                  ],
+                ),
               ],
-            ),
-          ],
-        ],
+              const SizedBox(height: 14),
+              if (preview.isCloudReady) ...[
+                FilledButton.icon(
+                  key: const Key('quick_sheet_sync_now_button'),
+                  onPressed: busy ? null : _runSync,
+                  icon: const Icon(Icons.sync_rounded, size: 18),
+                  label: const Text('立即多端同步'),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        key: const Key('quick_sheet_local_backup_button'),
+                        onPressed: busy ? null : _runLocalBackup,
+                        icon: const Icon(Icons.save_outlined, size: 17),
+                        label: const FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text('生成本地备份', maxLines: 1, softWrap: false),
+                        ),
+                      ),
+                    ),
+                    if (canSave || canShare) ...[
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          key: const Key('quick_sheet_export_save_button'),
+                          onPressed: busy ? null : _runExportExternal,
+                          icon: Icon(
+                            canSave
+                                ? Icons.download_outlined
+                                : Icons.ios_share_rounded,
+                            size: 17,
+                          ),
+                          label: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text(
+                              canSave ? '另存为 .tally' : '分享 .tally',
+                              maxLines: 1,
+                              softWrap: false,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ] else ...[
+                FilledButton.icon(
+                  key: const Key('quick_sheet_local_backup_button'),
+                  onPressed: busy ? null : _runLocalBackup,
+                  icon: const Icon(Icons.save_outlined, size: 18),
+                  label: const Text('立即生成本地备份'),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        key: const Key('quick_sheet_configure_sync_button'),
+                        onPressed: busy
+                            ? null
+                            : () {
+                                final parentCtx = Navigator.of(context).context;
+                                Navigator.of(context).pop();
+                                _openFullBackupPage(parentCtx);
+                              },
+                        icon: const Icon(Icons.cloud_outlined, size: 17),
+                        label: const FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text('配置云同步', maxLines: 1, softWrap: false),
+                        ),
+                      ),
+                    ),
+                    if (canSave || canShare) ...[
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          key: const Key('quick_sheet_export_save_button'),
+                          onPressed: busy ? null : _runExportExternal,
+                          icon: Icon(
+                            canSave
+                                ? Icons.download_outlined
+                                : Icons.ios_share_rounded,
+                            size: 17,
+                          ),
+                          label: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text(
+                              canSave ? '另存为 .tally' : '分享 .tally',
+                              maxLines: 1,
+                              softWrap: false,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ],
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -564,8 +614,15 @@ class _MobileMeSyncQuickCardState extends ConsumerState<MobileMeSyncQuickCard> {
       ..showSnackBar(SnackBar(content: Text(text)));
   }
 
+  bool get _isCloudSyncInProgress =>
+      (ref.exists(databaseProvider) ||
+          ref.exists(cloudSyncInProgressProvider)) &&
+      ref
+          .read(cloudSyncInProgressProvider)
+          .maybeWhen(data: (v) => v, orElse: () => false);
+
   Future<void> _handleOneTap(MobileSyncQuickPreview preview) async {
-    if (_busy) return;
+    if (_busy || _isCloudSyncInProgress) return;
     setState(() => _busy = true);
     CloudSyncOutcome? pendingConflict;
     try {
@@ -632,6 +689,14 @@ class _MobileMeSyncQuickCardState extends ConsumerState<MobileMeSyncQuickCard> {
     final scheme = theme.colorScheme;
     final isDark = theme.brightness == Brightness.dark;
     final preview = ref.watch(mobileSyncQuickPreviewProvider);
+    final syncInProgress =
+        (ref.exists(databaseProvider) ||
+            ref.exists(cloudSyncInProgressProvider))
+        ? ref
+              .watch(cloudSyncInProgressProvider)
+              .maybeWhen(data: (v) => v, orElse: () => false)
+        : false;
+    final busy = _busy || syncInProgress;
     final accent = isDark ? const Color(0xFF6EE7B7) : const Color(0xFF1F7A53);
     final fgTone = Color.lerp(accent, scheme.primary, 0.18)!;
 
@@ -681,7 +746,8 @@ class _MobileMeSyncQuickCardState extends ConsumerState<MobileMeSyncQuickCard> {
                       ),
                       const SizedBox(height: 1),
                       Text(
-                        preview.statusLine,
+                        syncInProgress ? '正在执行多端云同步…' : preview.statusLine,
+                        key: const Key('me-mobile-sync-quick-status'),
                         maxLines: 1,
                         softWrap: false,
                         overflow: TextOverflow.ellipsis,
@@ -703,8 +769,8 @@ class _MobileMeSyncQuickCardState extends ConsumerState<MobileMeSyncQuickCard> {
                       vertical: 6,
                     ),
                   ),
-                  onPressed: _busy ? null : () => _handleOneTap(preview),
-                  child: _busy
+                  onPressed: busy ? null : () => _handleOneTap(preview),
+                  child: busy
                       ? const SizedBox(
                           width: 14,
                           height: 14,

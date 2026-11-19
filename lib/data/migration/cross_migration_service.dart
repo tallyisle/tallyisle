@@ -8,7 +8,9 @@ import 'package:sqlite3/sqlite3.dart' as raw_sqlite;
 
 import '../../core/failure.dart';
 import '../../core/money.dart';
+import '../../domain/model/codes.dart';
 import '../../domain/rules/ios_migration_rules.dart';
+import '../../domain/rules/receipt_diy_rules.dart';
 import '../../domain/rules/reminder_rules.dart';
 import '../../platform/notifications.dart';
 import '../db/database.dart';
@@ -1863,6 +1865,27 @@ final class CrossMigrationService {
                   value: '$activeBookId',
                 ),
               );
+
+          // Clear stale defaultAccountId since `db.assets` was wiped & replaced.
+          final diyRow =
+              await (db.select(db.preferences)
+                    ..where((t) => t.key.equals(prefKeyRecordDiyToolbar)))
+                  .getSingleOrNull();
+          if (diyRow != null) {
+            final resetDiy = DiyToolbarConfig.decode(diyRow.value)
+                .copyWithDefaultAccount(
+                  autoSelectDefaultAccount: false,
+                  defaultAccountId: noRef,
+                );
+            await db
+                .into(db.preferences)
+                .insertOnConflictUpdate(
+                  PreferencesCompanion.insert(
+                    key: prefKeyRecordDiyToolbar,
+                    value: resetDiy.encode(),
+                  ),
+                );
+          }
 
           // 4. Clear stale command receipts and persist this migration command receipt
           await db.delete(db.writeCommands).go();

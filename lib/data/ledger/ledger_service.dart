@@ -342,6 +342,7 @@ final class LedgerService {
     Money? limit,
     String? creditInfo,
     String? extraInfo,
+    bool? setAsDefaultAccount,
   }) {
     final effectiveSubType = subType ?? RecordDirection.none;
     final effectiveIcon = icon ?? '';
@@ -365,6 +366,7 @@ final class LedgerService {
         limit?.toJson(),
         creditInfo,
         extraInfo,
+        if (setAsDefaultAccount != null) setAsDefaultAccount,
       ],
       () async {
         final trimmed = _assetName(name);
@@ -397,6 +399,14 @@ final class LedgerService {
                 ),
               ),
             );
+        if (setAsDefaultAccount != null) {
+          await _applyDefaultAccountPreference(
+            assetId: id,
+            type: type,
+            status: AssetStatus.active,
+            setAsDefault: setAsDefaultAccount,
+          );
+        }
         return '$id';
       },
       int.parse,
@@ -419,6 +429,7 @@ final class LedgerService {
     Money? limit,
     String? creditInfo,
     String? extraInfo,
+    bool? setAsDefaultAccount,
   }) => _command(
     commandId,
     [
@@ -435,6 +446,7 @@ final class LedgerService {
       limit?.toJson(),
       creditInfo,
       extraInfo,
+      if (setAsDefaultAccount != null) setAsDefaultAccount,
     ],
     () async {
       final asset = await _asset(assetId);
@@ -466,10 +478,102 @@ final class LedgerService {
           extraInfo: Value(extraInfo),
         ),
       );
+      if (setAsDefaultAccount != null) {
+        await _applyDefaultAccountPreference(
+          assetId: assetId,
+          type: asset.type,
+          status: asset.status,
+          setAsDefault: setAsDefaultAccount,
+        );
+      }
       return '$assetId';
     },
     (_) {},
   );
+
+  /// Reorders the positions occupied by [orderedAssetIds] within the global
+  /// `(sort ASC, id ASC)` asset list while keeping all other assets in place,
+  /// normalizing `sort` to `0..N-1`.
+  Future<void> reorderAssets({
+    required String commandId,
+    required List<int> orderedAssetIds,
+  }) => _command(commandId, ['reorder-assets-v1', orderedAssetIds], () async {
+    final seen = <int>{};
+    final deduped = <int>[
+      for (final id in orderedAssetIds)
+        if (seen.add(id)) id,
+    ];
+    final all =
+        await (db.select(db.assets)..orderBy([
+              (t) => OrderingTerm.asc(t.sort),
+              (t) => OrderingTerm.asc(t.id),
+            ]))
+            .get();
+    final byId = <int, Asset>{for (final a in all) a.id: a};
+    for (final id in deduped) {
+      if (!byId.containsKey(id)) {
+        throw const Failure(FailureCode.validation, '账户不存在');
+      }
+    }
+    var cursor = 0;
+    final reorderedIds = <int>[
+      for (final a in all)
+        if (seen.contains(a.id)) deduped[cursor++] else a.id,
+    ];
+    for (var i = 0; i < reorderedIds.length; i++) {
+      final asset = byId[reorderedIds[i]]!;
+      if (asset.sort != i) {
+        await (db.update(db.assets)..where((t) => t.id.equals(asset.id))).write(
+          AssetsCompanion(sort: Value(i)),
+        );
+      }
+    }
+    return 'ok';
+  }, (_) {});
+
+  Future<void> _applyDefaultAccountPreference({
+    required int assetId,
+    required int type,
+    required int status,
+    required bool setAsDefault,
+  }) async {
+    final row = await (db.select(
+      db.preferences,
+    )..where((t) => t.key.equals(prefKeyRecordDiyToolbar))).getSingleOrNull();
+    final current = DiyToolbarConfig.decode(row?.value);
+    final effectiveSetDefault =
+        setAsDefault && status == AssetStatus.active && type != AssetType.debt;
+    if (effectiveSetDefault) {
+      if (!current.autoSelectDefaultAccount ||
+          current.defaultAccountId != assetId) {
+        final updated = current.copyWithDefaultAccount(
+          autoSelectDefaultAccount: true,
+          defaultAccountId: assetId,
+        );
+        await db
+            .into(db.preferences)
+            .insertOnConflictUpdate(
+              PreferencesCompanion.insert(
+                key: prefKeyRecordDiyToolbar,
+                value: updated.encode(),
+              ),
+            );
+      }
+    } else if (current.defaultAccountId == assetId) {
+      final cleared = current.copyWithDefaultAccount(
+        autoSelectDefaultAccount: false,
+        defaultAccountId: noRef,
+      );
+      await db
+          .into(db.preferences)
+          .insertOnConflictUpdate(
+            PreferencesCompanion.insert(
+              key: prefKeyRecordDiyToolbar,
+              value: cleared.encode(),
+            ),
+          );
+    }
+  }
 
   Future<void> _clearDefaultAccountIfMatches(int assetId) async {
     final row = await (db.select(

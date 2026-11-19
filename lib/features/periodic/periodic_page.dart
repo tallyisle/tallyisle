@@ -31,12 +31,29 @@ class PeriodicPage extends ConsumerStatefulWidget {
 
 class _PeriodicPageState extends ConsumerState<PeriodicPage>
     with WidgetsBindingObserver {
+  static const List<int> _tabs = <int>[
+    PeriodState.active,
+    PeriodState.ended,
+    PeriodState.paused,
+  ];
+
   final _commandIds = CommandIds();
   CatchUpResult? _lastCatchUp;
+  late PageController _pageController;
+  int? _targetPage;
+
+  static int _pageForTab(int tab) => switch (tab) {
+    PeriodState.ended => 1,
+    PeriodState.paused => 2,
+    _ => 0,
+  };
 
   @override
   void initState() {
     super.initState();
+    _pageController = PageController(
+      initialPage: _pageForTab(ref.read(periodicTabProvider)),
+    );
     WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _triggerCatchUp(force: true);
@@ -46,7 +63,42 @@ class _PeriodicPageState extends ConsumerState<PeriodicPage>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _pageController.dispose();
     super.dispose();
+  }
+
+  void _syncControllerToTab(int nextTab) {
+    final targetPage = _pageForTab(nextTab);
+    if (!_pageController.hasClients) {
+      if (_pageController.initialPage != targetPage) {
+        _pageController.dispose();
+        _pageController = PageController(initialPage: targetPage);
+      }
+      return;
+    }
+    if (_pageController.page?.round() != targetPage) {
+      _targetPage = targetPage;
+      unawaited(
+        _pageController
+            .animateToPage(
+              targetPage,
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeOutCubic,
+            )
+            .whenComplete(() {
+              if (_targetPage == targetPage) _targetPage = null;
+            }),
+      );
+    }
+  }
+
+  void _onPageChanged(int page) {
+    if (_targetPage != null && page != _targetPage) return;
+    _targetPage = null;
+    final nextTab = _tabs[page];
+    if (ref.read(periodicTabProvider) != nextTab) {
+      ref.read(periodicTabProvider.notifier).select(nextTab);
+    }
   }
 
   @override
@@ -189,9 +241,12 @@ class _PeriodicPageState extends ConsumerState<PeriodicPage>
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<int>(periodicTabProvider, (_, next) {
+      _syncControllerToTab(next);
+    });
+
     final selectedTab = ref.watch(periodicTabProvider);
     final countsAsync = ref.watch(periodicStateCountsProvider);
-    final rulesAsync = ref.watch(periodicRulesByStateProvider(selectedTab));
     final allCategories =
         ref.watch(periodicAllCategoriesProvider).value ??
         const <RecordCategory>[];
@@ -203,6 +258,70 @@ class _PeriodicPageState extends ConsumerState<PeriodicPage>
     final isDark = theme.brightness == Brightness.dark;
     final counts = countsAsync.value;
     final skippedCount = _lastCatchUp?.skippedCount ?? 0;
+
+    final activeTab = switch (selectedTab) {
+      PeriodState.ended => PeriodState.ended,
+      PeriodState.paused => PeriodState.paused,
+      _ => PeriodState.active,
+    };
+    final wantPage = _pageForTab(activeTab);
+    if (!_pageController.hasClients &&
+        _pageController.initialPage != wantPage) {
+      _pageController.dispose();
+      _pageController = PageController(initialPage: wantPage);
+    }
+
+    Widget buildTabPage(int tabState) {
+      final rulesAsync = ref.watch(periodicRulesByStateProvider(tabState));
+      return rulesAsync.when(
+        loading: () => const Loading(),
+        error: (e, _) => ErrorView(e),
+        data: (rules) {
+          if (rules.isEmpty) {
+            final emptyText = switch (tabState) {
+              PeriodState.active => '暂无进行中的周期记账',
+              PeriodState.ended => '暂无已结束的周期记账',
+              PeriodState.paused => '暂无已停用的周期记账',
+              _ => '暂无周期记账',
+            };
+            return RefreshIndicator(
+              onRefresh: () => _triggerCatchUp(force: true),
+              child: ListView(
+                children: [
+                  const SizedBox(height: 120),
+                  Center(
+                    child: Text(
+                      emptyText,
+                      style: TextStyle(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }
+
+          return RefreshIndicator(
+            onRefresh: () => _triggerCatchUp(force: true),
+            child: ListView.builder(
+              padding: EdgeInsets.only(top: 4, bottom: isDesktop ? 24 : 88),
+              itemCount: rules.length,
+              itemBuilder: (context, index) {
+                final rule = rules[index];
+                return _buildRuleCard(
+                  context,
+                  rule: rule,
+                  categories: allCategories,
+                  assets: allAssets,
+                  books: books,
+                );
+              },
+            ),
+          );
+        },
+      );
+    }
 
     final bodyContent = Column(
       children: [
@@ -263,7 +382,7 @@ class _PeriodicPageState extends ConsumerState<PeriodicPage>
                   ),
                 ),
               ],
-              selected: {selectedTab},
+              selected: {activeTab},
               onSelectionChanged: (selection) {
                 ref.read(periodicTabProvider.notifier).select(selection.first);
               },
@@ -303,53 +422,11 @@ class _PeriodicPageState extends ConsumerState<PeriodicPage>
             ),
           ),
         Expanded(
-          child: rulesAsync.when(
-            loading: () => const Loading(),
-            error: (e, _) => ErrorView(e),
-            data: (rules) {
-              if (rules.isEmpty) {
-                final emptyText = switch (selectedTab) {
-                  PeriodState.active => '暂无进行中的周期记账',
-                  PeriodState.ended => '暂无已结束的周期记账',
-                  PeriodState.paused => '暂无已停用的周期记账',
-                  _ => '暂无周期记账',
-                };
-                return RefreshIndicator(
-                  onRefresh: () => _triggerCatchUp(force: true),
-                  child: ListView(
-                    children: [
-                      const SizedBox(height: 120),
-                      Center(
-                        child: Text(
-                          emptyText,
-                          style: TextStyle(
-                            color: theme.colorScheme.onSurfaceVariant,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                );
-              }
-
-              return RefreshIndicator(
-                onRefresh: () => _triggerCatchUp(force: true),
-                child: ListView.builder(
-                  padding: EdgeInsets.only(top: 4, bottom: isDesktop ? 24 : 88),
-                  itemCount: rules.length,
-                  itemBuilder: (context, index) {
-                    final rule = rules[index];
-                    return _buildRuleCard(
-                      context,
-                      rule: rule,
-                      categories: allCategories,
-                      assets: allAssets,
-                      books: books,
-                    );
-                  },
-                ),
-              );
-            },
+          child: PageView(
+            key: const Key('periodic_page_view'),
+            controller: _pageController,
+            onPageChanged: _onPageChanged,
+            children: [for (final tabState in _tabs) buildTabPage(tabState)],
           ),
         ),
       ],
@@ -385,18 +462,19 @@ class _PeriodicPageState extends ConsumerState<PeriodicPage>
           ? null
           : FloatingActionButton(
               key: const Key('add_periodic_button'),
+              heroTag: 'fab-periodic',
               tooltip: '新建周期记账',
               onPressed: () => _openEditor(),
               child: const Icon(Icons.add),
             ),
-      body: isDesktop
-          ? Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 800),
-                child: bodyContent,
-              ),
-            )
-          : bodyContent,
+      body: Center(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxWidth: isDesktop ? 800 : double.infinity,
+          ),
+          child: bodyContent,
+        ),
+      ),
     );
   }
 

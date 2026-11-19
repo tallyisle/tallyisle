@@ -18,6 +18,7 @@ import '../../data/tools/template_remark_service.dart';
 import '../../domain/ledger/record_extra.dart';
 import '../../domain/ledger/record_relations.dart';
 import '../../domain/model/codes.dart';
+import '../../domain/rules/app_settings_rules.dart';
 import '../../domain/rules/asset_overview.dart'
     show RateTable, normalizeCurrency;
 import '../../domain/rules/currency_rates.dart';
@@ -225,11 +226,29 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
   List<RecordCategory> _initialCategories = const <RecordCategory>[];
   List<Asset> _initialAssets = const <Asset>[];
   List<AssetBook> _initialAssetBooks = const <AssetBook>[];
+  static const List<int> _creatableRecordTypes = <int>[
+    RecordType.expense,
+    RecordType.income,
+    RecordType.transfer,
+    RecordType.reimbursable,
+    RecordType.advanceExpense,
+    RecordType.advanceIncome,
+  ];
+
   int type = RecordType.expense;
+  bool _userTouchedType = false;
   int? categoryId;
   int? parentCatId;
   bool _userTouchedCategory = false;
   bool _userTouchedAsset = false;
+  int? _middleActivePointer;
+  int? _lastBlockedMiddlePointer;
+  Offset? _middlePointerDownPos;
+  Duration? _middlePointerDownTime;
+  Offset _middleTotalDelta = Offset.zero;
+  double _middleDragDx = 0.0;
+  bool _middleSwipeBlockedByChild = false;
+  bool _middleDragHandledByArena = false;
   Set<String> selectedTagIds = {};
   List<String> imageNames = const <String>[];
   BillLocationInfo? location;
@@ -741,6 +760,27 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     return fromProvider ?? DiyToolbarConfig.defaults();
   }
 
+  Future<int> _resolveDefaultRecordType(AppDatabase db) async {
+    final row = await (db.select(
+      db.preferences,
+    )..where((t) => t.key.equals(appSettingsPreferenceKey))).getSingleOrNull();
+    if (row != null) {
+      try {
+        return AppSettings.parse(row.value).defaultRecordType;
+      } on Failure {
+        // Fall back to provider or expense default.
+      }
+    }
+    final fromProvider = mounted
+        ? ref.read(appSettingsProvider).value?.defaultRecordType
+        : null;
+    if (fromProvider != null &&
+        allowedDefaultRecordTypes.contains(fromProvider)) {
+      return fromProvider;
+    }
+    return RecordType.expense;
+  }
+
   void _persistDateTimePickerStyles({
     required RecordDatePickerStyle datePickerStyle,
     required RecordTimePickerStyle timePickerStyle,
@@ -825,6 +865,121 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
       assets: assets.map((a) => (id: a.id, type: a.type, status: a.status)),
       assetBookBindings: assetBookBindings,
     );
+  }
+
+  ({int assetId, int fromAssetId, int toAssetId, bool changed})
+  _computeReconciledCreateModeAccounts({
+    required int? bookId,
+    required Iterable<Asset> latestAssets,
+    required Map<int, Set<int>> latestBindings,
+    required DiyToolbarConfig latestConfig,
+    int? previousEffectiveDefaultId,
+  }) {
+    bool isEligible(int id) => _isSelectableBookAsset(
+      id,
+      bookId: bookId,
+      assets: latestAssets,
+      assetBookBindings: latestBindings,
+    );
+
+    final effectiveDefaultId = _computeEffectiveDefaultAccountId(
+      config: latestConfig,
+      bookId: bookId,
+      assets: latestAssets,
+      assetBookBindings: latestBindings,
+    );
+
+    var nextAssetId = assetId;
+    var nextFromAssetId = fromAssetId;
+    var nextToAssetId = toAssetId;
+
+    if (nextToAssetId != noRef && !isEligible(nextToAssetId)) {
+      nextToAssetId = noRef;
+    }
+
+    if (nextFromAssetId != noRef && !isEligible(nextFromAssetId)) {
+      nextFromAssetId =
+          (!_userTouchedAsset &&
+              effectiveDefaultId != noRef &&
+              effectiveDefaultId != nextToAssetId)
+          ? effectiveDefaultId
+          : noRef;
+    } else if (!_userTouchedAsset && type == RecordType.transfer) {
+      final shouldApplyDefault =
+          nextFromAssetId == noRef ||
+          (previousEffectiveDefaultId != null &&
+              previousEffectiveDefaultId != noRef &&
+              nextFromAssetId == previousEffectiveDefaultId);
+      if (shouldApplyDefault) {
+        nextFromAssetId =
+            (effectiveDefaultId != noRef && effectiveDefaultId != nextToAssetId)
+            ? effectiveDefaultId
+            : noRef;
+      }
+    }
+    if (nextFromAssetId != noRef && nextFromAssetId == nextToAssetId) {
+      nextFromAssetId = noRef;
+    }
+
+    if (nextAssetId != noRef && !isEligible(nextAssetId)) {
+      nextAssetId = !_userTouchedAsset ? effectiveDefaultId : noRef;
+    } else if (!_userTouchedAsset && type != RecordType.transfer) {
+      final shouldApplyDefault =
+          nextAssetId == noRef ||
+          (previousEffectiveDefaultId != null &&
+              previousEffectiveDefaultId != noRef &&
+              nextAssetId == previousEffectiveDefaultId);
+      if (shouldApplyDefault) {
+        nextAssetId = effectiveDefaultId;
+      }
+    }
+
+    final changed =
+        nextAssetId != assetId ||
+        nextFromAssetId != fromAssetId ||
+        nextToAssetId != toAssetId;
+    return (
+      assetId: nextAssetId,
+      fromAssetId: nextFromAssetId,
+      toAssetId: nextToAssetId,
+      changed: changed,
+    );
+  }
+
+  Future<void> _refreshAndReconcileAccountsFromDb() async {
+    if (!mounted || editing) return;
+    try {
+      final db = await ref.read(databaseProvider.future);
+      final latestAssets = await db.select(db.assets).get();
+      final latestAssetBooks = await db.select(db.assetBooks).get();
+      final latestBookId = await _readCurrentBookId(db);
+      final latestConfig = await _resolveLatestDiyConfig(db);
+      if (!mounted || editing) return;
+      _resolvedBookId = latestBookId;
+      _initialAssets = latestAssets;
+      _initialAssetBooks = latestAssetBooks;
+      final reconciled = _computeReconciledCreateModeAccounts(
+        bookId: latestBookId,
+        latestAssets: latestAssets,
+        latestBindings: _buildAssetBookBindings(latestAssetBooks),
+        latestConfig: latestConfig,
+      );
+      if (reconciled.changed) {
+        setState(() {
+          assetId = reconciled.assetId;
+          fromAssetId = reconciled.fromAssetId;
+          toAssetId = reconciled.toAssetId;
+          convertedEdited = false;
+          _autoConvert();
+        });
+      } else {
+        setState(() {
+          _autoConvert();
+        });
+      }
+    } catch (_) {
+      // Non-blocking post-navigation catalog sync.
+    }
   }
 
   String _currencyOf(int id) {
@@ -986,6 +1141,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
 
     setState(() {
       type = prefill.type;
+      _userTouchedType = true;
       if (prefill.type == RecordType.transfer) {
         categoryId = null;
         parentCatId = null;
@@ -1114,6 +1270,20 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
         _imeWasVisible = true;
       }
       setState(() => _panelMode = _BottomPanelMode.osKeyboard);
+      if (_feeFocus.hasFocus && !_isDesktopActive) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          final feeCtx = _feeFocus.context;
+          if (mounted && _feeFocus.hasFocus && feeCtx != null) {
+            unawaited(
+              Scrollable.ensureVisible(
+                feeCtx,
+                alignment: 0.5,
+                duration: Duration.zero,
+              ),
+            );
+          }
+        });
+      }
     } else {
       _imeWasVisible = false;
       setState(() {
@@ -1212,11 +1382,34 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     _amountFocus.addListener(_onAmountFocusChanged);
     _remarkFocus.addListener(_onOsKeyboardFieldFocusChanged);
     _feeFocus.addListener(_onOsKeyboardFieldFocusChanged);
-    type = widget.initialType ?? RecordType.expense;
+    if (!editing &&
+        widget.initialType == null &&
+        widget.initialCategory == null) {
+      final cachedDefaultType = ref
+          .read(appSettingsProvider)
+          .value
+          ?.defaultRecordType;
+      if (cachedDefaultType != null &&
+          allowedDefaultRecordTypes.contains(cachedDefaultType)) {
+        type = cachedDefaultType;
+      } else {
+        type = RecordType.expense;
+      }
+    } else {
+      type = widget.initialType ?? RecordType.expense;
+    }
     categoryId = widget.initialCategory;
     assetId = widget.initialAsset ?? noRef;
     fromAssetId = widget.initialFrom ?? noRef;
     toAssetId = widget.initialTo ?? noRef;
+    if (!editing &&
+        type == RecordType.transfer &&
+        fromAssetId == noRef &&
+        widget.initialFrom == null &&
+        widget.initialAsset != null) {
+      fromAssetId = widget.initialAsset!;
+      assetId = noRef;
+    }
     _userTouchedAsset =
         widget.initialAsset != null ||
         widget.initialFrom != null ||
@@ -1351,6 +1544,31 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
             );
           }
         } else {
+          if (widget.initialType == null && !_userTouchedType) {
+            if (widget.initialCategory != null) {
+              final targetCat = cats
+                  .where((c) => c.id == widget.initialCategory)
+                  .firstOrNull;
+              if (targetCat != null && targetCat.type == RecordType.income) {
+                type = RecordType.income;
+              }
+            } else {
+              final resolvedDefaultType = await _resolveDefaultRecordType(db);
+              if (mounted && !_userTouchedType) {
+                type = resolvedDefaultType;
+                if (type == RecordType.transfer) {
+                  categoryId = null;
+                  parentCatId = null;
+                  if (fromAssetId == noRef &&
+                      widget.initialFrom == null &&
+                      widget.initialAsset != null) {
+                    fromAssetId = widget.initialAsset!;
+                    assetId = noRef;
+                  }
+                }
+              }
+            }
+          }
           if (widget.initialCategory == null &&
               type != RecordType.transfer &&
               categoryId == null &&
@@ -1367,28 +1585,18 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
               }
             }
           }
-          if (mounted && !_userTouchedAsset) {
-            final effectiveDefaultId = _computeEffectiveDefaultAccountId(
-              config: diyConfig,
+          if (mounted) {
+            final bindings = _buildAssetBookBindings(loadedAssetBooks);
+            final reconciled = _computeReconciledCreateModeAccounts(
               bookId: _resolvedBookId,
-              assets: loadedAssets,
-              assetBookBindings: _buildAssetBookBindings(loadedAssetBooks),
+              latestAssets: loadedAssets,
+              latestBindings: bindings,
+              latestConfig: diyConfig,
             );
-            if (type == RecordType.transfer) {
-              if (fromAssetId == noRef) {
-                fromAssetId =
-                    (effectiveDefaultId != noRef &&
-                        effectiveDefaultId != toAssetId)
-                    ? effectiveDefaultId
-                    : noRef;
-                _autoConvert();
-              }
-            } else {
-              if (assetId == noRef) {
-                assetId = effectiveDefaultId;
-                _autoConvert();
-              }
-            }
+            assetId = reconciled.assetId;
+            fromAssetId = reconciled.fromAssetId;
+            toAssetId = reconciled.toAssetId;
+            _autoConvert();
           }
         }
       }
@@ -1482,6 +1690,27 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
       final effectiveDiscount = parsedDiscount != null && !parsedDiscount.isZero
           ? parsedDiscount
           : null;
+
+      final effectiveDiyConfig = await _resolveLatestDiyConfig(db);
+      if (!editing) {
+        final liveAssets = await db.select(db.assets).get();
+        final liveAssetBooks = await db.select(db.assetBooks).get();
+        _initialAssets = liveAssets;
+        _initialAssetBooks = liveAssetBooks;
+        final reconciledBeforeSave = _computeReconciledCreateModeAccounts(
+          bookId: bookId,
+          latestAssets: liveAssets,
+          latestBindings: _buildAssetBookBindings(liveAssetBooks),
+          latestConfig: effectiveDiyConfig,
+        );
+        if (reconciledBeforeSave.changed) {
+          assetId = reconciledBeforeSave.assetId;
+          fromAssetId = reconciledBeforeSave.fromAssetId;
+          toAssetId = reconciledBeforeSave.toAssetId;
+          convertedEdited = false;
+          _autoConvert();
+        }
+      }
 
       // Multi-currency (`ledger-catalog.md` §4 `curr`) via direct DB read.
       final (sc, ac) = _currencies();
@@ -1580,7 +1809,6 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
         );
       }
 
-      final effectiveDiyConfig = await _resolveLatestDiyConfig(db);
       final remarksEnabled = effectiveDiyConfig.isEnabled(
         DiyToolbarAction.frequentRemarks,
       );
@@ -1635,31 +1863,33 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
               currentCategories,
             );
           }
+          final refreshedAssets = await db.select(db.assets).get();
+          final refreshedAssetBooks = await db.select(db.assetBooks).get();
+          final refreshedBindings = _buildAssetBookBindings(
+            refreshedAssetBooks,
+          );
           final resetToDefaultAccount =
               effectiveDiyConfig.autoSelectDefaultAccount;
-          var nextDefaultAccountId = noRef;
-          List<Asset>? refreshedAssets;
-          List<AssetBook>? refreshedAssetBooks;
-          if (resetToDefaultAccount) {
-            refreshedAssets = await db.select(db.assets).get();
-            refreshedAssetBooks = await db.select(db.assetBooks).get();
-            nextDefaultAccountId = _computeEffectiveDefaultAccountId(
-              config: effectiveDiyConfig,
-              bookId: bookId,
-              assets: refreshedAssets,
-              assetBookBindings: _buildAssetBookBindings(refreshedAssetBooks),
-            );
-          }
+          final nextDefaultAccountId = _computeEffectiveDefaultAccountId(
+            config: effectiveDiyConfig,
+            bookId: bookId,
+            assets: refreshedAssets,
+            assetBookBindings: refreshedBindings,
+          );
+          final initialAssetStillEligible =
+              widget.initialAsset != null &&
+              _isSelectableBookAsset(
+                widget.initialAsset!,
+                bookId: bookId,
+                assets: refreshedAssets,
+                assetBookBindings: refreshedBindings,
+              );
           if (!mounted) return;
           setState(() {
             busy = false;
             _draftNonce++;
-            if (refreshedAssets != null) {
-              _initialAssets = refreshedAssets;
-            }
-            if (refreshedAssetBooks != null) {
-              _initialAssetBooks = refreshedAssetBooks;
-            }
+            _initialAssets = refreshedAssets;
+            _initialAssetBooks = refreshedAssetBooks;
             _setAmountText('');
             converted.clear();
             convertedEdited = false;
@@ -1675,8 +1905,34 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
               parentCatId = nextAutoFirstCat?.id;
               _userTouchedCategory = false;
             }
-            if (resetToDefaultAccount) {
-              _userTouchedAsset = false;
+            _userTouchedAsset = initialAssetStillEligible;
+            if (initialAssetStillEligible) {
+              if (type == RecordType.transfer) {
+                toAssetId = noRef;
+                fromAssetId =
+                    _isSelectableBookAsset(
+                      fromAssetId,
+                      bookId: bookId,
+                      assets: refreshedAssets,
+                      assetBookBindings: refreshedBindings,
+                    )
+                    ? fromAssetId
+                    : widget.initialAsset!;
+                assetId = noRef;
+              } else {
+                assetId =
+                    _isSelectableBookAsset(
+                      assetId,
+                      bookId: bookId,
+                      assets: refreshedAssets,
+                      assetBookBindings: refreshedBindings,
+                    )
+                    ? assetId
+                    : widget.initialAsset!;
+                fromAssetId = noRef;
+                toAssetId = noRef;
+              }
+            } else if (resetToDefaultAccount) {
               if (type == RecordType.transfer) {
                 toAssetId = noRef;
                 fromAssetId = nextDefaultAccountId;
@@ -1684,6 +1940,37 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
               } else {
                 assetId = nextDefaultAccountId;
                 fromAssetId = noRef;
+                toAssetId = noRef;
+              }
+            } else {
+              if (assetId != noRef &&
+                  !_isSelectableBookAsset(
+                    assetId,
+                    bookId: bookId,
+                    assets: refreshedAssets,
+                    assetBookBindings: refreshedBindings,
+                  )) {
+                assetId = noRef;
+              }
+              if (fromAssetId != noRef &&
+                  !_isSelectableBookAsset(
+                    fromAssetId,
+                    bookId: bookId,
+                    assets: refreshedAssets,
+                    assetBookBindings: refreshedBindings,
+                  )) {
+                fromAssetId = noRef;
+              }
+              if (toAssetId != noRef &&
+                  !_isSelectableBookAsset(
+                    toAssetId,
+                    bookId: bookId,
+                    assets: refreshedAssets,
+                    assetBookBindings: refreshedBindings,
+                  )) {
+                toAssetId = noRef;
+              }
+              if (fromAssetId != noRef && fromAssetId == toAssetId) {
                 toAssetId = noRef;
               }
             }
@@ -1697,22 +1984,39 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
           return;
         }
 
+        final nextDefaultType = await _resolveDefaultRecordType(db);
+        if (!mounted) return;
         _unfocusOsKeyboardFields();
         if (_isImperativeDialogRoute) {
           unawaited(
-            Navigator.of(
-              context,
-            ).pushReplacement(createDesktopRecordEditorDialogRoute(context)),
+            Navigator.of(context).pushReplacement(
+              createDesktopRecordEditorDialogRoute(
+                context,
+                initialType: nextDefaultType,
+              ),
+            ),
           );
           return;
         }
         final router = GoRouter.maybeOf(context);
         if (router != null) {
-          context.pushReplacement('/record/new');
+          final nextLocation = nextDefaultType == RecordType.expense
+              ? '/record/new'
+              : '/record/new?type=$nextDefaultType';
+          final canReplace =
+              router.routerDelegate.currentConfiguration.matches.length > 1 &&
+              context.canPop();
+          if (canReplace) {
+            context.pushReplacement(nextLocation);
+          } else {
+            unawaited(context.push(nextLocation));
+          }
         } else {
           unawaited(
             Navigator.of(context).pushReplacement(
-              MaterialPageRoute<void>(builder: (_) => const RecordEditorPage()),
+              MaterialPageRoute<void>(
+                builder: (_) => RecordEditorPage(initialType: nextDefaultType),
+              ),
             ),
           );
         }
@@ -2231,6 +2535,8 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     if (openedManager) {
       await _openAssetsManager();
       if (!mounted) return;
+      await _refreshAndReconcileAccountsFromDb();
+      if (!mounted) return;
       _focusDesktopAmountIfIdle();
       return;
     }
@@ -2700,66 +3006,55 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
             assetBookBindings: assetBookBindings,
           );
 
-    void syncUntouchedDefaultAccountFromLiveCatalog({
+    void reconcileCreateModeAccountsFromLiveCatalog({
       required List<Asset> latestAssets,
       required List<AssetBook> latestAssetBooks,
+      int? latestBookId,
+      DiyToolbarConfig? prevConfig,
+      DiyToolbarConfig? latestConfig,
     }) {
-      if (loading || editing || _userTouchedAsset) return;
+      if (loading || editing) return;
       final currentBookId =
+          latestBookId ??
           original?.accountBookId ??
           ref.read(currentBookIdProvider).value ??
           _resolvedBookId;
       final latestBindings = _buildAssetBookBindings(latestAssetBooks);
       final currentCfg =
+          latestConfig ??
           ref.read(diyToolbarConfigProvider).value ??
           DiyToolbarConfig.defaults();
-      final nextEffective = _computeEffectiveDefaultAccountId(
-        config: currentCfg,
+      final prevEffective = prevConfig == null
+          ? null
+          : _computeEffectiveDefaultAccountId(
+              config: prevConfig,
+              bookId: currentBookId,
+              assets: latestAssets,
+              assetBookBindings: latestBindings,
+            );
+      _initialAssets = latestAssets;
+      _initialAssetBooks = latestAssetBooks;
+      final reconciled = _computeReconciledCreateModeAccounts(
         bookId: currentBookId,
-        assets: latestAssets,
-        assetBookBindings: latestBindings,
+        latestAssets: latestAssets,
+        latestBindings: latestBindings,
+        latestConfig: currentCfg,
+        previousEffectiveDefaultId: prevEffective,
       );
-      if (type == RecordType.transfer) {
-        final currentFromValid = _isSelectableBookAsset(
-          fromAssetId,
-          bookId: currentBookId,
-          assets: latestAssets,
-          assetBookBindings: latestBindings,
-        );
-        if (fromAssetId == noRef || !currentFromValid) {
-          final target = (nextEffective != noRef && nextEffective != toAssetId)
-              ? nextEffective
-              : noRef;
-          if (fromAssetId != target) {
-            setState(() {
-              fromAssetId = target;
-              convertedEdited = false;
-              _autoConvert();
-            });
-          }
-        }
-      } else {
-        final currentValid = _isSelectableBookAsset(
-          assetId,
-          bookId: currentBookId,
-          assets: latestAssets,
-          assetBookBindings: latestBindings,
-        );
-        if (assetId == noRef || !currentValid) {
-          if (assetId != nextEffective) {
-            setState(() {
-              assetId = nextEffective;
-              convertedEdited = false;
-              _autoConvert();
-            });
-          }
-        }
+      if (reconciled.changed) {
+        setState(() {
+          assetId = reconciled.assetId;
+          fromAssetId = reconciled.fromAssetId;
+          toAssetId = reconciled.toAssetId;
+          convertedEdited = false;
+          _autoConvert();
+        });
       }
     }
 
     ref.listen<AsyncValue<List<Asset>>>(assetsProvider, (_, next) {
       if (!next.hasValue) return;
-      syncUntouchedDefaultAccountFromLiveCatalog(
+      reconcileCreateModeAccountsFromLiveCatalog(
         latestAssets: next.value!,
         latestAssetBooks:
             ref.read(assetBooksProvider).value ?? _initialAssetBooks,
@@ -2768,10 +3063,60 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
 
     ref.listen<AsyncValue<List<AssetBook>>>(assetBooksProvider, (_, next) {
       if (!next.hasValue) return;
-      syncUntouchedDefaultAccountFromLiveCatalog(
+      reconcileCreateModeAccountsFromLiveCatalog(
         latestAssets: ref.read(assetsProvider).value ?? _initialAssets,
         latestAssetBooks: next.value!,
       );
+    });
+
+    ref.listen<AsyncValue<int>>(currentBookIdProvider, (_, next) {
+      if (!next.hasValue) return;
+      _resolvedBookId = next.value;
+      reconcileCreateModeAccountsFromLiveCatalog(
+        latestAssets: ref.read(assetsProvider).value ?? _initialAssets,
+        latestAssetBooks:
+            ref.read(assetBooksProvider).value ?? _initialAssetBooks,
+        latestBookId: next.value,
+      );
+    });
+
+    ref.listen<AsyncValue<AppSettings>>(appSettingsProvider, (prev, next) {
+      if (editing ||
+          widget.initialType != null ||
+          widget.initialTemplateId != null ||
+          widget.initialCategory != null ||
+          _userTouchedType ||
+          _userTouchedCategory ||
+          amount.text.isNotEmpty ||
+          remark.text.isNotEmpty) {
+        return;
+      }
+      if (prev?.hasValue == true || !next.hasValue) return;
+      final nextDefaultType = next.value!.defaultRecordType;
+      if (!allowedDefaultRecordTypes.contains(nextDefaultType) ||
+          nextDefaultType == type) {
+        return;
+      }
+      if (!loading) {
+        _switchRecordTypeTo(
+          nextDefaultType,
+          categories: categories,
+          diyConfig: diyConfig,
+          effectiveDefaultAccountId: effectiveDefaultAccountId,
+          markUserTouchedType: false,
+        );
+      } else {
+        setState(() {
+          type = nextDefaultType;
+          if (type == RecordType.transfer &&
+              fromAssetId == noRef &&
+              widget.initialFrom == null &&
+              widget.initialAsset != null) {
+            fromAssetId = widget.initialAsset!;
+            assetId = noRef;
+          }
+        });
+      }
     });
 
     ref.listen<AsyncValue<DiyToolbarConfig>>(diyToolbarConfigProvider, (
@@ -2814,58 +3159,33 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
           });
         }
       }
-      if (!loading && !editing && !_userTouchedAsset && next.hasValue) {
-        final currentBookId =
-            original?.accountBookId ??
-            ref.read(currentBookIdProvider).value ??
-            _resolvedBookId;
-        final currentAssets = ref.read(assetsProvider).value ?? _initialAssets;
-        final currentBindings = _buildAssetBookBindings(
-          ref.read(assetBooksProvider).value ?? _initialAssetBooks,
+      if (!loading && !editing && next.hasValue) {
+        reconcileCreateModeAccountsFromLiveCatalog(
+          latestAssets: ref.read(assetsProvider).value ?? _initialAssets,
+          latestAssetBooks:
+              ref.read(assetBooksProvider).value ?? _initialAssetBooks,
+          prevConfig: prev?.value,
+          latestConfig: next.value!,
         );
-        final prevEffective = prev?.value == null
-            ? noRef
-            : _computeEffectiveDefaultAccountId(
-                config: prev!.value!,
-                bookId: currentBookId,
-                assets: currentAssets,
-                assetBookBindings: currentBindings,
-              );
-        final nextEffective = _computeEffectiveDefaultAccountId(
-          config: next.value!,
-          bookId: currentBookId,
-          assets: currentAssets,
-          assetBookBindings: currentBindings,
-        );
-        if (type == RecordType.transfer) {
-          if (fromAssetId == noRef ||
-              (prevEffective != noRef && fromAssetId == prevEffective)) {
-            final target =
-                (nextEffective != noRef && nextEffective != toAssetId)
-                ? nextEffective
-                : noRef;
-            if (fromAssetId != target) {
-              setState(() {
-                fromAssetId = target;
-                convertedEdited = false;
-                _autoConvert();
-              });
-            }
-          }
-        } else {
-          if (assetId == noRef ||
-              (prevEffective != noRef && assetId == prevEffective)) {
-            if (assetId != nextEffective) {
-              setState(() {
-                assetId = nextEffective;
-                convertedEdited = false;
-                _autoConvert();
-              });
-            }
-          }
-        }
       }
     });
+
+    if (!loading && !editing) {
+      final hasStaleHeldAsset =
+          (assetId != noRef && !assets.any((a) => a.id == assetId)) ||
+          (fromAssetId != noRef && !assets.any((a) => a.id == fromAssetId)) ||
+          (toAssetId != noRef && !assets.any((a) => a.id == toAssetId));
+      if (hasStaleHeldAsset) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted || loading || editing) return;
+          reconcileCreateModeAccountsFromLiveCatalog(
+            latestAssets: ref.read(assetsProvider).value ?? _initialAssets,
+            latestAssetBooks:
+                ref.read(assetBooksProvider).value ?? _initialAssetBooks,
+          );
+        });
+      }
+    }
 
     final isDesktop = DesktopAdaptive.isDesktop(context);
     final embeddedInDialog = _isEmbeddedInDesktopDialog;
@@ -2903,6 +3223,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                   tags: tags,
                   currencies: currencies,
                   diyConfig: diyConfig,
+                  effectiveDefaultAccountId: effectiveDefaultAccountId,
                   canSubmit: canSubmit,
                 );
               },
@@ -3054,6 +3375,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     required List<Tag> tags,
     required List<Currency> currencies,
     required DiyToolbarConfig diyConfig,
+    required int effectiveDefaultAccountId,
     required bool canSubmit,
   }) {
     final isDesktop = DesktopAdaptive.isDesktop(context);
@@ -3065,10 +3387,18 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
         : cs.surfaceContainerLow;
 
     if (isDesktop) {
+      final rawTextScale = MediaQuery.textScalerOf(context).scale(1.0);
+      final textScale = rawTextScale.clamp(1.0, 2.0);
+      final scaleDelta = textScale - 1.0;
       final compactViewport = areaConstraints.maxHeight < 580.0;
-      final minMiddleZoneHeight = compactViewport
-          ? 132.0
-          : math.min(186.0, math.max(146.0, areaConstraints.maxHeight * 0.26));
+      final minMiddleZoneHeight = areaConstraints.maxHeight < 260.0
+          ? (areaConstraints.maxHeight * 0.45).clamp(0.0, 120.0)
+          : (compactViewport
+                ? (scaleDelta > 0.05 ? 124.0 : 132.0)
+                : math.min(
+                    186.0,
+                    math.max(146.0, areaConstraints.maxHeight * 0.26),
+                  ));
       final maxDockHeight = math.max(
         0.0,
         areaConstraints.maxHeight - minMiddleZoneHeight,
@@ -3078,6 +3408,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
       final showBudgetHint =
           bookId != null &&
           categoryId != null &&
+          !excludeBudget &&
           (type == RecordType.expense ||
               type == RecordType.income ||
               type == RecordType.reimbursable);
@@ -3087,21 +3418,75 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
               imageNames.isNotEmpty);
       final pillCount = _countVisibleToolbarPills(diyConfig, currencies);
       final innerWidth = math.max(200.0, areaConstraints.maxWidth - 24.0);
+      final avgPillWidth = 78.0 * textScale;
       final pillRows = pillCount <= 1
           ? 1
-          : ((pillCount * 78.0) / innerWidth).ceil().clamp(1, 3);
+          : ((pillCount * avgPillWidth) / innerWidth).ceil().clamp(1, 4);
+      final singlePillHeight = scaleDelta > 0.02
+          ? math.max(24.0, (7.0 + 17.5 * textScale).ceilToDouble())
+          : 24.0;
+      final minPillToolbarVisibleHeight = math.max(
+        30.0,
+        singlePillHeight + 6.0,
+      );
+
+      final summaryAmountReserve =
+          43.0 +
+          28.0 * scaleDelta +
+          (hasPendingOperator(amount.text) ? 15.0 * textScale + 2.0 : 0.0) +
+          (sc != ac ? 17.0 * textScale + 2.0 : 0.0);
+      final budgetBannerReserve = showBudgetHint
+          ? (12.0 + 18.0 * textScale)
+          : 0.0;
+      final savedBannerReserve = (_savedAndResetBanner && error == null)
+          ? (26.0 + 16.0 * scaleDelta)
+          : 0.0;
+      double errorBannerReserve = 0.0;
+      if (error != null) {
+        final errorAvailW = math.max(120.0, areaConstraints.maxWidth - 68.0);
+        final estErrorW = error!.runes.length * 12.5 * textScale;
+        final isTwoLineError =
+            error!.contains('\n') || estErrorW > errorAvailW * 0.80;
+        errorBannerReserve = isTwoLineError
+            ? (14.0 + 36.0 * textScale)
+            : (12.0 + 18.0 * textScale);
+      }
+      final remarkRowReserve =
+          (scaleDelta > 0.02
+              ? (20.0 + 18.0 * textScale).ceilToDouble()
+              : 38.0) +
+          6.0;
+
+      final showRemarksActionBtn =
+          diyConfig.isEnabled(DiyToolbarAction.frequentRemarks) &&
+          type != RecordType.transfer;
+      final compactActionBar = areaConstraints.maxWidth < 550.0 * textScale;
+      final estLeftActionW =
+          (41.0 + 39.0 * textScale) +
+          (showRemarksActionBtn ? (47.0 + 52.0 * textScale) : 0.0);
+      final estRightActionW = compactActionBar
+          ? (60.0 + 70.0 * textScale)
+          : (60.0 + 220.0 * textScale);
+      final actionBarInnerW = math.max(120.0, areaConstraints.maxWidth - 24.0);
+      final actionBarWraps =
+          (estLeftActionW + 8.0 + estRightActionW) > actionBarInnerW * 0.94;
+      final singleActionRowH = scaleDelta > 0.02
+          ? math.max(34.0, (14.0 + 19.0 * textScale).ceilToDouble())
+          : 34.0;
+      final actionBarReserve = actionBarWraps
+          ? (15.0 + singleActionRowH * 2.0 + 6.0)
+          : (15.0 + singleActionRowH);
 
       final pinnedDockReserve =
-          43.0 +
-          (hasPendingOperator(amount.text) ? 15.0 : 0.0) +
-          (sc != ac ? 17.0 : 0.0) +
-          (showBudgetHint ? 28.0 : 0.0) +
-          (_savedAndResetBanner && error == null ? 26.0 : 0.0) +
-          (error != null ? 30.0 : 0.0) +
-          44.0 +
-          49.0;
+          summaryAmountReserve +
+          budgetBannerReserve +
+          savedBannerReserve +
+          errorBannerReserve +
+          remarkRowReserve +
+          actionBarReserve +
+          (scaleDelta > 0.02 ? 4.0 * scaleDelta : 0.0);
       final pillAndAttachmentReserve =
-          (pillRows * 24.0 + (pillRows - 1) * 4.0 + 6.0) +
+          (pillRows * singlePillHeight + (pillRows - 1) * 4.0 + 6.0) +
           (showAttachments ? 72.0 : 0.0);
       final idealAvailableForPanel = math.max(
         0.0,
@@ -3109,7 +3494,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
       );
       final hardMaxPanelHeight = math.max(
         0.0,
-        maxDockHeight - pinnedDockReserve - 30.0,
+        maxDockHeight - pinnedDockReserve - minPillToolbarVisibleHeight,
       );
 
       double? desktopKeypadKeyHeight;
@@ -3129,12 +3514,17 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
             minKeyHeight: RecordCustomKeypad.desktopMinKeyRowHeight,
           );
         } else {
+          final targetPanelAvail = idealAvailableForPanel > 0
+              ? idealAvailableForPanel
+              : hardMaxPanelHeight;
+          final safeMinKeyH = math.min(
+            30.0,
+            math.max(22.0, (hardMaxPanelHeight - 25.0) / 4.0),
+          );
           desktopKeypadKeyHeight = RecordCustomKeypad.resolveDesktopKeyHeight(
-            idealAvailableForPanel > 0
-                ? idealAvailableForPanel
-                : hardMaxPanelHeight,
+            targetPanelAvail,
             maxKeyHeight: maxKeyH,
-            minKeyHeight: 30.0,
+            minKeyHeight: safeMinKeyH,
           );
         }
         desktopPanelSlotHeight = math.min(
@@ -3160,6 +3550,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
               categories: categories,
               assets: assets,
               diyConfig: diyConfig,
+              effectiveDefaultAccountId: effectiveDefaultAccountId,
             ),
           ),
           ConstrainedBox(
@@ -3187,10 +3578,32 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
         RecordCustomKeypad.panelHeight + mediaQuery.padding.bottom;
     final rawTargetSlotHeight = math.max(basePanelHeight, imeHeight);
 
-    const minDockHeaderReserve = 112.0;
+    final double minMiddleHeight;
+    if (areaConstraints.maxHeight >= 240.0) {
+      final baseMinMiddle = (areaConstraints.maxHeight * 0.22).clamp(
+        84.0,
+        132.0,
+      );
+      minMiddleHeight = imeHeight > 0
+          ? math.min(
+              baseMinMiddle,
+              math.max(84.0, areaConstraints.maxHeight - imeHeight - 112.0),
+            )
+          : baseMinMiddle;
+    } else {
+      minMiddleHeight = math
+          .max(48.0, areaConstraints.maxHeight * 0.30)
+          .clamp(0.0, areaConstraints.maxHeight * 0.45);
+    }
+    final maxBottomHeight = math.max(
+      0.0,
+      areaConstraints.maxHeight - minMiddleHeight,
+    );
+
+    final minDockHeaderReserve = math.min(112.0, maxBottomHeight * 0.48);
     final maxAllowedSlotHeight = math.max(
       0.0,
-      areaConstraints.maxHeight - minDockHeaderReserve,
+      maxBottomHeight - minDockHeaderReserve,
     );
     final targetSlotHeight = math.min(
       rawTargetSlotHeight,
@@ -3209,10 +3622,11 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
             categories: categories,
             assets: assets,
             diyConfig: diyConfig,
+            effectiveDefaultAccountId: effectiveDefaultAccountId,
           ),
         ),
         ConstrainedBox(
-          constraints: BoxConstraints(maxHeight: areaConstraints.maxHeight),
+          constraints: BoxConstraints(maxHeight: maxBottomHeight),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -3244,6 +3658,122 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
           ),
         ),
       ],
+    );
+  }
+
+  void _switchRecordTypeTo(
+    int nextType, {
+    required List<RecordCategory> categories,
+    required DiyToolbarConfig diyConfig,
+    required int effectiveDefaultAccountId,
+    bool markUserTouchedType = true,
+  }) {
+    if (busy || editing || type == nextType) return;
+    if (_feeFocus.hasFocus && nextType != RecordType.transfer) {
+      _feeFocus.unfocus();
+    }
+    setState(() {
+      type = nextType;
+      if (markUserTouchedType) {
+        _userTouchedType = true;
+      }
+      _userTouchedCategory = false;
+      if (nextType == RecordType.transfer) {
+        categoryId = null;
+        parentCatId = null;
+        sourceCurrency = null;
+        convertedEdited = false;
+        _desktopRemarksExpanded = false;
+        if (_panelMode == _BottomPanelMode.frequentRemarks) {
+          _panelMode = _BottomPanelMode.customKeypad;
+        }
+        if (!_userTouchedAsset && fromAssetId == noRef) {
+          fromAssetId =
+              (effectiveDefaultAccountId != noRef &&
+                  effectiveDefaultAccountId != toAssetId)
+              ? effectiveDefaultAccountId
+              : noRef;
+        }
+      } else {
+        if (diyConfig.isEnabled(DiyToolbarAction.autoSelectFirstCategory)) {
+          final first = _firstTopCategoryForType(nextType, categories);
+          categoryId = first?.id;
+          parentCatId = first?.id;
+        } else {
+          categoryId = null;
+          parentCatId = null;
+        }
+        if (!_userTouchedAsset && assetId == noRef) {
+          assetId = effectiveDefaultAccountId;
+        }
+      }
+      _remarksShowAllScope = false;
+      _autoConvert();
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final chipFinder = Key('type-$nextType');
+      Element? targetElement;
+      void visit(Element el) {
+        if (targetElement != null) return;
+        if (el.widget.key == chipFinder) {
+          targetElement = el;
+          return;
+        }
+        el.visitChildren(visit);
+      }
+
+      context.visitChildElements(visit);
+      if (targetElement != null) {
+        unawaited(
+          Scrollable.ensureVisible(
+            targetElement!,
+            alignment: 0.5,
+            duration: const Duration(milliseconds: 160),
+            curve: Curves.easeOutCubic,
+          ),
+        );
+      }
+    });
+    _focusDesktopAmountIfIdle();
+  }
+
+  void _stepRecordTypeBySwipe(
+    int delta, {
+    required List<RecordCategory> categories,
+    required DiyToolbarConfig diyConfig,
+    required int effectiveDefaultAccountId,
+  }) {
+    if (busy || editing || loading) return;
+    final currentIdx = _creatableRecordTypes.indexOf(type);
+    if (currentIdx < 0) return;
+    final targetIdx = (currentIdx + delta).clamp(
+      0,
+      _creatableRecordTypes.length - 1,
+    );
+    if (targetIdx == currentIdx) return;
+    _switchRecordTypeTo(
+      _creatableRecordTypes[targetIdx],
+      categories: categories,
+      diyConfig: diyConfig,
+      effectiveDefaultAccountId: effectiveDefaultAccountId,
+    );
+  }
+
+  Widget _buildHorizontalSwipeShield({required Widget child}) {
+    return Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: (event) {
+        _lastBlockedMiddlePointer = event.pointer;
+        _middleSwipeBlockedByChild = true;
+      },
+      child: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onHorizontalDragStart: (_) {},
+        onHorizontalDragUpdate: (_) {},
+        onHorizontalDragEnd: (_) {},
+        child: child,
+      ),
     );
   }
 
@@ -3289,47 +3819,12 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
         selected: selected,
         onSelected: busy || editing
             ? null
-            : (_) {
-                if (type == value) return;
-                setState(() {
-                  type = value;
-                  _userTouchedCategory = false;
-                  if (value == RecordType.transfer) {
-                    categoryId = null;
-                    parentCatId = null;
-                    sourceCurrency = null;
-                    convertedEdited = false;
-                    _desktopRemarksExpanded = false;
-                    if (_panelMode == _BottomPanelMode.frequentRemarks) {
-                      _panelMode = _BottomPanelMode.customKeypad;
-                    }
-                    if (!_userTouchedAsset && fromAssetId == noRef) {
-                      fromAssetId =
-                          (effectiveDefaultAccountId != noRef &&
-                              effectiveDefaultAccountId != toAssetId)
-                          ? effectiveDefaultAccountId
-                          : noRef;
-                    }
-                  } else {
-                    if (diyConfig.isEnabled(
-                      DiyToolbarAction.autoSelectFirstCategory,
-                    )) {
-                      final first = _firstTopCategoryForType(value, categories);
-                      categoryId = first?.id;
-                      parentCatId = first?.id;
-                    } else {
-                      categoryId = null;
-                      parentCatId = null;
-                    }
-                    if (!_userTouchedAsset && assetId == noRef) {
-                      assetId = effectiveDefaultAccountId;
-                    }
-                  }
-                  _remarksShowAllScope = false;
-                  _autoConvert();
-                });
-                _focusDesktopAmountIfIdle();
-              },
+            : (_) => _switchRecordTypeTo(
+                value,
+                categories: categories,
+                diyConfig: diyConfig,
+                effectiveDefaultAccountId: effectiveDefaultAccountId,
+              ),
       );
     }
 
@@ -3361,6 +3856,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     required List<RecordCategory> categories,
     required List<Asset> assets,
     required DiyToolbarConfig diyConfig,
+    required int effectiveDefaultAccountId,
   }) {
     if (categoryId != null && parentCatId == null) {
       final chosen = categories.where((c) => c.id == categoryId).firstOrNull;
@@ -3391,7 +3887,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
               .where((c) => c.parentCatId == parentCatId && !c.isHide)
               .toList();
 
-    return CustomScrollView(
+    final scrollView = CustomScrollView(
       key: const Key('editor-zone2-scroll'),
       slivers: [
         if (!editing &&
@@ -3400,16 +3896,18 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
           SliverPadding(
             padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
             sliver: SliverToBoxAdapter(
-              child: TemplateQuickBar(
-                bookId: bookId,
-                recordType: type,
-                enabled: !busy,
-                recordTimeMs: time.millisecondsSinceEpoch,
-                onPrefill: _applyTemplatePrefill,
-                onInstantSaved: (savedId) {
-                  if (!mounted) return;
-                  _closeEditor(savedId);
-                },
+              child: _buildHorizontalSwipeShield(
+                child: TemplateQuickBar(
+                  bookId: bookId,
+                  recordType: type,
+                  enabled: !busy,
+                  recordTimeMs: time.millisecondsSinceEpoch,
+                  onPrefill: _applyTemplatePrefill,
+                  onInstantSaved: (savedId) {
+                    if (!mounted) return;
+                    _closeEditor(savedId);
+                  },
+                ),
               ),
             ),
           ),
@@ -3425,19 +3923,21 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
             SliverPadding(
               padding: const EdgeInsets.symmetric(horizontal: 12),
               sliver: SliverToBoxAdapter(
-                child: RecordSubcategoryStrip(
-                  parentCategory: selectedParent,
-                  subCategories: subCats,
-                  selectedCategoryId: categoryId,
-                  enabled: !busy,
-                  onSelectCategoryId: (id) {
-                    setState(() {
-                      _userTouchedCategory = true;
-                      categoryId = id;
-                      _remarksShowAllScope = false;
-                    });
-                    _focusDesktopAmountIfIdle();
-                  },
+                child: _buildHorizontalSwipeShield(
+                  child: RecordSubcategoryStrip(
+                    parentCategory: selectedParent,
+                    subCategories: subCats,
+                    selectedCategoryId: categoryId,
+                    enabled: !busy,
+                    onSelectCategoryId: (id) {
+                      setState(() {
+                        _userTouchedCategory = true;
+                        categoryId = id;
+                        _remarksShowAllScope = false;
+                      });
+                      _focusDesktopAmountIfIdle();
+                    },
+                  ),
                 ),
               ),
             ),
@@ -3462,6 +3962,134 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
         ],
       ],
     );
+
+    if (editing) {
+      return scrollView;
+    }
+
+    void resetMiddleSwipeTracking() {
+      _middleActivePointer = null;
+      _middlePointerDownPos = null;
+      _middlePointerDownTime = null;
+      _middleTotalDelta = Offset.zero;
+      _middleDragDx = 0.0;
+      _middleSwipeBlockedByChild = false;
+      _middleDragHandledByArena = false;
+    }
+
+    return Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: (event) {
+        _middleActivePointer = event.pointer;
+        _middlePointerDownPos = event.position;
+        _middlePointerDownTime = event.timeStamp;
+        _middleTotalDelta = Offset.zero;
+        _middleSwipeBlockedByChild = _lastBlockedMiddlePointer == event.pointer;
+        _middleDragHandledByArena = false;
+      },
+      onPointerMove: (event) {
+        if (event.pointer != _middleActivePointer) return;
+        final start = _middlePointerDownPos;
+        if (start != null) {
+          _middleTotalDelta = event.position - start;
+        }
+      },
+      onPointerUp: (event) {
+        if (event.pointer != _middleActivePointer) return;
+        if (_middleDragHandledByArena) {
+          // GestureDetector won the arena; let onHorizontalDragEnd/Cancel read
+          // _middlePointerDownPos & _middleTotalDelta and reset state there.
+          return;
+        }
+        final start = _middlePointerDownPos;
+        final downTime = _middlePointerDownTime;
+        final delta = start != null
+            ? (event.position - start)
+            : _middleTotalDelta;
+        final blocked = _middleSwipeBlockedByChild;
+        resetMiddleSwipeTracking();
+        if (blocked) {
+          return;
+        }
+        final dx = delta.dx;
+        final dy = delta.dy;
+        if (dx.abs() <= dy.abs() * 1.5) {
+          return;
+        }
+        final elapsedUs = downTime == null
+            ? 0
+            : (event.timeStamp - downTime).inMicroseconds;
+        final vx = elapsedUs > 0 ? dx * 1000000.0 / elapsedUs : 0.0;
+        final vy = elapsedUs > 0 ? dy * 1000000.0 / elapsedUs : 0.0;
+        final validDistance = dx.abs() > 48.0;
+        final validFling =
+            dx.abs() > 24.0 &&
+            vx.abs() > 360.0 &&
+            vx.abs() > vy.abs() * 1.5 &&
+            vx.sign == dx.sign;
+        if (!validDistance && !validFling) {
+          return;
+        }
+        _stepRecordTypeBySwipe(
+          dx < 0 ? 1 : -1,
+          categories: categories,
+          diyConfig: diyConfig,
+          effectiveDefaultAccountId: effectiveDefaultAccountId,
+        );
+      },
+      onPointerCancel: (event) {
+        if (event.pointer == _middleActivePointer) {
+          resetMiddleSwipeTracking();
+        }
+      },
+      child: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onHorizontalDragStart: (_) {
+          _middleDragHandledByArena = true;
+          _middleDragDx = 0.0;
+        },
+        onHorizontalDragUpdate: (details) {
+          _middleDragDx += details.primaryDelta ?? details.delta.dx;
+        },
+        onHorizontalDragCancel: () {
+          // A child recognizer (e.g. unfocused TextField's eager drag recognizer)
+          // may reject our HorizontalDragGestureRecognizer mid-move; keep pointer
+          // tracking alive until onPointerUp / onPointerCancel decides.
+          _middleDragDx = 0.0;
+          _middleDragHandledByArena = false;
+        },
+        onHorizontalDragEnd: (details) {
+          final blocked = _middleSwipeBlockedByChild;
+          final dx = _middlePointerDownPos != null
+              ? _middleTotalDelta.dx
+              : _middleDragDx;
+          final dy = _middlePointerDownPos != null ? _middleTotalDelta.dy : 0.0;
+          resetMiddleSwipeTracking();
+          if (blocked || dx.abs() <= dy.abs() * 1.5) {
+            return;
+          }
+          final vx =
+              details.primaryVelocity ?? details.velocity.pixelsPerSecond.dx;
+          final vy = details.velocity.pixelsPerSecond.dy;
+          final validDistance = dx.abs() > 48.0;
+          final validFling =
+              dx.abs() > 24.0 &&
+              vx.abs() > 360.0 &&
+              vx.abs() > vy.abs() * 1.5 &&
+              vx.sign == dx.sign;
+          if (!validDistance && !validFling) {
+            return;
+          }
+          _stepRecordTypeBySwipe(
+            dx < 0 ? 1 : -1,
+            categories: categories,
+            diyConfig: diyConfig,
+            effectiveDefaultAccountId: effectiveDefaultAccountId,
+          );
+        },
+        child: scrollView,
+      ),
+    );
   }
 
   Widget _buildTransferCard(
@@ -3470,26 +4098,17 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     required DiyToolbarConfig diyConfig,
   }) {
     final cs = Theme.of(context).colorScheme;
-    final allLookupAssets =
-        ref.read(assetsProvider).value ??
-        (_initialAssets.isNotEmpty ? _initialAssets : assets);
-    final fromAsset =
-        assets.where((a) => a.id == fromAssetId).firstOrNull ??
-        (widget.initialFrom != null && fromAssetId == widget.initialFrom
-            ? allLookupAssets
-                  .where((a) => a.id == fromAssetId && a.type != AssetType.debt)
-                  .firstOrNull
-            : null);
-    final toAsset =
-        assets.where((a) => a.id == toAssetId).firstOrNull ??
-        (widget.initialTo != null && toAssetId == widget.initialTo
-            ? allLookupAssets
-                  .where((a) => a.id == toAssetId && a.type != AssetType.debt)
-                  .firstOrNull
-            : null);
+    final fromAsset = assets.where((a) => a.id == fromAssetId).firstOrNull;
+    final toAsset = assets.where((a) => a.id == toAssetId).firstOrNull;
     final configuredDefaultId = diyConfig.autoSelectDefaultAccount
         ? diyConfig.defaultAccountId
         : noRef;
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    final textScale = MediaQuery.textScalerOf(context).scale(1.0);
+    final desktopTransferRowHeight = math.max(
+      44.0,
+      (24.0 + 18.0 * textScale).ceilToDouble(),
+    );
 
     Widget accountSlot({
       required Key key,
@@ -3651,45 +4270,60 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
             Expanded(
               child: ConstrainedBox(
                 constraints: BoxConstraints(
-                  minHeight: DesktopAdaptive.isDesktop(context) ? 44 : 42,
+                  minHeight: isDesktop ? desktopTransferRowHeight : 42,
                 ),
-                child: TextField(
-                  key: const Key('fee'),
-                  controller: fee,
-                  focusNode: _feeFocus,
-                  enabled: !busy,
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
-                  ),
-                  textInputAction: TextInputAction.done,
-                  onEditingComplete: () {
-                    if (!_isDesktopActive) {
-                      _activateCustomKeypad();
+                child: Listener(
+                  behavior: HitTestBehavior.translucent,
+                  onPointerDown: (event) {
+                    if (_feeFocus.hasFocus) {
+                      _lastBlockedMiddlePointer = event.pointer;
+                      _middleSwipeBlockedByChild = true;
                     }
                   },
-                  onSubmitted: (_) {
-                    if (_isDesktopActive) {
-                      _triggerDesktopEnter();
-                    } else {
-                      _activateCustomKeypad();
-                    }
-                  },
-                  inputFormatters: amountInputFormatters,
-                  style: const TextStyle(fontSize: 14),
-                  decoration: InputDecoration(
-                    labelText: '手续费（可选）',
-                    prefixText:
-                        '${feeFromTarget ? _currencies().$2 : _currencies().$1} ',
-                    isDense: !DesktopAdaptive.isDesktop(context),
-                    constraints: DesktopAdaptive.isDesktop(context)
-                        ? const BoxConstraints.tightFor(height: 44)
-                        : null,
-                    contentPadding: EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: DesktopAdaptive.isDesktop(context) ? 12 : 10,
+                  child: TextField(
+                    key: const Key('fee'),
+                    controller: fee,
+                    focusNode: _feeFocus,
+                    enabled: !busy,
+                    enableInteractiveSelection: _feeFocus.hasFocus,
+                    scrollPhysics: _feeFocus.hasFocus
+                        ? null
+                        : const NeverScrollableScrollPhysics(),
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
                     ),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
+                    textInputAction: TextInputAction.done,
+                    onEditingComplete: () {
+                      if (!_isDesktopActive) {
+                        _activateCustomKeypad();
+                      }
+                    },
+                    onSubmitted: (_) {
+                      if (_isDesktopActive) {
+                        _triggerDesktopEnter();
+                      } else {
+                        _activateCustomKeypad();
+                      }
+                    },
+                    inputFormatters: amountInputFormatters,
+                    style: const TextStyle(fontSize: 14),
+                    decoration: InputDecoration(
+                      labelText: '手续费（可选）',
+                      prefixText:
+                          '${feeFromTarget ? _currencies().$2 : _currencies().$1} ',
+                      isDense: !isDesktop,
+                      constraints: isDesktop
+                          ? BoxConstraints.tightFor(
+                              height: desktopTransferRowHeight,
+                            )
+                          : null,
+                      contentPadding: EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: isDesktop ? 10 : 10,
+                      ),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
                     ),
                   ),
                 ),
@@ -3697,17 +4331,17 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
             ),
             const SizedBox(width: 8),
             SizedBox(
-              height: DesktopAdaptive.isDesktop(context) ? 44 : null,
+              height: isDesktop ? desktopTransferRowHeight : null,
               child: FilterChip(
                 key: const Key('transfer-fee-side-toggle'),
-                visualDensity: DesktopAdaptive.isDesktop(context)
+                visualDensity: isDesktop
                     ? VisualDensity.standard
                     : VisualDensity.compact,
-                materialTapTargetSize: DesktopAdaptive.isDesktop(context)
+                materialTapTargetSize: isDesktop
                     ? MaterialTapTargetSize.shrinkWrap
                     : null,
-                padding: DesktopAdaptive.isDesktop(context)
-                    ? const EdgeInsets.symmetric(horizontal: 10, vertical: 8)
+                padding: isDesktop
+                    ? const EdgeInsets.symmetric(horizontal: 10, vertical: 6)
                     : null,
                 label: Text(
                   feeFromTarget ? '转入方扣费' : '转出方扣费',
@@ -3766,12 +4400,15 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
       }
     }
 
-    final allAssets =
-        ref.watch(assetsProvider).value ??
-        (_initialAssets.isNotEmpty ? _initialAssets : assets);
-    final currentAsset = allAssets.where((a) => a.id == assetId).firstOrNull;
-    final fromAsset = allAssets.where((a) => a.id == fromAssetId).firstOrNull;
-    final toAsset = allAssets.where((a) => a.id == toAssetId).firstOrNull;
+    final lookupAssets = editing
+        ? (ref.watch(assetsProvider).value ??
+              (_initialAssets.isNotEmpty ? _initialAssets : assets))
+        : assets;
+    final currentAsset = lookupAssets.where((a) => a.id == assetId).firstOrNull;
+    final fromAsset = lookupAssets
+        .where((a) => a.id == fromAssetId)
+        .firstOrNull;
+    final toAsset = lookupAssets.where((a) => a.id == toAssetId).firstOrNull;
     final selectedCat = categoryId == null
         ? null
         : categories.where((c) => c.id == categoryId).firstOrNull;
@@ -4243,6 +4880,12 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     }
 
     if (DesktopAdaptive.isDesktop(context)) {
+      final desktopTextScale = MediaQuery.textScalerOf(
+        context,
+      ).scale(1.0).clamp(1.0, 2.0);
+      final desktopRemarkRowHeight = desktopTextScale > 1.02
+          ? (20.0 + 18.0 * desktopTextScale).ceilToDouble()
+          : 38.0;
       final remarkSuffix = _buildRemarkSuffixIcon(
         remarksEnabled: remarksEnabled,
       );
@@ -4265,7 +4908,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
             // Pinned Row 2: Explicit Horizontally-Centered Desktop Remark Row
             Container(
               key: const Key('editor-remark-row'),
-              height: 38,
+              height: desktopRemarkRowHeight,
               margin: const EdgeInsets.fromLTRB(12, 2, 12, 4),
               padding: const EdgeInsets.symmetric(horizontal: 12),
               decoration: BoxDecoration(
@@ -4602,7 +5245,10 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
       child: ExcludeFocus(
         child: LayoutBuilder(
           builder: (context, barConstraints) {
-            final compactBar = barConstraints.maxWidth < 550.0;
+            final textScale = MediaQuery.textScalerOf(
+              context,
+            ).scale(1.0).clamp(1.0, 2.0);
+            final compactBar = barConstraints.maxWidth < 550.0 * textScale;
             final saveAndAgainButton = OutlinedButton(
               key: const Key('desktop-save-and-again'),
               style: OutlinedButton.styleFrom(
@@ -4914,8 +5560,11 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                   data: (_) {
                     if (displayedRemarks.isEmpty) {
                       return Center(
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 24),
+                        child: SingleChildScrollView(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 24,
+                            vertical: 4,
+                          ),
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
@@ -5006,16 +5655,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     final isDesktop = DesktopAdaptive.isDesktop(context);
     final cs = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final allLookupAssets =
-        ref.read(assetsProvider).value ??
-        (_initialAssets.isNotEmpty ? _initialAssets : assets);
-    final currentAsset =
-        assets.where((a) => a.id == assetId).firstOrNull ??
-        (widget.initialAsset != null && assetId == widget.initialAsset
-            ? allLookupAssets
-                  .where((a) => a.id == assetId && a.type != AssetType.debt)
-                  .firstOrNull
-            : null);
+    final currentAsset = assets.where((a) => a.id == assetId).firstOrNull;
     final configuredDefaultId = diyConfig.autoSelectDefaultAccount
         ? diyConfig.defaultAccountId
         : noRef;

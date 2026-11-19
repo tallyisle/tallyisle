@@ -143,7 +143,11 @@ static gboolean my_application_local_command_line(GApplication* application,
                                                   int* exit_status) {
   MyApplication* self = MY_APPLICATION(application);
   // Strip out the first argument as it is the binary name.
-  self->dart_entrypoint_arguments = g_strdupv(*arguments + 1);
+  g_clear_pointer(&self->dart_entrypoint_arguments, g_strfreev);
+  if (arguments != nullptr && *arguments != nullptr &&
+      (*arguments)[0] != nullptr) {
+    self->dart_entrypoint_arguments = g_strdupv(*arguments + 1);
+  }
 
   g_autoptr(GError) error = nullptr;
   if (!g_application_register(application, nullptr, &error)) {

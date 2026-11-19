@@ -183,6 +183,7 @@ class _FixedDepositPageState extends ConsumerState<FixedDepositPage> {
           ? null
           : FloatingActionButton.extended(
               key: const Key('add_deposit_fab'),
+              heroTag: 'fab-fixed-deposit',
               onPressed: _openCreate,
               icon: const Icon(Icons.add),
               label: const Text('新建定存'),

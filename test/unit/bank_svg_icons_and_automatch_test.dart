@@ -96,6 +96,40 @@ void main() {
           'assets/icons/banks/library/bosc.svg',
         );
 
+        // B-21: Verify corrected displayNames & search aliases for the 5 mislabeled banks:
+        final sc = BankIconCatalog.bundled.descriptorFor(
+          'builtin:bank-icon.sc',
+        )!;
+        expect(sc.displayName, '渣打银行');
+        expect(sc.aliases, containsAll(<String>['渣打', 'Standard Chartered']));
+        expect(sc.matchesSearch('渣打'), isTrue);
+        expect(sc.matchesSearch('standard chartered'), isTrue);
+
+        expect(
+          BankIconCatalog.bundled
+              .descriptorFor('builtin:bank-icon.bankoftianjin')!
+              .displayName,
+          '天津银行',
+        );
+        expect(
+          BankIconCatalog.bundled
+              .descriptorFor('builtin:bank-icon.xmbankonline')!
+              .displayName,
+          '厦门银行',
+        );
+        expect(
+          BankIconCatalog.bundled
+              .descriptorFor('builtin:bank-icon.jnbank')!
+              .displayName,
+          '济宁银行',
+        );
+        expect(
+          BankIconCatalog.bundled
+              .descriptorFor('builtin:bank-icon.norincogroup')!
+              .displayName,
+          '兵器财务',
+        );
+
         // Rejects malformed / path-traversal / wrong-namespace references:
         for (final invalid in const <String?>[
           null,
@@ -338,6 +372,37 @@ void main() {
         }
         expect(navyCount, greaterThan(400));
         expect(goldCount, greaterThan(30));
+
+        // B-22: Verify ceb.svg & pingan.svg are ~1:1 centered square emblems (not horizontal wordmarks):
+        for (final emblemPath in const <String>[
+          'assets/icons/banks/ceb.svg',
+          'assets/icons/banks/pingan.svg',
+        ]) {
+          final emblemRgba = await rasterize(emblemPath, 128);
+          var minX = 128;
+          var maxX = -1;
+          var minY = 128;
+          var maxY = -1;
+          var opaque = 0;
+          for (var y = 0; y < 128; y++) {
+            for (var x = 0; x < 128; x++) {
+              final a = emblemRgba.getUint8((y * 128 + x) * 4 + 3);
+              if (a > 32) {
+                opaque++;
+                if (x < minX) minX = x;
+                if (x > maxX) maxX = x;
+                if (y < minY) minY = y;
+                if (y > maxY) maxY = y;
+              }
+            }
+          }
+          expect(opaque, greaterThan(2000), reason: emblemPath);
+          final w = (maxX - minX + 1).toDouble();
+          final h = (maxY - minY + 1).toDouble();
+          expect(w / h, closeTo(1.0, 0.06), reason: emblemPath);
+          expect((minX + maxX) / 2.0, closeTo(63.5, 2.5), reason: emblemPath);
+          expect((minY + maxY) / 2.0, closeTo(63.5, 2.5), reason: emblemPath);
+        }
       },
     );
   });
@@ -642,6 +707,20 @@ void main() {
         );
         expect(parsed.colorHex, '#E50113');
         expect(parsed.iconKey, 'builtin:bank-icon.bosc');
+
+        // B-19: Preview encoding strips `|` safely without throwing!
+        expect(
+          encodeBankCardVisualMeta(colorHex: '#1565c0', iconKey: 'text:招|行'),
+          '#1565C0|icon:text:招行',
+        );
+        expect(
+          encodeBankCardVisualMeta(colorHex: '#1565c0', iconKey: 'text:||'),
+          '#1565C0',
+        );
+        expect(
+          tryEncodeBankCardVisualMeta(colorHex: 'not-hex', iconKey: 'text:A|B'),
+          '|icon:text:AB',
+        );
 
         // Verify .ya2i export strips '|icon:...' to pure hex color for iOS schema parity:
         const payload = MigrationPayload(
