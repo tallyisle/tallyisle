@@ -12,6 +12,7 @@ class MainFlutterWindow: NSWindow {
     RegisterGeneratedPlugins(registry: flutterViewController)
 
     super.awakeFromNib()
-    self.title = "帐屿"
+    let preferredLanguage = (Locale.preferredLanguages.first ?? "").lowercased()
+    self.title = preferredLanguage.hasPrefix("zh") ? "帐屿" : "TallyIsle"
   }
 }

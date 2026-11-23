@@ -624,11 +624,20 @@ class _AssetMenuState extends ConsumerState<_AssetMenu> {
     final db = await ref.read(databaseProvider.future);
     final bookId = await _readCurrentBookId(db);
     final service = LedgerService(db);
+    final seq = _actionSeq++;
+    final opTimeMs = DateTime.now().millisecondsSinceEpoch;
     await service.adjustBalance(
-      commandId: ids.forPayload(['adjust', asset.id, target.toJson()]),
+      commandId: ids.forPayload([
+        'adjust',
+        asset.id,
+        target.toJson(),
+        opTimeMs,
+        seq,
+      ]),
       assetId: asset.id,
       target: target,
       bookId: bookId,
+      recordTime: opTimeMs,
     );
   }
 

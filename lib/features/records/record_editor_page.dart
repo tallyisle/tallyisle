@@ -259,6 +259,11 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
 
   /// The user typed the converted amount themselves (stop auto-filling).
   bool convertedEdited = false;
+
+  /// True while preserving an existing FX bill's loaded converted amount until
+  /// the user edits amount/discount/currency/account.
+  bool _preservingLoadedConversion = false;
+  int _pickerReorderSeq = 0;
   bool feeFromTarget = false;
   bool excludeBudget = false, excludeExIn = false;
   bool _attachmentsExpanded = false;
@@ -523,6 +528,10 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
         _desktopRemarksExpanded = false;
       }
       amount.value = nextValue;
+      if (_preservingLoadedConversion) {
+        _preservingLoadedConversion = false;
+        convertedEdited = false;
+      }
       _autoConvert();
     });
     if (!_amountFocus.hasFocus) {
@@ -950,7 +959,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     if (!mounted || editing) return;
     try {
       final db = await ref.read(databaseProvider.future);
-      final latestAssets = await db.select(db.assets).get();
+      final latestAssets = await LedgerQueries(db).getAssets();
       final latestAssetBooks = await db.select(db.assetBooks).get();
       final latestBookId = await _readCurrentBookId(db);
       final latestConfig = await _resolveLatestDiyConfig(db);
@@ -1007,8 +1016,31 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     return (sourceCurrency ?? ac, ac);
   }
 
+  BigInt _currentDiscountMinor() {
+    if (type != RecordType.expense && type != RecordType.income) {
+      return BigInt.zero;
+    }
+    final raw = discount.text.trim();
+    if (raw.isEmpty) return BigInt.zero;
+    try {
+      final parsed = parseAmount(raw);
+      return parsed.storageMinor > BigInt.zero
+          ? parsed.storageMinor
+          : BigInt.zero;
+    } on Failure {
+      return BigInt.zero;
+    }
+  }
+
+  BigInt _netSourceMinorFromGross(BigInt grossMinor) {
+    final disc = _currentDiscountMinor();
+    if (disc <= BigInt.zero) return grossMinor;
+    return grossMinor > disc ? grossMinor - disc : BigInt.zero;
+  }
+
   /// Fills [converted] from manual rates using exact calculator evaluation
-  /// unless the user edited [converted] manually.
+  /// (after subtracting discount for expense/income) unless the user edited
+  /// [converted] manually.
   void _autoConvert() {
     if (convertedEdited) return;
     final (sc, ac) = _currencies();
@@ -1023,8 +1055,9 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
       return;
     }
     try {
-      final minor = evaluateKeypadExpression(text).clampedMinor;
-      converted.text = formatMinor(rates.convert(minor, sc, ac));
+      final grossMinor = evaluateKeypadExpression(text).clampedMinor;
+      final netMinor = _netSourceMinorFromGross(grossMinor);
+      converted.text = formatMinor(rates.convert(netMinor, sc, ac));
     } on Failure {
       converted.text = '';
     }
@@ -1043,8 +1076,9 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     final text = amount.text.trim();
     if (rates == null || text.isEmpty) return '0.00';
     try {
-      final minor = evaluateKeypadExpression(text).clampedMinor;
-      return formatMinor(rates.convert(minor, sc, ac));
+      final grossMinor = evaluateKeypadExpression(text).clampedMinor;
+      final netMinor = _netSourceMinorFromGross(grossMinor);
+      return formatMinor(rates.convert(netMinor, sc, ac));
     } on Failure {
       return '0.00';
     }
@@ -1194,18 +1228,36 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     required String currencySymbol,
   }) async {
     _unfocusOsKeyboardFields();
+    BigInt? maxGrossMinor;
+    final rawAmt = amount.text.trim();
+    if (rawAmt.isNotEmpty) {
+      try {
+        final eval = evaluateKeypadExpression(rawAmt);
+        if (!eval.dividedByZero && !eval.isNegative) {
+          maxGrossMinor = eval.clampedMinor;
+        }
+      } on Failure {
+        maxGrossMinor = null;
+      }
+    }
     final result = await showDialog<String>(
       context: context,
       builder: (_) => _DiscountEditDialog(
         initialText: discount.text,
         currencyCode: currencyCode,
         currencySymbol: currencySymbol,
+        maxGrossMinor: maxGrossMinor,
       ),
     );
     if (!mounted) return;
     if (result != null) {
       setState(() {
         discount.text = result;
+        if (_preservingLoadedConversion) {
+          _preservingLoadedConversion = false;
+          convertedEdited = false;
+        }
+        _autoConvert();
         _savedAndResetBanner = false;
       });
     }
@@ -1222,6 +1274,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
   }) async {
     _unfocusOsKeyboardFields();
     final rates = ref.read(rateTableProvider).value;
+    final discMinor = _currentDiscountMinor();
     final res = await showDialog<({String text, bool edited})>(
       context: context,
       builder: (_) => _ConversionEditDialog(
@@ -1234,12 +1287,14 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
         sourceSymbol: _symbolForCurrency(sc, currencies),
         targetCurrency: ac,
         amountText: amount.text,
+        discountMinor: discMinor,
         rates: rates,
       ),
     );
     if (!mounted) return;
     if (res != null) {
       setState(() {
+        _preservingLoadedConversion = false;
         converted.text = res.text;
         convertedEdited = res.edited && res.text.isNotEmpty;
         if (!convertedEdited) {
@@ -1334,6 +1389,10 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
       _savedAndResetBanner = false;
       _panelMode = _BottomPanelMode.customKeypad;
       amount.value = nextValue;
+      if (_preservingLoadedConversion) {
+        _preservingLoadedConversion = false;
+        convertedEdited = false;
+      }
       _autoConvert();
     });
     if (!_amountFocus.hasFocus) {
@@ -1364,6 +1423,10 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
         error = null;
         _savedAndResetBanner = false;
         _setAmountText(evaluated.decimal);
+        if (_preservingLoadedConversion) {
+          _preservingLoadedConversion = false;
+          convertedEdited = false;
+        }
         _autoConvert();
       });
     } on Failure {
@@ -1452,9 +1515,15 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     assetId = r.type == RecordType.reimbursable ? r.fromAssetId : r.assetId;
     fromAssetId = r.fromAssetId;
     toAssetId = r.toAssetId;
-    _setAmountText(formatMinor(r.moneyMinor));
-    if (r.discountMinor != null && r.discountMinor! > BigInt.zero) {
-      discount.text = formatMinor(r.discountMinor!);
+    final discMinor =
+        (r.type == RecordType.expense || r.type == RecordType.income) &&
+            r.discountMinor != null &&
+            r.discountMinor! > BigInt.zero
+        ? r.discountMinor!
+        : BigInt.zero;
+    _setAmountText(formatMinor(r.moneyMinor + discMinor));
+    if (discMinor > BigInt.zero) {
+      discount.text = formatMinor(discMinor);
     }
     remark.text = r.remark;
     excludeBudget = r.excludeBudget;
@@ -1481,12 +1550,14 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
         if (sc != ac) {
           converted.text = formatMinor(snap.assetNet!);
           convertedEdited = true;
+          _preservingLoadedConversion = true;
         }
       } else if (sc != ac) {
         sourceCurrency = sc;
         _setAmountText(formatMinor(snap.sourceGross));
         converted.text = formatMinor(snap.assetNet!);
         convertedEdited = true;
+        _preservingLoadedConversion = true;
       }
     }
     if (feeRow != null) {
@@ -1505,7 +1576,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
   Future<void> _load() async {
     try {
       final db = await ref.read(databaseProvider.future);
-      final loadedAssets = await db.select(db.assets).get();
+      final loadedAssets = await LedgerQueries(db).getAssets();
       final loadedAssetBooks = await db.select(db.assetBooks).get();
       _initialAssets = loadedAssets;
       _initialAssetBooks = loadedAssetBooks;
@@ -1690,10 +1761,18 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
       final effectiveDiscount = parsedDiscount != null && !parsedDiscount.isZero
           ? parsedDiscount
           : null;
+      if (effectiveDiscount != null &&
+          effectiveDiscount.storageMinor > money.storageMinor) {
+        throw const Failure(FailureCode.validation, '优惠金额不能大于原金额');
+      }
+      final netSourceMinor = effectiveDiscount != null
+          ? money.storageMinor - effectiveDiscount.storageMinor
+          : money.storageMinor;
+      final netSourceMoney = Money.minor(netSourceMinor);
 
       final effectiveDiyConfig = await _resolveLatestDiyConfig(db);
       if (!editing) {
-        final liveAssets = await db.select(db.assets).get();
+        final liveAssets = await LedgerQueries(db).getAssets();
         final liveAssetBooks = await db.select(db.assetBooks).get();
         _initialAssets = liveAssets;
         _initialAssetBooks = liveAssetBooks;
@@ -1708,13 +1787,16 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
           fromAssetId = reconciledBeforeSave.fromAssetId;
           toAssetId = reconciledBeforeSave.toAssetId;
           convertedEdited = false;
+          _preservingLoadedConversion = false;
           _autoConvert();
         }
       }
 
       // Multi-currency (`ledger-catalog.md` §4 `curr`) via direct DB read.
+      // L-01: Keypad enters gross; discount applies to expense/income so
+      // same-currency books netSource and cross-currency converts netSource.
       final (sc, ac) = _currencies();
-      var booked = money;
+      var booked = type == RecordType.transfer ? money : netSourceMoney;
       if (sc != ac) {
         final currencyRows = await db.select(db.currencies).get();
         final rates = RateTable({
@@ -1722,9 +1804,9 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
         });
         final text = converted.text.trim();
         final target = text.isEmpty
-            ? Money.minor(rates.convert(money.storageMinor, sc, ac))
+            ? Money.minor(rates.convert(netSourceMinor, sc, ac))
             : parseAmount(text);
-        if (!money.isZero && target.units <= BigInt.zero) {
+        if (netSourceMinor > BigInt.zero && target.units <= BigInt.zero) {
           throw const Failure(FailureCode.validation, '折算金额须大于 0');
         }
         if (type != RecordType.transfer) booked = target;
@@ -1733,6 +1815,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
           sourceMinor: money.storageMinor,
           account: ac,
           assetMinor: target.storageMinor,
+          discountMinor: effectiveDiscount?.storageMinor,
           rates: rates,
         );
       } else if (sc != baseCurrency) {
@@ -1744,11 +1827,34 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
           source: sc,
           sourceMinor: money.storageMinor,
           account: ac,
-          assetMinor: money.storageMinor,
+          assetMinor: booked.storageMinor,
+          discountMinor: effectiveDiscount?.storageMinor,
           rates: rates,
         );
       } else {
         extra.currency = null;
+      }
+
+      // L-07: Preserve historical FX `bm` when editing non-amount fields.
+      if (old != null && old.type == type) {
+        final oldSnap = RecordExtra.parse(old.extraInfo).currency;
+        final newSnap = extra.currency;
+        final oldDisc = old.discountMinor ?? BigInt.zero;
+        final newDisc = effectiveDiscount?.storageMinor ?? BigInt.zero;
+        if (oldSnap != null &&
+            oldSnap.isValid &&
+            newSnap != null &&
+            newSnap.isValid &&
+            normalizeCurrency(oldSnap.sourceCode) ==
+                normalizeCurrency(newSnap.sourceCode) &&
+            oldSnap.sourceGross == newSnap.sourceGross &&
+            normalizeCurrency(oldSnap.assetCode) ==
+                normalizeCurrency(newSnap.assetCode) &&
+            (oldSnap.assetNet ?? old.moneyMinor) ==
+                (newSnap.assetNet ?? booked.storageMinor) &&
+            oldDisc == newDisc) {
+          extra.currency = oldSnap;
+        }
       }
 
       final draft = RecordDraft(
@@ -1863,7 +1969,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
               currentCategories,
             );
           }
-          final refreshedAssets = await db.select(db.assets).get();
+          final refreshedAssets = await LedgerQueries(db).getAssets();
           final refreshedAssetBooks = await db.select(db.assetBooks).get();
           final refreshedBindings = _buildAssetBookBindings(
             refreshedAssetBooks,
@@ -1893,9 +1999,15 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
             _setAmountText('');
             converted.clear();
             convertedEdited = false;
+            _preservingLoadedConversion = false;
             discount.clear();
             fee.clear();
+            feeFromTarget = false;
             remark.clear();
+            selectedTagIds.clear();
+            excludeBudget = false;
+            excludeExIn = false;
+            sourceCurrency = null;
             imageNames = const <String>[];
             location = null;
             _attachmentsExpanded = false;
@@ -2289,51 +2401,25 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     required ValueChanged<int> onSelected,
   }) async {
     _unfocusOsKeyboardFields();
-    Widget buildAccountTitle(BuildContext ctx, Asset a) {
-      final isDefault =
-          defaultAccountId != noRef &&
-          a.id == defaultAccountId &&
-          a.status == AssetStatus.active &&
-          a.type != AssetType.debt;
-      if (!isDefault) {
-        return Text(a.name, maxLines: 1, overflow: TextOverflow.ellipsis);
-      }
-      final itemCs = Theme.of(ctx).colorScheme;
-      return Row(
-        children: [
-          Flexible(
-            child: Text(a.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-          ),
-          const SizedBox(width: 6),
-          Container(
-            key: Key('account-default-badge-${a.id}'),
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
-            decoration: BoxDecoration(
-              color: itemCs.secondaryContainer,
-              borderRadius: BorderRadius.circular(999),
-            ),
-            child: Text(
-              '默认',
-              style: TextStyle(
-                fontSize: 10.5,
-                fontWeight: FontWeight.w600,
-                color: itemCs.onSecondaryContainer,
-                height: 1.2,
-              ),
-            ),
-          ),
-        ],
-      );
-    }
-
     final isDesktop = _isDesktopActive;
     var openedManager = false;
+    var didReorder = false;
+
+    Future<void> persistReorder(List<int> orderedIds) async {
+      final service = await ref.read(ledgerServiceProvider.future);
+      final seq = ++_pickerReorderSeq;
+      await service.reorderAssets(
+        commandId: ids.forPayload(['picker-reorder', orderedIds, seq]),
+        orderedAssetIds: orderedIds,
+      );
+      didReorder = true;
+    }
+
     final int? chosen;
     if (isDesktop) {
       chosen = await showDialog<int>(
         context: context,
         builder: (dialogCtx) {
-          final cs = Theme.of(dialogCtx).colorScheme;
           return Dialog(
             key: const Key('desktop-account-picker-dialog'),
             shape: RoundedRectangleBorder(
@@ -2342,96 +2428,20 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
             clipBehavior: Clip.antiAlias,
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 420, maxHeight: 520),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 14, 10, 10),
-                    child: Row(
-                      children: [
-                        Text(
-                          title,
-                          style: Theme.of(dialogCtx).textTheme.titleMedium
-                              ?.copyWith(fontWeight: FontWeight.w600),
-                        ),
-                        const Spacer(),
-                        TextButton.icon(
-                          key: const Key('manage-assets-sheet-btn'),
-                          onPressed: () {
-                            openedManager = true;
-                            Navigator.of(dialogCtx).pop();
-                          },
-                          icon: const Icon(Icons.settings_outlined, size: 16),
-                          label: const Text('管理账户'),
-                        ),
-                        CloseButton(
-                          onPressed: () => Navigator.of(dialogCtx).pop(),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const Divider(height: 1),
-                  Flexible(
-                    child: ListView(
-                      shrinkWrap: true,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 6,
-                      ),
-                      children: [
-                        if (allowNone)
-                          ListTile(
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            leading: Container(
-                              width: 34,
-                              height: 34,
-                              decoration: BoxDecoration(
-                                color: cs.surfaceContainerHighest,
-                                shape: BoxShape.circle,
-                              ),
-                              alignment: Alignment.center,
-                              child: Icon(
-                                Icons.remove_circle_outline_rounded,
-                                size: 18,
-                                color: cs.onSurfaceVariant,
-                              ),
-                            ),
-                            title: const Text('不选账户'),
-                            trailing: currentId == noRef
-                                ? Icon(Icons.check_rounded, color: cs.primary)
-                                : null,
-                            onTap: () => Navigator.of(dialogCtx).pop(noRef),
-                          ),
-                        for (final a in assets)
-                          ListTile(
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            leading: AssetIconAvatar(
-                              iconKey: a.icon,
-                              colorHex: a.color,
-                              name: a.name,
-                              assetType: a.type,
-                              subType: a.subType,
-                              size: 34,
-                              selected: currentId == a.id,
-                            ),
-                            title: buildAccountTitle(dialogCtx, a),
-                            subtitle: Text(
-                              '${normalizeCurrency(a.currency) ?? baseCurrency} · ${formatMinor(a.balanceMinor)}',
-                              style: const TextStyle(fontSize: 12),
-                            ),
-                            trailing: currentId == a.id
-                                ? Icon(Icons.check_rounded, color: cs.primary)
-                                : null,
-                            onTap: () => Navigator.of(dialogCtx).pop(a.id),
-                          ),
-                      ],
-                    ),
-                  ),
-                ],
+              child: _AccountPickerBody(
+                title: title,
+                initialAssets: assets,
+                currentId: currentId,
+                allowNone: allowNone,
+                defaultAccountId: defaultAccountId,
+                isDesktop: true,
+                onSelect: (id) => Navigator.of(dialogCtx).pop(id),
+                onOpenManager: () {
+                  openedManager = true;
+                  Navigator.of(dialogCtx).pop();
+                },
+                onClose: () => Navigator.of(dialogCtx).pop(),
+                onReorderPersist: persistReorder,
               ),
             ),
           );
@@ -2444,87 +2454,24 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
         isScrollControlled: true,
         sheetAnimationStyle: AnimationStyle.noAnimation,
         builder: (sheetCtx) {
-          final cs = Theme.of(sheetCtx).colorScheme;
           return SafeArea(
             child: ConstrainedBox(
               constraints: BoxConstraints(
                 maxHeight: MediaQuery.sizeOf(sheetCtx).height * 0.65,
               ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                    child: Row(
-                      children: [
-                        Text(
-                          title,
-                          style: Theme.of(sheetCtx).textTheme.titleMedium,
-                        ),
-                        const Spacer(),
-                        TextButton.icon(
-                          key: const Key('manage-assets-sheet-btn'),
-                          onPressed: () {
-                            openedManager = true;
-                            Navigator.pop(sheetCtx);
-                          },
-                          icon: const Icon(Icons.settings_outlined, size: 16),
-                          label: const Text('管理账户'),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Flexible(
-                    child: ListView(
-                      shrinkWrap: true,
-                      children: [
-                        if (allowNone)
-                          ListTile(
-                            leading: Container(
-                              width: 36,
-                              height: 36,
-                              decoration: BoxDecoration(
-                                color: cs.surfaceContainerHighest,
-                                shape: BoxShape.circle,
-                              ),
-                              alignment: Alignment.center,
-                              child: Icon(
-                                Icons.remove_circle_outline_rounded,
-                                size: 18,
-                                color: cs.onSurfaceVariant,
-                              ),
-                            ),
-                            title: const Text('不选账户'),
-                            trailing: currentId == noRef
-                                ? Icon(Icons.check_rounded, color: cs.primary)
-                                : null,
-                            onTap: () => Navigator.pop(sheetCtx, noRef),
-                          ),
-                        for (final a in assets)
-                          ListTile(
-                            leading: AssetIconAvatar(
-                              iconKey: a.icon,
-                              colorHex: a.color,
-                              name: a.name,
-                              assetType: a.type,
-                              subType: a.subType,
-                              size: 36,
-                              selected: currentId == a.id,
-                            ),
-                            title: buildAccountTitle(sheetCtx, a),
-                            subtitle: Text(
-                              '${normalizeCurrency(a.currency) ?? baseCurrency} · ${formatMinor(a.balanceMinor)}',
-                              style: const TextStyle(fontSize: 12),
-                            ),
-                            trailing: currentId == a.id
-                                ? Icon(Icons.check_rounded, color: cs.primary)
-                                : null,
-                            onTap: () => Navigator.pop(sheetCtx, a.id),
-                          ),
-                      ],
-                    ),
-                  ),
-                ],
+              child: _AccountPickerBody(
+                title: title,
+                initialAssets: assets,
+                currentId: currentId,
+                allowNone: allowNone,
+                defaultAccountId: defaultAccountId,
+                isDesktop: false,
+                onSelect: (id) => Navigator.pop(sheetCtx, id),
+                onOpenManager: () {
+                  openedManager = true;
+                  Navigator.pop(sheetCtx);
+                },
+                onReorderPersist: persistReorder,
               ),
             ),
           );
@@ -2539,6 +2486,10 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
       if (!mounted) return;
       _focusDesktopAmountIfIdle();
       return;
+    }
+    if (didReorder) {
+      await _refreshAndReconcileAccountsFromDb();
+      if (!mounted) return;
     }
     if (chosen != null) {
       onSelected(chosen);
@@ -3678,6 +3629,9 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
         _userTouchedType = true;
       }
       _userTouchedCategory = false;
+      if (nextType != RecordType.expense && nextType != RecordType.income) {
+        discount.clear();
+      }
       if (nextType == RecordType.transfer) {
         categoryId = null;
         parentCatId = null;
@@ -4799,6 +4753,10 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                                     setState(() {
                                       error = null;
                                       _savedAndResetBanner = false;
+                                      if (_preservingLoadedConversion) {
+                                        _preservingLoadedConversion = false;
+                                        convertedEdited = false;
+                                      }
                                       _autoConvert();
                                     });
                                   },
@@ -4826,6 +4784,10 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                                         setState(() {
                                           error = null;
                                           _setAmountText(next);
+                                          if (_preservingLoadedConversion) {
+                                            _preservingLoadedConversion = false;
+                                            convertedEdited = false;
+                                          }
                                           _autoConvert();
                                         });
                                       } on Failure catch (e) {
@@ -5764,6 +5726,10 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
               defaultAccountId: configuredDefaultId,
               onSelected: (v) => setState(() {
                 _userTouchedAsset = true;
+                if (assetId != v && _preservingLoadedConversion) {
+                  _preservingLoadedConversion = false;
+                  convertedEdited = false;
+                }
                 assetId = v;
                 _autoConvert();
               }),
@@ -5778,8 +5744,8 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
       ),
     ];
 
-    final (_, ac) = _currencies();
-    final acSymbol = _symbolForCurrency(ac, currencies);
+    final (sc, _) = _currencies();
+    final scSymbol = _symbolForCurrency(sc, currencies);
 
     for (final item in diyConfig.items) {
       switch (item.action) {
@@ -5813,9 +5779,9 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
             String discLabel = '优惠';
             if (hasDisc) {
               try {
-                discLabel = '优惠 $acSymbol${parseAmount(discRaw).decimal}';
+                discLabel = '优惠 $scSymbol${parseAmount(discRaw).decimal}';
               } on Failure {
-                discLabel = '优惠 $acSymbol$discRaw';
+                discLabel = '优惠 $scSymbol$discRaw';
               }
             }
             pills.add(
@@ -5826,8 +5792,8 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                 active: hasDisc,
                 onTap: () => unawaited(
                   _openDiscountDialog(
-                    currencyCode: ac,
-                    currencySymbol: acSymbol,
+                    currencyCode: sc,
+                    currencySymbol: scSymbol,
                   ),
                 ),
               ),
@@ -5946,11 +5912,13 @@ class _DiscountEditDialog extends StatefulWidget {
     required this.initialText,
     required this.currencyCode,
     required this.currencySymbol,
+    this.maxGrossMinor,
   });
 
   final String initialText;
   final String currencyCode;
   final String currencySymbol;
+  final BigInt? maxGrossMinor;
 
   @override
   State<_DiscountEditDialog> createState() => _DiscountEditDialogState();
@@ -5980,6 +5948,16 @@ class _DiscountEditDialogState extends State<_DiscountEditDialog> {
     }
     try {
       final parsed = parseAmount(trimmed);
+      if (parsed.isNegative) {
+        setState(() => _errorText = '优惠金额不能为负数');
+        return;
+      }
+      if (widget.maxGrossMinor != null &&
+          widget.maxGrossMinor! > BigInt.zero &&
+          parsed.storageMinor > widget.maxGrossMinor!) {
+        setState(() => _errorText = '优惠金额不能大于原金额');
+        return;
+      }
       Navigator.of(context).pop(parsed.isZero ? '' : parsed.decimal);
     } on Failure catch (e) {
       setState(() => _errorText = safeMessage(e));
@@ -6051,6 +6029,7 @@ class _ConversionEditDialog extends StatefulWidget {
     required this.sourceSymbol,
     required this.targetCurrency,
     required this.amountText,
+    this.discountMinor,
     required this.rates,
   });
 
@@ -6061,6 +6040,7 @@ class _ConversionEditDialog extends StatefulWidget {
   final String sourceSymbol;
   final String targetCurrency;
   final String amountText;
+  final BigInt? discountMinor;
   final RateTable? rates;
 
   @override
@@ -6091,9 +6071,13 @@ class _ConversionEditDialogState extends State<_ConversionEditDialog> {
     String next = '';
     if (rates != null && rawAmt.isNotEmpty) {
       try {
-        final minor = evaluateKeypadExpression(rawAmt).clampedMinor;
+        final grossMinor = evaluateKeypadExpression(rawAmt).clampedMinor;
+        final disc = widget.discountMinor ?? BigInt.zero;
+        final netMinor = !widget.isTransfer && disc > BigInt.zero
+            ? (grossMinor > disc ? grossMinor - disc : BigInt.zero)
+            : grossMinor;
         next = formatMinor(
-          rates.convert(minor, widget.sourceCurrency, widget.targetCurrency),
+          rates.convert(netMinor, widget.sourceCurrency, widget.targetCurrency),
         );
       } on Failure {
         next = '';
@@ -6240,6 +6224,324 @@ class _DesktopActionToggleChip extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _AccountPickerBody extends StatefulWidget {
+  const _AccountPickerBody({
+    required this.title,
+    required this.initialAssets,
+    required this.currentId,
+    required this.allowNone,
+    required this.defaultAccountId,
+    required this.isDesktop,
+    required this.onSelect,
+    required this.onOpenManager,
+    this.onClose,
+    required this.onReorderPersist,
+  });
+
+  final String title;
+  final List<Asset> initialAssets;
+  final int currentId;
+  final bool allowNone;
+  final int defaultAccountId;
+  final bool isDesktop;
+  final ValueChanged<int> onSelect;
+  final VoidCallback onOpenManager;
+  final VoidCallback? onClose;
+  final Future<void> Function(List<int> orderedIds) onReorderPersist;
+
+  @override
+  State<_AccountPickerBody> createState() => _AccountPickerBodyState();
+}
+
+class _AccountPickerBodyState extends State<_AccountPickerBody> {
+  late List<Asset> _items = List<Asset>.of(widget.initialAssets);
+  bool _reordering = false;
+  bool _savingOrder = false;
+
+  String _subtitleOf(Asset a) {
+    final ccy = normalizeCurrency(a.currency) ?? baseCurrency;
+    final bal = formatMinor(a.balanceMinor);
+    if (a.type == AssetType.credit) {
+      return '信用账户 · $ccy · $bal';
+    }
+    return '$ccy · $bal';
+  }
+
+  Widget _buildAccountTitle(BuildContext ctx, Asset a) {
+    final isDefault =
+        widget.defaultAccountId != noRef &&
+        a.id == widget.defaultAccountId &&
+        a.status == AssetStatus.active &&
+        a.type != AssetType.debt;
+    if (!isDefault) {
+      return Text(a.name, maxLines: 1, overflow: TextOverflow.ellipsis);
+    }
+    final itemCs = Theme.of(ctx).colorScheme;
+    return Row(
+      children: [
+        Flexible(
+          child: Text(a.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+        ),
+        const SizedBox(width: 6),
+        Container(
+          key: Key('account-default-badge-${a.id}'),
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+          decoration: BoxDecoration(
+            color: itemCs.secondaryContainer,
+            borderRadius: BorderRadius.circular(999),
+          ),
+          child: Text(
+            '默认',
+            style: TextStyle(
+              fontSize: 10.5,
+              fontWeight: FontWeight.w600,
+              color: itemCs.onSecondaryContainer,
+              height: 1.2,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _handleReorder(int oldIndex, int newIndex) async {
+    if (oldIndex < 0 ||
+        oldIndex >= _items.length ||
+        newIndex < 0 ||
+        newIndex >= _items.length ||
+        oldIndex == newIndex) {
+      return;
+    }
+    final previous = List<Asset>.of(_items);
+    final updated = List<Asset>.of(_items);
+    final moved = updated.removeAt(oldIndex);
+    updated.insert(newIndex, moved);
+    setState(() {
+      _items = updated;
+      _savingOrder = true;
+    });
+    try {
+      await widget.onReorderPersist([for (final a in updated) a.id]);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _items = previous);
+      ScaffoldMessenger.maybeOf(
+        context,
+      )?.showSnackBar(SnackBar(content: Text(safeMessage(e))));
+    } finally {
+      if (mounted) {
+        setState(() => _savingOrder = false);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final canReorder = _items.length >= 2;
+    final avatarSize = widget.isDesktop ? 34.0 : 36.0;
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Padding(
+          padding: widget.isDesktop
+              ? const EdgeInsets.fromLTRB(20, 14, 10, 10)
+              : const EdgeInsets.fromLTRB(16, 0, 12, 8),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  widget.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: widget.isDesktop
+                      ? theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        )
+                      : theme.textTheme.titleMedium,
+                ),
+              ),
+              if (canReorder)
+                TextButton(
+                  key: const Key('toggle-account-picker-reorder-btn'),
+                  style: TextButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                  ),
+                  onPressed: _savingOrder
+                      ? null
+                      : () => setState(() => _reordering = !_reordering),
+                  child: Text(_reordering ? '完成' : '排序'),
+                ),
+              TextButton.icon(
+                key: const Key('manage-assets-sheet-btn'),
+                style: TextButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                ),
+                onPressed: _savingOrder ? null : widget.onOpenManager,
+                icon: const Icon(Icons.settings_outlined, size: 16),
+                label: const Text('管理账户'),
+              ),
+              if (widget.isDesktop && widget.onClose != null)
+                CloseButton(onPressed: widget.onClose),
+            ],
+          ),
+        ),
+        if (widget.isDesktop) const Divider(height: 1),
+        Flexible(
+          child: _reordering
+              ? ReorderableListView.builder(
+                  key: const Key('account-picker-reorder-list'),
+                  shrinkWrap: true,
+                  buildDefaultDragHandles: false,
+                  padding: widget.isDesktop
+                      ? const EdgeInsets.symmetric(horizontal: 8, vertical: 6)
+                      : EdgeInsets.zero,
+                  onReorderStart: (_) {
+                    if (!widget.isDesktop) {
+                      HapticFeedback.selectionClick();
+                    }
+                  },
+                  proxyDecorator: (child, index, animation) => Material(
+                    elevation: 6,
+                    color: cs.surface,
+                    borderRadius: BorderRadius.circular(12),
+                    clipBehavior: Clip.antiAlias,
+                    child: child,
+                  ),
+                  itemCount: _items.length,
+                  onReorderItem: (oldIndex, newIndex) =>
+                      unawaited(_handleReorder(oldIndex, newIndex)),
+                  itemBuilder: (ctx, index) {
+                    final a = _items[index];
+                    final dragHandle = ReorderableDragStartListener(
+                      index: index,
+                      child: MouseRegion(
+                        cursor: SystemMouseCursors.grab,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 4,
+                            vertical: 6,
+                          ),
+                          child: Icon(
+                            Icons.drag_handle_rounded,
+                            key: Key('account-picker-drag-${a.id}'),
+                            size: 20,
+                            color: cs.outline,
+                          ),
+                        ),
+                      ),
+                    );
+                    final tile = ListTile(
+                      shape: widget.isDesktop
+                          ? RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            )
+                          : null,
+                      leading: AssetIconAvatar(
+                        iconKey: a.icon,
+                        colorHex: a.color,
+                        name: a.name,
+                        assetType: a.type,
+                        subType: a.subType,
+                        size: avatarSize,
+                        selected: widget.currentId == a.id,
+                      ),
+                      title: _buildAccountTitle(ctx, a),
+                      subtitle: Text(
+                        _subtitleOf(a),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                      trailing: dragHandle,
+                    );
+                    if (widget.isDesktop) {
+                      return KeyedSubtree(
+                        key: ValueKey('picker-account-item-${a.id}'),
+                        child: tile,
+                      );
+                    }
+                    return ReorderableDelayedDragStartListener(
+                      key: ValueKey('picker-account-item-${a.id}'),
+                      index: index,
+                      child: tile,
+                    );
+                  },
+                )
+              : ListView(
+                  shrinkWrap: true,
+                  padding: widget.isDesktop
+                      ? const EdgeInsets.symmetric(horizontal: 8, vertical: 6)
+                      : EdgeInsets.zero,
+                  children: [
+                    if (widget.allowNone)
+                      ListTile(
+                        shape: widget.isDesktop
+                            ? RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              )
+                            : null,
+                        leading: Container(
+                          width: avatarSize,
+                          height: avatarSize,
+                          decoration: BoxDecoration(
+                            color: cs.surfaceContainerHighest,
+                            shape: BoxShape.circle,
+                          ),
+                          alignment: Alignment.center,
+                          child: Icon(
+                            Icons.remove_circle_outline_rounded,
+                            size: 18,
+                            color: cs.onSurfaceVariant,
+                          ),
+                        ),
+                        title: const Text('不选账户'),
+                        trailing: widget.currentId == noRef
+                            ? Icon(Icons.check_rounded, color: cs.primary)
+                            : null,
+                        onTap: () => widget.onSelect(noRef),
+                      ),
+                    for (final a in _items)
+                      ListTile(
+                        key: ValueKey('picker-account-row-${a.id}'),
+                        shape: widget.isDesktop
+                            ? RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              )
+                            : null,
+                        leading: AssetIconAvatar(
+                          iconKey: a.icon,
+                          colorHex: a.color,
+                          name: a.name,
+                          assetType: a.type,
+                          subType: a.subType,
+                          size: avatarSize,
+                          selected: widget.currentId == a.id,
+                        ),
+                        title: _buildAccountTitle(context, a),
+                        subtitle: Text(
+                          _subtitleOf(a),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                        trailing: widget.currentId == a.id
+                            ? Icon(Icons.check_rounded, color: cs.primary)
+                            : null,
+                        onTap: () => widget.onSelect(a.id),
+                      ),
+                  ],
+                ),
+        ),
+      ],
     );
   }
 }

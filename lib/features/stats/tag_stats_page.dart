@@ -5,7 +5,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../app/adaptive.dart';
-import '../../app/desktop_shell.dart' show PeriodSwipeRegion;
 import '../../data/db/database.dart';
 import '../../domain/model/codes.dart';
 import '../../domain/rules/billing_period.dart';
@@ -13,6 +12,7 @@ import '../../domain/rules/tag_stats.dart';
 import '../common/catalog_icons.dart';
 import '../common/common.dart';
 import '../common/desktop_modal_page.dart';
+import '../common/year_month_picker_dialog.dart';
 import '../records/record_detail_page.dart';
 import '../records/record_labels.dart';
 import 'tag_stats_providers.dart';
@@ -61,9 +61,63 @@ class _TagRankingsPageState extends ConsumerState<TagRankingsPage> {
     });
   }
 
+  Future<void> _pickTagPeriod(
+    BuildContext context, {
+    required TagStatsPeriodMode mode,
+    required BillingPeriod? period,
+    required int offset,
+    required int startDay,
+  }) async {
+    if (mode == TagStatsPeriodMode.all) return;
+    final now = DateTime.now();
+    final current =
+        period ??
+        resolveTagStatsPeriod(
+          mode: mode,
+          offset: offset,
+          startDay: startDay,
+          now: now,
+        );
+    if (current == null) return;
+    if (mode == TagStatsPeriodMode.year) {
+      final activeYearPeriod = BillingPeriod.containingYear(now, startDay);
+      final pickedYear = await showYearOnlyPickerDialog(
+        context,
+        initialYear: current.year,
+        currentYear: activeYearPeriod.year,
+      );
+      if (pickedYear == null || !mounted) return;
+      final baseYear = BillingPeriod.containingYear(
+        DateTime.now(),
+        startDay,
+      ).year;
+      ref
+          .read(tagStatsOffsetProvider.notifier)
+          .setOffset(pickedYear - baseYear);
+    } else {
+      final activeMonthPeriod = BillingPeriod.containing(now, startDay);
+      final picked = await showYearMonthPickerDialog(
+        context,
+        initialYear: current.year,
+        initialMonth: current.month,
+        currentYear: activeMonthPeriod.year,
+        currentMonth: activeMonthPeriod.month,
+      );
+      if (picked == null || !mounted) return;
+      final nowPeriod = BillingPeriod.containing(DateTime.now(), startDay);
+      final newOffset =
+          (picked.year - nowPeriod.year) * 12 +
+          (picked.month - nowPeriod.month);
+      ref.read(tagStatsOffsetProvider.notifier).setOffset(newOffset);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final mode = ref.watch(tagStatsPeriodModeProvider);
+    final offset = ref.watch(tagStatsOffsetProvider);
+    final startDay =
+        ref.watch(tagStatsCurrentBookProvider).value?.startDay ?? 1;
     final bucket = ref.watch(tagRankingsBucketProvider);
     final rollup = ref.watch(tagRankingsRollupProvider);
     final viewAsync = ref.watch(tagRankingsViewProvider);
@@ -109,8 +163,11 @@ class _TagRankingsPageState extends ConsumerState<TagRankingsPage> {
     Widget buildPeriodBar({bool compactDesktop = false}) {
       return _TagPeriodSelectorBar(
         keyPrefix: 'tag-rankings',
+        pickerTriggerKey: const Key('tag-stats-period-picker-trigger'),
+        resetPillKey: const Key('tag-stats-period-reset'),
         mode: mode,
         period: viewAsync.value?.period,
+        offset: offset,
         compactDesktop: compactDesktop,
         onModeChanged: (m) {
           ref.read(tagStatsPeriodModeProvider.notifier).setMode(m);
@@ -118,6 +175,13 @@ class _TagRankingsPageState extends ConsumerState<TagRankingsPage> {
         },
         onPrevious: () => ref.read(tagStatsOffsetProvider.notifier).previous(),
         onNext: () => ref.read(tagStatsOffsetProvider.notifier).next(),
+        onPickPeriod: () => _pickTagPeriod(
+          context,
+          mode: mode,
+          period: viewAsync.value?.period,
+          offset: offset,
+          startDay: startDay,
+        ),
         onReset: () => ref.read(tagStatsOffsetProvider.notifier).reset(),
       );
     }
@@ -351,165 +415,155 @@ class _TagRankingsPageState extends ConsumerState<TagRankingsPage> {
           ),
         ],
       ),
-      body: PeriodSwipeRegion(
-        enabled: mode != TagStatsPeriodMode.all,
-        onPrevious: () => ref.read(tagStatsOffsetProvider.notifier).previous(),
-        onNext: () => ref.read(tagStatsOffsetProvider.notifier).next(),
-        child: LayoutBuilder(
-          builder: (context, bodyConstraints) {
-            final useWideSplit =
-                isExpandedDesktop && bodyConstraints.maxWidth >= 820;
-            if (useWideSplit) {
-              return Column(
-                children: [
-                  Center(
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 1360),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 20,
-                          vertical: 8,
-                        ),
-                        child: Row(
-                          children: [
-                            SizedBox(width: 210, child: bucketSwitch),
-                            const SizedBox(width: 20),
-                            Expanded(
-                              child: buildPeriodBar(compactDesktop: true),
-                            ),
-                          ],
-                        ),
+      body: LayoutBuilder(
+        builder: (context, bodyConstraints) {
+          final useWideSplit =
+              isExpandedDesktop && bodyConstraints.maxWidth >= 820;
+          if (useWideSplit) {
+            return Column(
+              children: [
+                Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 1360),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 20,
+                        vertical: 8,
+                      ),
+                      child: Row(
+                        children: [
+                          SizedBox(width: 210, child: bucketSwitch),
+                          const SizedBox(width: 20),
+                          Expanded(child: buildPeriodBar(compactDesktop: true)),
+                        ],
                       ),
                     ),
                   ),
-                  const Divider(height: 1),
-                  Expanded(
-                    child: viewAsync.when(
-                      loading: () => const Center(child: Loading()),
-                      error: (e, _) => ErrorView(e),
-                      data: (view) {
-                        final rankings = view.rankings;
-                        final isExpense = rankings.bucket == StatBucket.expense;
-                        final accentColor = isExpense
-                            ? theme.colorScheme.error
-                            : theme.colorScheme.primary;
-                        return Center(
-                          child: ConstrainedBox(
-                            constraints: const BoxConstraints(maxWidth: 1360),
-                            child: Row(
-                              key: const Key('tag-rankings-desktop-split'),
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                Expanded(
-                                  flex: 44,
-                                  child: ListView(
-                                    padding: const EdgeInsets.fromLTRB(
-                                      20,
-                                      14,
-                                      12,
-                                      24,
-                                    ),
-                                    children: [
-                                      buildSummaryCard(rankings, accentColor),
-                                      const SizedBox(height: 14),
-                                      _TagProportionOverviewCard(
-                                        rankings: rankings,
-                                        fallbackColor: accentColor,
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                const VerticalDivider(width: 1),
-                                Expanded(
-                                  flex: 56,
-                                  child: ListView(
-                                    padding: const EdgeInsets.fromLTRB(
-                                      12,
-                                      14,
-                                      20,
-                                      24,
-                                    ),
-                                    children: [
-                                      if (view.hasTagGroups)
-                                        buildRollupHeader(view)
-                                      else
-                                        Padding(
-                                          padding: const EdgeInsets.only(
-                                            bottom: 8,
-                                          ),
-                                          child: Text(
-                                            '标签排行榜',
-                                            style: theme.textTheme.titleMedium
-                                                ?.copyWith(
-                                                  fontWeight: FontWeight.bold,
-                                                ),
-                                          ),
-                                        ),
-                                      buildRankingsCardOrEmpty(
-                                        view,
-                                        accentColor,
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                ],
-              );
-            }
-            final stackedList = ListView(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              children: [
-                // 1. Period Mode Selector (全部 | 按月 | 按年) + Prev/Next navigation
-                buildPeriodBar(),
-                const SizedBox(height: 12),
-
-                // 2. Bucket Switch (支出 | 收入)
-                SizedBox(width: double.infinity, child: bucketSwitch),
-                const SizedBox(height: 12),
-
-                // 3. Summary & Ranked List
-                viewAsync.when(
-                  loading: () => const Padding(
-                    padding: EdgeInsets.all(32),
-                    child: Loading(),
-                  ),
-                  error: (e, _) => ErrorView(e),
-                  data: (view) {
-                    final rankings = view.rankings;
-                    final isExpense = rankings.bucket == StatBucket.expense;
-                    final accentColor = isExpense
-                        ? theme.colorScheme.error
-                        : theme.colorScheme.primary;
-
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        buildSummaryCard(rankings, accentColor),
-                        const SizedBox(height: 12),
-                        buildRollupHeader(view),
-                        buildRankingsCardOrEmpty(view, accentColor),
-                      ],
-                    );
-                  },
                 ),
-                const SizedBox(height: 24),
+                const Divider(height: 1),
+                Expanded(
+                  child: viewAsync.when(
+                    loading: () => const Center(child: Loading()),
+                    error: (e, _) => ErrorView(e),
+                    data: (view) {
+                      final rankings = view.rankings;
+                      final isExpense = rankings.bucket == StatBucket.expense;
+                      final accentColor = isExpense
+                          ? theme.colorScheme.error
+                          : theme.colorScheme.primary;
+                      return Center(
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 1360),
+                          child: Row(
+                            key: const Key('tag-rankings-desktop-split'),
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Expanded(
+                                flex: 44,
+                                child: ListView(
+                                  padding: const EdgeInsets.fromLTRB(
+                                    20,
+                                    14,
+                                    12,
+                                    24,
+                                  ),
+                                  children: [
+                                    buildSummaryCard(rankings, accentColor),
+                                    const SizedBox(height: 14),
+                                    _TagProportionOverviewCard(
+                                      rankings: rankings,
+                                      fallbackColor: accentColor,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const VerticalDivider(width: 1),
+                              Expanded(
+                                flex: 56,
+                                child: ListView(
+                                  padding: const EdgeInsets.fromLTRB(
+                                    12,
+                                    14,
+                                    20,
+                                    24,
+                                  ),
+                                  children: [
+                                    if (view.hasTagGroups)
+                                      buildRollupHeader(view)
+                                    else
+                                      Padding(
+                                        padding: const EdgeInsets.only(
+                                          bottom: 8,
+                                        ),
+                                        child: Text(
+                                          '标签排行榜',
+                                          style: theme.textTheme.titleMedium
+                                              ?.copyWith(
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                        ),
+                                      ),
+                                    buildRankingsCardOrEmpty(view, accentColor),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
               ],
             );
-            if (!isDesktop) return stackedList;
-            return Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 760),
-                child: stackedList,
+          }
+          final stackedList = ListView(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            children: [
+              // 1. Period Mode Selector (全部 | 按月 | 按年) + Prev/Next navigation
+              buildPeriodBar(),
+              const SizedBox(height: 12),
+
+              // 2. Bucket Switch (支出 | 收入)
+              SizedBox(width: double.infinity, child: bucketSwitch),
+              const SizedBox(height: 12),
+
+              // 3. Summary & Ranked List
+              viewAsync.when(
+                loading: () => const Padding(
+                  padding: EdgeInsets.all(32),
+                  child: Loading(),
+                ),
+                error: (e, _) => ErrorView(e),
+                data: (view) {
+                  final rankings = view.rankings;
+                  final isExpense = rankings.bucket == StatBucket.expense;
+                  final accentColor = isExpense
+                      ? theme.colorScheme.error
+                      : theme.colorScheme.primary;
+
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      buildSummaryCard(rankings, accentColor),
+                      const SizedBox(height: 12),
+                      buildRollupHeader(view),
+                      buildRankingsCardOrEmpty(view, accentColor),
+                    ],
+                  );
+                },
               ),
-            );
-          },
-        ),
+              const SizedBox(height: 24),
+            ],
+          );
+          if (!isDesktop) return stackedList;
+          return Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 760),
+              child: stackedList,
+            ),
+          );
+        },
       ),
     );
   }
@@ -655,10 +709,63 @@ class _TagDetailStatsPageState extends ConsumerState<TagDetailStatsPage> {
   bool _userPickedCatBucket = false;
   bool _categoryExpanded = true;
 
+  Future<void> _pickTagDetailPeriod(
+    BuildContext context, {
+    required TagStatsPeriodMode mode,
+    required BillingPeriod? period,
+    required int offset,
+    required int startDay,
+  }) async {
+    if (mode == TagStatsPeriodMode.all) return;
+    final now = DateTime.now();
+    final current =
+        period ??
+        resolveTagStatsPeriod(
+          mode: mode,
+          offset: offset,
+          startDay: startDay,
+          now: now,
+        );
+    if (current == null) return;
+    if (mode == TagStatsPeriodMode.year) {
+      final activeYearPeriod = BillingPeriod.containingYear(now, startDay);
+      final pickedYear = await showYearOnlyPickerDialog(
+        context,
+        initialYear: current.year,
+        currentYear: activeYearPeriod.year,
+      );
+      if (pickedYear == null || !mounted) return;
+      final baseYear = BillingPeriod.containingYear(
+        DateTime.now(),
+        startDay,
+      ).year;
+      ref
+          .read(tagStatsOffsetProvider.notifier)
+          .setOffset(pickedYear - baseYear);
+    } else {
+      final activeMonthPeriod = BillingPeriod.containing(now, startDay);
+      final picked = await showYearMonthPickerDialog(
+        context,
+        initialYear: current.year,
+        initialMonth: current.month,
+        currentYear: activeMonthPeriod.year,
+        currentMonth: activeMonthPeriod.month,
+      );
+      if (picked == null || !mounted) return;
+      final nowPeriod = BillingPeriod.containing(DateTime.now(), startDay);
+      final newOffset =
+          (picked.year - nowPeriod.year) * 12 +
+          (picked.month - nowPeriod.month);
+      ref.read(tagStatsOffsetProvider.notifier).setOffset(newOffset);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final periodMode = ref.watch(tagStatsPeriodModeProvider);
     final periodOffset = ref.watch(tagStatsOffsetProvider);
+    final startDay =
+        ref.watch(tagStatsCurrentBookProvider).value?.startDay ?? 1;
     final query = (tagId: widget.tagId, mode: periodMode, offset: periodOffset);
     final viewAsync = ref.watch(tagDetailViewProvider(query));
     final theme = Theme.of(context);
@@ -701,609 +808,595 @@ class _TagDetailStatsPageState extends ConsumerState<TagDetailStatsPage> {
           orElse: () => const Text('标签统计详情'),
         ),
       ),
-      body: PeriodSwipeRegion(
-        enabled: periodMode != TagStatsPeriodMode.all,
-        onPrevious: () => ref.read(tagStatsOffsetProvider.notifier).previous(),
-        onNext: () => ref.read(tagStatsOffsetProvider.notifier).next(),
-        child: viewAsync.when(
-          loading: () => const Loading(),
-          error: (e, _) => ErrorView(e),
-          data: (data) {
-            final stats = data.stats;
-            final isDark = theme.brightness == Brightness.dark;
-            final isExpandedDesktop = DesktopAdaptive.isExpandedDesktop(
-              context,
-            );
-            final semanticIncomeColor = isDark
-                ? Colors.green.shade300
-                : Colors.green.shade700;
-            final effectiveCatBucket = _userPickedCatBucket
-                ? _catBucket
-                : (stats.totalExpense == BigInt.zero &&
-                          stats.totalIncome > BigInt.zero
-                      ? StatBucket.income
-                      : StatBucket.expense);
-            final catRows = effectiveCatBucket == StatBucket.expense
-                ? stats.expenseCategories
-                : stats.incomeCategories;
-            final catById = <int, RecordCategory>{
-              for (final c in data.categories) c.id: c,
-            };
+      body: viewAsync.when(
+        loading: () => const Loading(),
+        error: (e, _) => ErrorView(e),
+        data: (data) {
+          final stats = data.stats;
+          final isDark = theme.brightness == Brightness.dark;
+          final isExpandedDesktop = DesktopAdaptive.isExpandedDesktop(context);
+          final semanticIncomeColor = isDark
+              ? Colors.green.shade300
+              : Colors.green.shade700;
+          final effectiveCatBucket = _userPickedCatBucket
+              ? _catBucket
+              : (stats.totalExpense == BigInt.zero &&
+                        stats.totalIncome > BigInt.zero
+                    ? StatBucket.income
+                    : StatBucket.expense);
+          final catRows = effectiveCatBucket == StatBucket.expense
+              ? stats.expenseCategories
+              : stats.incomeCategories;
+          final catById = <int, RecordCategory>{
+            for (final c in data.categories) c.id: c,
+          };
 
-            Widget? groupOrParentBadge;
-            if (stats.isGroup) {
-              groupOrParentBadge = Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 4,
+          Widget? groupOrParentBadge;
+          if (stats.isGroup) {
+            groupOrParentBadge = Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.secondaryContainer,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(
+                '标签组 · 含 ${stats.childTags.length} 个子标签',
+                key: const Key('tag-detail-group-badge'),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.labelMedium?.copyWith(
+                  color: theme.colorScheme.onSecondaryContainer,
+                  fontWeight: FontWeight.w600,
                 ),
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.secondaryContainer,
-                  borderRadius: BorderRadius.circular(12),
+              ),
+            );
+          } else if (stats.parentTag != null) {
+            groupOrParentBadge = ActionChip(
+              key: Key('tag-detail-parent-chip-${stats.parentTag!.tagId}'),
+              visualDensity: VisualDensity.compact,
+              avatar: TagColorDot(colorHex: stats.parentTag!.color, size: 8),
+              label: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: (MediaQuery.sizeOf(context).width - 96).clamp(
+                    140.0,
+                    320.0,
+                  ),
                 ),
                 child: Text(
-                  '标签组 · 含 ${stats.childTags.length} 个子标签',
-                  key: const Key('tag-detail-group-badge'),
+                  '所属标签组：#${stats.parentTag!.name}',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.labelMedium?.copyWith(
-                    color: theme.colorScheme.onSecondaryContainer,
-                    fontWeight: FontWeight.w600,
-                  ),
                 ),
-              );
-            } else if (stats.parentTag != null) {
-              groupOrParentBadge = ActionChip(
-                key: Key('tag-detail-parent-chip-${stats.parentTag!.tagId}'),
-                visualDensity: VisualDensity.compact,
-                avatar: TagColorDot(colorHex: stats.parentTag!.color, size: 8),
-                label: ConstrainedBox(
-                  constraints: BoxConstraints(
-                    maxWidth: (MediaQuery.sizeOf(context).width - 96).clamp(
-                      140.0,
-                      320.0,
-                    ),
-                  ),
-                  child: Text(
-                    '所属标签组：#${stats.parentTag!.name}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                onPressed: () => openSiblingTag(stats.parentTag!.tagId),
-              );
-            }
+              ),
+              onPressed: () => openSiblingTag(stats.parentTag!.tagId),
+            );
+          }
 
-            Widget buildPeriodSelector({bool compactDesktop = false}) {
-              return _TagPeriodSelectorBar(
-                keyPrefix: 'tag-detail',
+          Widget buildPeriodSelector({bool compactDesktop = false}) {
+            return _TagPeriodSelectorBar(
+              keyPrefix: 'tag-detail',
+              pickerTriggerKey: const Key('tag-detail-period-picker-trigger'),
+              resetPillKey: const Key('tag-detail-period-reset'),
+              mode: periodMode,
+              period: data.period,
+              offset: periodOffset,
+              compactDesktop: compactDesktop,
+              onModeChanged: (m) {
+                ref.read(tagStatsPeriodModeProvider.notifier).setMode(m);
+                ref.read(tagStatsOffsetProvider.notifier).reset();
+              },
+              onPrevious: () =>
+                  ref.read(tagStatsOffsetProvider.notifier).previous(),
+              onNext: () => ref.read(tagStatsOffsetProvider.notifier).next(),
+              onPickPeriod: () => _pickTagDetailPeriod(
+                context,
                 mode: periodMode,
                 period: data.period,
-                compactDesktop: compactDesktop,
-                onModeChanged: (m) {
-                  ref.read(tagStatsPeriodModeProvider.notifier).setMode(m);
-                  ref.read(tagStatsOffsetProvider.notifier).reset();
-                },
-                onPrevious: () =>
-                    ref.read(tagStatsOffsetProvider.notifier).previous(),
-                onNext: () => ref.read(tagStatsOffsetProvider.notifier).next(),
-                onReset: () =>
-                    ref.read(tagStatsOffsetProvider.notifier).reset(),
-              );
-            }
-
-            final summaryCard = Card(
-              key: const Key('tag-detail-summary-card'),
-              elevation: 1,
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _MetricTile(
-                            label: '总支出',
-                            value: '¥${formatMinor(stats.totalExpense)}',
-                            valueKey: const Key('tag-detail-total-expense'),
-                            valueColor: theme.colorScheme.error,
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: _MetricTile(
-                            label: '总收入',
-                            value: '¥${formatMinor(stats.totalIncome)}',
-                            valueKey: const Key('tag-detail-total-income'),
-                            valueColor: semanticIncomeColor,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const Divider(height: 20),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _MetricTile(
-                            label: '结余',
-                            value:
-                                '${stats.netBalance.isNegative ? '-¥' : '¥'}${formatMinor(stats.netBalance.abs())}',
-                            valueKey: const Key('tag-detail-net-balance'),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: _MetricTile(
-                            label: '关联账单数',
-                            value: '${stats.billCount} 笔',
-                            valueKey: const Key('tag-detail-bill-count'),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
+                offset: periodOffset,
+                startDay: startDay,
               ),
+              onReset: () => ref.read(tagStatsOffsetProvider.notifier).reset(),
             );
+          }
 
-            final childrenCard =
-                (stats.isGroup && stats.childBreakdowns.isNotEmpty)
-                ? Card(
-                    key: const Key('tag-detail-children-section'),
-                    elevation: 1,
-                    child: Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            '子标签构成',
-                            style: theme.textTheme.titleSmall?.copyWith(
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: [
-                              for (final child in stats.childBreakdowns)
-                                _ChildTagBreakdownChip(
-                                  item: child,
-                                  onTap: child.isDirectOnGroup
-                                      ? null
-                                      : () => openSiblingTag(child.tagId),
-                                ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                  )
-                : null;
-
-            final categoryCard =
-                (stats.expenseCategories.isNotEmpty ||
-                    stats.incomeCategories.isNotEmpty)
-                ? Card(
-                    key: const Key('tag-detail-category-section'),
-                    elevation: 1,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 10,
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Expanded(
-                                child: Align(
-                                  alignment: Alignment.centerLeft,
-                                  child: FittedBox(
-                                    fit: BoxFit.scaleDown,
-                                    alignment: Alignment.centerLeft,
-                                    child: Text(
-                                      '分类构成',
-                                      maxLines: 1,
-                                      softWrap: false,
-                                      style: theme.textTheme.titleSmall
-                                          ?.copyWith(
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              SegmentedButton<StatBucket>(
-                                key: const Key('tag-detail-cat-bucket-switch'),
-                                showSelectedIcon: false,
-                                style: const ButtonStyle(
-                                  visualDensity: VisualDensity.compact,
-                                  padding: WidgetStatePropertyAll(
-                                    EdgeInsets.symmetric(horizontal: 8),
-                                  ),
-                                  tapTargetSize:
-                                      MaterialTapTargetSize.shrinkWrap,
-                                ),
-                                segments: const [
-                                  ButtonSegment(
-                                    value: StatBucket.expense,
-                                    label: FittedBox(
-                                      fit: BoxFit.scaleDown,
-                                      child: Text(
-                                        '支出构成',
-                                        maxLines: 1,
-                                        softWrap: false,
-                                      ),
-                                    ),
-                                  ),
-                                  ButtonSegment(
-                                    value: StatBucket.income,
-                                    label: FittedBox(
-                                      fit: BoxFit.scaleDown,
-                                      child: Text(
-                                        '收入构成',
-                                        maxLines: 1,
-                                        softWrap: false,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                                selected: {effectiveCatBucket},
-                                onSelectionChanged: (s) {
-                                  if (s.isNotEmpty) {
-                                    setState(() {
-                                      _userPickedCatBucket = true;
-                                      _catBucket = s.first;
-                                    });
-                                  }
-                                },
-                              ),
-                              const SizedBox(width: 4),
-                              IconButton(
-                                key: const Key('tag-detail-cat-expand-btn'),
-                                visualDensity: VisualDensity.compact,
-                                padding: EdgeInsets.zero,
-                                constraints: const BoxConstraints(
-                                  minWidth: 32,
-                                  minHeight: 32,
-                                ),
-                                style: IconButton.styleFrom(
-                                  tapTargetSize:
-                                      MaterialTapTargetSize.shrinkWrap,
-                                ),
-                                icon: Icon(
-                                  _categoryExpanded
-                                      ? Icons.expand_less
-                                      : Icons.expand_more,
-                                ),
-                                tooltip: _categoryExpanded
-                                    ? '收起分类构成'
-                                    : '展开分类构成',
-                                onPressed: () => setState(
-                                  () => _categoryExpanded = !_categoryExpanded,
-                                ),
-                              ),
-                            ],
-                          ),
-                          if (_categoryExpanded) ...[
-                            const SizedBox(height: 6),
-                            if (catRows.isEmpty)
-                              Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 12,
-                                ),
-                                child: Center(
-                                  child: Text(
-                                    effectiveCatBucket == StatBucket.expense
-                                        ? '无支出分类构成'
-                                        : '无收入分类构成',
-                                    style: theme.textTheme.bodySmall?.copyWith(
-                                      color: theme.colorScheme.onSurfaceVariant,
-                                    ),
-                                  ),
-                                ),
-                              )
-                            else
-                              for (final cat in catRows)
-                                Builder(
-                                  builder: (context) {
-                                    final dbCat = cat.categoryId == noRef
-                                        ? null
-                                        : catById[cat.categoryId];
-                                    final parentCat =
-                                        (dbCat != null &&
-                                            dbCat.parentCatId != noRef)
-                                        ? catById[dbCat.parentCatId]
-                                        : null;
-                                    final catIcon =
-                                        (dbCat?.icon != null &&
-                                            dbCat!.icon.trim().isNotEmpty)
-                                        ? dbCat.icon
-                                        : (cat.icon.isNotEmpty
-                                              ? cat.icon
-                                              : null);
-                                    final catColor =
-                                        (dbCat?.colorFill != null &&
-                                            dbCat!.colorFill!.trim().isNotEmpty)
-                                        ? dbCat.colorFill
-                                        : parentCat?.colorFill;
-                                    final catType =
-                                        effectiveCatBucket == StatBucket.income
-                                        ? RecordType.income
-                                        : RecordType.expense;
-                                    final visual = resolveCategoryVisual(
-                                      iconKey: catIcon,
-                                      parentIconKey: parentCat?.icon,
-                                      colorHex: catColor,
-                                      name: cat.name,
-                                      type: catType,
-                                    );
-                                    return Padding(
-                                      padding: const EdgeInsets.symmetric(
-                                        vertical: 5,
-                                      ),
-                                      child: Column(
-                                        children: [
-                                          Row(
-                                            children: [
-                                              CategoryIconAvatar(
-                                                iconKey: catIcon,
-                                                parentIconKey: parentCat?.icon,
-                                                colorHex: catColor,
-                                                name: cat.name,
-                                                type: catType,
-                                                size: 26,
-                                              ),
-                                              const SizedBox(width: 8),
-                                              Expanded(
-                                                child: Text(
-                                                  '${cat.name} (${cat.count} 笔)',
-                                                  style: theme
-                                                      .textTheme
-                                                      .bodyMedium,
-                                                  overflow:
-                                                      TextOverflow.ellipsis,
-                                                ),
-                                              ),
-                                              const SizedBox(width: 8),
-                                              ConstrainedBox(
-                                                constraints:
-                                                    const BoxConstraints(
-                                                      maxWidth: 140,
-                                                    ),
-                                                child: FittedBox(
-                                                  fit: BoxFit.scaleDown,
-                                                  alignment:
-                                                      Alignment.centerRight,
-                                                  child: Text(
-                                                    '¥${formatMinor(cat.moneyMinor)} (${cat.ratioText})',
-                                                    maxLines: 1,
-                                                    style: theme
-                                                        .textTheme
-                                                        .bodySmall
-                                                        ?.copyWith(
-                                                          fontWeight:
-                                                              FontWeight.w600,
-                                                        ),
-                                                  ),
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                          const SizedBox(height: 4),
-                                          ClipRRect(
-                                            borderRadius: BorderRadius.circular(
-                                              2,
-                                            ),
-                                            child: LinearProgressIndicator(
-                                              value:
-                                                  (cat.ratioBasisPoints /
-                                                          10000.0)
-                                                      .clamp(0.01, 1.0),
-                                              minHeight: 4,
-                                              color: visual.color,
-                                              backgroundColor: theme
-                                                  .colorScheme
-                                                  .surfaceContainerHighest,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    );
-                                  },
-                                ),
-                          ],
-                        ],
-                      ),
-                    ),
-                  )
-                : null;
-
-            final billsSectionWidgets = <Widget>[
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                child: Text(
-                  '关联账单明细 (${data.matchingRecords.length} 笔)',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-              if (data.matchingRecords.isEmpty)
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 32,
-                    ),
-                    child: Center(
-                      child: Text(
-                        periodMode == TagStatsPeriodMode.all
-                            ? '该标签下暂无关联账单'
-                            : '当前所选周期暂无关联账单，可切换至“全部”查看历史账单',
-                        textAlign: TextAlign.center,
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
+          final summaryCard = Card(
+            key: const Key('tag-detail-summary-card'),
+            elevation: 1,
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _MetricTile(
+                          label: '总支出',
+                          value: '¥${formatMinor(stats.totalExpense)}',
+                          valueKey: const Key('tag-detail-total-expense'),
+                          valueColor: theme.colorScheme.error,
                         ),
                       ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _MetricTile(
+                          label: '总收入',
+                          value: '¥${formatMinor(stats.totalIncome)}',
+                          valueKey: const Key('tag-detail-total-income'),
+                          valueColor: semanticIncomeColor,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const Divider(height: 20),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _MetricTile(
+                          label: '结余',
+                          value:
+                              '${stats.netBalance.isNegative ? '-¥' : '¥'}${formatMinor(stats.netBalance.abs())}',
+                          valueKey: const Key('tag-detail-net-balance'),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _MetricTile(
+                          label: '关联账单数',
+                          value: '${stats.billCount} 笔',
+                          valueKey: const Key('tag-detail-bill-count'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          );
+
+          final childrenCard =
+              (stats.isGroup && stats.childBreakdowns.isNotEmpty)
+              ? Card(
+                  key: const Key('tag-detail-children-section'),
+                  elevation: 1,
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '子标签构成',
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            for (final child in stats.childBreakdowns)
+                              _ChildTagBreakdownChip(
+                                item: child,
+                                onTap: child.isDirectOnGroup
+                                    ? null
+                                    : () => openSiblingTag(child.tagId),
+                              ),
+                          ],
+                        ),
+                      ],
                     ),
                   ),
                 )
-              else
-                ..._buildGroupedBillList(context, data),
-            ];
+              : null;
 
-            return LayoutBuilder(
-              builder: (context, bodyConstraints) {
-                final useWideSplit =
-                    isExpandedDesktop && bodyConstraints.maxWidth >= 820;
-                if (useWideSplit) {
-                  return Column(
-                    children: [
-                      Center(
-                        child: ConstrainedBox(
-                          constraints: const BoxConstraints(maxWidth: 1360),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 20,
-                              vertical: 8,
+          final categoryCard =
+              (stats.expenseCategories.isNotEmpty ||
+                  stats.incomeCategories.isNotEmpty)
+              ? Card(
+                  key: const Key('tag-detail-category-section'),
+                  elevation: 1,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 10,
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Align(
+                                alignment: Alignment.centerLeft,
+                                child: FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  alignment: Alignment.centerLeft,
+                                  child: Text(
+                                    '分类构成',
+                                    maxLines: 1,
+                                    softWrap: false,
+                                    style: theme.textTheme.titleSmall?.copyWith(
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              ),
                             ),
-                            child: Row(
-                              children: [
-                                if (groupOrParentBadge != null) ...[
-                                  Flexible(child: groupOrParentBadge),
-                                  const SizedBox(width: 16),
-                                ],
-                                Expanded(
-                                  child: buildPeriodSelector(
-                                    compactDesktop: true,
+                            const SizedBox(width: 8),
+                            SegmentedButton<StatBucket>(
+                              key: const Key('tag-detail-cat-bucket-switch'),
+                              showSelectedIcon: false,
+                              style: const ButtonStyle(
+                                visualDensity: VisualDensity.compact,
+                                padding: WidgetStatePropertyAll(
+                                  EdgeInsets.symmetric(horizontal: 8),
+                                ),
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              ),
+                              segments: const [
+                                ButtonSegment(
+                                  value: StatBucket.expense,
+                                  label: FittedBox(
+                                    fit: BoxFit.scaleDown,
+                                    child: Text(
+                                      '支出构成',
+                                      maxLines: 1,
+                                      softWrap: false,
+                                    ),
+                                  ),
+                                ),
+                                ButtonSegment(
+                                  value: StatBucket.income,
+                                  label: FittedBox(
+                                    fit: BoxFit.scaleDown,
+                                    child: Text(
+                                      '收入构成',
+                                      maxLines: 1,
+                                      softWrap: false,
+                                    ),
                                   ),
                                 ),
                               ],
+                              selected: {effectiveCatBucket},
+                              onSelectionChanged: (s) {
+                                if (s.isNotEmpty) {
+                                  setState(() {
+                                    _userPickedCatBucket = true;
+                                    _catBucket = s.first;
+                                  });
+                                }
+                              },
                             ),
-                          ),
+                            const SizedBox(width: 4),
+                            IconButton(
+                              key: const Key('tag-detail-cat-expand-btn'),
+                              visualDensity: VisualDensity.compact,
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(
+                                minWidth: 32,
+                                minHeight: 32,
+                              ),
+                              style: IconButton.styleFrom(
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              ),
+                              icon: Icon(
+                                _categoryExpanded
+                                    ? Icons.expand_less
+                                    : Icons.expand_more,
+                              ),
+                              tooltip: _categoryExpanded ? '收起分类构成' : '展开分类构成',
+                              onPressed: () => setState(
+                                () => _categoryExpanded = !_categoryExpanded,
+                              ),
+                            ),
+                          ],
                         ),
-                      ),
-                      const Divider(height: 1),
-                      Expanded(
-                        child: Center(
-                          child: ConstrainedBox(
-                            constraints: const BoxConstraints(maxWidth: 1360),
-                            child: Row(
-                              key: const Key('tag-detail-desktop-split'),
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                Expanded(
-                                  flex: 45,
-                                  child: ListView(
-                                    padding: const EdgeInsets.fromLTRB(
-                                      20,
-                                      14,
-                                      12,
-                                      24,
-                                    ),
-                                    children: [
-                                      summaryCard,
-                                      if (childrenCard != null) ...[
-                                        const SizedBox(height: 12),
-                                        childrenCard,
-                                      ],
-                                      if (categoryCard != null) ...[
-                                        const SizedBox(height: 12),
-                                        categoryCard,
-                                      ],
-                                    ],
+                        if (_categoryExpanded) ...[
+                          const SizedBox(height: 6),
+                          if (catRows.isEmpty)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              child: Center(
+                                child: Text(
+                                  effectiveCatBucket == StatBucket.expense
+                                      ? '无支出分类构成'
+                                      : '无收入分类构成',
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: theme.colorScheme.onSurfaceVariant,
                                   ),
                                 ),
-                                const VerticalDivider(width: 1),
-                                Expanded(
-                                  flex: 55,
-                                  child: ListView(
-                                    padding: const EdgeInsets.fromLTRB(
-                                      12,
-                                      14,
-                                      20,
-                                      24,
+                              ),
+                            )
+                          else
+                            for (final cat in catRows)
+                              Builder(
+                                builder: (context) {
+                                  final dbCat = cat.categoryId == noRef
+                                      ? null
+                                      : catById[cat.categoryId];
+                                  final parentCat =
+                                      (dbCat != null &&
+                                          dbCat.parentCatId != noRef)
+                                      ? catById[dbCat.parentCatId]
+                                      : null;
+                                  final catIcon =
+                                      (dbCat?.icon != null &&
+                                          dbCat!.icon.trim().isNotEmpty)
+                                      ? dbCat.icon
+                                      : (cat.icon.isNotEmpty ? cat.icon : null);
+                                  final catColor =
+                                      (dbCat?.colorFill != null &&
+                                          dbCat!.colorFill!.trim().isNotEmpty)
+                                      ? dbCat.colorFill
+                                      : parentCat?.colorFill;
+                                  final catType =
+                                      effectiveCatBucket == StatBucket.income
+                                      ? RecordType.income
+                                      : RecordType.expense;
+                                  final visual = resolveCategoryVisual(
+                                    iconKey: catIcon,
+                                    parentIconKey: parentCat?.icon,
+                                    colorHex: catColor,
+                                    name: cat.name,
+                                    type: catType,
+                                  );
+                                  return Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 5,
                                     ),
-                                    children: billsSectionWidgets,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  );
-                }
+                                    child: Column(
+                                      children: [
+                                        Row(
+                                          children: [
+                                            CategoryIconAvatar(
+                                              iconKey: catIcon,
+                                              parentIconKey: parentCat?.icon,
+                                              colorHex: catColor,
+                                              name: cat.name,
+                                              type: catType,
+                                              size: 26,
+                                            ),
+                                            const SizedBox(width: 8),
+                                            Expanded(
+                                              child: Text(
+                                                '${cat.name} (${cat.count} 笔)',
+                                                style:
+                                                    theme.textTheme.bodyMedium,
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                            const SizedBox(width: 8),
+                                            ConstrainedBox(
+                                              constraints: const BoxConstraints(
+                                                maxWidth: 140,
+                                              ),
+                                              child: FittedBox(
+                                                fit: BoxFit.scaleDown,
+                                                alignment:
+                                                    Alignment.centerRight,
+                                                child: Text(
+                                                  '¥${formatMinor(cat.moneyMinor)} (${cat.ratioText})',
+                                                  maxLines: 1,
+                                                  style: theme
+                                                      .textTheme
+                                                      .bodySmall
+                                                      ?.copyWith(
+                                                        fontWeight:
+                                                            FontWeight.w600,
+                                                      ),
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 4),
+                                        ClipRRect(
+                                          borderRadius: BorderRadius.circular(
+                                            2,
+                                          ),
+                                          child: LinearProgressIndicator(
+                                            value:
+                                                (cat.ratioBasisPoints / 10000.0)
+                                                    .clamp(0.01, 1.0),
+                                            minHeight: 4,
+                                            color: visual.color,
+                                            backgroundColor: theme
+                                                .colorScheme
+                                                .surfaceContainerHighest,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                },
+                              ),
+                        ],
+                      ],
+                    ),
+                  ),
+                )
+              : null;
 
-                final stackedDetailList = ListView(
+          final billsSectionWidgets = <Widget>[
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Text(
+                '关联账单明细 (${data.matchingRecords.length} 笔)',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+            if (data.matchingRecords.isEmpty)
+              Card(
+                child: Padding(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 16,
-                    vertical: 10,
+                    vertical: 32,
                   ),
+                  child: Center(
+                    child: Text(
+                      periodMode == TagStatsPeriodMode.all
+                          ? '该标签下暂无关联账单'
+                          : '当前所选周期暂无关联账单，可切换至“全部”查看历史账单',
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                ),
+              )
+            else
+              ..._buildGroupedBillList(context, data),
+          ];
+
+          return LayoutBuilder(
+            builder: (context, bodyConstraints) {
+              final useWideSplit =
+                  isExpandedDesktop && bodyConstraints.maxWidth >= 820;
+              if (useWideSplit) {
+                return Column(
                   children: [
-                    // Group or parent badge banner
-                    if (stats.isGroup)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 8),
-                        child: Row(
-                          children: [Flexible(child: groupOrParentBadge!)],
-                        ),
-                      )
-                    else if (stats.parentTag != null)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 8),
-                        child: Align(
-                          alignment: Alignment.centerLeft,
-                          child: groupOrParentBadge,
+                    Center(
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 1360),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 20,
+                            vertical: 8,
+                          ),
+                          child: Row(
+                            children: [
+                              if (groupOrParentBadge != null) ...[
+                                Flexible(child: groupOrParentBadge),
+                                const SizedBox(width: 16),
+                              ],
+                              Expanded(
+                                child: buildPeriodSelector(
+                                  compactDesktop: true,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
-
-                    // 1. Period Selector (全部 | 按月 | 按年, defaults to 全部)
-                    buildPeriodSelector(),
-                    const SizedBox(height: 12),
-
-                    // 2. Summary Card: 总支出, 总收入, 结余, 关联账单数
-                    summaryCard,
-                    const SizedBox(height: 12),
-
-                    // 3. Child-tag Breakdown Chips (if parent tag group with children)
-                    if (childrenCard != null) ...[
-                      childrenCard,
-                      const SizedBox(height: 12),
-                    ],
-
-                    // 4. Collapsible Category Breakdown Section (支出构成 / 收入构成)
-                    if (categoryCard != null) ...[
-                      categoryCard,
-                      const SizedBox(height: 12),
-                    ],
-
-                    // 5. Associated Bills List grouped by YYYY-MM-DD
-                    ...billsSectionWidgets,
-                    const SizedBox(height: 24),
+                    ),
+                    const Divider(height: 1),
+                    Expanded(
+                      child: Center(
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 1360),
+                          child: Row(
+                            key: const Key('tag-detail-desktop-split'),
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Expanded(
+                                flex: 45,
+                                child: ListView(
+                                  padding: const EdgeInsets.fromLTRB(
+                                    20,
+                                    14,
+                                    12,
+                                    24,
+                                  ),
+                                  children: [
+                                    summaryCard,
+                                    if (childrenCard != null) ...[
+                                      const SizedBox(height: 12),
+                                      childrenCard,
+                                    ],
+                                    if (categoryCard != null) ...[
+                                      const SizedBox(height: 12),
+                                      categoryCard,
+                                    ],
+                                  ],
+                                ),
+                              ),
+                              const VerticalDivider(width: 1),
+                              Expanded(
+                                flex: 55,
+                                child: ListView(
+                                  padding: const EdgeInsets.fromLTRB(
+                                    12,
+                                    14,
+                                    20,
+                                    24,
+                                  ),
+                                  children: billsSectionWidgets,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
                   ],
                 );
+              }
 
-                return isDesktop
-                    ? Center(
-                        child: ConstrainedBox(
-                          constraints: const BoxConstraints(maxWidth: 760),
-                          child: stackedDetailList,
-                        ),
-                      )
-                    : stackedDetailList;
-              },
-            );
-          },
-        ),
+              final stackedDetailList = ListView(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 10,
+                ),
+                children: [
+                  // Group or parent badge banner
+                  if (stats.isGroup)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Row(
+                        children: [Flexible(child: groupOrParentBadge!)],
+                      ),
+                    )
+                  else if (stats.parentTag != null)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: groupOrParentBadge,
+                      ),
+                    ),
+
+                  // 1. Period Selector (全部 | 按月 | 按年, defaults to 全部)
+                  buildPeriodSelector(),
+                  const SizedBox(height: 12),
+
+                  // 2. Summary Card: 总支出, 总收入, 结余, 关联账单数
+                  summaryCard,
+                  const SizedBox(height: 12),
+
+                  // 3. Child-tag Breakdown Chips (if parent tag group with children)
+                  if (childrenCard != null) ...[
+                    childrenCard,
+                    const SizedBox(height: 12),
+                  ],
+
+                  // 4. Collapsible Category Breakdown Section (支出构成 / 收入构成)
+                  if (categoryCard != null) ...[
+                    categoryCard,
+                    const SizedBox(height: 12),
+                  ],
+
+                  // 5. Associated Bills List grouped by YYYY-MM-DD
+                  ...billsSectionWidgets,
+                  const SizedBox(height: 24),
+                ],
+              );
+
+              return isDesktop
+                  ? Center(
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 760),
+                        child: stackedDetailList,
+                      ),
+                    )
+                  : stackedDetailList;
+            },
+          );
+        },
       ),
     );
   }
@@ -1434,21 +1527,29 @@ class _TagDetailStatsPageState extends ConsumerState<TagDetailStatsPage> {
 class _TagPeriodSelectorBar extends StatelessWidget {
   const _TagPeriodSelectorBar({
     required this.keyPrefix,
+    required this.pickerTriggerKey,
+    required this.resetPillKey,
     required this.mode,
     required this.period,
+    required this.offset,
     required this.onModeChanged,
     required this.onPrevious,
     required this.onNext,
+    this.onPickPeriod,
     this.onReset,
     this.compactDesktop = false,
   });
 
   final String keyPrefix;
+  final Key pickerTriggerKey;
+  final Key resetPillKey;
   final TagStatsPeriodMode mode;
   final BillingPeriod? period;
+  final int offset;
   final ValueChanged<TagStatsPeriodMode> onModeChanged;
   final VoidCallback onPrevious;
   final VoidCallback onNext;
+  final VoidCallback? onPickPeriod;
   final VoidCallback? onReset;
   final bool compactDesktop;
 
@@ -1489,6 +1590,9 @@ class _TagPeriodSelectorBar extends StatelessWidget {
       ],
     );
 
+    final showResetPill =
+        mode != TagStatsPeriodMode.all && offset != 0 && onReset != null;
+
     final periodNavRow = mode != TagStatsPeriodMode.all
         ? Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1501,26 +1605,58 @@ class _TagPeriodSelectorBar extends StatelessWidget {
               ),
               Expanded(
                 child: Center(
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(6),
-                    onTap: onReset,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 6,
-                        vertical: 2,
-                      ),
-                      child: FittedBox(
-                        fit: BoxFit.scaleDown,
-                        child: Text(
-                          label,
-                          key: Key('$keyPrefix-period-label'),
-                          maxLines: 1,
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.bold,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Flexible(
+                        child: InkWell(
+                          key: pickerTriggerKey,
+                          borderRadius: BorderRadius.circular(8),
+                          onTap: onPickPeriod,
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 4,
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Flexible(
+                                  child: FittedBox(
+                                    fit: BoxFit.scaleDown,
+                                    child: Text(
+                                      label,
+                                      key: Key('$keyPrefix-period-label'),
+                                      maxLines: 1,
+                                      style: theme.textTheme.titleMedium
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 2),
+                                Icon(
+                                  Icons.arrow_drop_down,
+                                  size: 18,
+                                  color: theme.colorScheme.onSurfaceVariant,
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                       ),
-                    ),
+                      if (showResetPill) ...[
+                        const SizedBox(width: 6),
+                        PeriodResetPill(
+                          key: resetPillKey,
+                          label: mode == TagStatsPeriodMode.year
+                              ? '回本年'
+                              : '回本月',
+                          onTap: onReset!,
+                        ),
+                      ],
+                    ],
                   ),
                 ),
               ),

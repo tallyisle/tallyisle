@@ -352,6 +352,23 @@ enum DiyToolbarAction {
   final String description;
   final bool defaultEnabled;
 
+  /// Whether this action renders as a reorderable pill in the record-editor
+  /// toolbar (`true` for the 7 draggable toolbar pills; `false` for the 4 fixed
+  /// auxiliary switches).
+  bool get isSortableToolbarPill => switch (this) {
+    DiyToolbarAction.tags ||
+    DiyToolbarAction.images ||
+    DiyToolbarAction.discount ||
+    DiyToolbarAction.location ||
+    DiyToolbarAction.excludeBudget ||
+    DiyToolbarAction.excludeExIn ||
+    DiyToolbarAction.currency => true,
+    DiyToolbarAction.templates ||
+    DiyToolbarAction.frequentRemarks ||
+    DiyToolbarAction.keypadMultiplyDivide ||
+    DiyToolbarAction.autoSelectFirstCategory => false,
+  };
+
   static DiyToolbarAction? fromKey(String key) {
     for (final a in values) {
       if (a.key == key) return a;
@@ -466,6 +483,49 @@ final class DiyToolbarConfig {
     for (final item in items)
       if (item.enabled) item.action,
   ];
+
+  /// The 7 draggable toolbar pill items in their user-configured relative order.
+  List<DiyToolbarItem> get sortableItems => List<DiyToolbarItem>.unmodifiable([
+    for (final item in items)
+      if (item.action.isSortableToolbarPill) item,
+  ]);
+
+  /// The 4 fixed auxiliary switches in canonical order (not reorderable).
+  List<DiyToolbarItem> get fixedSwitchItems {
+    final byAction = <DiyToolbarAction, DiyToolbarItem>{
+      for (final item in items)
+        if (!item.action.isSortableToolbarPill) item.action: item,
+    };
+    return List<DiyToolbarItem>.unmodifiable([
+      for (final action in DiyToolbarAction.values)
+        if (!action.isSortableToolbarPill)
+          byAction[action] ??
+              DiyToolbarItem(action: action, enabled: action.defaultEnabled),
+    ]);
+  }
+
+  /// Moves a sortable toolbar pill from [fromIndex] to [toIndex] within
+  /// [sortableItems] while preserving all fixed switches and keeping `version: 1`
+  /// storage 100% compatible.
+  DiyToolbarConfig moveSortableItem(int fromIndex, int toIndex) {
+    final sortable = sortableItems.toList();
+    if (fromIndex < 0 ||
+        fromIndex >= sortable.length ||
+        toIndex < 0 ||
+        toIndex >= sortable.length) {
+      throw const Failure(FailureCode.validation, '工具栏排序位置无效');
+    }
+    if (fromIndex == toIndex) return this;
+    final moved = sortable.removeAt(fromIndex);
+    sortable.insert(toIndex, moved);
+    return DiyToolbarConfig._(
+      <DiyToolbarItem>[...sortable, ...fixedSwitchItems],
+      datePickerStyle: datePickerStyle,
+      timePickerStyle: timePickerStyle,
+      autoSelectDefaultAccount: autoSelectDefaultAccount,
+      defaultAccountId: defaultAccountId,
+    );
+  }
 
   bool isEnabled(DiyToolbarAction action) =>
       items.firstWhere((e) => e.action == action).enabled;

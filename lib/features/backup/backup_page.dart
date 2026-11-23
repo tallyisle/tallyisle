@@ -4,18 +4,17 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/adaptive.dart';
-import '../../app/providers.dart';
 import '../../core/failure.dart';
 import '../../data/backup/s3_client.dart';
+import '../../data/backup/tally_backup_service.dart';
 import '../../data/backup/webdav_client.dart';
 import '../../domain/rules/cloud_sync_rules.dart';
 import '../../domain/rules/tally_backup.dart';
 import '../../platform/files.dart';
 import '../common/common.dart';
 import '../common/desktop_modal_page.dart';
-import '../migration/migration_providers.dart';
-import '../reminder/reminder_providers.dart';
 import 'backup_providers.dart';
+import 'post_restore_refresh.dart';
 import 's3_config_page.dart';
 import 'webdav_config_page.dart';
 
@@ -33,6 +32,28 @@ class _BackupPageState extends ConsumerState<BackupPage>
   int _transferredBytes = 0;
   int _totalBytes = 0;
   CloudSyncOutcome? _pendingConflict;
+  String? _pendingConflictTargetFingerprint;
+
+  void _clearPendingConflict() {
+    _pendingConflict = null;
+    _pendingConflictTargetFingerprint = null;
+  }
+
+  Future<String> _resolveActiveTargetFingerprint(
+    TallyBackupService service,
+  ) async {
+    final settings = await service.getCloudSyncSettings();
+    switch (settings.backend) {
+      case CloudBackendType.webdav:
+        final dav = await service.getWebDavConfig();
+        return dav.isConfigured ? dav.targetFingerprint : '';
+      case CloudBackendType.s3:
+        final s3 = await service.getS3Config();
+        return s3.isConfigured ? s3.targetFingerprint : '';
+      case CloudBackendType.none:
+        return '';
+    }
+  }
 
   @override
   void initState() {
@@ -56,15 +77,22 @@ class _BackupPageState extends ConsumerState<BackupPage>
   Future<void> _checkSilentTasksOnResume() async {
     try {
       final service = await ref.read(tallyBackupServiceProvider.future);
+      if (service.isSyncInProgress || _busy || !mounted) return;
       if (!service.hasAttachedScheduler) {
         final syncOutcome = await service.runCloudAutoSyncForTrigger(
           AutoTriggerSource.windowFocus,
         );
         if (syncOutcome != null && mounted) {
           if (syncOutcome.status == CloudSyncStatus.pulled) {
-            _refreshAfterRestore();
+            setState(_clearPendingConflict);
+            await _refreshAfterRestore();
           } else if (syncOutcome.isConflict) {
-            setState(() => _pendingConflict = syncOutcome);
+            final fp = await _resolveActiveTargetFingerprint(service);
+            if (!mounted) return;
+            setState(() {
+              _pendingConflict = syncOutcome;
+              _pendingConflictTargetFingerprint = fp;
+            });
             _refreshAfterBackupChange();
           } else {
             _refreshAfterBackupChange();
@@ -76,10 +104,10 @@ class _BackupPageState extends ConsumerState<BackupPage>
         if (localSaved != null && mounted) {
           _refreshAfterBackupChange();
         }
-      }
-      final uploaded = await service.runSilentAutoBackupIfNeeded();
-      if (uploaded != null && mounted) {
-        _refreshAfterBackupChange();
+        final uploaded = await service.runSilentAutoBackupIfNeeded();
+        if (uploaded != null && mounted) {
+          _refreshAfterBackupChange();
+        }
       }
     } catch (_) {
       // Silent background check never interrupts foreground workflow.
@@ -96,20 +124,8 @@ class _BackupPageState extends ConsumerState<BackupPage>
       ..invalidate(lastBackupAtMsProvider);
   }
 
-  void _refreshAfterRestore() {
-    _refreshAfterBackupChange();
-    ref.read(periodOffsetProvider.notifier).reset();
-    ref.read(calendarMonthOffsetProvider.notifier).reset();
-    ref
-      ..invalidate(currentBookIdProvider)
-      ..invalidate(booksProvider)
-      ..invalidate(assetsProvider)
-      ..invalidate(assetBooksProvider)
-      ..invalidate(currenciesProvider)
-      ..invalidate(tagsProvider)
-      ..invalidate(remindersProvider)
-      ..invalidate(reminderCountProvider)
-      ..invalidate(migrationLocalSummaryProvider);
+  Future<void> _refreshAfterRestore() async {
+    await invalidateAllAfterDatabaseReplace(ref);
   }
 
   void _showMessage(String text) {
@@ -135,7 +151,8 @@ class _BackupPageState extends ConsumerState<BackupPage>
     try {
       final service = await ref.read(tallyBackupServiceProvider.future);
       await service.setCloudBackend(backend);
-      setState(() => _pendingConflict = null);
+      if (!mounted) return;
+      setState(_clearPendingConflict);
       ref
         ..invalidate(cloudSyncSettingsProvider)
         ..invalidate(activeCloudBackupsProvider)
@@ -209,8 +226,11 @@ class _BackupPageState extends ConsumerState<BackupPage>
       child: WebDavConfigPage(initialConfig: current),
     );
     if (changed == true && mounted) {
+      setState(_clearPendingConflict);
       _refreshAfterBackupChange();
-      ref.invalidate(cloudSyncSettingsProvider);
+      ref
+        ..invalidate(cloudSyncSettingsProvider)
+        ..invalidate(cloudSyncCursorProvider);
       _showMessage('WebDAV 配置已更新');
     }
   }
@@ -221,8 +241,11 @@ class _BackupPageState extends ConsumerState<BackupPage>
       child: S3ConfigPage(initialConfig: current),
     );
     if (changed == true && mounted) {
+      setState(_clearPendingConflict);
       _refreshAfterBackupChange();
-      ref.invalidate(cloudSyncSettingsProvider);
+      ref
+        ..invalidate(cloudSyncSettingsProvider)
+        ..invalidate(cloudSyncCursorProvider);
       _showMessage('S3 对象存储配置已更新');
     }
   }
@@ -254,19 +277,24 @@ class _BackupPageState extends ConsumerState<BackupPage>
       if (!mounted) return;
       switch (outcome.status) {
         case CloudSyncStatus.alreadyUpToDate:
-          setState(() => _pendingConflict = null);
+          setState(_clearPendingConflict);
           _refreshAfterBackupChange();
           _showMessage('多端数据已是最新（版本 r${outcome.revision}）');
         case CloudSyncStatus.pushed:
-          setState(() => _pendingConflict = null);
+          setState(_clearPendingConflict);
           _refreshAfterBackupChange();
           _showMessage('已推送最新快照至云端（版本 r${outcome.revision}）');
         case CloudSyncStatus.pulled:
-          setState(() => _pendingConflict = null);
-          _refreshAfterRestore();
+          setState(_clearPendingConflict);
+          await _refreshAfterRestore();
           _showMessage('已从云端同步最新数据（版本 r${outcome.revision}）');
         case CloudSyncStatus.conflict:
-          setState(() => _pendingConflict = outcome);
+          final fp = await _resolveActiveTargetFingerprint(service);
+          if (!mounted) return;
+          setState(() {
+            _pendingConflict = outcome;
+            _pendingConflictTargetFingerprint = fp;
+          });
           _refreshAfterBackupChange();
           conflictToPrompt = outcome;
       }
@@ -286,12 +314,18 @@ class _BackupPageState extends ConsumerState<BackupPage>
     }
   }
 
-  Future<void> _showConflictResolutionDialog(CloudSyncOutcome conflict) async {
-    final head = conflict.remoteHead;
+  Future<void> _showConflictResolutionDialog(
+    CloudSyncOutcome? conflict, {
+    String? fallbackBackupFileName,
+  }) async {
+    final head = conflict?.remoteHead;
     final remoteDesc = head == null
         ? '云端新版本'
         : '设备「${head.deviceName}」于 ${formatDateTime(DateTime.fromMillisecondsSinceEpoch(head.updatedAtMs))} 推送的版本 r${head.revision}（账单 ${head.recordCount} 条）';
-    final backupName = conflict.conflictBackupFileName ?? 'conflict_*.tally';
+    final backupName =
+        conflict?.conflictBackupFileName ??
+        fallbackBackupFileName ??
+        'conflict_*.tally';
 
     final choice = await showDialog<SyncConflictResolution?>(
       context: context,
@@ -448,7 +482,9 @@ class _BackupPageState extends ConsumerState<BackupPage>
     try {
       final service = await ref.read(tallyBackupServiceProvider.future);
       final manifest = await service.restoreFromBytes(selected.bytes);
-      _refreshAfterRestore();
+      if (!mounted) return;
+      setState(_clearPendingConflict);
+      await _refreshAfterRestore();
       _showMessage('恢复完成：共导入 ${manifest.totalRows} 条数据');
     } catch (e) {
       _showMessage(safeMessage(e));
@@ -480,7 +516,9 @@ class _BackupPageState extends ConsumerState<BackupPage>
     try {
       final service = await ref.read(tallyBackupServiceProvider.future);
       final manifest = await service.restoreLocalBackup(item.fileName);
-      _refreshAfterRestore();
+      if (!mounted) return;
+      setState(_clearPendingConflict);
+      await _refreshAfterRestore();
       _showMessage('恢复完成：共导入 ${manifest.totalRows} 条数据');
     } catch (e) {
       _showMessage(safeMessage(e));
@@ -578,7 +616,9 @@ class _BackupPageState extends ConsumerState<BackupPage>
           });
         },
       );
-      _refreshAfterRestore();
+      if (!mounted) return;
+      setState(_clearPendingConflict);
+      await _refreshAfterRestore();
       _showMessage('云端恢复完成：共导入 ${manifest.totalRows} 条数据');
     } catch (e) {
       _showMessage(safeMessage(e));
@@ -752,6 +792,34 @@ class _BackupPageState extends ConsumerState<BackupPage>
       CloudBackendType.s3 => s3Config.isConfigured,
       CloudBackendType.none => false,
     };
+    final activeTargetFingerprint = switch (activeBackend) {
+      CloudBackendType.webdav when davConfig.isConfigured =>
+        davConfig.targetFingerprint,
+      CloudBackendType.s3 when s3Config.isConfigured =>
+        s3Config.targetFingerprint,
+      _ => '',
+    };
+    final scopedCursor = activeTargetFingerprint.isEmpty
+        ? const LocalSyncCursor.initial()
+        : syncCursor.scopedToTarget(activeTargetFingerprint);
+    final effectiveIncludeAttachments = switch (activeBackend) {
+      CloudBackendType.s3 => s3Config.includeAttachments,
+      CloudBackendType.webdav ||
+      CloudBackendType.none => davConfig.includeAttachments,
+    };
+    final effectivePendingConflict =
+        activeTargetFingerprint.isNotEmpty &&
+            _pendingConflictTargetFingerprint == activeTargetFingerprint
+        ? _pendingConflict
+        : null;
+    final activeConflictFileName =
+        effectivePendingConflict?.conflictBackupFileName ??
+        scopedCursor.lastConflictFileName;
+    final hasPersistentConflict =
+        isActiveCloudReady &&
+        ((activeConflictFileName != null &&
+                activeConflictFileName.isNotEmpty) ||
+            effectivePendingConflict != null);
     final AsyncValue<List<BackupFileMetadata>> remoteListAsync =
         isActiveCloudReady
         ? ref.watch(activeCloudBackupsProvider)
@@ -853,12 +921,12 @@ class _BackupPageState extends ConsumerState<BackupPage>
                               dense: isDesktop ? null : true,
                               title: const Text('完整备份（包含账单图片附件）'),
                               subtitle: Text(
-                                davConfig.includeAttachments
+                                effectiveIncludeAttachments
                                     ? '打包全部 22 张业务表及原图附件并写入 SHA-256 校验清单'
                                     : '纯数据轻量备份（仅打包 22 张业务表，不含图片附件）',
                               ),
-                              value: davConfig.includeAttachments,
-                              onChanged: _busy
+                              value: effectiveIncludeAttachments,
+                              onChanged: effectiveBusy
                                   ? null
                                   : _toggleIncludeAttachments,
                             ),
@@ -987,7 +1055,7 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                     ),
                                   ],
                                   selected: <CloudBackendType>{activeBackend},
-                                  onSelectionChanged: _busy
+                                  onSelectionChanged: effectiveBusy
                                       ? null
                                       : (selected) =>
                                             _selectCloudBackend(selected.first),
@@ -997,7 +1065,7 @@ class _BackupPageState extends ConsumerState<BackupPage>
                               Text(
                                 _buildSyncStatusSummary(
                                   settings: syncSettings,
-                                  cursor: syncCursor,
+                                  cursor: scopedCursor,
                                   isActiveReady: isActiveCloudReady,
                                 ),
                                 key: const Key('cloud_sync_status_summary'),
@@ -1012,7 +1080,7 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                         'open_webdav_config_button',
                                       ),
                                       style: _compactButtonStyle,
-                                      onPressed: _busy
+                                      onPressed: effectiveBusy
                                           ? null
                                           : () => _openWebDavConfig(davConfig),
                                       icon: const Icon(
@@ -1031,7 +1099,7 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                     child: OutlinedButton.icon(
                                       key: const Key('open_s3_config_button'),
                                       style: _compactButtonStyle,
-                                      onPressed: _busy
+                                      onPressed: effectiveBusy
                                           ? null
                                           : () => _openS3Config(s3Config),
                                       icon: const Icon(
@@ -1080,7 +1148,7 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                   '按需独立开启各自动同步时机（默认全部关闭，零静默联网）',
                                 ),
                                 value: syncSettings.autoSyncEnabled,
-                                onChanged: !_busy && isActiveCloudReady
+                                onChanged: !effectiveBusy && isActiveCloudReady
                                     ? _toggleAutoSync
                                     : null,
                               ),
@@ -1093,7 +1161,7 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                   '桌面获焦或回到前台时自动拉取或推送，预防多端陈旧冲突',
                                 ),
                                 value: syncSettings.syncOnStartup,
-                                onChanged: !_busy && isActiveCloudReady
+                                onChanged: !effectiveBusy && isActiveCloudReady
                                     ? (v) => _updateCloudSyncTriggers(
                                         syncOnStartup: v,
                                       )
@@ -1108,7 +1176,7 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                   '切入后台或桌面关窗时自动同步（含 5 秒超时保护，离线绝不卡死）',
                                 ),
                                 value: syncSettings.syncOnExit,
-                                onChanged: !_busy && isActiveCloudReady
+                                onChanged: !effectiveBusy && isActiveCloudReady
                                     ? (v) => _updateCloudSyncTriggers(
                                         syncOnExit: v,
                                       )
@@ -1121,7 +1189,7 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                 title: const Text('记账变更静置后自动同步'),
                                 subtitle: const Text('连续记账结束后静置指定时长合并推送一次'),
                                 value: syncSettings.syncOnIdle,
-                                onChanged: !_busy && isActiveCloudReady
+                                onChanged: !effectiveBusy && isActiveCloudReady
                                     ? (v) => _updateCloudSyncTriggers(
                                         syncOnIdle: v,
                                       )
@@ -1162,7 +1230,7 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                             child: Text('$m 分钟'),
                                           ),
                                       ],
-                                      onChanged: _busy
+                                      onChanged: effectiveBusy
                                           ? null
                                           : (val) {
                                               if (val != null) {
@@ -1182,7 +1250,7 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                 title: const Text('定时周期自动同步'),
                                 subtitle: const Text('应用运行期间按固定间隔自动检查同步'),
                                 value: syncSettings.syncOnSchedule,
-                                onChanged: !_busy && isActiveCloudReady
+                                onChanged: !effectiveBusy && isActiveCloudReady
                                     ? (v) => _updateCloudSyncTriggers(
                                         syncOnSchedule: v,
                                       )
@@ -1226,7 +1294,7 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                             ),
                                           ),
                                       ],
-                                      onChanged: _busy
+                                      onChanged: effectiveBusy
                                           ? null
                                           : (val) {
                                               if (val != null) {
@@ -1239,7 +1307,7 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                   ),
                                 ),
                               ),
-                              if (_pendingConflict != null) ...[
+                              if (hasPersistentConflict) ...[
                                 const SizedBox(height: 8),
                                 Container(
                                   key: const Key('cloud_sync_conflict_banner'),
@@ -1254,7 +1322,7 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                     children: [
                                       Expanded(
                                         child: Text(
-                                          '检测到同步冲突，本机快照已保护存为 ${_pendingConflict!.conflictBackupFileName ?? ''}',
+                                          '检测到同步冲突，本机快照已保护存为 ${activeConflictFileName ?? ''}',
                                           style: TextStyle(
                                             color: Theme.of(
                                               context,
@@ -1266,11 +1334,13 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                         key: const Key(
                                           'reopen_conflict_dialog_button',
                                         ),
-                                        onPressed: _busy
+                                        onPressed: effectiveBusy
                                             ? null
                                             : () =>
                                                   _showConflictResolutionDialog(
-                                                    _pendingConflict!,
+                                                    effectivePendingConflict,
+                                                    fallbackBackupFileName:
+                                                        activeConflictFileName,
                                                   ),
                                         child: const Text('处理冲突'),
                                       ),
@@ -1307,7 +1377,7 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                         'local_backup_create_button',
                                       ),
                                       style: _compactButtonStyle,
-                                      onPressed: _busy
+                                      onPressed: effectiveBusy
                                           ? null
                                           : _handleCreateLocalBackup,
                                       icon: const Icon(
@@ -1324,7 +1394,7 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                         'local_backup_import_button',
                                       ),
                                       style: _compactButtonStyle,
-                                      onPressed: _busy
+                                      onPressed: effectiveBusy
                                           ? null
                                           : _handleImportAndRestore,
                                       icon: const Icon(
@@ -1345,7 +1415,8 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                         'local_backup_export_button',
                                       ),
                                       style: _compactButtonStyle,
-                                      onPressed: !_busy && canSaveExternal
+                                      onPressed:
+                                          !effectiveBusy && canSaveExternal
                                           ? _handleExportSaveAs
                                           : null,
                                       icon: const Icon(
@@ -1363,7 +1434,8 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                           'local_backup_share_button',
                                         ),
                                         style: _compactButtonStyle,
-                                        onPressed: !_busy && canShareExternal
+                                        onPressed:
+                                            !effectiveBusy && canShareExternal
                                             ? _handleShareBackup
                                             : null,
                                         icon: const Icon(
@@ -1412,7 +1484,7 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                           child: Text('$n 份'),
                                         ),
                                     ],
-                                    onChanged: _busy
+                                    onChanged: effectiveBusy
                                         ? null
                                         : (val) {
                                             if (val != null) {
@@ -1434,7 +1506,7 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                 title: const Text('启动 App 时自动备份'),
                                 subtitle: const Text('仅在本地账务数据有变更时生成新快照'),
                                 value: localPolicy.backupOnStartup,
-                                onChanged: _busy
+                                onChanged: effectiveBusy
                                     ? null
                                     : (v) => _updateLocalAutoBackupPolicy(
                                         localPolicy.copyWith(
@@ -1449,7 +1521,7 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                 title: const Text('退出 / 切入后台时自动备份'),
                                 subtitle: const Text('切入后台或关闭桌面窗口时保存变更快照'),
                                 value: localPolicy.backupOnExit,
-                                onChanged: _busy
+                                onChanged: effectiveBusy
                                     ? null
                                     : (v) => _updateLocalAutoBackupPolicy(
                                         localPolicy.copyWith(backupOnExit: v),
@@ -1462,7 +1534,7 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                 title: const Text('记账变更静置后自动备份'),
                                 subtitle: const Text('连续记账结束后静置指定分钟数自动打包备份'),
                                 value: localPolicy.backupOnIdle,
-                                onChanged: _busy
+                                onChanged: effectiveBusy
                                     ? null
                                     : (v) => _updateLocalAutoBackupPolicy(
                                         localPolicy.copyWith(backupOnIdle: v),
@@ -1503,7 +1575,7 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                             child: Text('$m 分钟'),
                                           ),
                                       ],
-                                      onChanged: _busy
+                                      onChanged: effectiveBusy
                                           ? null
                                           : (val) {
                                               if (val != null) {
@@ -1525,7 +1597,7 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                 title: const Text('定时周期自动备份'),
                                 subtitle: const Text('距上次本地备份满设定周期且有数据变更时生成'),
                                 value: localPolicy.backupOnSchedule,
-                                onChanged: _busy
+                                onChanged: effectiveBusy
                                     ? null
                                     : (v) => _updateLocalAutoBackupPolicy(
                                         localPolicy.copyWith(
@@ -1571,7 +1643,7 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                             ),
                                           ),
                                       ],
-                                      onChanged: _busy
+                                      onChanged: effectiveBusy
                                           ? null
                                           : (val) {
                                               if (val != null) {
@@ -1632,7 +1704,7 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                                 key: Key(
                                                   'local_restore_${item.fileName}',
                                                 ),
-                                                onPressed: _busy
+                                                onPressed: effectiveBusy
                                                     ? null
                                                     : () =>
                                                           _handleRestoreLocalItem(
@@ -1645,7 +1717,7 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                                   'local_delete_${item.fileName}',
                                                 ),
                                                 tooltip: '删除',
-                                                onPressed: _busy
+                                                onPressed: effectiveBusy
                                                     ? null
                                                     : () =>
                                                           _handleDeleteLocalItem(
@@ -1721,7 +1793,7 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                           'webdav_backup_now_button',
                                         ),
                                         style: _compactButtonStyle,
-                                        onPressed: _busy
+                                        onPressed: effectiveBusy
                                             ? null
                                             : () => _handleCloudBackupUpload(
                                                 activeBackend,
@@ -1738,7 +1810,7 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                       child: OutlinedButton.icon(
                                         key: const Key('webdav_refresh_button'),
                                         style: _compactButtonStyle,
-                                        onPressed: _busy
+                                        onPressed: effectiveBusy
                                             ? null
                                             : _refreshAfterBackupChange,
                                         icon: const Icon(
@@ -1760,7 +1832,9 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                     '距上次备份满 24 小时且本地有新账单变动时自动上传',
                                   ),
                                   value: activeAutoBackupEnabled,
-                                  onChanged: _busy ? null : _toggleAutoBackup,
+                                  onChanged: effectiveBusy
+                                      ? null
+                                      : _toggleAutoBackup,
                                 ),
                               ],
                               const Divider(height: 24),
@@ -1818,7 +1892,7 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                                   key: Key(
                                                     'webdav_restore_${item.fileName}',
                                                   ),
-                                                  onPressed: _busy
+                                                  onPressed: effectiveBusy
                                                       ? null
                                                       : () =>
                                                             _handleRestoreCloudItem(
@@ -1832,7 +1906,7 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                                     'webdav_delete_${item.fileName}',
                                                   ),
                                                   tooltip: '删除',
-                                                  onPressed: _busy
+                                                  onPressed: effectiveBusy
                                                       ? null
                                                       : () =>
                                                             _handleDeleteCloudItem(

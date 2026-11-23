@@ -70,19 +70,54 @@ class _DiyToolbarSettingsPageState
       ? scheme.surfaceContainerLow
       : Color.lerp(scheme.surfaceContainerLow, scheme.surfaceContainer, 0.55)!;
 
-  Widget _buildToolbarRow(
+  Widget _buildSectionHeader(
+    BuildContext context, {
+    required String title,
+    String? subtitle,
+    EdgeInsetsGeometry padding = const EdgeInsets.fromLTRB(20, 4, 20, 8),
+  }) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Padding(
+      padding: padding,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: theme.textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.w600,
+              color: scheme.onSurface,
+            ),
+          ),
+          if (subtitle != null) ...[
+            const SizedBox(height: 2),
+            Text(
+              subtitle,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: scheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSortableRow(
     BuildContext context, {
     required DiyToolbarConfig config,
+    required List<DiyToolbarItem> sortableItems,
     required int index,
     required bool isDesktop,
   }) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final isDark = theme.brightness == Brightness.dark;
-    final item = config.items[index];
+    final item = sortableItems[index];
     final action = item.action;
     final isFirst = index == 0;
-    final isLast = index == config.items.length - 1;
+    final isLast = index == sortableItems.length - 1;
     const radius = Radius.circular(16);
 
     final tile = ListTile(
@@ -163,6 +198,75 @@ class _DiyToolbarSettingsPageState
     );
   }
 
+  Widget _buildFixedSwitchesSection(
+    BuildContext context, {
+    required DiyToolbarConfig config,
+    required List<DiyToolbarItem> fixedItems,
+    required bool isDesktop,
+  }) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
+
+    return Column(
+      key: const Key('diy-fixed-switches-section'),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _buildSectionHeader(
+          context,
+          title: '记账辅助开关（固定位置无需排序）',
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Material(
+            key: const Key('diy-fixed-switches-card'),
+            color: _groupColor(scheme, isDark),
+            borderRadius: BorderRadius.circular(16),
+            clipBehavior: Clip.antiAlias,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (var i = 0; i < fixedItems.length; i++) ...[
+                  if (i > 0)
+                    Divider(
+                      height: 1,
+                      thickness: 0.5,
+                      indent: 56,
+                      endIndent: 16,
+                      color: scheme.outlineVariant.withValues(
+                        alpha: isDark ? 0.28 : 0.35,
+                      ),
+                    ),
+                  ListTile(
+                    key: ValueKey('diy-row-${fixedItems[i].action.key}'),
+                    visualDensity: isDesktop
+                        ? null
+                        : const VisualDensity(vertical: -1),
+                    contentPadding: const EdgeInsets.only(left: 16, right: 12),
+                    leading: Icon(_iconFor(fixedItems[i].action)),
+                    title: Text(fixedItems[i].action.label),
+                    subtitle: Text(fixedItems[i].action.description),
+                    trailing: Switch(
+                      key: Key('diy-switch-${fixedItems[i].action.key}'),
+                      value: fixedItems[i].enabled,
+                      onChanged: _busy
+                          ? null
+                          : (enabled) => _persist(
+                              config.setEnabled(fixedItems[i].action, enabled),
+                            ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final configAsync = ref.watch(diyToolbarConfigProvider);
@@ -202,10 +306,24 @@ class _DiyToolbarSettingsPageState
       ),
       body: asyncBody(configAsync, (rawConfig) {
         final config = _optimisticConfig ?? rawConfig;
+        final sortableItems = config.sortableItems;
+        final fixedItems = config.fixedSwitchItems;
+
         final list = ReorderableListView.builder(
           key: const Key('diy-toolbar-list'),
           buildDefaultDragHandles: false,
-          padding: const EdgeInsets.only(top: 12, bottom: 16),
+          padding: const EdgeInsets.only(top: 12, bottom: 24),
+          header: _buildSectionHeader(
+            context,
+            title: '工具栏项目（可拖拽排序）',
+            subtitle: '账户与日期时间固定在工具栏最前常驻',
+          ),
+          footer: _buildFixedSwitchesSection(
+            context,
+            config: config,
+            fixedItems: fixedItems,
+            isDesktop: isDesktop,
+          ),
           onReorderStart: (_) {
             if (!isDesktop) {
               HapticFeedback.selectionClick();
@@ -217,14 +335,15 @@ class _DiyToolbarSettingsPageState
             borderRadius: BorderRadius.circular(16),
             child: child,
           ),
-          itemCount: config.items.length,
+          itemCount: sortableItems.length,
           onReorderItem: (oldIndex, newIndex) {
             if (_busy || oldIndex == newIndex) return;
-            _persist(config.moveItem(oldIndex, newIndex));
+            _persist(config.moveSortableItem(oldIndex, newIndex));
           },
-          itemBuilder: (context, index) => _buildToolbarRow(
+          itemBuilder: (context, index) => _buildSortableRow(
             context,
             config: config,
+            sortableItems: sortableItems,
             index: index,
             isDesktop: isDesktop,
           ),

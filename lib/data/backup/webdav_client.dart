@@ -127,11 +127,22 @@ final class WebDavConfig {
       60 *
       1000;
 
-  String get targetFingerprint => sha256Hex(
-    utf8.encode(
-      'webdav|${serverUrl.trim().toLowerCase()}|${remoteDirectory.trim()}',
-    ),
-  );
+  String get targetFingerprint {
+    var cleanUrl = serverUrl.trim().toLowerCase();
+    while (cleanUrl.length > 1 && cleanUrl.endsWith('/')) {
+      cleanUrl = cleanUrl.substring(0, cleanUrl.length - 1);
+    }
+    final cleanDirSegments = <String>[
+      for (final seg in remoteDirectory.trim().split('/'))
+        if (seg.isNotEmpty && seg != '.' && seg != '..') seg,
+    ];
+    final cleanDir = '/${cleanDirSegments.join('/')}';
+    return sha256Hex(
+      utf8.encode(
+        'webdav|$cleanUrl|$cleanDir|${username.trim().toLowerCase()}',
+      ),
+    );
+  }
 
   WebDavConfig copyWith({
     String? serverUrl,
@@ -428,7 +439,6 @@ final class WebDavClient {
       if (mkRes.statusCode == 201 ||
           mkRes.statusCode == 200 ||
           mkRes.statusCode == 204 ||
-          mkRes.statusCode == 301 ||
           mkRes.statusCode == 405) {
         _verifiedCollectionPaths.add(prefixKey);
         continue;
@@ -761,6 +771,7 @@ final class WebDavClient {
   }) async {
     final req = await client.getUrl(uri).timeout(controlTimeout);
     req.headers.set(HttpHeaders.authorizationHeader, _basicAuthHeader);
+    req.headers.set(HttpHeaders.acceptEncodingHeader, 'identity');
     final res = await req.close().timeout(transferTimeout);
     if (res.statusCode == 404 || res.statusCode == 410) {
       await res.drain<void>().timeout(controlTimeout);
@@ -785,7 +796,10 @@ final class WebDavClient {
         onProgress?.call(received, expectedLength);
       }
     }
-    if (expectedLength >= 0 && received != expectedLength) {
+    if (expectedLength >= 0 &&
+        res.compressionState !=
+            HttpClientResponseCompressionState.decompressed &&
+        received != expectedLength) {
       throw const Failure(FailureCode.remoteUnavailable, '下载中断：远端字节长度与响应头不一致');
     }
     return builder.takeBytes();
@@ -859,6 +873,7 @@ final class WebDavClient {
   ) async {
     final req = await client.openUrl('HEAD', uri).timeout(controlTimeout);
     req.headers.set(HttpHeaders.authorizationHeader, _basicAuthHeader);
+    req.headers.set(HttpHeaders.acceptEncodingHeader, 'identity');
     final res = await req.close().timeout(controlTimeout);
     await res.drain<void>().timeout(controlTimeout);
     if (res.statusCode == 405 || res.statusCode == 501) {
@@ -871,6 +886,17 @@ final class WebDavClient {
         FailureCode.remoteUnavailable,
         'WebDAV HEAD 校验失败（状态码 ${res.statusCode}）',
       );
+    }
+    final contentEncoding = res.headers
+        .value(HttpHeaders.contentEncodingHeader)
+        ?.trim()
+        .toLowerCase();
+    if (res.compressionState ==
+            HttpClientResponseCompressionState.decompressed ||
+        (contentEncoding != null &&
+            contentEncoding.isNotEmpty &&
+            contentEncoding != 'identity')) {
+      return;
     }
     final contentLengthHeader = res.headers.value(
       HttpHeaders.contentLengthHeader,
@@ -909,7 +935,8 @@ final class WebDavClient {
     }
   }
 
-  /// Parses WebDAV `207 Multi-Status` XML responses namespace-agnostically.
+  /// Parses WebDAV `207 Multi-Status` XML responses namespace-agnostically,
+  /// extracting properties strictly from `2xx` `<d:propstat>` blocks (`S-08`).
   static List<BackupFileMetadata> parsePropfindBackups(
     String xml, {
     required String collectionPath,
@@ -919,25 +946,24 @@ final class WebDavClient {
       caseSensitive: false,
     ).allMatches(xml);
 
-    final normalizedCollection = _stripTrailingSlash(
-      Uri.decodeFull(collectionPath),
-    );
+    final normalizedCollection = _decodeWebDavPath(collectionPath);
     final items = <BackupFileMetadata>[];
     final seenNames = <String>{};
 
     for (final match in responseBlocks) {
       final block = match.group(1) ?? '';
+      final okPropsXml = _extract2xxPropsXml(block);
+      if (okPropsXml == null) continue;
       if (RegExp(
         r'<(?:[A-Za-z0-9_-]+:)?collection\b',
         caseSensitive: false,
-      ).hasMatch(block)) {
+      ).hasMatch(okPropsXml)) {
         continue;
       }
 
       final rawHref = _extractTagText(block, 'href');
       if (rawHref == null || rawHref.isEmpty) continue;
-      final hrefPath = Uri.tryParse(rawHref)?.path ?? rawHref;
-      final decodedPath = _stripTrailingSlash(Uri.decodeFull(hrefPath));
+      final decodedPath = _decodeHrefToPath(rawHref);
       if (decodedPath.isEmpty || decodedPath == normalizedCollection) {
         continue;
       }
@@ -949,10 +975,10 @@ final class WebDavClient {
       if (!isSupportedBackupFileName(fileName)) continue;
       if (!seenNames.add(fileName)) continue;
 
-      final sizeText = _extractTagText(block, 'getcontentlength');
+      final sizeText = _extractTagText(okPropsXml, 'getcontentlength');
       final sizeBytes = int.tryParse(sizeText?.trim() ?? '') ?? 0;
 
-      final lastModText = _extractTagText(block, 'getlastmodified');
+      final lastModText = _extractTagText(okPropsXml, 'getlastmodified');
       final modifiedAtMs =
           _parseHttpOrIsoTimestamp(lastModText) ??
           parseTimestampFromFileName(fileName) ??
@@ -985,23 +1011,22 @@ final class WebDavClient {
       caseSensitive: false,
     ).allMatches(xml);
 
-    final normalizedCollection = _stripTrailingSlash(
-      Uri.decodeFull(collectionPath),
-    );
+    final normalizedCollection = _decodeWebDavPath(collectionPath);
     final names = <String>{};
 
     for (final match in responseBlocks) {
       final block = match.group(1) ?? '';
+      final okPropsXml = _extract2xxPropsXml(block);
+      if (okPropsXml == null) continue;
       if (RegExp(
         r'<(?:[A-Za-z0-9_-]+:)?collection\b',
         caseSensitive: false,
-      ).hasMatch(block)) {
+      ).hasMatch(okPropsXml)) {
         continue;
       }
       final rawHref = _extractTagText(block, 'href');
       if (rawHref == null || rawHref.isEmpty) continue;
-      final hrefPath = Uri.tryParse(rawHref)?.path ?? rawHref;
-      final decodedPath = _stripTrailingSlash(Uri.decodeFull(hrefPath));
+      final decodedPath = _decodeHrefToPath(rawHref);
       if (decodedPath.isEmpty || decodedPath == normalizedCollection) {
         continue;
       }
@@ -1013,6 +1038,86 @@ final class WebDavClient {
       names.add(fileName);
     }
     return names;
+  }
+
+  static String? _extract2xxPropsXml(String responseBlock) {
+    final propstats = RegExp(
+      r'<(?:[A-Za-z0-9_-]+:)?propstat\b[^>]*>([\s\S]*?)</(?:[A-Za-z0-9_-]+:)?propstat>',
+      caseSensitive: false,
+    ).allMatches(responseBlock).toList();
+    if (propstats.isEmpty) {
+      final respStatus = _extractTagText(responseBlock, 'status');
+      if (respStatus != null && !_is2xxHttpStatusLine(respStatus)) {
+        return null;
+      }
+      return responseBlock;
+    }
+
+    final okBuf = StringBuffer();
+    var has2xx = false;
+    for (final ps in propstats) {
+      final psBody = ps.group(1) ?? '';
+      final statusText = _extractTagText(psBody, 'status');
+      if (statusText != null && !_is2xxHttpStatusLine(statusText)) {
+        continue;
+      }
+      has2xx = true;
+      final propMatches = RegExp(
+        r'<(?:[A-Za-z0-9_-]+:)?prop\b[^>]*>([\s\S]*?)</(?:[A-Za-z0-9_-]+:)?prop>',
+        caseSensitive: false,
+      ).allMatches(psBody);
+      if (propMatches.isEmpty) {
+        okBuf.write(psBody);
+      } else {
+        for (final pm in propMatches) {
+          okBuf.write(pm.group(1) ?? '');
+        }
+      }
+    }
+    return has2xx ? okBuf.toString() : null;
+  }
+
+  static bool _is2xxHttpStatusLine(String statusText) =>
+      RegExp(r'\b2\d\d\b').hasMatch(statusText);
+
+  static String _decodeHrefToPath(String rawHref) {
+    var trimmed = rawHref.trim();
+    final authorityMatch = RegExp(
+      r'^https?://[^/]*',
+      caseSensitive: false,
+    ).firstMatch(trimmed);
+    if (authorityMatch != null) {
+      trimmed = trimmed.substring(authorityMatch.end);
+      if (trimmed.isEmpty) trimmed = '/';
+    }
+    final qIdx = trimmed.indexOf('?');
+    if (qIdx >= 0) trimmed = trimmed.substring(0, qIdx);
+    final fIdx = trimmed.indexOf('#');
+    if (fIdx >= 0) trimmed = trimmed.substring(0, fIdx);
+    return _decodeWebDavPath(trimmed);
+  }
+
+  static String _decodeWebDavPath(String rawPath) {
+    final decoded = <String>[
+      for (final seg in rawPath.split('/')) _safeDecodeUriSegment(seg),
+    ].join('/');
+    return _stripTrailingSlash(decoded);
+  }
+
+  static String _safeDecodeUriSegment(String segment) {
+    if (!segment.contains('%')) return segment;
+    try {
+      return Uri.decodeComponent(segment);
+    } on Object {
+      return segment.replaceAllMapped(RegExp(r'(?:%[0-9a-fA-F]{2})+'), (match) {
+        final encodedRun = match.group(0)!;
+        try {
+          return Uri.decodeComponent(encodedRun);
+        } on Object {
+          return encodedRun;
+        }
+      });
+    }
   }
 
   static bool isSupportedBackupFileName(String fileName) {
@@ -1033,12 +1138,39 @@ final class WebDavClient {
     );
     final raw = pattern.firstMatch(xmlBlock)?.group(1)?.trim();
     if (raw == null) return null;
-    return raw
-        .replaceAll('&amp;', '&')
-        .replaceAll('&lt;', '<')
-        .replaceAll('&gt;', '>')
-        .replaceAll('&quot;', '"')
-        .replaceAll('&apos;', "'");
+    return unescapeWebDavXml(raw);
+  }
+
+  static String unescapeWebDavXml(String input) {
+    return input.replaceAllMapped(
+      RegExp(r'&(?:#x([0-9a-fA-F]+)|#([0-9]+)|quot|apos|lt|gt|amp);'),
+      (m) {
+        final hex = m.group(1);
+        if (hex != null) {
+          final code = int.tryParse(hex, radix: 16);
+          if (code != null && code >= 0 && code <= 0x10FFFF) {
+            return String.fromCharCode(code);
+          }
+          return m.group(0)!;
+        }
+        final dec = m.group(2);
+        if (dec != null) {
+          final code = int.tryParse(dec);
+          if (code != null && code >= 0 && code <= 0x10FFFF) {
+            return String.fromCharCode(code);
+          }
+          return m.group(0)!;
+        }
+        return switch (m.group(0)) {
+          '&quot;' => '"',
+          '&apos;' => "'",
+          '&lt;' => '<',
+          '&gt;' => '>',
+          '&amp;' => '&',
+          _ => m.group(0)!,
+        };
+      },
+    );
   }
 
   static int? _parseHttpOrIsoTimestamp(String? text) {

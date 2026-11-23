@@ -5,14 +5,15 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../app/adaptive.dart';
-import '../../app/desktop_shell.dart' show PeriodSwipeRegion;
 import '../../app/providers.dart';
 import '../../data/db/database.dart';
 import '../../domain/model/codes.dart';
+import '../../domain/rules/billing_period.dart';
 import '../../domain/rules/category_stats.dart';
 import '../common/catalog_icons.dart';
 import '../common/common.dart';
 import '../common/desktop_modal_page.dart';
+import '../common/year_month_picker_dialog.dart';
 import '../records/record_detail_page.dart';
 import 'category_stats_providers.dart';
 
@@ -134,15 +135,6 @@ class _CategoryStatsPageState extends ConsumerState<CategoryStatsPage> {
       ),
     );
 
-    final swipeEnabled = rangeKind != StatRangeKind.custom;
-    Widget wrapSwipe(Widget child) => PeriodSwipeRegion(
-      enabled: swipeEnabled,
-      onPrevious: () =>
-          ref.read(categoryStatsOffsetProvider.notifier).previous(),
-      onNext: () => ref.read(categoryStatsOffsetProvider.notifier).next(),
-      child: child,
-    );
-
     return Scaffold(
       key: _scaffoldKey,
       drawerEdgeDragWidth: 0,
@@ -179,28 +171,26 @@ class _CategoryStatsPageState extends ConsumerState<CategoryStatsPage> {
       body: isExpandedDesktop
           ? Column(
               children: [
-                wrapSwipe(
-                  Center(
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 1440),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 20,
-                          vertical: 8,
-                        ),
-                        child: Row(
-                          children: [
-                            SizedBox(width: 210, child: dimensionSwitch),
-                            const SizedBox(width: 20),
-                            Expanded(
-                              child: _PeriodNavigationBar(
-                                rangeKind: rangeKind,
-                                periodAsync: periodAsync,
-                                compactDesktop: true,
-                              ),
+                Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 1440),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 20,
+                        vertical: 8,
+                      ),
+                      child: Row(
+                        children: [
+                          SizedBox(width: 210, child: dimensionSwitch),
+                          const SizedBox(width: 20),
+                          Expanded(
+                            child: _PeriodNavigationBar(
+                              rangeKind: rangeKind,
+                              periodAsync: periodAsync,
+                              compactDesktop: true,
                             ),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
                     ),
                   ),
@@ -225,32 +215,27 @@ class _CategoryStatsPageState extends ConsumerState<CategoryStatsPage> {
                                 24,
                               ),
                               children: [
-                                wrapSwipe(
-                                  Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.stretch,
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      headerSummaryWidget,
-                                      const SizedBox(height: 16),
-                                      resultAsync.when(
-                                        data: (res) => _CategoryDonutChartCard(
-                                          key: const Key(
-                                            'category-stats-donut-card',
-                                          ),
-                                          result: res,
-                                          isFlatten: isFlatten,
+                                Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    headerSummaryWidget,
+                                    const SizedBox(height: 16),
+                                    resultAsync.when(
+                                      data: (res) => _CategoryDonutChartCard(
+                                        key: const Key(
+                                          'category-stats-donut-card',
                                         ),
-                                        loading: () => const SizedBox.shrink(),
-                                        error: (_, _) =>
-                                            const SizedBox.shrink(),
+                                        result: res,
+                                        isFlatten: isFlatten,
                                       ),
-                                    ],
-                                  ),
+                                      loading: () => const SizedBox.shrink(),
+                                      error: (_, _) => const SizedBox.shrink(),
+                                    ),
+                                  ],
                                 ),
                                 const SizedBox(height: 16),
-                                // Strictly excluded from PeriodSwipeRegion so
-                                // scrubbing line-chart points never switches periods.
                                 trendChartWidget,
                               ],
                             ),
@@ -258,17 +243,15 @@ class _CategoryStatsPageState extends ConsumerState<CategoryStatsPage> {
                           const VerticalDivider(width: 1),
                           Expanded(
                             flex: 54,
-                            child: wrapSwipe(
-                              ListView(
-                                key: const Key('category-stats-right-pane'),
-                                padding: const EdgeInsets.fromLTRB(
-                                  10,
-                                  14,
-                                  20,
-                                  24,
-                                ),
-                                children: [rankingsWidget],
+                            child: ListView(
+                              key: const Key('category-stats-right-pane'),
+                              padding: const EdgeInsets.fromLTRB(
+                                10,
+                                14,
+                                20,
+                                24,
                               ),
+                              children: [rankingsWidget],
                             ),
                           ),
                         ],
@@ -285,37 +268,32 @@ class _CategoryStatsPageState extends ConsumerState<CategoryStatsPage> {
                   vertical: 8,
                 ),
                 children: [
-                  wrapSwipe(
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        // 1. Dimension Switch: Expense / Income
-                        SizedBox(
-                          width: double.infinity,
-                          child: dimensionSwitch,
-                        ),
-                        const SizedBox(height: 12),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      // 1. Dimension Switch: Expense / Income
+                      SizedBox(width: double.infinity, child: dimensionSwitch),
+                      const SizedBox(height: 12),
 
-                        // 2. Period Navigation Bar
-                        _PeriodNavigationBar(
-                          rangeKind: rangeKind,
-                          periodAsync: periodAsync,
-                        ),
-                        const SizedBox(height: 12),
+                      // 2. Period Navigation Bar
+                      _PeriodNavigationBar(
+                        rangeKind: rangeKind,
+                        periodAsync: periodAsync,
+                      ),
+                      const SizedBox(height: 12),
 
-                        // 3. Header Summary Card
-                        headerSummaryWidget,
-                      ],
-                    ),
+                      // 3. Header Summary Card
+                      headerSummaryWidget,
+                    ],
                   ),
                   const SizedBox(height: 16),
 
-                  // 4. Trend Line Chart (strictly outside PeriodSwipeRegion)
+                  // 4. Trend Line Chart
                   trendChartWidget,
                   const SizedBox(height: 16),
 
                   // 5. Category Rankings Card
-                  wrapSwipe(rankingsWidget),
+                  rankingsWidget,
                   const SizedBox(height: 24),
                 ],
               );
@@ -344,12 +322,76 @@ class _PeriodNavigationBar extends ConsumerWidget {
   });
 
   final StatRangeKind rangeKind;
-  final AsyncValue<dynamic> periodAsync;
+  final AsyncValue<BillingPeriod> periodAsync;
   final bool compactDesktop;
+
+  Future<void> _onTapPeriodLabel(
+    BuildContext context,
+    WidgetRef ref,
+    int startDay,
+  ) async {
+    final now = DateTime.now();
+    if (rangeKind == StatRangeKind.custom) {
+      final current = periodAsync.value;
+      final picked = await showDateRangePicker(
+        context: context,
+        firstDate: DateTime(2000),
+        lastDate: DateTime(2100),
+        initialDateRange: current != null
+            ? DateTimeRange(start: current.start, end: current.end)
+            : DateTimeRange(
+                start: now.subtract(const Duration(days: 30)),
+                end: now,
+              ),
+      );
+      if (picked != null && context.mounted) {
+        ref
+            .read(categoryStatsCustomRangeProvider.notifier)
+            .setRange(picked.start, picked.end);
+      }
+      return;
+    }
+
+    if (rangeKind == StatRangeKind.year) {
+      final activeYearPeriod = BillingPeriod.containingYear(now, startDay);
+      final current = periodAsync.value ?? activeYearPeriod;
+      final pickedYear = await showYearOnlyPickerDialog(
+        context,
+        initialYear: current.year,
+        currentYear: activeYearPeriod.year,
+      );
+      if (pickedYear == null || !context.mounted) return;
+      final curYear = BillingPeriod.containingYear(
+        DateTime.now(),
+        startDay,
+      ).year;
+      ref
+          .read(categoryStatsOffsetProvider.notifier)
+          .setOffset(pickedYear - curYear);
+      return;
+    }
+
+    final activeMonthPeriod = BillingPeriod.containing(now, startDay);
+    final current = periodAsync.value ?? activeMonthPeriod;
+    final picked = await showYearMonthPickerDialog(
+      context,
+      initialYear: current.year,
+      initialMonth: current.month,
+      currentYear: activeMonthPeriod.year,
+      currentMonth: activeMonthPeriod.month,
+    );
+    if (picked == null || !context.mounted) return;
+    final nowPeriod = BillingPeriod.containing(DateTime.now(), startDay);
+    final newOffset =
+        (picked.year - nowPeriod.year) * 12 + (picked.month - nowPeriod.month);
+    ref.read(categoryStatsOffsetProvider.notifier).setOffset(newOffset);
+  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
+    final offset = ref.watch(categoryStatsOffsetProvider);
+    final startDay = ref.watch(currentBookProvider).value?.startDay ?? 1;
 
     String label = '加载中…';
     periodAsync.whenData((p) {
@@ -410,7 +452,7 @@ class _PeriodNavigationBar extends ConsumerWidget {
                   end: now,
                 ),
               );
-              if (picked != null) {
+              if (picked != null && context.mounted) {
                 ref
                     .read(categoryStatsRangeKindProvider.notifier)
                     .setRangeKind(StatRangeKind.custom);
@@ -423,6 +465,8 @@ class _PeriodNavigationBar extends ConsumerWidget {
         ),
       ],
     );
+
+    final showResetPill = rangeKind != StatRangeKind.custom && offset != 0;
 
     final periodSwitcherRow = Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -439,42 +483,55 @@ class _PeriodNavigationBar extends ConsumerWidget {
         ),
         Expanded(
           child: Center(
-            child: InkWell(
-              borderRadius: BorderRadius.circular(6),
-              onTap: rangeKind == StatRangeKind.custom
-                  ? () async {
-                      final now = DateTime.now();
-                      final picked = await showDateRangePicker(
-                        context: context,
-                        firstDate: DateTime(2000),
-                        lastDate: DateTime(2100),
-                        initialDateRange: DateTimeRange(
-                          start: now.subtract(const Duration(days: 30)),
-                          end: now,
-                        ),
-                      );
-                      if (picked != null) {
-                        ref
-                            .read(categoryStatsCustomRangeProvider.notifier)
-                            .setRange(picked.start, picked.end);
-                      }
-                    }
-                  : () {
-                      ref.read(categoryStatsOffsetProvider.notifier).reset();
-                    },
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-                child: FittedBox(
-                  fit: BoxFit.scaleDown,
-                  child: Text(
-                    label,
-                    maxLines: 1,
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Flexible(
+                  child: InkWell(
+                    key: const Key('category-stats-period-picker-trigger'),
+                    borderRadius: BorderRadius.circular(8),
+                    onTap: () => _onTapPeriodLabel(context, ref, startDay),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 4,
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Flexible(
+                            child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Text(
+                                label,
+                                maxLines: 1,
+                                style: theme.textTheme.titleMedium?.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 2),
+                          Icon(
+                            Icons.arrow_drop_down,
+                            size: 18,
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
-              ),
+                if (showResetPill) ...[
+                  const SizedBox(width: 6),
+                  PeriodResetPill(
+                    key: const Key('category-stats-period-reset'),
+                    label: rangeKind == StatRangeKind.year ? '回本年' : '回本月',
+                    onTap: () =>
+                        ref.read(categoryStatsOffsetProvider.notifier).reset(),
+                  ),
+                ],
+              ],
             ),
           ),
         ),

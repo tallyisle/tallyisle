@@ -56,8 +56,20 @@ final class LocalDirectoryBackupTarget implements BackupTarget {
     return trimmed;
   }
 
+  static Future<T> _runRootIo<T>(Future<T> Function() action) {
+    final completer = Completer<T>();
+    Zone.root.run(() async {
+      try {
+        completer.complete(await action());
+      } catch (e, st) {
+        completer.completeError(e, st);
+      }
+    });
+    return completer.future;
+  }
+
   @override
-  Future<List<BackupFileMetadata>> listBackups() async {
+  Future<List<BackupFileMetadata>> listBackups() => _runRootIo(() async {
     final dir = await directoryProvider();
     if (!await dir.exists()) return const <BackupFileMetadata>[];
 
@@ -72,9 +84,10 @@ final class LocalDirectoryBackupTarget implements BackupTarget {
       final stat = await entity.stat();
       TallyManifest? manifest;
       try {
-        final bytes = await entity.readAsBytes();
-        final zip = ZipArchive.decode(bytes);
-        final manifestEntry = zip[tallyManifestFileName];
+        final manifestEntry = await ZipArchive.readSingleEntryFromFile(
+          entity,
+          tallyManifestFileName,
+        );
         if (manifestEntry != null) {
           final decoded = jsonDecode(utf8.decode(manifestEntry.bytes));
           if (decoded is Map<String, Object?>) {
@@ -101,14 +114,14 @@ final class LocalDirectoryBackupTarget implements BackupTarget {
       return b.fileName.compareTo(a.fileName);
     });
     return items;
-  }
+  });
 
   @override
   Future<BackupFileMetadata> writeBackup(
     String fileName,
     Uint8List bytes, {
     BackupProgressCallback? onProgress,
-  }) async {
+  }) => _runRootIo(() async {
     final cleanName = _validateFileName(fileName);
     final dir = await directoryProvider();
     await dir.create(recursive: true);
@@ -142,13 +155,13 @@ final class LocalDirectoryBackupTarget implements BackupTarget {
           manifest?.createdAtMs ?? stat.modified.millisecondsSinceEpoch,
       manifest: manifest,
     );
-  }
+  });
 
   @override
   Future<Uint8List> readBackup(
     String fileName, {
     BackupProgressCallback? onProgress,
-  }) async {
+  }) => _runRootIo(() async {
     final cleanName = _validateFileName(fileName);
     final dir = await directoryProvider();
     final file = File(p.join(dir.path, cleanName));
@@ -158,17 +171,17 @@ final class LocalDirectoryBackupTarget implements BackupTarget {
     final bytes = await file.readAsBytes();
     onProgress?.call(bytes.length, bytes.length);
     return bytes;
-  }
+  });
 
   @override
-  Future<void> deleteBackup(String fileName) async {
+  Future<void> deleteBackup(String fileName) => _runRootIo(() async {
     final cleanName = _validateFileName(fileName);
     final dir = await directoryProvider();
     final file = File(p.join(dir.path, cleanName));
     if (await file.exists()) {
       await file.delete();
     }
-  }
+  });
 }
 
 /// Core backup, 3-stage atomic restore, and WebDAV orchestration service
@@ -181,6 +194,7 @@ final class TallyBackupService {
     Future<Directory> Function()? attachmentsDirectoryProvider,
     this.httpClientFactory,
     this.appVersion = appVersionName,
+    this.beforeAttachmentSwapFinalizeForTest,
   }) : _localBackupsDirProvider =
            localBackupsDirectoryProvider ?? _defaultBackupsDirectory,
        _attachmentsDirProvider =
@@ -192,18 +206,41 @@ final class TallyBackupService {
   final Future<Directory> Function() _attachmentsDirProvider;
   final HttpClient Function()? httpClientFactory;
   final String appVersion;
+  FutureOr<void> Function()? beforeAttachmentSwapFinalizeForTest;
 
   late final LocalDirectoryBackupTarget localTarget =
       LocalDirectoryBackupTarget(_localBackupsDirProvider);
 
   String? _cachedFallbackDeviceId;
-  Future<void>? _syncSerialChain;
-  Future<void>? _localAutoBackupSerialChain;
+  Future<void> _exclusiveChain = Future<void>.value();
+  int _attachmentSwapSeq = 0;
   int _internalRestoreDepth = 0;
   int _attachedSchedulerCount = 0;
   int _activeSyncCount = 0;
   final StreamController<bool> _syncInProgressController =
       StreamController<bool>.broadcast();
+
+  /// Single FIFO async mutex serializing [syncNow], manual/auto local backup,
+  /// cloud backup upload, [runSilentAutoBackupIfNeeded], and [restoreFromBytes] (`S-07`).
+  Future<T> _runExclusive<T>(Future<T> Function() action) {
+    final prev = _exclusiveChain;
+    final completer = Completer<T>();
+    final gate = Completer<void>();
+    _exclusiveChain = gate.future;
+    unawaited(
+      prev.then((_) async {
+        try {
+          final result = await action();
+          completer.complete(result);
+        } catch (e, st) {
+          completer.completeError(e, st);
+        } finally {
+          gate.complete();
+        }
+      }),
+    );
+    return completer.future;
+  }
 
   /// `true` whenever a foreground or background [syncNow] task is queued or active.
   bool get isSyncInProgress => _activeSyncCount > 0;
@@ -797,7 +834,8 @@ final class TallyBackupService {
     );
   }
 
-  /// Updates the full vs lightweight no-attachment export toggle (§6.3).
+  /// Updates the full vs lightweight no-attachment export toggle across BOTH
+  /// WebDAV and S3 stored configurations regardless of `isConfigured` (`S-09`).
   Future<void> setIncludeAttachments(bool includeAttachments) async {
     final currentDav = await getWebDavConfig();
     final currentS3 = await getS3Config();
@@ -815,20 +853,18 @@ final class TallyBackupService {
                 ),
               ),
             );
-        if (currentS3.isConfigured) {
-          await db
-              .into(db.preferences)
-              .insertOnConflictUpdate(
-                PreferencesCompanion.insert(
-                  key: prefKeyS3Config,
-                  value: jsonEncode(
-                    currentS3
-                        .copyWith(includeAttachments: includeAttachments)
-                        .toJson(),
-                  ),
+        await db
+            .into(db.preferences)
+            .insertOnConflictUpdate(
+              PreferencesCompanion.insert(
+                key: prefKeyS3Config,
+                value: jsonEncode(
+                  currentS3
+                      .copyWith(includeAttachments: includeAttachments)
+                      .toJson(),
                 ),
-              );
-        }
+              ),
+            );
       }),
     );
   }
@@ -941,8 +977,17 @@ final class TallyBackupService {
   Future<PackedTallyBackup> createBackupBytes({
     bool? includeAttachments,
   }) async {
-    final config = await getWebDavConfig();
-    final withAttachments = includeAttachments ?? config.includeAttachments;
+    final bool withAttachments;
+    if (includeAttachments != null) {
+      withAttachments = includeAttachments;
+    } else {
+      final settings = await getCloudSyncSettings();
+      if (settings.backend == CloudBackendType.s3) {
+        withAttachments = (await getS3Config()).includeAttachments;
+      } else {
+        withAttachments = (await getWebDavConfig()).includeAttachments;
+      }
+    }
     final tables = await guardDatabase(
       () => db.transaction(_exportAll22Tables),
     );
@@ -963,6 +1008,18 @@ final class TallyBackupService {
   /// records the independent local backup digest & timestamp, and prunes older
   /// routine backups exceeding `policy.keepCount` while preserving `conflict_*`.
   Future<BackupFileMetadata> createLocalBackup({
+    bool? includeAttachments,
+    String? customFileName,
+    BackupProgressCallback? onProgress,
+  }) => _runExclusive(
+    () => _createLocalBackupUnlocked(
+      includeAttachments: includeAttachments,
+      customFileName: customFileName,
+      onProgress: onProgress,
+    ),
+  );
+
+  Future<BackupFileMetadata> _createLocalBackupUnlocked({
     bool? includeAttachments,
     String? customFileName,
     BackupProgressCallback? onProgress,
@@ -1112,6 +1169,18 @@ final class TallyBackupService {
     bool? includeAttachments,
     String? customFileName,
     BackupProgressCallback? onProgress,
+  }) => _runExclusive(
+    () => _uploadBackupToWebDavUnlocked(
+      includeAttachments: includeAttachments,
+      customFileName: customFileName,
+      onProgress: onProgress,
+    ),
+  );
+
+  Future<BackupFileMetadata> _uploadBackupToWebDavUnlocked({
+    bool? includeAttachments,
+    String? customFileName,
+    BackupProgressCallback? onProgress,
   }) async {
     final config = await getWebDavConfig();
     if (!config.isConfigured) {
@@ -1120,16 +1189,24 @@ final class TallyBackupService {
     final packed = await createBackupBytes(
       includeAttachments: includeAttachments ?? config.includeAttachments,
     );
-    final fileName =
-        customFileName ??
-        formatTallyBackupFileName(
-          DateTime.fromMillisecondsSinceEpoch(packed.manifest.createdAtMs),
-        );
     final target = WebDavBackupTarget(
       config,
       httpClientFactory: httpClientFactory,
       nowMs: _nowMs,
     );
+    final String fileName;
+    if (customFileName != null) {
+      fileName = customFileName;
+    } else {
+      final existing = await target.listBackups().then(
+        (items) => items.map((e) => e.fileName),
+        onError: (_) => const <String>[],
+      );
+      fileName = formatTallyBackupFileName(
+        DateTime.fromMillisecondsSinceEpoch(packed.manifest.createdAtMs),
+        existingFileNames: existing,
+      );
+    }
     final uploaded = await target.writeBackup(
       fileName,
       packed.bytes,
@@ -1150,6 +1227,18 @@ final class TallyBackupService {
     bool? includeAttachments,
     String? customFileName,
     BackupProgressCallback? onProgress,
+  }) => _runExclusive(
+    () => _uploadBackupToS3Unlocked(
+      includeAttachments: includeAttachments,
+      customFileName: customFileName,
+      onProgress: onProgress,
+    ),
+  );
+
+  Future<BackupFileMetadata> _uploadBackupToS3Unlocked({
+    bool? includeAttachments,
+    String? customFileName,
+    BackupProgressCallback? onProgress,
   }) async {
     final config = await getS3Config();
     if (!config.isConfigured) {
@@ -1158,16 +1247,24 @@ final class TallyBackupService {
     final packed = await createBackupBytes(
       includeAttachments: includeAttachments ?? config.includeAttachments,
     );
-    final fileName =
-        customFileName ??
-        formatTallyBackupFileName(
-          DateTime.fromMillisecondsSinceEpoch(packed.manifest.createdAtMs),
-        );
     final target = S3BackupTarget(
       config,
       httpClientFactory: httpClientFactory,
       nowMs: _nowMs,
     );
+    final String fileName;
+    if (customFileName != null) {
+      fileName = customFileName;
+    } else {
+      final existing = await target.listBackups().then(
+        (items) => items.map((e) => e.fileName),
+        onError: (_) => const <String>[],
+      );
+      fileName = formatTallyBackupFileName(
+        DateTime.fromMillisecondsSinceEpoch(packed.manifest.createdAtMs),
+        existingFileNames: existing,
+      );
+    }
     final uploaded = await target.writeBackup(
       fileName,
       packed.bytes,
@@ -1187,15 +1284,15 @@ final class TallyBackupService {
     bool? includeAttachments,
     String? customFileName,
     BackupProgressCallback? onProgress,
-  }) async {
+  }) => _runExclusive(() async {
     final settings = await getCloudSyncSettings();
     return switch (settings.backend) {
-      CloudBackendType.s3 => uploadBackupToS3(
+      CloudBackendType.s3 => _uploadBackupToS3Unlocked(
         includeAttachments: includeAttachments,
         customFileName: customFileName,
         onProgress: onProgress,
       ),
-      CloudBackendType.webdav => uploadBackupToWebDav(
+      CloudBackendType.webdav => _uploadBackupToWebDavUnlocked(
         includeAttachments: includeAttachments,
         customFileName: customFileName,
         onProgress: onProgress,
@@ -1205,7 +1302,7 @@ final class TallyBackupService {
         '请先选择并配置云存储通道（WebDAV 或 S3）',
       ),
     };
-  }
+  });
 
   /// Downloads a remote `.tally` backup from WebDAV and executes the 3-stage
   /// atomic restore (R5).
@@ -1302,11 +1399,26 @@ final class TallyBackupService {
   /// Checks R7 silent auto-backup eligibility (`enabled && configured &&
   /// elapsed >= cooldown && localDataChanged`) and, if eligible, packs and
   /// uploads a backup to the configured cloud target. Returns `null` when
-  /// throttled, disabled, or unchanged.
+  /// backend is `none`, throttled, disabled, or unchanged (`S-06`, `S-07`).
   Future<BackupFileMetadata?> runSilentAutoBackupIfNeeded({
     BackupProgressCallback? onProgress,
   }) async {
     final settings = await getCloudSyncSettings();
+    if (settings.backend == CloudBackendType.none) {
+      return null;
+    }
+    return _runExclusive(
+      () => _runSilentAutoBackupIfNeededUnlocked(onProgress: onProgress),
+    );
+  }
+
+  Future<BackupFileMetadata?> _runSilentAutoBackupIfNeededUnlocked({
+    BackupProgressCallback? onProgress,
+  }) async {
+    final settings = await getCloudSyncSettings();
+    if (settings.backend == CloudBackendType.none) {
+      return null;
+    }
     if (settings.backend == CloudBackendType.s3) {
       final s3Config = await getS3Config();
       if (!s3Config.autoBackupEnabled || !s3Config.isConfigured) {
@@ -1329,7 +1441,7 @@ final class TallyBackupService {
       )) {
         return null;
       }
-      return uploadBackupToS3(onProgress: onProgress);
+      return _uploadBackupToS3Unlocked(onProgress: onProgress);
     }
 
     final config = await getWebDavConfig();
@@ -1353,7 +1465,7 @@ final class TallyBackupService {
     )) {
       return null;
     }
-    return uploadBackupToWebDav(onProgress: onProgress);
+    return _uploadBackupToWebDavUnlocked(onProgress: onProgress);
   }
 
   /// Returns epoch milliseconds of the last successful local `.tally` backup, if any.
@@ -1407,26 +1519,13 @@ final class TallyBackupService {
   );
 
   /// Evaluates [LocalAutoBackupPolicy] for [source] and generates a pruned
-  /// local `.tally` backup when eligible and local data changed.
+  /// local `.tally` backup when eligible and local data changed (`S-07`).
   Future<BackupFileMetadata?> runLocalAutoBackupForTrigger(
     AutoTriggerSource source, {
     BackupProgressCallback? onProgress,
-  }) {
-    final prev = _localAutoBackupSerialChain ?? Future<void>.value();
-    final completer = Completer<BackupFileMetadata?>();
-    _localAutoBackupSerialChain = prev.catchError((_) {}).then((_) async {
-      try {
-        final saved = await _runLocalAutoBackupForTriggerUnlocked(
-          source,
-          onProgress: onProgress,
-        );
-        completer.complete(saved);
-      } catch (e, st) {
-        completer.completeError(e, st);
-      }
-    });
-    return completer.future;
-  }
+  }) => _runExclusive(
+    () => _runLocalAutoBackupForTriggerUnlocked(source, onProgress: onProgress),
+  );
 
   Future<BackupFileMetadata?> _runLocalAutoBackupForTriggerUnlocked(
     AutoTriggerSource source, {
@@ -1454,7 +1553,7 @@ final class TallyBackupService {
     )) {
       return null;
     }
-    return createLocalBackup(onProgress: onProgress);
+    return _createLocalBackupUnlocked(onProgress: onProgress);
   }
 
   /// Evaluates [CloudSyncSettings] for [source] and executes silent multi-device
@@ -1524,10 +1623,11 @@ final class TallyBackupService {
     return syncNow(onProgress: onProgress);
   }
 
-  /// Executes multi-device snapshot synchronization (`sync/head.json` +
-  /// `sync/latest_db.tally` + deduplicated `sync/attachments/*`) with atomic
-  /// pull replacement, race-guarded push commits, and zero-data-loss conflict
-  /// backup preservation (`R4`, `R5`, `R6`).
+  /// Executes multi-device snapshot synchronization (`sync/head.json` `format: 2` +
+  /// immutable `sync/revisions/db_r<rev>_<sha16>.tally` + deduplicated
+  /// `sync/attachments/*`) with same-filesystem atomic pull replacement,
+  /// race-guarded push commits, and zero-data-loss conflict preservation
+  /// (`R4`, `R5`, `R6`, `S-01`, `S-02`, `S-07`).
   Future<CloudSyncOutcome> syncNow({
     SyncConflictResolution? resolution,
     BackupProgressCallback? onProgress,
@@ -1537,18 +1637,13 @@ final class TallyBackupService {
     if (_activeSyncCount == 1 && !_syncInProgressController.isClosed) {
       _syncInProgressController.add(true);
     }
-    final prev = _syncSerialChain ?? Future<void>.value();
-    final completer = Completer<CloudSyncOutcome>();
-    _syncSerialChain = prev.catchError((_) {}).then((_) async {
+    return _runExclusive(() async {
       try {
-        final outcome = await _syncNowUnlocked(
+        return await _syncNowUnlocked(
           resolution: resolution,
           onProgress: onProgress,
           beforePushCommitForTest: beforePushCommitForTest,
         );
-        completer.complete(outcome);
-      } catch (e, st) {
-        completer.completeError(e, st);
       } finally {
         if (_activeSyncCount > 0) {
           _activeSyncCount--;
@@ -1558,7 +1653,6 @@ final class TallyBackupService {
         }
       }
     });
-    return completer.future;
   }
 
   Future<CloudSyncOutcome> _syncNowUnlocked({
@@ -1627,23 +1721,35 @@ final class TallyBackupService {
 
     final rawCursor = await getSyncCursor();
     final cursor = rawCursor.scopedToTarget(store.targetFingerprint);
-    final remoteHead = await _readRemoteHeadOrNull(store);
-    final orphanRemoteLatestDbBytes = remoteHead == null
-        ? await store.getObjectOrNull(cloudSyncLatestDbPath)
-        : null;
-    final hasRemoteOrphanLatestDb = orphanRemoteLatestDbBytes != null;
+    final remoteState = await _inspectRemoteSyncState(store);
+    final remoteHead = remoteState.head;
+    final orphanRemoteDbBytes = remoteState.orphanOrLegacyDbBytes;
+    final hasRemoteOrphanSnapshot = orphanRemoteDbBytes != null;
 
     final decision = decideSyncAction(
       cursor: cursor,
       localDataSha256: localDataSha256,
       isLocalFreshEmpty: isLocalFreshEmpty,
       remoteHead: remoteHead,
-      hasRemoteOrphanLatestDb: hasRemoteOrphanLatestDb,
+      hasRemoteOrphanLatestDb: hasRemoteOrphanSnapshot,
+      hasLegacyIncompatibleRemoteHead: remoteState.isLegacyFormat,
+      legacyRemoteRevision:
+          remoteState.legacyRevision ?? remoteState.orphanRevisionHint,
       resolution: resolution,
     );
 
     switch (decision.action) {
       case SyncActionType.noOp:
+        if (cursor.lastConflictFileName != null ||
+            cursor.lastConflictSha256 != null) {
+          await _saveSyncCursor(
+            cursor.copyWith(
+              targetFingerprint: store.targetFingerprint,
+              clearConflictRecord: true,
+            ),
+            ensureSettings: settings,
+          );
+        }
         return CloudSyncOutcome(
           status: CloudSyncStatus.alreadyUpToDate,
           revision: remoteHead!.revision,
@@ -1669,10 +1775,26 @@ final class TallyBackupService {
 
       case SyncActionType.pullRemote:
         if (remoteHead == null) {
+          if (orphanRemoteDbBytes == null) {
+            throw const Failure(
+              FailureCode.storageUnavailable,
+              '云端旧版同步快照缺失，请使用本机覆盖推送或从历史备份恢复',
+            );
+          }
+          if (remoteState.isLegacyFormat) {
+            await _archiveOrphanRemoteSnapshotIfNeeded(
+              orphanBytes: orphanRemoteDbBytes,
+              cloudBackupTarget: cloudBackupTarget,
+            );
+          }
           return _executeOrphanRemotePull(
             settings: settings,
             store: store,
-            orphanLatestDbBytes: orphanRemoteLatestDbBytes!,
+            orphanDbBytes: orphanRemoteDbBytes,
+            healedRevision:
+                (remoteState.legacyRevision ??
+                    remoteState.orphanRevisionHint) ??
+                1,
             localAttachments: localAttachments,
             localAttChecksums: localAttChecksums,
           );
@@ -1687,9 +1809,9 @@ final class TallyBackupService {
         );
 
       case SyncActionType.pushLocal:
-        if (orphanRemoteLatestDbBytes != null) {
-          await _archiveOrphanRemoteLatestDbIfNeeded(
-            orphanBytes: orphanRemoteLatestDbBytes,
+        if (orphanRemoteDbBytes != null) {
+          await _archiveOrphanRemoteSnapshotIfNeeded(
+            orphanBytes: orphanRemoteDbBytes,
             cloudBackupTarget: cloudBackupTarget,
           );
         }
@@ -1699,6 +1821,8 @@ final class TallyBackupService {
           cloudBackupTarget: cloudBackupTarget,
           cursor: cursor,
           initialRemoteHead: remoteHead,
+          legacyRemoteRevision:
+              remoteState.legacyRevision ?? remoteState.orphanRevisionHint,
           localTables: localTables,
           localAttachments: localAttachments,
           localAttChecksums: localAttChecksums,
@@ -1717,7 +1841,9 @@ final class TallyBackupService {
           cloudBackupTarget: cloudBackupTarget,
           cursor: cursor,
           remoteHead: remoteHead,
-          orphanRemoteLatestDbBytes: orphanRemoteLatestDbBytes,
+          fallbackRemoteRevision:
+              remoteState.legacyRevision ?? remoteState.orphanRevisionHint,
+          orphanRemoteLatestDbBytes: orphanRemoteDbBytes,
           isLocalFreshEmpty: isLocalFreshEmpty,
           localTables: localTables,
           localAttachments: localAttachments,
@@ -1726,22 +1852,185 @@ final class TallyBackupService {
     }
   }
 
-  Future<CloudSyncHead?> _readRemoteHeadOrNull(
+  Future<_RemoteSyncState> _inspectRemoteSyncState(
     CloudSyncObjectStore store,
   ) async {
     final bytes = await store.getObjectOrNull(cloudSyncHeadPath);
-    if (bytes == null) return null;
-    final Object? decoded;
-    try {
-      decoded = jsonDecode(utf8.decode(bytes));
-    } catch (_) {
-      throw const Failure(FailureCode.corruptData, '远端 sync/head.json 解析失败');
+    if (bytes != null) {
+      final Object? decoded;
+      try {
+        decoded = jsonDecode(utf8.decode(bytes));
+      } catch (_) {
+        throw const Failure(FailureCode.corruptData, '远端 sync/head.json 解析失败');
+      }
+      if (decoded is! Map<String, Object?>) {
+        throw const Failure(FailureCode.corruptData, '远端 sync/head.json 格式损坏');
+      }
+      if (isLegacyCloudSyncHeadJson(decoded)) {
+        final rawRev = decoded['revision'];
+        final legacyRev = (rawRev is int && rawRev > 0) ? rawRev : null;
+        final legacyOrOrphan = await _findOrphanOrLegacyRemoteDb(store);
+        return _RemoteSyncState(
+          head: null,
+          isLegacyFormat: true,
+          legacyRevision: legacyRev,
+          orphanOrLegacyDbBytes: legacyOrOrphan.bytes,
+          orphanRevisionHint: legacyRev ?? legacyOrOrphan.revision,
+        );
+      }
+      return _RemoteSyncState(head: CloudSyncHead.fromJson(decoded));
     }
-    if (decoded is! Map<String, Object?>) {
-      throw const Failure(FailureCode.corruptData, '远端 sync/head.json 格式损坏');
-    }
-    return CloudSyncHead.fromJson(decoded);
+
+    final orphan = await _findOrphanOrLegacyRemoteDb(store);
+    return _RemoteSyncState(
+      head: null,
+      orphanOrLegacyDbBytes: orphan.bytes,
+      orphanRevisionHint: orphan.revision,
+    );
   }
+
+  Future<({Uint8List? bytes, int? revision})> _findOrphanOrLegacyRemoteDb(
+    CloudSyncObjectStore store,
+  ) async {
+    final revFiles = await store.listRelativeFileNames(cloudSyncRevisionsDir);
+    if (revFiles.isNotEmpty) {
+      final candidates = <({int revision, String name})>[];
+      for (final name in revFiles) {
+        final parsed = parseSyncRevisionFileName(name);
+        if (parsed != null) {
+          candidates.add((revision: parsed.revision, name: name));
+        }
+      }
+      if (candidates.isNotEmpty) {
+        candidates.sort((a, b) {
+          final byRev = b.revision.compareTo(a.revision);
+          return byRev != 0 ? byRev : b.name.compareTo(a.name);
+        });
+        final newest = candidates.first;
+        final revBytes = await store.getObjectOrNull(
+          '$cloudSyncRevisionsDir/${newest.name}',
+        );
+        if (revBytes != null) {
+          return (bytes: revBytes, revision: newest.revision);
+        }
+      }
+    }
+
+    // Also archive/recover legacy `sync/latest_db.tally` if left behind on remote
+    // so zero user data is ever lost during format-1 -> format-2 transition.
+    final legacyBytes = await store.getObjectOrNull(
+      legacyCloudSyncLatestDbPath,
+    );
+    return (bytes: legacyBytes, revision: null);
+  }
+
+  Future<({Directory targetDir, Directory stagingDir, Directory backupDir})>
+  _prepareSiblingAttachmentStagingDir() =>
+      LocalDirectoryBackupTarget._runRootIo(() async {
+        final rawTarget = await _attachmentsDirProvider();
+        final targetDir = Directory(p.normalize(rawTarget.path));
+        await targetDir.parent.create(recursive: true);
+        final opId = '${_nowMs()}_${++_attachmentSwapSeq}';
+        final stagingDir = Directory('${targetDir.path}.staging_$opId');
+        final backupDir = Directory('${targetDir.path}.bak_$opId');
+        if (await stagingDir.exists()) {
+          await stagingDir.delete(recursive: true);
+        }
+        await stagingDir.create(recursive: true);
+        return (
+          targetDir: targetDir,
+          stagingDir: stagingDir,
+          backupDir: backupDir,
+        );
+      });
+
+  Future<void> _stageAndVerifyAttachmentsOnSameFs({
+    required Directory stagingDir,
+    required Map<String, Uint8List> attachments,
+    required Map<String, String> expectedChecksums,
+  }) => LocalDirectoryBackupTarget._runRootIo(() async {
+    final canonicalStagingRoot = await stagingDir.resolveSymbolicLinks();
+    for (final entry in attachments.entries) {
+      final cleanArchivePath = normalizeAttachmentArchivePath(entry.key);
+      final relUnderAtt = cleanArchivePath.substring(
+        tallyAttachmentsPrefix.length,
+      );
+      final outPath = p.normalize(
+        p.joinAll(<String>[canonicalStagingRoot, ...relUnderAtt.split('/')]),
+      );
+      if (!p.isWithin(canonicalStagingRoot, outPath)) {
+        throw Failure(FailureCode.corruptData, '拒绝越界的附件暂存路径：$cleanArchivePath');
+      }
+      final stagedFile = File(outPath);
+      await stagedFile.parent.create(recursive: true);
+      await stagedFile.writeAsBytes(entry.value, flush: true);
+    }
+
+    for (final expected in expectedChecksums.entries) {
+      final cleanArchivePath = normalizeAttachmentArchivePath(expected.key);
+      final relUnderAtt = cleanArchivePath.substring(
+        tallyAttachmentsPrefix.length,
+      );
+      final stagedPath = p.normalize(
+        p.joinAll(<String>[canonicalStagingRoot, ...relUnderAtt.split('/')]),
+      );
+      final stagedFile = File(stagedPath);
+      if (!await stagedFile.exists()) {
+        throw Failure(FailureCode.corruptData, '暂存附件文件缺失：$cleanArchivePath');
+      }
+      final diskBytes = await stagedFile.readAsBytes();
+      if (sha256Hex(diskBytes) != expected.value.toLowerCase()) {
+        throw Failure(FailureCode.corruptData, '暂存附件哈希校验失败：$cleanArchivePath');
+      }
+    }
+  });
+
+  Future<void> _swapStagedAttachmentsAtomically({
+    required Directory targetDir,
+    required Directory stagingDir,
+    required Directory backupDir,
+  }) => LocalDirectoryBackupTarget._runRootIo(() async {
+    var movedTargetToBak = false;
+    try {
+      if (await backupDir.exists()) {
+        await backupDir.delete(recursive: true);
+      }
+      if (await targetDir.exists()) {
+        await targetDir.rename(backupDir.path);
+        movedTargetToBak = true;
+      }
+      if (beforeAttachmentSwapFinalizeForTest != null) {
+        await beforeAttachmentSwapFinalizeForTest!();
+      }
+      await stagingDir.rename(targetDir.path);
+    } catch (e) {
+      if (movedTargetToBak) {
+        try {
+          if (await targetDir.exists()) {
+            await targetDir.delete(recursive: true);
+          }
+          if (await backupDir.exists()) {
+            await backupDir.rename(targetDir.path);
+          }
+        } catch (_) {}
+      }
+      if (e is Failure && e.code == FailureCode.storageUnavailable) {
+        rethrow;
+      }
+      throw const Failure(
+        FailureCode.storageUnavailable,
+        '切换本地附件目录失败，已自动回滚原附件数据',
+      );
+    }
+
+    if (movedTargetToBak) {
+      try {
+        if (await backupDir.exists()) {
+          await backupDir.delete(recursive: true);
+        }
+      } catch (_) {}
+    }
+  });
 
   Future<CloudSyncOutcome> _executeSyncPull({
     required CloudSyncSettings settings,
@@ -1751,14 +2040,14 @@ final class TallyBackupService {
     required Map<String, String> localAttChecksums,
     BackupProgressCallback? onProgress,
   }) async {
-    final latestDbBytes = await store.getObject(
-      cloudSyncLatestDbPath,
+    final snapshotDbBytes = await store.getObject(
+      remoteHead.databasePath,
       onProgress: onProgress,
     );
-    final verifiedDb = unpackAndVerifyTallyArchive(latestDbBytes);
+    final verifiedDb = unpackAndVerifyTallyArchive(snapshotDbBytes);
     final Object? rawDbJson;
     try {
-      final zip = ZipArchive.decode(latestDbBytes);
+      final zip = ZipArchive.decode(snapshotDbBytes);
       rawDbJson = jsonDecode(
         utf8.decode(zip[verifiedDb.manifest.databaseFile]!.bytes),
       );
@@ -1818,19 +2107,13 @@ final class TallyBackupService {
       );
     }
 
-    final stagingDir = await Directory.systemTemp.createTemp(
-      'tally_sync_pull_',
-    );
+    final dirs = await _prepareSiblingAttachmentStagingDir();
     try {
-      final stagedAttRoot = Directory(p.join(stagingDir.path, 'attachments'));
-      for (final entry in verifiedPulledAttachments.entries) {
-        final relUnderAtt = entry.key.substring(tallyAttachmentsPrefix.length);
-        final stagedFile = File(
-          p.joinAll(<String>[stagedAttRoot.path, ...relUnderAtt.split('/')]),
-        );
-        await stagedFile.parent.create(recursive: true);
-        await stagedFile.writeAsBytes(entry.value, flush: true);
-      }
+      await _stageAndVerifyAttachmentsOnSameFs(
+        stagingDir: dirs.stagingDir,
+        attachments: verifiedPulledAttachments,
+        expectedChecksums: pulledAttChecksums,
+      );
 
       final now = _nowMs();
       final newCursor = LocalSyncCursor(
@@ -1860,52 +2143,17 @@ final class TallyBackupService {
                     value: '$activeBookId',
                   ),
                 );
-            await db
-                .into(db.preferences)
-                .insertOnConflictUpdate(
-                  PreferencesCompanion.insert(
-                    key: prefKeyCloudSyncCursor,
-                    value: jsonEncode(newCursor.toJson()),
-                  ),
-                );
-            await db
-                .into(db.preferences)
-                .insert(
-                  PreferencesCompanion.insert(
-                    key: prefKeyCloudSyncSettings,
-                    value: jsonEncode(settings.toJson()),
-                  ),
-                  mode: InsertMode.insertOrIgnore,
-                );
           }),
         );
 
-        final targetAttDir = await _attachmentsDirProvider();
-        if (await targetAttDir.exists()) {
-          await for (final child in targetAttDir.list(followLinks: false)) {
-            await child.delete(recursive: true);
-          }
-        }
-        if (verifiedPulledAttachments.isNotEmpty) {
-          await targetAttDir.create(recursive: true);
-          for (final archivePath in verifiedPulledAttachments.keys) {
-            final relUnderAtt = archivePath.substring(
-              tallyAttachmentsPrefix.length,
-            );
-            final srcFile = File(
-              p.joinAll(<String>[
-                stagedAttRoot.path,
-                ...relUnderAtt.split('/'),
-              ]),
-            );
-            final dstFile = File(
-              p.joinAll(<String>[targetAttDir.path, ...relUnderAtt.split('/')]),
-            );
-            await dstFile.parent.create(recursive: true);
-            await srcFile.copy(dstFile.path);
-          }
-        }
+        await _swapStagedAttachmentsAtomically(
+          targetDir: dirs.targetDir,
+          stagingDir: dirs.stagingDir,
+          backupDir: dirs.backupDir,
+        );
 
+        // Persist sync cursor ONLY AFTER same-FS attachment swap succeeds (`S-02`).
+        await _saveSyncCursor(newCursor, ensureSettings: settings);
         await reminderService.resyncAll();
       } finally {
         await Future<void>.microtask(() {});
@@ -1922,8 +2170,8 @@ final class TallyBackupService {
       );
     } finally {
       try {
-        if (await stagingDir.exists()) {
-          await stagingDir.delete(recursive: true);
+        if (await dirs.stagingDir.exists()) {
+          await dirs.stagingDir.delete(recursive: true);
         }
       } catch (_) {}
     }
@@ -1935,6 +2183,7 @@ final class TallyBackupService {
     required BackupTarget cloudBackupTarget,
     required LocalSyncCursor cursor,
     required CloudSyncHead? initialRemoteHead,
+    int? legacyRemoteRevision,
     required Map<String, List<Map<String, Object?>>> localTables,
     required Map<String, Uint8List> localAttachments,
     required Map<String, String> localAttChecksums,
@@ -1973,8 +2222,7 @@ final class TallyBackupService {
     }
 
     // 2. Always re-read `sync/head.json` from remote right before committing
-    // `sync/latest_db.tally` and `sync/head.json` to catch concurrent pushes
-    // even when `uploadedCount == 0`!
+    // to catch concurrent pushes even when `uploadedCount == 0`.
     final now = _nowMs();
     final lightweightDb = packTallyArchive(
       tables: localTables,
@@ -1986,10 +2234,14 @@ final class TallyBackupService {
     if (beforePushCommitForTest != null) {
       await beforePushCommitForTest();
     }
-    final freshHead = await _readRemoteHeadOrNull(store);
+    final freshState = await _inspectRemoteSyncState(store);
+    final freshHead = freshState.head;
     if (!forceOverwriteRemote) {
       final raced =
-          (initialRemoteHead == null && freshHead != null) ||
+          freshState.isLegacyFormat ||
+          (initialRemoteHead == null &&
+              (freshHead != null ||
+                  freshState.orphanOrLegacyDbBytes != null)) ||
           (initialRemoteHead != null &&
               (freshHead == null ||
                   freshHead.revision != initialRemoteHead.revision ||
@@ -2011,16 +2263,15 @@ final class TallyBackupService {
             remoteHead: freshHead,
           );
         }
-        final racedOrphanBytes = freshHead == null
-            ? await store.getObjectOrNull(cloudSyncLatestDbPath)
-            : null;
         return _preserveConflictAndReport(
           settings: settings,
           store: store,
           cloudBackupTarget: cloudBackupTarget,
           cursor: cursor,
           remoteHead: freshHead,
-          orphanRemoteLatestDbBytes: racedOrphanBytes,
+          fallbackRemoteRevision:
+              freshState.legacyRevision ?? freshState.orphanRevisionHint,
+          orphanRemoteLatestDbBytes: freshState.orphanOrLegacyDbBytes,
           isLocalFreshEmpty: false,
           localTables: localTables,
           localAttachments: localAttachments,
@@ -2029,18 +2280,32 @@ final class TallyBackupService {
       }
     }
 
-    // 3. Upload lightweight `sync/latest_db.tally` + updated `sync/head.json`.
+    // 3. Upload immutable `sync/revisions/db_r<rev>_<sha16>.tally` BEFORE
+    // updating `sync/head.json` so a network drop mid-upload NEVER corrupts the
+    // live pointer (`S-01`).
+    final baseRevision =
+        freshHead?.revision ??
+        initialRemoteHead?.revision ??
+        freshState.legacyRevision ??
+        legacyRemoteRevision ??
+        0;
+    final nextRevision = baseRevision + 1;
+    final revisionPath = buildCloudSyncRevisionPath(
+      revision: nextRevision,
+      dataSha256: localDataSha256,
+    );
     await store.putObject(
-      cloudSyncLatestDbPath,
+      revisionPath,
       lightweightDb.bytes,
       onProgress: onProgress,
     );
 
-    final nextRevision =
-        (freshHead?.revision ?? initialRemoteHead?.revision ?? 0) + 1;
+    // 4. Commit `sync/head.json` (`format: 2` with `databasePath`).
     final newHead = CloudSyncHead(
+      format: currentCloudSyncHeadFormat,
       revision: nextRevision,
       dataSha256: localDataSha256,
+      databasePath: revisionPath,
       updatedAtMs: now,
       deviceId: settings.deviceId,
       deviceName: settings.deviceName,
@@ -2051,12 +2316,20 @@ final class TallyBackupService {
     final headBytes = Uint8List.fromList(
       utf8.encode(const JsonEncoder.withIndent('  ').convert(newHead.toJson())),
     );
-    await store.putObject(
-      cloudSyncHeadPath,
-      headBytes,
-      contentType: 'application/json; charset=utf-8',
-    );
+    try {
+      await store.putObject(
+        cloudSyncHeadPath,
+        headBytes,
+        contentType: 'application/json; charset=utf-8',
+      );
+    } catch (_) {
+      try {
+        await store.deleteObject(revisionPath);
+      } catch (_) {}
+      rethrow;
+    }
 
+    // 5. Persist local `prefKeyCloudSyncCursor`.
     final updatedCursor = LocalSyncCursor(
       lastSyncedRevision: nextRevision,
       lastSyncedDataSha256: localDataSha256,
@@ -2065,9 +2338,27 @@ final class TallyBackupService {
     );
     await _saveSyncCursor(updatedCursor, ensureSettings: settings);
 
-    // 4. Optional 24h full versioned `.tally` archive backup & pruning.
-    // Reuses already-exported `localTables` & `cloudBackupTarget` and isolates
-    // errors so a committed sync revision is NEVER failed by auxiliary archiving.
+    // 6. Best-effort prune superseded `sync/revisions/*` objects while keeping
+    // both `rN` and immediate previous revision `r(N-1)` safe for readers (`S-01`).
+    try {
+      final existingRevFiles = await store.listRelativeFileNames(
+        cloudSyncRevisionsDir,
+      );
+      final superseded = selectSupersededSyncRevisionFileNames(
+        existingRevFiles,
+        currentRevision: nextRevision,
+        currentDatabasePath: revisionPath,
+        previousDatabasePath:
+            freshHead?.databasePath ?? initialRemoteHead?.databasePath,
+      );
+      for (final oldFile in superseded) {
+        await store.deleteObject('$cloudSyncRevisionsDir/$oldFile');
+      }
+    } catch (_) {
+      // Best-effort revision cleanup never fails a committed sync push.
+    }
+
+    // 7. Optional 24h full versioned `.tally` archive backup & pruning.
     String? archivedName;
     if (settings.autoArchiveBackupEnabled) {
       try {
@@ -2082,8 +2373,13 @@ final class TallyBackupService {
             appVersion: appVersion,
             includeAttachments: includeArchiveAttachments,
           );
+          final existingCloudNames = await cloudBackupTarget.listBackups().then(
+            (items) => items.map((e) => e.fileName),
+            onError: (_) => const <String>[],
+          );
           final archiveFileName = formatTallyBackupFileName(
             DateTime.fromMillisecondsSinceEpoch(now),
+            existingFileNames: existingCloudNames,
           );
           final archived = await cloudBackupTarget.writeBackup(
             archiveFileName,
@@ -2093,7 +2389,7 @@ final class TallyBackupService {
           archivedName = archived.fileName;
         }
       } catch (_) {
-        // Sync commit (`latest_db.tally` + `head.json` + cursor) already succeeded.
+        // Sync commit (`db_r<rev>` + `head.json` + cursor) already succeeded.
       }
     }
 
@@ -2110,7 +2406,21 @@ final class TallyBackupService {
   String? _lastArchivedOrphanRemoteSha256;
   String? _lastArchivedOrphanRemoteFileName;
 
-  Future<String> _archiveOrphanRemoteLatestDbIfNeeded({
+  Future<Set<String>> _collectExistingConflictAndBackupFileNames(
+    BackupTarget cloudBackupTarget,
+  ) async {
+    final localNames = await localTarget.listBackups().then(
+      (items) => items.map((e) => e.fileName),
+      onError: (_) => const <String>[],
+    );
+    final remoteNames = await cloudBackupTarget.listBackups().then(
+      (items) => items.map((e) => e.fileName),
+      onError: (_) => const <String>[],
+    );
+    return <String>{...localNames, ...remoteNames};
+  }
+
+  Future<String> _archiveOrphanRemoteSnapshotIfNeeded({
     required Uint8List orphanBytes,
     required BackupTarget cloudBackupTarget,
   }) async {
@@ -2127,9 +2437,13 @@ final class TallyBackupService {
     }
 
     final now = _nowMs();
+    final existingNames = await _collectExistingConflictAndBackupFileNames(
+      cloudBackupTarget,
+    );
     final orphanConflictName = formatConflictBackupFileName(
       deviceId: 'remote${orphanSha.substring(0, 4)}',
       when: DateTime.fromMillisecondsSinceEpoch(now),
+      existingFileNames: existingNames,
     );
     await localTarget.writeBackup(orphanConflictName, orphanBytes);
     await cloudBackupTarget.writeBackup(orphanConflictName, orphanBytes);
@@ -2141,14 +2455,15 @@ final class TallyBackupService {
   Future<CloudSyncOutcome> _executeOrphanRemotePull({
     required CloudSyncSettings settings,
     required CloudSyncObjectStore store,
-    required Uint8List orphanLatestDbBytes,
+    required Uint8List orphanDbBytes,
+    required int healedRevision,
     required Map<String, Uint8List> localAttachments,
     required Map<String, String> localAttChecksums,
   }) async {
-    final verifiedDb = unpackAndVerifyTallyArchive(orphanLatestDbBytes);
+    final verifiedDb = unpackAndVerifyTallyArchive(orphanDbBytes);
     final Object? rawDbJson;
     try {
-      final zip = ZipArchive.decode(orphanLatestDbBytes);
+      final zip = ZipArchive.decode(orphanDbBytes);
       rawDbJson = jsonDecode(
         utf8.decode(zip[verifiedDb.manifest.databaseFile]!.bytes),
       );
@@ -2228,28 +2543,35 @@ final class TallyBackupService {
     }
     objectNames.sort();
 
-    final stagingDir = await Directory.systemTemp.createTemp(
-      'tally_orphan_sync_pull_',
-    );
+    final dirs = await _prepareSiblingAttachmentStagingDir();
     try {
-      final stagedAttRoot = Directory(p.join(stagingDir.path, 'attachments'));
-      for (final entry in verifiedPulledAttachments.entries) {
-        final relUnderAtt = entry.key.substring(tallyAttachmentsPrefix.length);
-        final stagedFile = File(
-          p.joinAll(<String>[stagedAttRoot.path, ...relUnderAtt.split('/')]),
-        );
-        await stagedFile.parent.create(recursive: true);
-        await stagedFile.writeAsBytes(entry.value, flush: true);
-      }
+      await _stageAndVerifyAttachmentsOnSameFs(
+        stagingDir: dirs.stagingDir,
+        attachments: verifiedPulledAttachments,
+        expectedChecksums: pulledAttChecksums,
+      );
 
       final now = _nowMs();
+      final effectiveRev = healedRevision < 1 ? 1 : healedRevision;
       final healedDataSha = computeCanonicalSyncDataSha256(
         tables: verifiedDb.tables,
         attachmentChecksums: pulledAttChecksums,
       );
-      final healedHead = CloudSyncHead(
-        revision: 1,
+      final healedRevisionPath = buildCloudSyncRevisionPath(
+        revision: effectiveRev,
         dataSha256: healedDataSha,
+      );
+      final healedLightweightDb = packTallyArchive(
+        tables: verifiedDb.tables,
+        createdAtMs: now,
+        appVersion: appVersion,
+        includeAttachments: false,
+      );
+      final healedHead = CloudSyncHead(
+        format: currentCloudSyncHeadFormat,
+        revision: effectiveRev,
+        dataSha256: healedDataSha,
+        databasePath: healedRevisionPath,
         updatedAtMs: now,
         deviceId: settings.deviceId,
         deviceName: settings.deviceName,
@@ -2258,7 +2580,7 @@ final class TallyBackupService {
         attachmentManifest: pulledAttChecksums,
       );
       final newCursor = LocalSyncCursor(
-        lastSyncedRevision: 1,
+        lastSyncedRevision: effectiveRev,
         lastSyncedDataSha256: healedDataSha,
         lastSyncedAtMs: now,
         targetFingerprint: store.targetFingerprint,
@@ -2284,52 +2606,30 @@ final class TallyBackupService {
                     value: '$activeBookId',
                   ),
                 );
-            await db
-                .into(db.preferences)
-                .insertOnConflictUpdate(
-                  PreferencesCompanion.insert(
-                    key: prefKeyCloudSyncCursor,
-                    value: jsonEncode(newCursor.toJson()),
-                  ),
-                );
-            await db
-                .into(db.preferences)
-                .insert(
-                  PreferencesCompanion.insert(
-                    key: prefKeyCloudSyncSettings,
-                    value: jsonEncode(settings.toJson()),
-                  ),
-                  mode: InsertMode.insertOrIgnore,
-                );
           }),
         );
 
-        final targetAttDir = await _attachmentsDirProvider();
-        if (await targetAttDir.exists()) {
-          await for (final child in targetAttDir.list(followLinks: false)) {
-            await child.delete(recursive: true);
-          }
-        }
-        if (verifiedPulledAttachments.isNotEmpty) {
-          await targetAttDir.create(recursive: true);
-          for (final archivePath in verifiedPulledAttachments.keys) {
-            final relUnderAtt = archivePath.substring(
-              tallyAttachmentsPrefix.length,
-            );
-            final srcFile = File(
-              p.joinAll(<String>[
-                stagedAttRoot.path,
-                ...relUnderAtt.split('/'),
-              ]),
-            );
-            final dstFile = File(
-              p.joinAll(<String>[targetAttDir.path, ...relUnderAtt.split('/')]),
-            );
-            await dstFile.parent.create(recursive: true);
-            await srcFile.copy(dstFile.path);
-          }
-        }
+        await _swapStagedAttachmentsAtomically(
+          targetDir: dirs.targetDir,
+          stagingDir: dirs.stagingDir,
+          backupDir: dirs.backupDir,
+        );
 
+        await store.putObject(healedRevisionPath, healedLightweightDb.bytes);
+        final headBytes = Uint8List.fromList(
+          utf8.encode(
+            const JsonEncoder.withIndent('  ').convert(healedHead.toJson()),
+          ),
+        );
+        await store.putObject(
+          cloudSyncHeadPath,
+          headBytes,
+          contentType: 'application/json; charset=utf-8',
+        );
+
+        // Persist sync cursor ONLY AFTER attachment swap + healed `head.json`
+        // upload succeed (`S-02`).
+        await _saveSyncCursor(newCursor, ensureSettings: settings);
         await reminderService.resyncAll();
       } finally {
         await Future<void>.microtask(() {});
@@ -2337,28 +2637,17 @@ final class TallyBackupService {
         _internalRestoreDepth--;
       }
 
-      final headBytes = Uint8List.fromList(
-        utf8.encode(
-          const JsonEncoder.withIndent('  ').convert(healedHead.toJson()),
-        ),
-      );
-      await store.putObject(
-        cloudSyncHeadPath,
-        headBytes,
-        contentType: 'application/json; charset=utf-8',
-      );
-
       return CloudSyncOutcome(
         status: CloudSyncStatus.pulled,
-        revision: 1,
+        revision: effectiveRev,
         localDataSha256: healedDataSha,
         remoteHead: healedHead,
         downloadedAttachments: downloadedCount,
       );
     } finally {
       try {
-        if (await stagingDir.exists()) {
-          await stagingDir.delete(recursive: true);
+        if (await dirs.stagingDir.exists()) {
+          await dirs.stagingDir.delete(recursive: true);
         }
       } catch (_) {}
     }
@@ -2370,6 +2659,7 @@ final class TallyBackupService {
     required BackupTarget cloudBackupTarget,
     required LocalSyncCursor cursor,
     required CloudSyncHead? remoteHead,
+    int? fallbackRemoteRevision,
     Uint8List? orphanRemoteLatestDbBytes,
     bool isLocalFreshEmpty = false,
     required Map<String, List<Map<String, Object?>>> localTables,
@@ -2378,7 +2668,7 @@ final class TallyBackupService {
   }) async {
     String? orphanConflictFileName;
     if (orphanRemoteLatestDbBytes != null) {
-      orphanConflictFileName = await _archiveOrphanRemoteLatestDbIfNeeded(
+      orphanConflictFileName = await _archiveOrphanRemoteSnapshotIfNeeded(
         orphanBytes: orphanRemoteLatestDbBytes,
         cloudBackupTarget: cloudBackupTarget,
       );
@@ -2401,9 +2691,13 @@ final class TallyBackupService {
 
     if (conflictFileName == null) {
       final now = _nowMs();
+      final existingNames = await _collectExistingConflictAndBackupFileNames(
+        cloudBackupTarget,
+      );
       conflictFileName = formatConflictBackupFileName(
         deviceId: settings.deviceId,
         when: DateTime.fromMillisecondsSinceEpoch(now),
+        existingFileNames: existingNames,
       );
       final fullConflictPack = packTallyArchive(
         tables: localTables,
@@ -2417,85 +2711,127 @@ final class TallyBackupService {
         conflictFileName,
         fullConflictPack.bytes,
       );
+    }
+
+    if (cursor.lastConflictFileName != conflictFileName ||
+        cursor.lastConflictSha256 != localDataSha256 ||
+        cursor.targetFingerprint != store.targetFingerprint) {
       await _saveSyncCursor(
         cursor.copyWith(
           targetFingerprint: store.targetFingerprint,
           lastConflictSha256: localDataSha256,
           lastConflictFileName: conflictFileName,
         ),
+        ensureSettings: settings,
       );
     }
 
     return CloudSyncOutcome.conflict(
-      revision: remoteHead?.revision ?? 0,
+      revision: remoteHead?.revision ?? fallbackRemoteRevision ?? 0,
       localDataSha256: localDataSha256,
       remoteHead: remoteHead,
       conflictBackupFileName: conflictFileName,
     );
   }
 
-  /// Executes the 3-stage safe restore workflow (R5):
-  /// 1. Unpacks archive into an isolated temporary `staging/` directory (with
-  ///    zip-slip containment check);
+  /// Executes the 3-stage safe restore workflow (`R5`, `S-02`, `S-05`, `S-07`, `S-09`):
+  /// 1. Unpacks metadata/DB into an isolated staging directory and stages
+  ///    attachments into a sibling directory `${targetAttDir.path}.staging_<id>`
+  ///    on the same filesystem as `attachments` (with zip-slip containment);
   /// 2. Validates `manifest.json`, `database_sha256`, every `attachments/*`
-  ///    SHA-256, `table_counts`, and parses/validates all 22 table rows BEFORE
-  ///    touching SQLite or local attachments;
+  ///    SHA-256, `table_counts`, non-empty `account_book`, `CNY` currency, and
+  ///    parses/validates all 22 table rows BEFORE touching SQLite or live attachments;
   /// 3. Replaces all 22 business tables atomically in a single SQLite
-  ///    transaction, resets `current_book_id` to a valid book (`1` if present
-  ///    else first book), syncs attachments, and calls
+  ///    transaction, atomically swaps `attachments` via same-FS rename (with `.bak`
+  ///    rollback on failure), clears any stale conflict cursor record, and calls
   ///    `ReminderService.resyncAll()`.
   Future<TallyManifest> restoreFromBytes(
     Uint8List archiveBytes, {
     void Function()? beforeTransactionCommitForTest,
+  }) => _runExclusive(
+    () => _restoreFromBytesUnlocked(
+      archiveBytes,
+      beforeTransactionCommitForTest: beforeTransactionCommitForTest,
+    ),
+  );
+
+  Future<TallyManifest> _restoreFromBytesUnlocked(
+    Uint8List archiveBytes, {
+    void Function()? beforeTransactionCommitForTest,
   }) async {
-    final stagingDir = await Directory.systemTemp.createTemp(
-      'tally_restore_staging_',
+    final stagingDir = await LocalDirectoryBackupTarget._runRootIo(
+      () => Directory.systemTemp.createTemp('tally_restore_staging_'),
     );
+    ({Directory targetDir, Directory stagingDir, Directory backupDir})?
+    attSwapDirs;
     try {
-      // Stage 1: Extract ZIP entries into isolated staging directory.
-      final zip = ZipArchive.decode(archiveBytes);
-      final canonicalStagingRoot = await stagingDir.resolveSymbolicLinks();
-      for (final entry in zip.entries) {
-        final safeRel = validateZipEntryPath(entry.name);
-        final outPath = p.normalize(
-          p.joinAll(<String>[canonicalStagingRoot, ...safeRel.split('/')]),
-        );
-        if (!p.isWithin(canonicalStagingRoot, outPath)) {
-          throw Failure(FailureCode.corruptData, '拒绝越界的暂存路径：$safeRel');
-        }
-        final outFile = File(outPath);
-        await outFile.parent.create(recursive: true);
-        await outFile.writeAsBytes(entry.bytes);
-      }
+      // Stage 1 & 2a: Extract ZIP metadata/DB entries into isolated staging directory
+      // and read staged manifest/database bytes on root IO loop.
+      final stagedStage1 = await LocalDirectoryBackupTarget._runRootIo(
+        () async {
+          final zip = ZipArchive.decode(archiveBytes);
+          final canonicalStagingRoot = await stagingDir.resolveSymbolicLinks();
+          final rawAttEntries = <String, Uint8List>{};
+          for (final entry in zip.entries) {
+            final safeRel = validateZipEntryPath(entry.name);
+            if (safeRel.startsWith(tallyAttachmentsPrefix)) {
+              rawAttEntries[safeRel] = entry.bytes;
+              continue;
+            }
+            final outPath = p.normalize(
+              p.joinAll(<String>[canonicalStagingRoot, ...safeRel.split('/')]),
+            );
+            if (!p.isWithin(canonicalStagingRoot, outPath)) {
+              throw Failure(FailureCode.corruptData, '拒绝越界的暂存路径：$safeRel');
+            }
+            final outFile = File(outPath);
+            await outFile.parent.create(recursive: true);
+            await outFile.writeAsBytes(entry.bytes);
+          }
 
-      // Stage 2: Static SHA-256 & schema validation on staged files BEFORE touching DB.
-      final stagedManifestFile = File(
-        p.join(canonicalStagingRoot, tallyManifestFileName),
-      );
-      if (!await stagedManifestFile.exists()) {
-        throw const Failure(FailureCode.corruptData, '备份包缺少 manifest.json');
-      }
-      final Object? rawManifest;
-      try {
-        rawManifest = jsonDecode(await stagedManifestFile.readAsString());
-      } catch (_) {
-        throw const Failure(FailureCode.corruptData, '备份包 manifest.json 解析失败');
-      }
-      if (rawManifest is! Map<String, Object?>) {
-        throw const Failure(FailureCode.corruptData, '备份包 manifest.json 结构损坏');
-      }
-      final manifest = TallyManifest.fromJson(rawManifest);
+          final stagedManifestFile = File(
+            p.join(canonicalStagingRoot, tallyManifestFileName),
+          );
+          if (!await stagedManifestFile.exists()) {
+            throw const Failure(FailureCode.corruptData, '备份包缺少 manifest.json');
+          }
+          final Object? rawManifest;
+          try {
+            rawManifest = jsonDecode(await stagedManifestFile.readAsString());
+          } catch (_) {
+            throw const Failure(
+              FailureCode.corruptData,
+              '备份包 manifest.json 解析失败',
+            );
+          }
+          if (rawManifest is! Map<String, Object?>) {
+            throw const Failure(
+              FailureCode.corruptData,
+              '备份包 manifest.json 结构损坏',
+            );
+          }
+          final manifest = TallyManifest.fromJson(rawManifest);
 
-      final stagedDbFile = File(
-        p.join(canonicalStagingRoot, manifest.databaseFile),
+          final stagedDbFile = File(
+            p.join(canonicalStagingRoot, manifest.databaseFile),
+          );
+          if (!await stagedDbFile.exists()) {
+            throw Failure(
+              FailureCode.corruptData,
+              '备份包缺少数据库文件 ${manifest.databaseFile}',
+            );
+          }
+          final stagedDbBytes = await stagedDbFile.readAsBytes();
+          return (
+            manifest: manifest,
+            stagedDbBytes: stagedDbBytes,
+            rawAttEntries: rawAttEntries,
+          );
+        },
       );
-      if (!await stagedDbFile.exists()) {
-        throw Failure(
-          FailureCode.corruptData,
-          '备份包缺少数据库文件 ${manifest.databaseFile}',
-        );
-      }
-      final stagedDbBytes = await stagedDbFile.readAsBytes();
+      final manifest = stagedStage1.manifest;
+      final stagedDbBytes = stagedStage1.stagedDbBytes;
+      final rawAttEntries = stagedStage1.rawAttEntries;
       if (sha256Hex(stagedDbBytes) != manifest.databaseSha256) {
         throw const Failure(
           FailureCode.corruptData,
@@ -2503,44 +2839,27 @@ final class TallyBackupService {
         );
       }
 
+      for (final attName in rawAttEntries.keys) {
+        if (!manifest.filesChecksum.containsKey(attName)) {
+          throw Failure(
+            FailureCode.corruptData,
+            '备份包存在未在清单登记的额外附件（$attName），已拒绝恢复',
+          );
+        }
+      }
       for (final expected in manifest.filesChecksum.entries) {
-        final stagedAttPath = p.normalize(
-          p.joinAll(<String>[canonicalStagingRoot, ...expected.key.split('/')]),
-        );
-        final stagedAttFile = File(stagedAttPath);
-        if (!await stagedAttFile.exists()) {
+        final attBytes = rawAttEntries[expected.key];
+        if (attBytes == null) {
           throw Failure(
             FailureCode.corruptData,
             '备份包缺少清单登记的附件文件：${expected.key}',
           );
         }
-        final attBytes = await stagedAttFile.readAsBytes();
         if (sha256Hex(attBytes) != expected.value) {
           throw Failure(
             FailureCode.corruptData,
             '备份附件哈希校验失败（${expected.key}），已拒绝恢复',
           );
-        }
-      }
-
-      final stagedAttachmentsRoot = Directory(
-        p.join(canonicalStagingRoot, 'attachments'),
-      );
-      if (await stagedAttachmentsRoot.exists()) {
-        await for (final entity in stagedAttachmentsRoot.list(
-          recursive: true,
-          followLinks: false,
-        )) {
-          if (entity is! File) continue;
-          final relPosix = p
-              .split(p.relative(entity.path, from: canonicalStagingRoot))
-              .join('/');
-          if (!manifest.filesChecksum.containsKey(relPosix)) {
-            throw Failure(
-              FailureCode.corruptData,
-              '备份包存在未在清单登记的额外附件（$relPosix），已拒绝恢复',
-            );
-          }
         }
       }
 
@@ -2555,6 +2874,15 @@ final class TallyBackupService {
       }
 
       final parsedRows = _parseAndValidateAll22Tables(rawDbJson, manifest);
+
+      if (manifest.includeAttachments) {
+        attSwapDirs = await _prepareSiblingAttachmentStagingDir();
+        await _stageAndVerifyAttachmentsOnSameFs(
+          stagingDir: attSwapDirs.stagingDir,
+          attachments: rawAttEntries,
+          expectedChecksums: manifest.filesChecksum,
+        );
+      }
 
       // Stage 3: Single atomic SQLite transaction replacing all 22 tables.
       _internalRestoreDepth++;
@@ -2582,11 +2910,23 @@ final class TallyBackupService {
           }),
         );
 
-        // Sync verified attachments into app attachments directory after DB commit.
-        await _syncStagedAttachments(
-          stagedAttachmentsRoot: stagedAttachmentsRoot,
-          manifest: manifest,
-        );
+        // Same-filesystem atomic swap of verified attachments (`S-02`).
+        if (attSwapDirs != null) {
+          await _swapStagedAttachmentsAtomically(
+            targetDir: attSwapDirs.targetDir,
+            stagingDir: attSwapDirs.stagingDir,
+            backupDir: attSwapDirs.backupDir,
+          );
+        }
+
+        // Clear any pending conflict banner state after manual restore (`S-05`).
+        final existingCursor = await getSyncCursor();
+        if (existingCursor.lastConflictFileName != null ||
+            existingCursor.lastConflictSha256 != null) {
+          await _saveSyncCursor(
+            existingCursor.copyWith(clearConflictRecord: true),
+          );
+        }
 
         final restoredAt = _nowMs();
         await _recordCompletedBackupState(restoredAt);
@@ -2600,11 +2940,21 @@ final class TallyBackupService {
 
       return manifest;
     } finally {
-      try {
-        if (await stagingDir.exists()) {
-          await stagingDir.delete(recursive: true);
+      final attSwap = attSwapDirs;
+      await LocalDirectoryBackupTarget._runRootIo(() async {
+        try {
+          if (await stagingDir.exists()) {
+            await stagingDir.delete(recursive: true);
+          }
+        } catch (_) {}
+        if (attSwap != null) {
+          try {
+            if (await attSwap.stagingDir.exists()) {
+              await attSwap.stagingDir.delete(recursive: true);
+            }
+          } catch (_) {}
         }
-      } catch (_) {}
+      });
     }
   }
 
@@ -2684,41 +3034,6 @@ final class TallyBackupService {
       result[archivePath] = await entity.readAsBytes();
     }
     return result;
-  }
-
-  Future<void> _syncStagedAttachments({
-    required Directory stagedAttachmentsRoot,
-    required TallyManifest manifest,
-  }) async {
-    final targetDir = await _attachmentsDirProvider();
-    if (manifest.includeAttachments) {
-      if (await targetDir.exists()) {
-        await for (final child in targetDir.list(followLinks: false)) {
-          await child.delete(recursive: true);
-        }
-      } else if (manifest.filesChecksum.isNotEmpty) {
-        await targetDir.create(recursive: true);
-      }
-    }
-
-    if (!await stagedAttachmentsRoot.exists()) return;
-    await targetDir.create(recursive: true);
-    for (final archivePath in manifest.filesChecksum.keys) {
-      final relUnderAttachments = archivePath.substring(
-        tallyAttachmentsPrefix.length,
-      );
-      final srcFile = File(
-        p.joinAll(<String>[
-          stagedAttachmentsRoot.path,
-          ...relUnderAttachments.split('/'),
-        ]),
-      );
-      final dstFile = File(
-        p.joinAll(<String>[targetDir.path, ...relUnderAttachments.split('/')]),
-      );
-      await dstFile.parent.create(recursive: true);
-      await srcFile.copy(dstFile.path);
-    }
   }
 
   Future<Map<String, List<Map<String, Object?>>>> _exportAll22Tables() async {
@@ -3301,7 +3616,7 @@ final class TallyBackupService {
       return rows;
     }
 
-    return _ValidatedDatabaseRows(
+    final validated = _ValidatedDatabaseRows(
       accountBooks: <AccountBook>[
         for (final m in tableMaps('account_book'))
           AccountBook(
@@ -3724,6 +4039,19 @@ final class TallyBackupService {
           ),
       ],
     );
+    if (validated.accountBooks.isEmpty) {
+      throw const Failure(
+        FailureCode.corruptData,
+        '备份数据缺少有效账本（account_book 不能为空），已拒绝恢复',
+      );
+    }
+    final hasBaseCny = validated.currencies.any(
+      (c) => c.code.trim().toUpperCase() == 'CNY',
+    );
+    if (!hasBaseCny) {
+      throw const Failure(FailureCode.corruptData, '备份数据缺少本位币 CNY 配置，已拒绝恢复');
+    }
+    return validated;
   }
 
   static int _reqInt(Map<String, Object?> m, String key, String table) {
@@ -3831,4 +4159,20 @@ final class _ValidatedDatabaseRows {
   final List<ImportPlatform> importPlatforms;
   final List<Note> notes;
   final List<Currency> currencies;
+}
+
+final class _RemoteSyncState {
+  const _RemoteSyncState({
+    required this.head,
+    this.isLegacyFormat = false,
+    this.legacyRevision,
+    this.orphanOrLegacyDbBytes,
+    this.orphanRevisionHint,
+  });
+
+  final CloudSyncHead? head;
+  final bool isLegacyFormat;
+  final int? legacyRevision;
+  final Uint8List? orphanOrLegacyDbBytes;
+  final int? orphanRevisionHint;
 }

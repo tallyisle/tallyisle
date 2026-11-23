@@ -581,12 +581,37 @@ void main() {
       expect(container.read(periodOffsetProvider), 0);
       expect(find.byKey(const Key('home-reset-period-btn')), findsNothing);
 
-      // Swipe left -> steps to next period (+1); tap period title text -> resets to 0!
+      // Swipe left -> steps to next period (+1); tap period title -> opens Year-Month picker!
       await tester.drag(find.byType(CustomScrollView), const Offset(-180, 0));
       await _settle(tester);
       expect(container.read(periodOffsetProvider), 1);
-      final nextPeriod = await container.read(currentPeriodProvider.future);
-      await tester.tap(find.text('${nextPeriod.year}年${nextPeriod.month}月'));
+      await tester.tap(find.byKey(const Key('home-period-picker-trigger')));
+      await _settle(tester);
+      expect(tester.takeException(), isNull);
+      expect(find.byKey(const Key('ym-picker-jump-current')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('ym-picker-jump-current')));
+      await _settle(tester);
+      expect(container.read(periodOffsetProvider), 0);
+
+      // Open Home Year-Month picker again, toggle year grid, jump to previous year's March
+      final nowPeriod = BillingPeriod.containing(DateTime.now(), 1);
+      final targetYear = nowPeriod.year - 1;
+      await tester.tap(find.byKey(const Key('home-period-picker-trigger')));
+      await _settle(tester);
+      await tester.tap(find.byKey(const Key('ym-picker-toggle-year-grid')));
+      await _settle(tester);
+      await tester.tap(find.byKey(Key('ym-picker-year-$targetYear')));
+      await _settle(tester);
+      await tester.tap(find.byKey(const Key('ym-picker-month-3')));
+      await _settle(tester);
+      expect(
+        container.read(periodOffsetProvider),
+        (targetYear - nowPeriod.year) * 12 + (3 - nowPeriod.month),
+      );
+      expect(find.text('$targetYear年3月'), findsOneWidget);
+      expect(find.byKey(const Key('home-reset-period-btn')), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.tap(find.byKey(const Key('home-reset-period-btn')));
       await _settle(tester);
       expect(container.read(periodOffsetProvider), 0);
 
@@ -716,8 +741,36 @@ void main() {
       await _settle(tester);
       expect(container.read(calendarMonthOffsetProvider), 0);
 
-      // Jump to January of current year (31 days), select day 31, then swipe left to February (28/29 days) -> clamps safely!
+      // Tap calendar period header -> opens Year-Month picker, jumps cleanly & syncs PageView!
       final now = DateTime.now();
+      final pickedCalYear = now.year - 1;
+      await tester.tap(find.byKey(const Key('calendar-period-picker-trigger')));
+      await _settle(tester);
+      await tester.tap(find.byKey(const Key('ym-picker-prev-year')));
+      await _settle(tester);
+      await tester.tap(find.byKey(const Key('ym-picker-month-4')));
+      await _settle(tester);
+      final expectedPickedOffset =
+          (pickedCalYear - now.year) * 12 + (4 - now.month);
+      expect(container.read(calendarMonthOffsetProvider), expectedPickedOffset);
+      expect(find.text('$pickedCalYear年4月'), findsOneWidget);
+      expect(find.byKey(const Key('calendar-grid')), findsOneWidget);
+      // Horizontal swipe right immediately after picker jump steps cleanly to March without glitch!
+      await tester.drag(
+        find.byKey(const Key('calendar-month-pageview')),
+        const Offset(300, 0),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        container.read(calendarMonthOffsetProvider),
+        expectedPickedOffset - 1,
+      );
+      expect(find.text('$pickedCalYear年3月'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('calendar-today-button')));
+      await _settle(tester);
+      expect(container.read(calendarMonthOffsetProvider), 0);
+
+      // Jump to January of current year (31 days), select day 31, then swipe left to February (28/29 days) -> clamps safely!
       final janOffset = (1 - now.month);
       container.read(calendarMonthOffsetProvider.notifier).setOffset(janOffset);
       await _settle(tester);
@@ -895,7 +948,7 @@ void main() {
 
       late ProviderContainer container;
 
-      // 1. BudgetPage horizontal swipe
+      // 1. BudgetPage: horizontal swipe & trackpad scroll cancelled; ‹/› buttons & reset pill work
       await tester.pumpWidget(
         ProviderScope(
           retry: (_, _) => null,
@@ -910,16 +963,32 @@ void main() {
       );
       await _settle(tester);
       expect(container.read(budgetOffsetProvider), 0);
+      expect(find.byKey(const Key('budget_period_reset')), findsNothing);
 
       await tester.drag(find.byType(ListView).first, const Offset(180, 0));
       await _settle(tester);
-      expect(container.read(budgetOffsetProvider), -1);
+      expect(container.read(budgetOffsetProvider), 0);
 
       await tester.drag(find.byType(ListView).first, const Offset(-180, 0));
       await _settle(tester);
       expect(container.read(budgetOffsetProvider), 0);
 
-      // 2. CategoryStatsPage: drawerEdgeDragWidth == 0, header/ranking swipe, AND _TrendChartCard isolation!
+      final budgetCenter = tester.getCenter(find.byType(ListView).first);
+      _sendTrackpadHorizontalScroll(tester, budgetCenter, -45);
+      await _settle(tester);
+      expect(container.read(budgetOffsetProvider), 0);
+
+      await tester.tap(find.byKey(const Key('budget_period_prev')));
+      await _settle(tester);
+      expect(container.read(budgetOffsetProvider), -1);
+      expect(find.byKey(const Key('budget_period_reset')), findsOneWidget);
+      expect(find.text('回本月'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('budget_period_reset')));
+      await _settle(tester);
+      expect(container.read(budgetOffsetProvider), 0);
+      expect(find.byKey(const Key('budget_period_reset')), findsNothing);
+
+      // 2. CategoryStatsPage: drawerEdgeDragWidth == 0, swipe & trackpad scroll cancelled, ‹/› & reset pill work!
       await tester.pumpWidget(
         ProviderScope(
           retry: (_, _) => null,
@@ -936,21 +1005,30 @@ void main() {
       final catScaffold = tester.widget<Scaffold>(find.byType(Scaffold).first);
       expect(catScaffold.drawerEdgeDragWidth, 0);
       expect(container.read(categoryStatsOffsetProvider), 0);
+      expect(
+        find.byKey(const Key('category-stats-period-reset')),
+        findsNothing,
+      );
 
-      // Swiping on HeaderSummaryCard steps categoryStatsOffsetProvider to -1
+      // Swiping on HeaderSummaryCard, CategoryRankingsCard, and TrendChartCard MUST NOT change offset!
       await tester.drag(
         find.byKey(const Key('header-total-amount')),
         const Offset(180, 0),
       );
       await _settle(tester);
-      expect(container.read(categoryStatsOffsetProvider), -1);
+      expect(container.read(categoryStatsOffsetProvider), 0);
 
-      // Swiping left on CategoryRankingsCard steps back to 0
       await tester.drag(find.text('分类排行榜'), const Offset(-180, 0));
       await _settle(tester);
       expect(container.read(categoryStatsOffsetProvider), 0);
 
-      // Scrubbing horizontally across _TrendChartCard MUST NOT change categoryStatsOffsetProvider!
+      final catHeaderCenter = tester.getCenter(
+        find.byKey(const Key('header-total-amount')),
+      );
+      _sendTrackpadHorizontalScroll(tester, catHeaderCenter, 45);
+      await _settle(tester);
+      expect(container.read(categoryStatsOffsetProvider), 0);
+
       final trendTitle = find.text('收支趋势');
       expect(trendTitle, findsOneWidget);
       final trendCard = find.ancestor(
@@ -964,11 +1042,24 @@ void main() {
       await tester.drag(chartCanvas.first, const Offset(220, 0));
       await _settle(tester);
       expect(container.read(categoryStatsOffsetProvider), 0);
-      await tester.drag(chartCanvas.first, const Offset(-220, 0));
+
+      // ‹ button steps to -1 and shows `回本月` pill -> tapping pill resets to 0
+      await tester.tap(find.byKey(const Key('period-prev-button')));
+      await _settle(tester);
+      expect(container.read(categoryStatsOffsetProvider), -1);
+      expect(
+        find.byKey(const Key('category-stats-period-reset')),
+        findsOneWidget,
+      );
+      await tester.tap(find.byKey(const Key('category-stats-period-reset')));
       await _settle(tester);
       expect(container.read(categoryStatsOffsetProvider), 0);
+      expect(
+        find.byKey(const Key('category-stats-period-reset')),
+        findsNothing,
+      );
 
-      // 3. TagRankingsPage & TagDetailStatsPage swipes + B-16 popup modal check
+      // 3. TagRankingsPage & TagDetailStatsPage: horizontal swipe & trackpad scroll cancelled + B-16 popup modal check
       await tester.pumpWidget(
         ProviderScope(
           retry: (_, _) => null,
@@ -994,7 +1085,23 @@ void main() {
       await _settle(tester);
       await tester.drag(find.byType(ListView).first, const Offset(180, 0));
       await _settle(tester);
+      expect(container.read(tagStatsOffsetProvider), 0);
+      _sendTrackpadHorizontalScroll(
+        tester,
+        tester.getCenter(find.byType(ListView).first),
+        -45,
+      );
+      await _settle(tester);
+      expect(container.read(tagStatsOffsetProvider), 0);
+
+      await tester.tap(find.byKey(const Key('tag-rankings-prev-period')));
+      await _settle(tester);
       expect(container.read(tagStatsOffsetProvider), -1);
+      expect(find.byKey(const Key('tag-stats-period-reset')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('tag-stats-period-reset')));
+      await _settle(tester);
+      expect(container.read(tagStatsOffsetProvider), 0);
+      expect(find.byKey(const Key('tag-stats-period-reset')), findsNothing);
 
       // B-16: On empty month (-1 has 0 tag bills), open TagRankingsPage inside a desktop PopupRoute and tap `tag-rankings-manage-tags-btn` -> pops cleanly!
       tester.view.physicalSize = const Size(1280, 800);
@@ -1039,7 +1146,7 @@ void main() {
       expect(find.byKey(const Key('tag-rankings-page')), findsNothing);
       expect(tester.takeException(), isNull);
 
-      // TagDetailStatsPage swipe in month mode
+      // TagDetailStatsPage: swipe & trackpad scroll cancelled, ‹/› and reset pill work!
       tester.view.physicalSize = const Size(390, 844);
       await tester.pumpWidget(
         ProviderScope(
@@ -1055,35 +1162,20 @@ void main() {
       );
       await _settle(tester);
       expect(container.read(tagStatsOffsetProvider), -1);
+      expect(find.byKey(const Key('tag-detail-period-reset')), findsOneWidget);
       await tester.drag(find.byType(ListView).first, const Offset(-180, 0));
       await _settle(tester);
-      expect(container.read(tagStatsOffsetProvider), 0);
+      expect(container.read(tagStatsOffsetProvider), -1);
 
-      // Rapid 2-event trackpad scroll (50ms apart) across AsyncLoading -> AsyncData on uncached offset +1:
-      // outer PeriodSwipeRegion preserves 320ms cooldown so offset steps by +1 (not +2)!
       final tagDetailCenter = tester.getCenter(find.byType(ListView).first);
       _sendTrackpadHorizontalScroll(tester, tagDetailCenter, 42);
-      await tester.pump();
-      await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 25)),
-      );
-      await tester.pump(const Duration(milliseconds: 25));
-      _sendTrackpadHorizontalScroll(tester, tagDetailCenter, 42);
       await _settle(tester);
-      expect(container.read(tagStatsOffsetProvider), 1);
-      // And rapid 2-event scroll left (-42) from -1 into uncached -2 also steps by -1 (to -2, not -3):
-      await tester.pump(const Duration(milliseconds: 350));
-      container.read(tagStatsOffsetProvider.notifier).setOffset(-1);
+      expect(container.read(tagStatsOffsetProvider), -1);
+
+      await tester.tap(find.byKey(const Key('tag-detail-period-reset')));
       await _settle(tester);
-      _sendTrackpadHorizontalScroll(tester, tagDetailCenter, -42);
-      await tester.pump();
-      await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 25)),
-      );
-      await tester.pump(const Duration(milliseconds: 25));
-      _sendTrackpadHorizontalScroll(tester, tagDetailCenter, -42);
-      await _settle(tester);
-      expect(container.read(tagStatsOffsetProvider), -2);
+      expect(container.read(tagStatsOffsetProvider), 0);
+      expect(find.byKey(const Key('tag-detail-period-reset')), findsNothing);
 
       // 4. AnnualReportPage synced 2-page PageView swipe (年度账单 ⇄ 年度报告)
       await tester.pumpWidget(

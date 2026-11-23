@@ -86,11 +86,19 @@ final class _LoopbackSigV4S3Server {
         objectKey.isEmpty &&
         req.uri.queryParameters['list-type'] == '2') {
       final prefix = req.uri.queryParameters['prefix'] ?? '';
+      final delimiter = req.uri.queryParameters['delimiter'];
       final startIdx =
           int.tryParse(req.uri.queryParameters['continuation-token'] ?? '') ??
           0;
-      final matchingKeys =
-          objects.keys.where((k) => k.startsWith(prefix)).toList()..sort();
+      final matchingKeys = objects.keys.where((k) {
+        if (!k.startsWith(prefix)) return false;
+        if (delimiter != null &&
+            delimiter.isNotEmpty &&
+            k.substring(prefix.length).contains(delimiter)) {
+          return false;
+        }
+        return true;
+      }).toList()..sort();
       final endIdx = (startIdx + maxKeysPerPage < matchingKeys.length)
           ? startIdx + maxKeysPerPage
           : matchingKeys.length;
@@ -552,9 +560,15 @@ void main() {
         expect(push1.uploadedAttachments, 1);
         expect(s3Server.putCountsByKey[imgAObjKey], 1);
 
-        // Verify sync/latest_db.tally is lightweight (does NOT inline attachment bytes)
+        // Verify immutable format-2 revision snapshot is lightweight (no inline attachments) and latest_db.tally is never written
+        expect(push1.remoteHead!.format, currentCloudSyncHeadFormat);
+        expect(
+          push1.remoteHead!.databasePath,
+          startsWith('sync/revisions/db_r1_'),
+        );
+        expect(s3Server.objects['TallyIsle/sync/latest_db.tally'], isNull);
         final latestZip = ZipArchive.decode(
-          s3Server.objects['TallyIsle/sync/latest_db.tally']!,
+          s3Server.objects['TallyIsle/${push1.remoteHead!.databasePath}']!,
         );
         expect(
           latestZip.entries.any((e) => e.name.startsWith('attachments/')),
@@ -982,7 +996,7 @@ void main() {
         expect(
           davServer.files.keys,
           containsAll(<String>[
-            '/dav/TallySync/sync/latest_db.tally',
+            '/dav/TallySync/${push1.remoteHead!.databasePath}',
             '/dav/TallySync/sync/head.json',
           ]),
         );
@@ -1129,7 +1143,7 @@ void main() {
           resolution: SyncConflictResolution.useRemote,
         );
         expect(healedPull.status, CloudSyncStatus.pulled);
-        expect(healedPull.revision, 1);
+        expect(healedPull.revision, 2);
         expect(healedPull.downloadedAttachments, 1);
         expect(
           davServer.files.containsKey('/dav/TallySync/sync/head.json'),
@@ -1177,7 +1191,7 @@ void main() {
         await serviceC.setAutoArchiveBackupEnabled(false);
         final pullC = await serviceC.syncNow();
         expect(pullC.status, CloudSyncStatus.pulled);
-        expect(pullC.revision, 1);
+        expect(pullC.revision, 2);
         expect(pullC.downloadedAttachments, 1);
         expect(
           await File(p.join(attCDir.path, 'receipt_a.png')).readAsBytes(),

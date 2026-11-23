@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="accessibility_service_label">帐屿自动记账辅助服务</string>
+    <string name="accessibility_service_description">用于在支付成功或账单详情界面本地提取付款金额与商户文本，生成帐屿待确认记账草稿。所有识别仅在本机离线执行，不上传任何屏幕数据。</string>
+    <string name="accessibility_service_summary">本地提取付款信息并生成待确认记账草稿</string>
+
+    <string name="widget_quick_add_label">帐屿 · 快捷记账</string>
+    <string name="widget_quick_add_desc">1×1 桌面快捷入口，点击直达帐屿记一笔页面</string>
+    <string name="widget_month_summary_label">帐屿 · 月度收支概览</string>
+    <string name="widget_month_summary_desc">2×2 卡片展示当前账本本期支出、收入与结余，并支持一键记账</string>
+    <string name="widget_month_bar_label">帐屿 · 月度横条</string>
+    <string name="widget_month_bar_desc">4×1 横条展示当前账本本期支出、收入、今日支出与快捷记账按钮</string>
+</resources>

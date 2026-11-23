@@ -17,7 +17,29 @@ G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
 
 namespace {
 
-constexpr const gchar* kWindowTitle = "帐屿";
+const gchar* resolve_window_title() {
+  const gchar* const* languages = g_get_language_names();
+  if (languages != nullptr) {
+    for (const gchar* const* it = languages; *it != nullptr; ++it) {
+      const gchar* lang = *it;
+      if (lang[0] == '\0') {
+        continue;
+      }
+      if (g_ascii_strcasecmp(lang, "C") == 0 ||
+          g_ascii_strcasecmp(lang, "POSIX") == 0) {
+        break;
+      }
+      if (g_ascii_strncasecmp(lang, "zh", 2) == 0 &&
+          (lang[2] == '\0' || lang[2] == '_' || lang[2] == '-' ||
+           lang[2] == '.' || lang[2] == '@')) {
+        return "帐屿";
+      }
+      break;
+    }
+  }
+  return "TallyIsle";
+}
+
 constexpr const gchar* kRelativeLogoAssetPath =
     "data/flutter_assets/assets/branding/tallyisle-logo-original.png";
 
@@ -100,11 +122,12 @@ static void my_application_activate(GApplication* application) {
   // GNOME Shell). On KDE Plasma (Wayland and X11) and other window managers,
   // let KWin / native WM draw native titlebars instead of a GNOME HeaderBar.
   const gboolean use_header_bar = should_use_gnome_header_bar(window);
-  gtk_window_set_title(window, kWindowTitle);
+  const gchar* window_title = resolve_window_title();
+  gtk_window_set_title(window, window_title);
   if (use_header_bar) {
     GtkHeaderBar* header_bar = GTK_HEADER_BAR(gtk_header_bar_new());
     gtk_widget_show(GTK_WIDGET(header_bar));
-    gtk_header_bar_set_title(header_bar, kWindowTitle);
+    gtk_header_bar_set_title(header_bar, window_title);
     gtk_header_bar_set_show_close_button(header_bar, TRUE);
     gtk_window_set_titlebar(window, GTK_WIDGET(header_bar));
   }

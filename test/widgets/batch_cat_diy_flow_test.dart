@@ -543,7 +543,7 @@ void main() {
       );
       await settle(tester);
 
-      // Top section header, preview, default account, and up/down arrow buttons are absent.
+      // Old header, preview, default account, and up/down arrow buttons are absent.
       expect(find.text('工具栏项目与顺序'), findsNothing);
       expect(find.text('工具栏预览'), findsNothing);
       expect(find.text('默认账户'), findsNothing);
@@ -552,12 +552,16 @@ void main() {
       expect(find.byKey(const Key('diy-up-tags')), findsNothing);
       expect(find.byKey(const Key('diy-down-tags')), findsNothing);
 
+      // Two-group split headers and fixed-switches card are present.
+      expect(find.text('工具栏项目（可拖拽排序）'), findsOneWidget);
+      expect(find.text('账户与日期时间固定在工具栏最前常驻'), findsOneWidget);
+
       Switch switchFor(String key) =>
           tester.widget<Switch>(find.byKey(Key('diy-switch-$key')));
 
       expect(switchFor('tags').value, isTrue);
 
-      // Seed custom date/time picker styles & default account in ti_preference and ensure UI setEnabled & moveItem preserve them.
+      // Seed custom date/time picker styles & default account in ti_preference and ensure UI setEnabled & moveSortableItem preserve them.
       await tester.runAsync(() async {
         final current = await attService.getDiyToolbarConfig();
         await attService.saveDiyToolbarConfig(
@@ -575,6 +579,20 @@ void main() {
       });
       await settle(tester);
 
+      // Mobile long-press drag reorder on the 7-item sortable pill group (move images above tags).
+      final rowImages = find.byKey(const ValueKey('diy-row-images'));
+      final rowTags = find.byKey(const ValueKey('diy-row-tags'));
+      final dragStart = tester.getCenter(rowImages);
+      final dragOffset = tester.getCenter(rowTags) - dragStart;
+      final dragGesture = await tester.startGesture(dragStart);
+      await tester.pump(kLongPressTimeout + const Duration(milliseconds: 100));
+      for (var i = 0; i < 12; i++) {
+        await dragGesture.moveBy(dragOffset / 12.0);
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      await dragGesture.up();
+      await settle(tester);
+
       await tester.tap(find.byKey(const Key('diy-switch-tags')));
       await settle(tester);
       expect(switchFor('tags').value, isFalse);
@@ -585,6 +603,16 @@ void main() {
         scrollable: find.byType(Scrollable).last,
       );
       await settle(tester);
+      expect(find.text('记账辅助开关（固定位置无需排序）'), findsOneWidget);
+      expect(find.byKey(const Key('diy-fixed-switches-card')), findsOneWidget);
+      for (final fixedKey in const <String>[
+        'templates',
+        'frequent_remarks',
+        'keypad_mul_div',
+        'auto_select_first_cat',
+      ]) {
+        expect(find.byKey(Key('diy-drag-handle-$fixedKey')), findsNothing);
+      }
       expect(switchFor('frequent_remarks').value, isFalse);
 
       await tester.tap(find.byKey(const Key('diy-switch-frequent_remarks')));
@@ -619,23 +647,6 @@ void main() {
       await settle(tester);
       expect(switchFor('auto_select_first_cat').value, isTrue);
 
-      final rowAutoCat = find.byKey(
-        const ValueKey('diy-row-auto_select_first_cat'),
-      );
-      final rowMulDiv = find.byKey(const ValueKey('diy-row-keypad_mul_div'));
-      await tester.ensureVisible(rowAutoCat);
-      await settle(tester);
-      final dragStart = tester.getCenter(rowAutoCat);
-      final dragOffset = tester.getCenter(rowMulDiv) - dragStart;
-      final dragGesture = await tester.startGesture(dragStart);
-      await tester.pump(kLongPressTimeout + const Duration(milliseconds: 100));
-      for (var i = 0; i < 12; i++) {
-        await dragGesture.moveBy(dragOffset / 12.0);
-        await tester.pump(const Duration(milliseconds: 16));
-      }
-      await dragGesture.up();
-      await settle(tester);
-
       final persistedAfterEdits = await tester.runAsync(
         attService.getDiyToolbarConfig,
       );
@@ -646,8 +657,17 @@ void main() {
         isTrue,
       );
       expect(
-        persistedAfterEdits.items[9].action,
-        DiyToolbarAction.autoSelectFirstCategory,
+        persistedAfterEdits.sortableItems.first.action,
+        DiyToolbarAction.images,
+      );
+      expect(
+        persistedAfterEdits.fixedSwitchItems.map((e) => e.action).toList(),
+        const <DiyToolbarAction>[
+          DiyToolbarAction.templates,
+          DiyToolbarAction.frequentRemarks,
+          DiyToolbarAction.keypadMultiplyDivide,
+          DiyToolbarAction.autoSelectFirstCategory,
+        ],
       );
       expect(persistedAfterEdits.datePickerStyle, RecordDatePickerStyle.wheel);
       expect(persistedAfterEdits.timePickerStyle, RecordTimePickerStyle.dial);

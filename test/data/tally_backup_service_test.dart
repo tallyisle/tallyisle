@@ -721,6 +721,15 @@ void main() {
                 'create_date': 1700000000000,
               },
             ],
+            'currency': <Map<String, Object?>>[
+              <String, Object?>{
+                'code': 'CNY',
+                'name': '人民币',
+                'symbol': '¥',
+                'rate_to_anchor': '1',
+                'anchor_code': 'CNY',
+              },
+            ],
           },
           createdAtMs: 1793952000000,
         );
@@ -773,6 +782,15 @@ void main() {
           tables: <String, List<Map<String, Object?>>>{
             'account_book': <Map<String, Object?>>[
               <String, Object?>{'id': 1, 'name': '新账本', 'create_date': 1000},
+            ],
+            'currency': <Map<String, Object?>>[
+              <String, Object?>{
+                'code': 'CNY',
+                'name': '人民币',
+                'symbol': '¥',
+                'rate_to_anchor': '1',
+                'anchor_code': 'CNY',
+              },
             ],
           },
           attachments: <String, Uint8List>{

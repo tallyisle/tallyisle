@@ -14,6 +14,9 @@ import '../../data/db/database.dart';
 import '../../domain/ledger/record_extra.dart';
 import '../../domain/ledger/record_relations.dart';
 import '../../domain/model/codes.dart';
+import '../../domain/rules/asset_overview.dart' show normalizeCurrency;
+import '../../domain/rules/currency_rates.dart'
+    show baseCurrency, defaultCurrencySymbol;
 import '../attachments/attachment_providers.dart';
 import '../common/catalog_icons.dart';
 import '../common/common.dart';
@@ -101,6 +104,7 @@ class RecordDetailPage extends ConsumerStatefulWidget {
 
 class _RecordDetailPageState extends ConsumerState<RecordDetailPage> {
   final ids = CommandIds();
+  int _opSeq = 0;
   bool busy = false;
   String? error;
 
@@ -111,6 +115,29 @@ class _RecordDetailPageState extends ConsumerState<RecordDetailPage> {
       busy = false;
       error = null;
     }
+  }
+
+  String _resolveOriginCurrency(LedgerRecord r, List<Asset> allAssets) {
+    final snap = RecordExtra.parse(r.extraInfo).currency;
+    final ac = normalizeCurrency(snap?.assetCode);
+    if (ac != null) return ac;
+    final aid = r.type == RecordType.reimbursable ? r.fromAssetId : r.assetId;
+    if (aid != noRef) {
+      final a = allAssets.where((x) => x.id == aid).firstOrNull;
+      final c = normalizeCurrency(a?.currency);
+      if (c != null) return c;
+    }
+    return baseCurrency;
+  }
+
+  String _symbolForCurrency(String code) {
+    final currencies = ref.read(currenciesProvider).value ?? const <Currency>[];
+    for (final c in currencies) {
+      if (normalizeCurrency(c.code) == code && c.symbol.trim().isNotEmpty) {
+        return c.symbol.trim();
+      }
+    }
+    return defaultCurrencySymbol(code);
   }
 
   Future<List<Asset>> _loadEligibleAssets() async {
@@ -327,16 +354,25 @@ class _RecordDetailPageState extends ConsumerState<RecordDetailPage> {
   }
 
   Future<void> _addLink(LedgerRecord r, {required bool refund}) async {
-    final assets = await _loadEligibleAssets();
+    final allAssets = await _loadEligibleAssets();
     if (!mounted) return;
+    final originCurrency = _resolveOriginCurrency(r, allAssets);
+    final sameCurrencyAssets = allAssets
+        .where(
+          (a) =>
+              (normalizeCurrency(a.currency) ?? baseCurrency) == originCurrency,
+        )
+        .toList();
+    final currencySymbol = _symbolForCurrency(originCurrency);
     final input = await showDialog<(Money, int)>(
       context: context,
       builder: (_) => _LinkDialog(
         title: refund ? '添加退款' : '登记报销款',
-        assets: assets,
+        assets: sameCurrencyAssets,
         initialAsset: refund
             ? (r.type == RecordType.reimbursable ? r.fromAssetId : r.assetId)
             : noRef,
+        currencySymbol: currencySymbol,
       ),
     );
     if (input == null || !mounted) return;
@@ -347,15 +383,23 @@ class _RecordDetailPageState extends ConsumerState<RecordDetailPage> {
     try {
       final service = await ref.read(ledgerServiceProvider.future);
       final (amount, assetId) = input;
-      final payload = [refund, r.recordId, amount.toJson(), assetId];
-      final now = DateTime.now().millisecondsSinceEpoch;
+      final seq = _opSeq++;
+      final opTimeMs = DateTime.now().millisecondsSinceEpoch;
+      final payload = [
+        refund,
+        r.recordId,
+        amount.toJson(),
+        assetId,
+        opTimeMs,
+        seq,
+      ];
       if (refund) {
         await service.addRefund(
           commandId: ids.forPayload(payload),
           originId: r.recordId,
           amount: amount,
           assetId: assetId,
-          recordTime: now,
+          recordTime: opTimeMs,
         );
       } else {
         await service.addReimbursement(
@@ -363,7 +407,7 @@ class _RecordDetailPageState extends ConsumerState<RecordDetailPage> {
           originId: r.recordId,
           amount: amount,
           assetId: assetId,
-          recordTime: now,
+          recordTime: opTimeMs,
         );
       }
     } catch (e) {
@@ -374,15 +418,24 @@ class _RecordDetailPageState extends ConsumerState<RecordDetailPage> {
   }
 
   Future<void> _settleAdvance(LedgerRecord r) async {
-    final assets = await _loadEligibleAssets();
+    final allAssets = await _loadEligibleAssets();
     if (!mounted) return;
+    final originCurrency = _resolveOriginCurrency(r, allAssets);
+    final sameCurrencyAssets = allAssets
+        .where(
+          (a) =>
+              (normalizeCurrency(a.currency) ?? baseCurrency) == originCurrency,
+        )
+        .toList();
+    final currencySymbol = _symbolForCurrency(originCurrency);
     final input = await showDialog<(Money, int, bool)>(
       context: context,
       builder: (_) => _SettleAdvanceDialog(
         isIncome: r.type == RecordType.advanceIncome,
         defaultAmount: formatMinor(r.moneyMinor),
-        assets: assets,
+        assets: sameCurrencyAssets,
         initialAsset: r.assetId,
+        currencySymbol: currencySymbol,
       ),
     );
     if (input == null || !mounted) return;
@@ -393,6 +446,8 @@ class _RecordDetailPageState extends ConsumerState<RecordDetailPage> {
     try {
       final service = await ref.read(ledgerServiceProvider.future);
       final (amount, assetId, finish) = input;
+      final seq = _opSeq++;
+      final opTimeMs = DateTime.now().millisecondsSinceEpoch;
       final settledId = await service.settleAdvance(
         commandId: ids.forPayload([
           'settle-advance',
@@ -400,11 +455,13 @@ class _RecordDetailPageState extends ConsumerState<RecordDetailPage> {
           amount.toJson(),
           assetId,
           finish,
+          opTimeMs,
+          seq,
         ]),
         originId: r.recordId,
         amount: amount,
         assetId: assetId,
-        recordTime: DateTime.now().millisecondsSinceEpoch,
+        recordTime: opTimeMs,
         finish: finish,
       );
       if (mounted) {
@@ -907,10 +964,12 @@ class _LinkDialog extends StatefulWidget {
     required this.title,
     required this.assets,
     required this.initialAsset,
+    this.currencySymbol = '¥',
   });
   final String title;
   final List<Asset> assets;
   final int initialAsset;
+  final String currencySymbol;
   @override
   State<_LinkDialog> createState() => _LinkDialogState();
 }
@@ -943,7 +1002,7 @@ class _LinkDialogState extends State<_LinkDialog> {
           inputFormatters: _amountInputFormatters,
           decoration: InputDecoration(
             labelText: '金额',
-            prefixText: '¥ ',
+            prefixText: '${widget.currencySymbol} ',
             errorText: error,
             border: fieldBorder,
           ),
@@ -1009,11 +1068,13 @@ class _SettleAdvanceDialog extends StatefulWidget {
     required this.defaultAmount,
     required this.assets,
     required this.initialAsset,
+    this.currencySymbol = '¥',
   });
   final bool isIncome;
   final String defaultAmount;
   final List<Asset> assets;
   final int initialAsset;
+  final String currencySymbol;
   @override
   State<_SettleAdvanceDialog> createState() => _SettleAdvanceDialogState();
 }
@@ -1047,7 +1108,7 @@ class _SettleAdvanceDialogState extends State<_SettleAdvanceDialog> {
           inputFormatters: _amountInputFormatters,
           decoration: InputDecoration(
             labelText: '实际结算金额',
-            prefixText: '¥ ',
+            prefixText: '${widget.currencySymbol} ',
             errorText: error,
             border: fieldBorder,
           ),

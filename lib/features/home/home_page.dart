@@ -11,6 +11,7 @@ import '../../data/db/database.dart';
 import '../../domain/model/codes.dart';
 import '../../domain/rules/app_settings_rules.dart';
 import '../../domain/rules/asset_overview.dart';
+import '../../domain/rules/billing_period.dart';
 import '../../domain/rules/income_expense.dart';
 import '../books/book_switcher_modal.dart';
 import '../backup/mobile_sync_backup_quick_sheet.dart';
@@ -19,6 +20,7 @@ import '../budget/budget_providers.dart'
 import '../budget/budget_widgets.dart';
 import '../common/catalog_icons.dart';
 import '../common/common.dart';
+import '../common/year_month_picker_dialog.dart';
 import '../receipt/record_receipt_dialog.dart' show showRecordReceiptDialog;
 import '../records/record_detail_page.dart'
     show RecordDetailPage, isGeneratedTransferFeeRecord, isRecordEditable;
@@ -262,7 +264,11 @@ class _HomePageState extends ConsumerState<HomePage> {
                     children: [
                       Flexible(
                         child: Text(
-                          book.value?.name ?? '帐屿',
+                          book.value?.name ??
+                              (Localizations.localeOf(context).languageCode ==
+                                      'zh'
+                                  ? '帐屿'
+                                  : 'TallyIsle'),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -317,6 +323,26 @@ class _HomePageState extends ConsumerState<HomePage> {
       _pickingBook = false;
     }
   }
+}
+
+Future<void> _openHomePeriodPicker(BuildContext context, WidgetRef ref) async {
+  final book = ref.read(currentBookProvider).value;
+  final startDay = book?.startDay ?? 1;
+  final activeNowPeriod = BillingPeriod.containing(DateTime.now(), startDay);
+  final currentPeriod =
+      ref.read(currentPeriodProvider).value ?? activeNowPeriod;
+  final picked = await showYearMonthPickerDialog(
+    context,
+    initialYear: currentPeriod.year,
+    initialMonth: currentPeriod.month,
+    currentYear: activeNowPeriod.year,
+    currentMonth: activeNowPeriod.month,
+  );
+  if (picked == null || !context.mounted) return;
+  final nowPeriod = BillingPeriod.containing(DateTime.now(), startDay);
+  final newOffset =
+      (picked.year - nowPeriod.year) * 12 + (picked.month - nowPeriod.month);
+  ref.read(periodOffsetProvider.notifier).setOffset(newOffset);
 }
 
 class _HomeResetPeriodPill extends StatelessWidget {
@@ -398,20 +424,38 @@ class _HomeBody extends ConsumerWidget {
                         children: [
                           Flexible(
                             child: InkWell(
-                              borderRadius: BorderRadius.circular(6),
-                              onTap: periodOffset != 0 ? offset.reset : null,
+                              key: const Key('home-period-picker-trigger'),
+                              borderRadius: BorderRadius.circular(8),
+                              onTap: () => _openHomePeriodPicker(context, ref),
                               child: Padding(
                                 padding: const EdgeInsets.symmetric(
-                                  horizontal: 4,
+                                  horizontal: 6,
                                   vertical: 2,
                                 ),
-                                child: Text(
-                                  periodTitle,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: Theme.of(
-                                    context,
-                                  ).textTheme.titleMedium,
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Flexible(
+                                      child: Text(
+                                        periodTitle,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: Theme.of(
+                                          context,
+                                        ).textTheme.titleMedium,
+                                      ),
+                                    ),
+                                    if (periodTitle.isNotEmpty) ...[
+                                      const SizedBox(width: 2),
+                                      Icon(
+                                        Icons.arrow_drop_down,
+                                        size: 18,
+                                        color: Theme.of(
+                                          context,
+                                        ).colorScheme.onSurfaceVariant,
+                                      ),
+                                    ],
+                                  ],
                                 ),
                               ),
                             ),
@@ -601,6 +645,7 @@ class _DesktopHomeBody extends ConsumerWidget {
                 periodOffset: periodOffset,
                 onPreviousPeriod: offset.previous,
                 onNextPeriod: offset.next,
+                onPickPeriod: () => _openHomePeriodPicker(context, ref),
                 onResetPeriod: offset.reset,
                 summary: summary.value ?? IncomeExpense.zero,
                 showAssetBanner: settings.showHomeAssetSummaryBanner,
@@ -632,20 +677,39 @@ class _DesktopHomeBody extends ConsumerWidget {
                           children: [
                             Flexible(
                               child: InkWell(
-                                borderRadius: BorderRadius.circular(6),
-                                onTap: periodOffset != 0 ? offset.reset : null,
+                                key: const Key('home-period-picker-trigger'),
+                                borderRadius: BorderRadius.circular(8),
+                                onTap: () =>
+                                    _openHomePeriodPicker(context, ref),
                                 child: Padding(
                                   padding: const EdgeInsets.symmetric(
-                                    horizontal: 4,
+                                    horizontal: 6,
                                     vertical: 2,
                                   ),
-                                  child: Text(
-                                    periodTitle,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: Theme.of(
-                                      context,
-                                    ).textTheme.titleMedium,
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Flexible(
+                                        child: Text(
+                                          periodTitle,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: Theme.of(
+                                            context,
+                                          ).textTheme.titleMedium,
+                                        ),
+                                      ),
+                                      if (periodTitle.isNotEmpty) ...[
+                                        const SizedBox(width: 2),
+                                        Icon(
+                                          Icons.arrow_drop_down,
+                                          size: 18,
+                                          color: Theme.of(
+                                            context,
+                                          ).colorScheme.onSurfaceVariant,
+                                        ),
+                                      ],
+                                    ],
                                   ),
                                 ),
                               ),
@@ -762,6 +826,7 @@ class _DesktopExpandedOverviewHeader extends ConsumerWidget {
     required this.periodOffset,
     required this.onPreviousPeriod,
     required this.onNextPeriod,
+    required this.onPickPeriod,
     required this.onResetPeriod,
     required this.summary,
     required this.showAssetBanner,
@@ -775,6 +840,7 @@ class _DesktopExpandedOverviewHeader extends ConsumerWidget {
   final int periodOffset;
   final VoidCallback onPreviousPeriod;
   final VoidCallback onNextPeriod;
+  final VoidCallback onPickPeriod;
   final VoidCallback onResetPeriod;
   final IncomeExpense summary;
   final bool showAssetBanner;
@@ -816,20 +882,32 @@ class _DesktopExpandedOverviewHeader extends ConsumerWidget {
           ConstrainedBox(
             constraints: const BoxConstraints(minWidth: 96),
             child: InkWell(
-              borderRadius: BorderRadius.circular(6),
-              onTap: periodOffset != 0 ? onResetPeriod : null,
+              key: const Key('home-period-picker-trigger'),
+              borderRadius: BorderRadius.circular(8),
+              onTap: onPickPeriod,
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                child: Center(
-                  widthFactor: 1.0,
-                  child: Text(
-                    periodTitle,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w600,
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      periodTitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
-                  ),
+                    if (periodTitle.isNotEmpty) ...[
+                      const SizedBox(width: 2),
+                      Icon(
+                        Icons.arrow_drop_down,
+                        size: 18,
+                        color: scheme.onSurfaceVariant,
+                      ),
+                    ],
+                  ],
                 ),
               ),
             ),

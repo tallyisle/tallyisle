@@ -12,10 +12,10 @@ import '../domain/rules/app_settings_rules.dart';
 import '../domain/rules/cloud_sync_rules.dart';
 import '../features/automation/automation_providers.dart';
 import '../features/backup/backup_providers.dart';
+import '../features/backup/post_restore_refresh.dart';
 import '../features/currencies/currency_rate_providers.dart';
 import '../features/deposit/fixed_deposit_providers.dart';
 import '../features/installment/installment_providers.dart';
-import '../features/migration/migration_providers.dart';
 import '../features/periodic/periodic_providers.dart';
 import '../features/reminder/reminder_providers.dart';
 import '../features/savings/savings_providers.dart';
@@ -60,7 +60,7 @@ ThemeData _buildDesktopTheme(ThemeData base) => base.copyWith(
 );
 
 String brandName(Locale locale) =>
-    locale.languageCode == 'zh' ? '帐屿' : 'TallyIsle';
+    locale.languageCode.toLowerCase() == 'zh' ? '帐屿' : 'TallyIsle';
 
 /// Subclasses [AppLifecycleListener] to wire [onExitRequested] for desktop
 /// window-close requests while delegating lifecycle state transitions to
@@ -157,15 +157,21 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
         service: service,
         onCloudSyncOutcome: (outcome) {
           if (_disposed || !mounted) return;
-          _applyCloudSyncOutcome(outcome);
-          if (outcome.status == CloudSyncStatus.pulled) {
-            unawaited(_syncWidgetSnapshotSafely());
-          }
+          unawaited(_applyCloudSyncOutcome(outcome));
         },
         onLocalBackupCreated: (_) {
           if (!_disposed && mounted) {
             ref
               ..invalidate(localBackupsProvider)
+              ..invalidate(lastBackupAtMsProvider);
+          }
+        },
+        onCloudBackupUploaded: (_) {
+          if (!_disposed && mounted) {
+            ref
+              ..invalidate(webDavBackupsProvider)
+              ..invalidate(s3BackupsProvider)
+              ..invalidate(activeCloudBackupsProvider)
               ..invalidate(lastBackupAtMsProvider);
           }
         },
@@ -175,20 +181,6 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
     await scheduler.start();
     if (_disposed || !mounted) return null;
     return scheduler;
-  }
-
-  Future<void> _syncWidgetSnapshotSafely() async {
-    if (_disposed || !mounted) return;
-    try {
-      final widgetService = await ref.read(
-        widgetSnapshotServiceProvider.future,
-      );
-      if (!_disposed && mounted) {
-        await widgetService.syncToPlatform();
-      }
-    } catch (_) {
-      // Non-blocking widget snapshot sync.
-    }
   }
 
   Future<AppExitResponse> _handleExitRequested() async {
@@ -209,7 +201,7 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
     return AppExitResponse.exit;
   }
 
-  void _applyCloudSyncOutcome(CloudSyncOutcome outcome) {
+  Future<void> _applyCloudSyncOutcome(CloudSyncOutcome outcome) async {
     if (_disposed || !mounted) return;
     ref
       ..invalidate(localBackupsProvider)
@@ -219,18 +211,45 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
       ..invalidate(cloudSyncCursorProvider)
       ..invalidate(lastBackupAtMsProvider);
     if (outcome.status == CloudSyncStatus.pulled) {
-      ref.read(periodOffsetProvider.notifier).reset();
-      ref.read(calendarMonthOffsetProvider.notifier).reset();
-      ref
-        ..invalidate(currentBookIdProvider)
-        ..invalidate(booksProvider)
-        ..invalidate(assetsProvider)
-        ..invalidate(assetBooksProvider)
-        ..invalidate(currenciesProvider)
-        ..invalidate(tagsProvider)
-        ..invalidate(remindersProvider)
-        ..invalidate(reminderCountProvider)
-        ..invalidate(migrationLocalSummaryProvider);
+      await invalidateAllAfterDatabaseReplace(ref);
+      return;
+    }
+    if (outcome.status == CloudSyncStatus.conflict) {
+      _notifyBackgroundSyncConflictSafely(outcome);
+    }
+  }
+
+  void _notifyBackgroundSyncConflictSafely(CloudSyncOutcome outcome) {
+    if (_disposed || !mounted) return;
+    try {
+      final currentUri = router.routeInformationProvider.value.uri.toString();
+      if (currentUri.startsWith('/backup')) {
+        return;
+      }
+      final navContext = router.routerDelegate.navigatorKey.currentContext;
+      final messenger = navContext == null
+          ? null
+          : ScaffoldMessenger.maybeOf(navContext);
+      if (messenger == null) return;
+      final backupLabel = outcome.conflictBackupFileName ?? 'conflict_*.tally';
+      messenger
+        ..clearSnackBars()
+        ..showSnackBar(
+          SnackBar(
+            key: const Key('background_sync_conflict_snackbar'),
+            content: Text('检测到多端云同步冲突，本机快照已保护存为 $backupLabel'),
+            action: SnackBarAction(
+              label: '去处理',
+              onPressed: () {
+                if (!_disposed && mounted) {
+                  _handleLaunchRoute('/backup');
+                }
+              },
+            ),
+          ),
+        );
+    } catch (_) {
+      // Never allow background conflict notification to crash UI.
     }
   }
 
@@ -357,6 +376,14 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
         if (_disposed || !mounted) return;
         await service.ingestCapturedEvents();
       });
+      // Run cloud sync / 24h silent cloud backup BEFORE local auto-plan
+      // catch-ups so a fresh remote snapshot is pulled first instead of
+      // generating local due bills that trigger spurious conflicts (`S-05`).
+      await safeStep(() async {
+        final scheduler = await _ensureBackupSyncScheduler();
+        if (_disposed || !mounted || scheduler == null) return;
+        await scheduler.onAppResumedOrFocused(isInitialStartup: isInitial);
+      });
       await safeStep(() async {
         final service = await ref.read(periodicServiceProvider.future);
         if (_disposed || !mounted) return;
@@ -401,11 +428,6 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
         if (synced.updatedCount > 0) {
           ref.invalidate(currenciesProvider);
         }
-      });
-      await safeStep(() async {
-        final scheduler = await _ensureBackupSyncScheduler();
-        if (_disposed || !mounted || scheduler == null) return;
-        await scheduler.onAppResumedOrFocused(isInitialStartup: isInitial);
       });
       await safeStep(() async {
         final service = await ref.read(widgetSnapshotServiceProvider.future);
@@ -465,7 +487,10 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
       scrollBehavior: _appScrollBehavior,
       localizationsDelegates: GlobalMaterialLocalizations.delegates,
       supportedLocales: const [Locale('zh'), Locale('en')],
-      locale: const Locale('zh'),
+      localeResolutionCallback: (locale, supportedLocales) =>
+          locale?.languageCode.toLowerCase() == 'zh'
+          ? const Locale('zh')
+          : const Locale('en'),
       themeMode: themeMode,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(

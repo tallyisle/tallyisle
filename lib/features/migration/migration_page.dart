@@ -7,19 +7,17 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../app/adaptive.dart';
-import '../../app/providers.dart';
 import '../../core/failure.dart';
 import '../../data/migration/cross_migration_service.dart';
 import '../../domain/rules/penny_backup.dart';
 import '../../platform/files.dart';
+import '../backup/post_restore_refresh.dart';
 import '../common/common.dart';
 import '../common/desktop_modal_page.dart';
 import '../csv_transfer/csv_import_page.dart';
 import '../csv_transfer/import_batches_page.dart';
 import '../me/me_page.dart' show MeEmbeddedNavigationScope;
 import '../penny_import/penny_import_providers.dart';
-import '../receipt/receipt_diy_providers.dart' show diyToolbarConfigProvider;
-import '../reminder/reminder_providers.dart';
 import 'migration_providers.dart';
 
 /// Modular third-party & legacy data import hub (`第三方数据导入`, `F-035`,
@@ -75,21 +73,7 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
     });
   }
 
-  void _refreshProviders() {
-    ref.read(periodOffsetProvider.notifier).reset();
-    ref.read(calendarMonthOffsetProvider.notifier).reset();
-    ref
-      ..invalidate(migrationLocalSummaryProvider)
-      ..invalidate(booksProvider)
-      ..invalidate(currentBookIdProvider)
-      ..invalidate(assetsProvider)
-      ..invalidate(assetBooksProvider)
-      ..invalidate(currenciesProvider)
-      ..invalidate(tagsProvider)
-      ..invalidate(diyToolbarConfigProvider)
-      ..invalidate(remindersProvider)
-      ..invalidate(reminderCountProvider);
-  }
+  Future<void> _refreshProviders() => invalidateAllAfterDatabaseReplace(ref);
 
   Future<PennyPickedFile?> _pickPennyFile() async {
     final picker = ref.read(pennyFilePickerProvider);
@@ -148,7 +132,9 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
         fileName: picked.name,
         bytes: picked.bytes,
       );
-      _refreshProviders();
+      if (mounted) {
+        await _refreshProviders();
+      }
       _setStatus(
         '原版 Android 备份导入完成：已切换至「${result.preview.targetBookName}」，共恢复 '
         '${result.preview.bookCount} 个账本、${result.preview.assetCount} 个账户、'
@@ -314,7 +300,9 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
       commandId: commandId,
       payload: preview.payload,
     );
-    _refreshProviders();
+    if (mounted) {
+      await _refreshProviders();
+    }
     final kindLabel = preview.sourceKind == MigrationSourceKind.yi2a
         ? '原版 iOS 迁移包导入完成'
         : '原版局域网备份恢复完成';

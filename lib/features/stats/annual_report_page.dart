@@ -9,6 +9,7 @@ import '../../app/providers.dart';
 import '../../domain/rules/annual_report.dart';
 import '../common/common.dart';
 import '../common/desktop_modal_page.dart';
+import '../common/year_month_picker_dialog.dart';
 import '../records/record_detail_page.dart';
 import 'annual_report_providers.dart';
 
@@ -107,11 +108,6 @@ class _AnnualReportPageState extends ConsumerState<AnnualReportPage> {
 
     final targetBookId = _allBooks ? null : currentBookId;
 
-    final availableYearsAsync = ref.watch(
-      annualAvailableYearsProvider(targetBookId),
-    );
-    final availableYears = availableYearsAsync.value ?? [selectedYear];
-
     final reportAsync = ref.watch(
       annualReportDataProvider((
         year: selectedYear,
@@ -167,7 +163,7 @@ class _AnnualReportPageState extends ConsumerState<AnnualReportPage> {
       body: Column(
         children: [
           // Year Picker & Tab Switcher Bar
-          _buildTopControls(availableYears, selectedYear),
+          _buildTopControls(selectedYear),
           const Divider(height: 1),
 
           // Content Area: Synced 2-page PageView (年度账单 ⇄ 年度报告)
@@ -221,8 +217,9 @@ class _AnnualReportPageState extends ConsumerState<AnnualReportPage> {
     );
   }
 
-  Widget _buildTopControls(List<int> availableYears, int selectedYear) {
+  Widget _buildTopControls(int selectedYear) {
     final isExpandedDesktop = DesktopAdaptive.isExpandedDesktop(context);
+    final showResetPill = selectedYear != DateTime.now().year;
 
     final yearSelectorRow = Row(
       mainAxisSize: MainAxisSize.min,
@@ -236,26 +233,43 @@ class _AnnualReportPageState extends ConsumerState<AnnualReportPage> {
             _setSelectedYear(selectedYear - 1);
           },
         ),
-        InkWell(
-          key: const Key('annual-report-year-picker-button'),
-          borderRadius: BorderRadius.circular(8),
-          onTap: () => _showYearPickerDialog(availableYears, selectedYear),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            child: Row(
-              children: [
-                Text(
-                  '$selectedYear年',
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
+        Flexible(
+          child: InkWell(
+            key: const Key('annual-report-year-picker-trigger'),
+            borderRadius: BorderRadius.circular(8),
+            onTap: () => _showYearPickerDialog(selectedYear),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Flexible(
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        '$selectedYear年',
+                        maxLines: 1,
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
                   ),
-                ),
-                const Icon(Icons.arrow_drop_down),
-              ],
+                  const Icon(Icons.arrow_drop_down),
+                ],
+              ),
             ),
           ),
         ),
+        if (showResetPill) ...[
+          const SizedBox(width: 6),
+          PeriodResetPill(
+            key: const Key('annual-report-year-reset'),
+            label: '回本年',
+            onTap: () => _setSelectedYear(DateTime.now().year),
+          ),
+        ],
         IconButton(
           key: const Key('annual-report-next-year-button'),
           icon: const Icon(Icons.chevron_right),
@@ -312,7 +326,7 @@ class _AnnualReportPageState extends ConsumerState<AnnualReportPage> {
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
             child: Row(
               children: [
-                yearSelectorRow,
+                Flexible(child: yearSelectorRow),
                 const Spacer(),
                 SizedBox(width: 280, child: segmentedTabs),
               ],
@@ -343,53 +357,14 @@ class _AnnualReportPageState extends ConsumerState<AnnualReportPage> {
     );
   }
 
-  void _showYearPickerDialog(List<int> availableYears, int selectedYear) {
-    showDialog<int>(
-      context: context,
-      builder: (ctx) {
-        final sortedYears = {...availableYears, selectedYear}.toList()
-          ..sort((a, b) => b.compareTo(a));
-        return SimpleDialog(
-          title: const Text('选择年份'),
-          children: sortedYears.map((y) {
-            final isSelected = y == selectedYear;
-            return SimpleDialogOption(
-              onPressed: () => Navigator.pop(ctx, y),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      '$y年',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: isSelected
-                            ? FontWeight.bold
-                            : FontWeight.normal,
-                        color: isSelected
-                            ? Theme.of(context).colorScheme.primary
-                            : null,
-                      ),
-                    ),
-                    if (isSelected)
-                      Icon(
-                        Icons.check,
-                        color: Theme.of(context).colorScheme.primary,
-                        size: 20,
-                      ),
-                  ],
-                ),
-              ),
-            );
-          }).toList(),
-        );
-      },
-    ).then((picked) {
-      if (picked != null) {
-        _setSelectedYear(picked);
-      }
-    });
+  Future<void> _showYearPickerDialog(int selectedYear) async {
+    final picked = await showYearOnlyPickerDialog(
+      context,
+      initialYear: selectedYear,
+    );
+    if (picked != null && mounted) {
+      _setSelectedYear(picked);
+    }
   }
 }
 

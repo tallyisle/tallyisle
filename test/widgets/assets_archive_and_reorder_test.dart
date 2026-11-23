@@ -839,7 +839,7 @@ void main() {
       neverConfig.complete(DiyToolbarConfig.defaults());
       await tester.pump();
 
-      // 5b. Desktop DiyToolbarSettingsPage drag reorder via leading drag handle!
+      // 5b. Desktop DiyToolbarSettingsPage two-group split: drag handles on 7 sortable pills only, NO drag handles on 4 fixed switches!
       await tester.binding.setSurfaceSize(const Size(1280, 800));
       addTearDown(() => tester.binding.setSurfaceSize(null));
 
@@ -855,7 +855,23 @@ void main() {
         ),
       );
       await _settle(tester);
+      expect(find.text('工具栏项目（可拖拽排序）'), findsOneWidget);
+      expect(find.text('账户与日期时间固定在工具栏最前常驻'), findsOneWidget);
       expect(find.byKey(const Key('diy-drag-handle-tags')), findsOneWidget);
+      expect(find.byKey(const Key('diy-drag-handle-images')), findsOneWidget);
+      expect(find.byKey(const Key('diy-drag-handle-templates')), findsNothing);
+      expect(
+        find.byKey(const Key('diy-drag-handle-frequent_remarks')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const Key('diy-drag-handle-keypad_mul_div')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const Key('diy-drag-handle-auto_select_first_cat')),
+        findsNothing,
+      );
 
       final handleImages = find.byKey(const Key('diy-drag-handle-images'));
       final rowTags = find.byKey(const ValueKey('diy-row-tags'));
@@ -871,7 +887,17 @@ void main() {
       await _settle(tester, 4);
 
       final cfgAfterDrag = await tester.runAsync(attSvc.getDiyToolbarConfig);
-      expect(cfgAfterDrag!.items.first.action, DiyToolbarAction.images);
+      expect(cfgAfterDrag!.sortableItems.first.action, DiyToolbarAction.images);
+      expect(cfgAfterDrag.items.first.action, DiyToolbarAction.images);
+      expect(
+        cfgAfterDrag.fixedSwitchItems.map((e) => e.action).toList(),
+        const <DiyToolbarAction>[
+          DiyToolbarAction.templates,
+          DiyToolbarAction.frequentRemarks,
+          DiyToolbarAction.keypadMultiplyDivide,
+          DiyToolbarAction.autoSelectFirstCategory,
+        ],
+      );
 
       // 5c. PeriodicPage 3-tab PageView swipe (进行中 ⇄ 已结束 ⇄ 已停用)!
       await tester.binding.setSurfaceSize(const Size(390, 844));

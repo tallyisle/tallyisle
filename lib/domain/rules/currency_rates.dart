@@ -1231,22 +1231,33 @@ String priceFromRateToAnchor(String rateToAnchor) {
 }
 
 /// Builds the `extra_info.curr` snapshot for an income/expense bill entered as
-/// [sourceMinor] in [source], booked as [assetMinor] in the account currency
-/// [account]. Returns null when every currency is the base currency.
+/// [sourceMinor] (gross) in [source] with optional [discountMinor] in [source],
+/// booked as net [assetMinor] in the account currency [account]. Returns null
+/// when every currency is the base currency.
 CurrencySnapshot? billSnapshot({
   required String source,
   required BigInt sourceMinor,
   required String account,
   required BigInt assetMinor,
   required RateTable rates,
+  BigInt? discountMinor,
 }) {
   final sc = normalizeCurrency(source) ?? baseCurrency;
   final ac = normalizeCurrency(account) ?? baseCurrency;
   if (sc == baseCurrency && ac == baseCurrency) return null;
+  final disc = discountMinor != null && discountMinor > BigInt.zero
+      ? discountMinor
+      : BigInt.zero;
+  final BigInt netSource;
+  if (disc > BigInt.zero && sourceMinor > BigInt.zero) {
+    netSource = sourceMinor > disc ? sourceMinor - disc : BigInt.zero;
+  } else {
+    netSource = sourceMinor;
+  }
   final bm = ac == baseCurrency
       ? assetMinor
       : sc == baseCurrency
-      ? sourceMinor
+      ? netSource
       : rates.convert(assetMinor, ac, baseCurrency);
   return CurrencySnapshot(
     sourceCode: sc,

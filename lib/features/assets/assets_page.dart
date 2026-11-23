@@ -287,10 +287,21 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
               )
               .toList(),
         );
+        final spendable = _applyOptimisticOrder(
+          'spendable',
+          list
+              .where(
+                (a) =>
+                    a.type != AssetType.debt && a.status == AssetStatus.active,
+              )
+              .toList(),
+        );
         final allVisibleEmpty =
             normal.isEmpty && credit.isEmpty && debts.isEmpty;
 
-        final selectableAssets = <Asset>[...normal, ...credit];
+        final selectableAssets = isManagementMode
+            ? spendable
+            : <Asset>[...normal, ...credit];
         final int? effectiveSelectedAssetId = selectableAssets.isEmpty
             ? null
             : (selectableAssets.any((a) => a.id == _selectedAssetId)
@@ -298,21 +309,46 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
                   : selectableAssets.first.id);
 
         var hintShown = false;
-        Widget header(String text) {
+        Widget header(String text, {String? subtitle}) {
           final showHint = !hintShown;
           hintShown = true;
           return Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-            child: Row(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(child: Text(text, style: theme.textTheme.labelLarge)),
-                if (showHint)
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        text,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.labelLarge,
+                      ),
+                    ),
+                    if (showHint) ...[
+                      const SizedBox(width: 8),
+                      Text(
+                        '点击自定义图标',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: theme.colorScheme.outline,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+                if (subtitle != null && subtitle.isNotEmpty) ...[
+                  const SizedBox(height: 2),
                   Text(
-                    '点击自定义图标',
+                    subtitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.labelSmall?.copyWith(
-                      color: theme.colorScheme.outline,
+                      color: theme.colorScheme.onSurfaceVariant,
                     ),
                   ),
+                ],
               ],
             ),
           );
@@ -322,6 +358,7 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
           Asset a, {
           required int index,
           bool isDebtSection = false,
+          bool showCreditBadge = false,
         }) {
           final isDebt = isDebtSection || a.type == AssetType.debt;
           void openAssetOrDebtDetail() {
@@ -350,6 +387,7 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
                 asset: a,
                 hidden: hidden,
                 isDebtSection: isDebtSection,
+                showCreditBadge: showCreditBadge,
                 onCustomizeIcon: () => _customizeAssetIcon(a),
                 onTap: openAssetOrDebtDetail,
               ),
@@ -361,6 +399,7 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
             asset: a,
             hidden: hidden,
             isDebtSection: isDebt,
+            showCreditBadge: showCreditBadge,
             standaloneManagement: isManagementMode,
             selected:
                 useMasterDetail && !isDebt && effectiveSelectedAssetId == a.id,
@@ -400,10 +439,12 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
           String groupKey,
           String title,
           List<Asset> items, {
+          String? subtitle,
           bool isDebtSection = false,
+          bool showCreditBadge = false,
         }) {
           return <Widget>[
-            SliverToBoxAdapter(child: header(title)),
+            SliverToBoxAdapter(child: header(title, subtitle: subtitle)),
             SliverReorderableList(
               key: Key('assets-reorder-$groupKey'),
               itemCount: items.length,
@@ -419,6 +460,7 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
                 items[index],
                 index: index,
                 isDebtSection: isDebtSection,
+                showCreditBadge: showCreditBadge,
               ),
             ),
           ];
@@ -592,10 +634,21 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
                 ],
               ),
             ),
-            if (normal.isNotEmpty)
-              ...buildReorderableSection('normal', '资金账户', normal),
-            if (credit.isNotEmpty)
-              ...buildReorderableSection('credit', '信用账户', credit),
+            if (isManagementMode) ...[
+              if (spendable.isNotEmpty)
+                ...buildReorderableSection(
+                  'spendable',
+                  '记账可用账户',
+                  spendable,
+                  subtitle: '可跨资金/信用穿插排序',
+                  showCreditBadge: true,
+                ),
+            ] else ...[
+              if (normal.isNotEmpty)
+                ...buildReorderableSection('normal', '资金账户', normal),
+              if (credit.isNotEmpty)
+                ...buildReorderableSection('credit', '信用账户', credit),
+            ],
             if (debts.isNotEmpty)
               ...buildReorderableSection(
                 'debts',
@@ -825,6 +878,7 @@ class _DesktopAssetTile extends StatefulWidget {
     required this.onManageDebts,
     required this.selected,
     this.isDebtSection = false,
+    this.showCreditBadge = false,
     this.standaloneManagement = false,
   });
 
@@ -838,6 +892,7 @@ class _DesktopAssetTile extends StatefulWidget {
   final VoidCallback onManageDebts;
   final bool selected;
   final bool isDebtSection;
+  final bool showCreditBadge;
   final bool standaloneManagement;
 
   @override
@@ -1034,15 +1089,28 @@ class _DesktopAssetTileState extends State<_DesktopAssetTile> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Text(
-                            asset.name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.bodyLarge?.copyWith(
-                              fontWeight: widget.selected
-                                  ? FontWeight.w600
-                                  : FontWeight.w500,
-                            ),
+                          Row(
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  asset.name,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.bodyLarge?.copyWith(
+                                    fontWeight: widget.selected
+                                        ? FontWeight.w600
+                                        : FontWeight.w500,
+                                  ),
+                                ),
+                              ),
+                              if (widget.showCreditBadge &&
+                                  asset.type == AssetType.credit) ...[
+                                const SizedBox(width: 6),
+                                _CreditTypeBadge(
+                                  key: Key('asset-credit-badge-${asset.id}'),
+                                ),
+                              ],
+                            ],
                           ),
                           if (subtitleParts.isNotEmpty) ...[
                             const SizedBox(height: 2),
@@ -1111,6 +1179,7 @@ class _AssetTile extends StatelessWidget {
     required this.onCustomizeIcon,
     required this.onTap,
     this.isDebtSection = false,
+    this.showCreditBadge = false,
   });
 
   final Asset asset;
@@ -1118,6 +1187,7 @@ class _AssetTile extends StatelessWidget {
   final VoidCallback onCustomizeIcon;
   final VoidCallback onTap;
   final bool isDebtSection;
+  final bool showCreditBadge;
 
   @override
   Widget build(BuildContext context) {
@@ -1170,7 +1240,21 @@ class _AssetTile extends StatelessWidget {
         isArchived: isArchived,
         onCustomize: onCustomizeIcon,
       ),
-      title: Text(asset.name),
+      title: showCreditBadge && credit
+          ? Row(
+              children: [
+                Flexible(
+                  child: Text(
+                    asset.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                _CreditTypeBadge(key: Key('asset-credit-badge-${asset.id}')),
+              ],
+            )
+          : Text(asset.name),
       subtitle: subtitleParts.isEmpty ? null : Text(subtitleParts.join(' · ')),
       trailing: Text(
         hidden
@@ -1180,6 +1264,31 @@ class _AssetTile extends StatelessWidget {
             : formatMinor(asset.balanceMinor),
       ),
       onTap: onTap,
+    );
+  }
+}
+
+class _CreditTypeBadge extends StatelessWidget {
+  const _CreditTypeBadge({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+      decoration: BoxDecoration(
+        color: cs.tertiaryContainer.withValues(alpha: 0.75),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        '信用',
+        style: TextStyle(
+          fontSize: 10.5,
+          fontWeight: FontWeight.w600,
+          color: cs.onTertiaryContainer,
+          height: 1.2,
+        ),
+      ),
     );
   }
 }

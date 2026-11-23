@@ -1,4 +1,4 @@
-import 'package:drift/drift.dart';
+import 'package:drift/drift.dart' hide isNull;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -8,7 +8,9 @@ import 'package:tallyisle/core/money.dart';
 import 'package:tallyisle/data/db/database.dart';
 import 'package:tallyisle/data/ledger/ledger_service.dart';
 import 'package:tallyisle/domain/model/codes.dart';
+import 'package:tallyisle/domain/rules/billing_period.dart';
 import 'package:tallyisle/features/stats/category_stats_page.dart';
+import 'package:tallyisle/features/stats/category_stats_providers.dart';
 
 Money m(String s) => Money.parse(s);
 
@@ -301,4 +303,123 @@ void main() {
     await settle();
     await tester.pump(const Duration(seconds: 1)); // drift stream-close timers
   });
+
+  testWidgets(
+    'CategoryStatsPage: year/year-month pickers respect custom startDay, show 回本月/回本年 reset pills, cancel swipe, and have zero overflow at 360x640 @ 1.2x',
+    (tester) async {
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        tester.platformDispatcher.clearTextScaleFactorTestValue();
+      });
+
+      tester.view.physicalSize = const Size(360, 640);
+      tester.view.devicePixelRatio = 1.0;
+      tester.platformDispatcher.textScaleFactorTestValue = 1.2;
+
+      final db = AppDatabase(NativeDatabase.memory());
+      await (db.update(db.accountBooks)..where((b) => b.id.equals(1))).write(
+        const AccountBooksCompanion(startDay: Value(15)),
+      );
+
+      final now = DateTime.now();
+      final curMonth = BillingPeriod.containing(now, 15);
+      final curYear = BillingPeriod.containingYear(now, 15);
+      final targetYear = curYear.year - 1;
+
+      Future<void> settle() async {
+        for (var i = 0; i < 10; i++) {
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 20)),
+          );
+          await tester.pump();
+        }
+      }
+
+      late ProviderContainer container;
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [databaseProvider.overrideWith((ref) async => db)],
+          child: Consumer(
+            builder: (context, ref, _) {
+              container = ProviderScope.containerOf(context, listen: false);
+              return const MaterialApp(home: CategoryStatsPage());
+            },
+          ),
+        ),
+      );
+      await settle();
+      expect(tester.takeException(), isNull);
+      expect(find.text('${curMonth.year}年${curMonth.month}月'), findsOneWidget);
+      expect(
+        find.byKey(const Key('category-stats-period-reset')),
+        findsNothing,
+      );
+
+      // Horizontal swipe does NOT change offset
+      await tester.drag(find.byType(ListView).first, const Offset(180, 0));
+      await settle();
+      expect(container.read(categoryStatsOffsetProvider), 0);
+
+      // Tap period trigger -> Year-Month picker -> jump to targetYear年6月
+      await tester.tap(
+        find.byKey(const Key('category-stats-period-picker-trigger')),
+      );
+      await settle();
+      expect(tester.takeException(), isNull);
+      await tester.tap(find.byKey(const Key('ym-picker-prev-year')));
+      await settle();
+      await tester.tap(find.byKey(const Key('ym-picker-month-6')));
+      await settle();
+      expect(tester.takeException(), isNull);
+      expect(
+        container.read(categoryStatsOffsetProvider),
+        (curMonth.year - 1 - curMonth.year) * 12 + (6 - curMonth.month),
+      );
+      expect(find.text('${curMonth.year - 1}年6月'), findsOneWidget);
+      expect(
+        find.byKey(const Key('category-stats-period-reset')),
+        findsOneWidget,
+      );
+      expect(find.text('回本月'), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('category-stats-period-reset')));
+      await settle();
+      expect(container.read(categoryStatsOffsetProvider), 0);
+      expect(
+        find.byKey(const Key('category-stats-period-reset')),
+        findsNothing,
+      );
+
+      // Switch to 按年 -> Year-Only picker -> jump to targetYear
+      await tester.tap(find.byKey(const Key('period-kind-year')));
+      await settle();
+      expect(find.text('${curYear.year}年'), findsOneWidget);
+
+      await tester.tap(
+        find.byKey(const Key('category-stats-period-picker-trigger')),
+      );
+      await settle();
+      expect(tester.takeException(), isNull);
+      await tester.tap(find.byKey(Key('y-picker-year-$targetYear')));
+      await settle();
+      expect(tester.takeException(), isNull);
+      expect(container.read(categoryStatsOffsetProvider), -1);
+      expect(find.text('$targetYear年'), findsOneWidget);
+      expect(
+        find.byKey(const Key('category-stats-period-reset')),
+        findsOneWidget,
+      );
+      expect(find.text('回本年'), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('category-stats-period-reset')));
+      await settle();
+      expect(container.read(categoryStatsOffsetProvider), 0);
+      expect(find.text('${curYear.year}年'), findsOneWidget);
+
+      await tester.pumpWidget(const SizedBox());
+      await settle();
+      await tester.pump(const Duration(seconds: 1));
+    },
+  );
 }

@@ -734,7 +734,8 @@ final class PeriodicService {
         if (allFacts.isNotEmpty) {
           final net = netEffects(after: allFacts);
           for (final entry in net.entries) {
-            final asset = assets[entry.key]!;
+            final asset = assets[entry.key];
+            if (asset == null || asset.type == AssetType.debt) continue;
             final updatedBalance = Money.minor(
               asset.balanceMinor + entry.value,
             );
@@ -853,6 +854,9 @@ final class PeriodicService {
     if (asset == null) {
       throw Failure(FailureCode.validation, '$label不存在');
     }
+    if (asset.type == AssetType.debt) {
+      throw Failure(FailureCode.validation, '$label不能为借贷账户');
+    }
     if (asset.status != AssetStatus.active) {
       throw Failure(FailureCode.validation, '$label已隐藏或归档，不可用于周期记账');
     }
@@ -894,9 +898,11 @@ final class PeriodicService {
       if (rule.assetId == rule.assetId2) return '转出与转入账户相同';
       final fromAsset = assets[rule.assetId];
       if (fromAsset == null) return '转出账户已删除';
+      if (fromAsset.type == AssetType.debt) return '转出账户为借贷账户，不支持周期记账';
       if (fromAsset.status != AssetStatus.active) return '转出账户已隐藏或归档';
       final toAsset = assets[rule.assetId2];
       if (toAsset == null) return '转入账户已删除';
+      if (toAsset.type == AssetType.debt) return '转入账户为借贷账户，不支持周期记账';
       if (toAsset.status != AssetStatus.active) return '转入账户已隐藏或归档';
 
       final fromCode = normalizeCurrency(fromAsset.currency) ?? baseCurrency;
@@ -923,6 +929,7 @@ final class PeriodicService {
     if (rule.assetId != noRef) {
       final asset = assets[rule.assetId];
       if (asset == null) return '关联账户已删除';
+      if (asset.type == AssetType.debt) return '关联账户为借贷账户，不支持周期记账';
       if (asset.status != AssetStatus.active) return '关联账户已隐藏或归档';
       final code = normalizeCurrency(asset.currency) ?? baseCurrency;
       if (!positiveRates.contains(code)) {

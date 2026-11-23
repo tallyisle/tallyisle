@@ -1,4 +1,4 @@
-import 'package:drift/drift.dart';
+import 'package:drift/drift.dart' hide isNull;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -324,6 +324,82 @@ void main() {
       expect(report.topExpenseCategories.first.categoryId, 500);
       expect(report.topExpenseCategories.first.categoryName, '餐饮美食');
       expect(report.topExpenseCategories.first.amount, BigInt.from(18800));
+    },
+  );
+
+  testWidgets(
+    'AnnualReportPage: year-only picker supports any year (2000..2100), shows 回本年 pill, and has zero overflow at 360x640 @ 1.2x',
+    (tester) async {
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        tester.platformDispatcher.clearTextScaleFactorTestValue();
+      });
+
+      tester.view.physicalSize = const Size(360, 640);
+      tester.view.devicePixelRatio = 1.0;
+      tester.platformDispatcher.textScaleFactorTestValue = 1.2;
+
+      final db = AppDatabase(NativeDatabase.memory());
+      addTearDown(() => db.close());
+
+      final currentYear = DateTime.now().year;
+      final arbitraryEmptyYear = currentYear - 3;
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [databaseProvider.overrideWith((ref) async => db)],
+          child: const MaterialApp(home: AnnualReportPage()),
+        ),
+      );
+      await settle(tester);
+      expect(tester.takeException(), isNull);
+      expect(find.text('$currentYear年'), findsOneWidget);
+      expect(find.byKey(const Key('annual-report-year-reset')), findsNothing);
+
+      // Tap year title -> opens Year-Only picker supporting any year even with zero records
+      await tester.tap(
+        find.byKey(const Key('annual-report-year-picker-trigger')),
+      );
+      await settle(tester);
+      expect(tester.takeException(), isNull);
+      expect(find.byKey(const Key('y-picker-jump-current')), findsNothing);
+      final targetTile = find.byKey(Key('y-picker-year-$arbitraryEmptyYear'));
+      await tester.scrollUntilVisible(
+        targetTile,
+        -120,
+        scrollable: find.byType(Scrollable).last,
+      );
+      await tester.tap(targetTile);
+      await settle(tester);
+      expect(tester.takeException(), isNull);
+      expect(find.text('$arbitraryEmptyYear年'), findsOneWidget);
+      expect(find.byKey(const Key('annual-report-year-reset')), findsOneWidget);
+      expect(find.text('回本年'), findsOneWidget);
+
+      // Re-open picker while off current year -> `本年` shortcut appears and jumps back!
+      await tester.tap(
+        find.byKey(const Key('annual-report-year-picker-trigger')),
+      );
+      await settle(tester);
+      expect(find.byKey(const Key('y-picker-jump-current')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('y-picker-jump-current')));
+      await settle(tester);
+      expect(find.text('$currentYear年'), findsOneWidget);
+      expect(find.byKey(const Key('annual-report-year-reset')), findsNothing);
+
+      // Step to previous year and reset via `回本年` pill
+      await tester.tap(find.byKey(const Key('annual-report-prev-year-button')));
+      await settle(tester);
+      expect(find.byKey(const Key('annual-report-year-reset')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('annual-report-year-reset')));
+      await settle(tester);
+      expect(find.text('$currentYear年'), findsOneWidget);
+      expect(find.byKey(const Key('annual-report-year-reset')), findsNothing);
+
+      await tester.pumpWidget(const SizedBox());
+      await settle(tester);
+      await tester.pump(const Duration(seconds: 1));
     },
   );
 }

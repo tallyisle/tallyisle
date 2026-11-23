@@ -2,12 +2,10 @@ import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../app/providers.dart';
 import '../../data/penny/penny_import_service.dart';
 import '../../domain/rules/penny_backup.dart';
+import '../backup/post_restore_refresh.dart';
 import '../common/common.dart';
-import '../migration/migration_providers.dart';
-import '../reminder/reminder_providers.dart';
 import 'penny_import_providers.dart';
 
 /// Page for importing original encrypted `.penny` / `.yy` backups (`F-035`).
@@ -93,20 +91,11 @@ class _PennyImportPageState extends ConsumerState<PennyImportPage> {
         bytes: picked.bytes,
       );
 
-      // Reset home & calendar period offsets and invalidate cached providers
-      // so the restored default book and accounts reflect immediately (R7).
-      ref.read(periodOffsetProvider.notifier).reset();
-      ref.read(calendarMonthOffsetProvider.notifier).reset();
-      ref
-        ..invalidate(currentBookIdProvider)
-        ..invalidate(booksProvider)
-        ..invalidate(assetsProvider)
-        ..invalidate(assetBooksProvider)
-        ..invalidate(currenciesProvider)
-        ..invalidate(tagsProvider)
-        ..invalidate(remindersProvider)
-        ..invalidate(reminderCountProvider)
-        ..invalidate(migrationLocalSummaryProvider);
+      // Reset period offsets, clear image caches, and invalidate all cached
+      // providers so restored books/accounts/categories reflect immediately (`S-10`).
+      if (mounted) {
+        await invalidateAllAfterDatabaseReplace(ref);
+      }
 
       if (!mounted) return;
       setState(() {

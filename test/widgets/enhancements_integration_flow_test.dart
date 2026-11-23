@@ -881,9 +881,11 @@ void main() {
       final head = CloudSyncHead.fromJson(
         jsonDecode(utf8.decode(headBytes!)) as Map<String, Object?>,
       );
+      expect(head.format, currentCloudSyncHeadFormat);
       expect(head.revision, 1);
       expect(head.recordCount, 1);
-      expect(s3Server.objects['TallyIsle/sync/latest_db.tally'], isNotNull);
+      expect(s3Server.objects['TallyIsle/${head.databasePath}'], isNotNull);
+      expect(s3Server.objects['TallyIsle/sync/latest_db.tally'], isNull);
 
       final localFiles = (await tester.runAsync(
         () =>

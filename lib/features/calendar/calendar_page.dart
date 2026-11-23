@@ -14,6 +14,7 @@ import '../../domain/rules/calendar.dart';
 import '../../domain/rules/income_expense.dart';
 import '../common/catalog_icons.dart';
 import '../common/common.dart';
+import '../common/year_month_picker_dialog.dart';
 import '../records/record_labels.dart';
 
 class CalendarPage extends ConsumerStatefulWidget {
@@ -144,6 +145,36 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
     }
   }
 
+  Future<void> _pickMonth(
+    BuildContext context,
+    CalendarMonth currentMonth,
+  ) async {
+    final picked = await showYearMonthPickerDialog(
+      context,
+      initialYear: currentMonth.year,
+      initialMonth: currentMonth.month,
+    );
+    if (picked == null || !mounted) return;
+    final now = DateTime.now();
+    final newOffset =
+        (picked.year - now.year) * 12 + (picked.month - now.month);
+    final targetMonth = ref.read(calendarMonthForOffsetProvider(newOffset));
+    final clampedDay = _selectedDay.clamp(1, targetMonth.daysInMonth);
+    if (clampedDay != _selectedDay) {
+      setState(() => _selectedDay = clampedDay);
+    }
+    ref.read(calendarMonthOffsetProvider.notifier).setOffset(newOffset);
+    final targetPage = _kBasePage + newOffset;
+    _pageController.syncedInitialPage = targetPage;
+    if (_pageController.hasClients) {
+      final currentPage =
+          _pageController.page?.round() ?? _pageController.initialPage;
+      if (currentPage != targetPage) {
+        _pageController.jumpToPage(targetPage);
+      }
+    }
+  }
+
   static int _rowCountForMonth(CalendarMonth month) {
     final leadingBlanks = (month.firstWeekday - 1) % 7;
     final totalCells = leadingBlanks + month.daysInMonth;
@@ -234,7 +265,7 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
 
     Widget buildSingleColumnBody() => Column(
       children: [
-        _buildMonthSwitcher(context, month, activeOffset: activeOffset),
+        _buildMonthSwitcher(context, month),
         _buildMonthSummaryCard(context, monthSummaryAsync),
         _buildWeekdayHeader(context),
         _buildCalendarPageView(
@@ -289,11 +320,7 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
                         padding: const EdgeInsets.symmetric(vertical: 8),
                         child: Column(
                           children: [
-                            _buildMonthSwitcher(
-                              context,
-                              month,
-                              activeOffset: activeOffset,
-                            ),
+                            _buildMonthSwitcher(context, month),
                             const SizedBox(height: 4),
                             _buildMonthSummaryCard(context, monthSummaryAsync),
                             const SizedBox(height: 6),
@@ -431,11 +458,7 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
     );
   }
 
-  Widget _buildMonthSwitcher(
-    BuildContext context,
-    CalendarMonth month, {
-    required int activeOffset,
-  }) {
+  Widget _buildMonthSwitcher(BuildContext context, CalendarMonth month) {
     final offsetNotifier = ref.read(calendarMonthOffsetProvider.notifier);
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
@@ -451,21 +474,32 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
           Expanded(
             child: Center(
               child: InkWell(
-                borderRadius: BorderRadius.circular(6),
-                onTap: activeOffset != 0 ? _resetToToday : null,
+                key: const Key('calendar-period-picker-trigger'),
+                borderRadius: BorderRadius.circular(8),
+                onTap: () => _pickMonth(context, month),
                 child: Padding(
                   padding: const EdgeInsets.symmetric(
-                    horizontal: 6,
-                    vertical: 2,
+                    horizontal: 8,
+                    vertical: 4,
                   ),
                   child: FittedBox(
                     fit: BoxFit.scaleDown,
-                    child: Text(
-                      '${month.year}年${month.month}月',
-                      maxLines: 1,
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          '${month.year}年${month.month}月',
+                          maxLines: 1,
+                          style: Theme.of(context).textTheme.titleLarge
+                              ?.copyWith(fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(width: 2),
+                        Icon(
+                          Icons.arrow_drop_down,
+                          size: 20,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      ],
                     ),
                   ),
                 ),

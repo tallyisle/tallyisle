@@ -477,12 +477,12 @@ BigInt _selectTrendAmount({
         );
       }
     } else {
-      if (normalizeCurrency(curr.sourceCode) == target) {
-        return curr.sourceGross - (record.discountMinor ?? BigInt.zero);
-      }
       if (normalizeCurrency(curr.assetCode) == target &&
           curr.assetNet != null) {
         return curr.assetNet!;
+      }
+      if (normalizeCurrency(curr.sourceCode) == target) {
+        return curr.sourceGross - (record.discountMinor ?? BigInt.zero);
       }
       if (normalizeCurrency(curr.baseCode) == target &&
           curr.baseAmount != null) {
@@ -499,8 +499,9 @@ BigInt _selectTrendAmount({
     }
   }
 
-  final netMoney = record.moneyMinor - (record.discountMinor ?? BigInt.zero);
-  return netMoney;
+  // `record.moneyMinor` is already the booked net amount in the account's
+  // currency (discount has already been deducted before storage).
+  return record.moneyMinor;
 }
 
 /// Card 2 & Card 3 monthly backward walk engine (R2/R4/R5/R6).

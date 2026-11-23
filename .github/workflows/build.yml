@@ -85,20 +85,20 @@ jobs:
       - name: Build Android Release APK
         run: |
           flutter build apk --release --target-platform android-arm64 --tree-shake-icons
-          cp build/app/outputs/flutter-apk/app-release.apk 帐屿-Android-正式版.apk
+          cp build/app/outputs/flutter-apk/app-release.apk TallyIsle-Android-release.apk
 
       - name: Build Android Debug APK
         run: |
           flutter build apk --debug --target-platform android-arm64
-          cp build/app/outputs/flutter-apk/app-debug.apk 帐屿-Android-开发版.apk
+          cp build/app/outputs/flutter-apk/app-debug.apk TallyIsle-Android-debug.apk
 
       - name: Upload Android artifacts
         uses: actions/upload-artifact@v4
         with:
           name: TallyIsle-Android-APK
           path: |
-            帐屿-Android-正式版.apk
-            帐屿-Android-开发版.apk
+            TallyIsle-Android-release.apk
+            TallyIsle-Android-debug.apk
           if-no-files-found: error
 
   build-windows:
@@ -127,13 +127,13 @@ jobs:
 
       - name: Package Windows x64 archive
         shell: pwsh
-        run: Compress-Archive -Path "build/windows/x64/runner/Release/*" -DestinationPath "帐屿-Windows-x64.zip" -Force
+        run: Compress-Archive -Path "build/windows/x64/runner/Release/*" -DestinationPath "TallyIsle-Windows-x64.zip" -Force
 
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
         with:
           name: TallyIsle-Windows-x64
-          path: 帐屿-Windows-x64.zip
+          path: TallyIsle-Windows-x64.zip
           if-no-files-found: error
 
   build-linux:
@@ -166,13 +166,13 @@ jobs:
         run: flutter build linux --release
 
       - name: Package Linux x64 bundle
-        run: tar -C build/linux/x64/release/bundle -czf 帐屿-Linux-x64.tar.gz .
+        run: tar -C build/linux/x64/release/bundle -czf TallyIsle-Linux-x64.tar.gz .
 
       - name: Upload Linux artifact
         uses: actions/upload-artifact@v4
         with:
           name: TallyIsle-Linux-x64
-          path: 帐屿-Linux-x64.tar.gz
+          path: TallyIsle-Linux-x64.tar.gz
           if-no-files-found: error
 
   build-apple:
@@ -203,13 +203,13 @@ jobs:
         run: |
           codesign --force --deep --preserve-metadata=entitlements --sign - build/macos/Build/Products/Release/TallyIsle.app || \
             codesign --force --deep --sign - build/macos/Build/Products/Release/TallyIsle.app
-          ditto -c -k --sequesterRsrc --keepParent build/macos/Build/Products/Release/TallyIsle.app 帐屿-macOS.zip
+          ditto -c -k --sequesterRsrc --keepParent build/macos/Build/Products/Release/TallyIsle.app TallyIsle-macOS.zip
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
         with:
           name: TallyIsle-macOS
-          path: 帐屿-macOS.zip
+          path: TallyIsle-macOS.zip
           if-no-files-found: error
 
       - name: Build iOS Release (no codesign)
@@ -220,13 +220,13 @@ jobs:
           rm -rf Payload
           mkdir -p Payload
           cp -R build/ios/iphoneos/Runner.app Payload/
-          zip -qry 帐屿-iOS-unsigned.ipa Payload
+          zip -qry TallyIsle-iOS-unsigned.ipa Payload
 
       - name: Upload iOS artifact
         uses: actions/upload-artifact@v4
         with:
           name: TallyIsle-iOS-Unsigned
-          path: 帐屿-iOS-unsigned.ipa
+          path: TallyIsle-iOS-unsigned.ipa
           if-no-files-found: error
 
   release:

@@ -11,6 +11,8 @@ import '../../core/failure.dart';
 import '../../core/money.dart';
 import '../../data/db/database.dart';
 import '../../domain/model/codes.dart';
+import '../../domain/rules/asset_overview.dart' show normalizeCurrency;
+import '../../domain/rules/currency_rates.dart' show baseCurrency;
 import '../../domain/rules/reimburse_overview.dart';
 import '../common/catalog_icons.dart';
 import '../common/common.dart';
@@ -173,10 +175,22 @@ class _ReimbursePageState extends ConsumerState<ReimbursePage>
     });
   }
 
+  List<Asset> _assetsForCurrency(List<Asset> eligible, String currencyCode) {
+    final target = normalizeCurrency(currencyCode) ?? baseCurrency;
+    return eligible
+        .where((a) => (normalizeCurrency(a.currency) ?? baseCurrency) == target)
+        .toList();
+  }
+
   Future<void> _openSingleReimburse(
     ReimburseBillRowView row,
     ReimburseViewData view,
   ) async {
+    final matchingAssets = _assetsForCurrency(
+      view.eligibleReceivingAssets,
+      row.item.currencyCode,
+    );
+    final defaultAssetId = pickDefaultReceivingAssetId(matchingAssets);
     final isDesktop = DesktopAdaptive.isDesktop(context);
     final saved = isDesktop
         ? await showDialog<bool>(
@@ -186,8 +200,8 @@ class _ReimbursePageState extends ConsumerState<ReimbursePage>
               clipBehavior: Clip.antiAlias,
               child: _SingleReimburseSheet(
                 row: row,
-                eligibleAssets: view.eligibleReceivingAssets,
-                defaultAssetId: view.defaultReceivingAssetId,
+                eligibleAssets: matchingAssets,
+                defaultAssetId: defaultAssetId,
                 isDesktopDialog: true,
               ),
             ),
@@ -199,8 +213,8 @@ class _ReimbursePageState extends ConsumerState<ReimbursePage>
             showDragHandle: true,
             builder: (_) => _SingleReimburseSheet(
               row: row,
-              eligibleAssets: view.eligibleReceivingAssets,
-              defaultAssetId: view.defaultReceivingAssetId,
+              eligibleAssets: matchingAssets,
+              defaultAssetId: defaultAssetId,
             ),
           );
     if (saved == true && mounted) {
@@ -215,6 +229,23 @@ class _ReimbursePageState extends ConsumerState<ReimbursePage>
     ReimburseViewData view,
   ) async {
     if (selectedRows.isEmpty) return;
+    final currencies = selectedRows.map((r) => r.item.currencyCode).toSet();
+    if (currencies.length > 1) {
+      final sortedCodes = currencies.toList()..sort();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('所选账单包含多种币种（${sortedCodes.join(' / ')}），请按单一币种分别合并报销'),
+        ),
+      );
+      return;
+    }
+    final batchCurrency = currencies.first;
+    final batchSymbol = selectedRows.first.currencySymbol;
+    final matchingAssets = _assetsForCurrency(
+      view.eligibleReceivingAssets,
+      batchCurrency,
+    );
+    final defaultAssetId = pickDefaultReceivingAssetId(matchingAssets);
     final batchTotalMinor = selectedRows.fold<BigInt>(
       BigInt.zero,
       (sum, r) => sum + r.item.remainingMinor,
@@ -229,9 +260,9 @@ class _ReimbursePageState extends ConsumerState<ReimbursePage>
               clipBehavior: Clip.antiAlias,
               child: _BatchReimburseSheet(
                 rows: selectedRows,
-                eligibleAssets: view.eligibleReceivingAssets,
-                defaultAssetId: view.defaultReceivingAssetId,
-                currencySymbol: view.baseCurrencySymbol,
+                eligibleAssets: matchingAssets,
+                defaultAssetId: defaultAssetId,
+                currencySymbol: batchSymbol,
                 isDesktopDialog: true,
               ),
             ),
@@ -243,9 +274,9 @@ class _ReimbursePageState extends ConsumerState<ReimbursePage>
             showDragHandle: true,
             builder: (_) => _BatchReimburseSheet(
               rows: selectedRows,
-              eligibleAssets: view.eligibleReceivingAssets,
-              defaultAssetId: view.defaultReceivingAssetId,
-              currencySymbol: view.baseCurrencySymbol,
+              eligibleAssets: matchingAssets,
+              defaultAssetId: defaultAssetId,
+              currencySymbol: batchSymbol,
             ),
           );
     if (saved == true && mounted) {
@@ -256,7 +287,7 @@ class _ReimbursePageState extends ConsumerState<ReimbursePage>
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            '已合并报销 $count 笔，共 ${view.baseCurrencySymbol}${formatMinor(batchTotalMinor)}',
+            '已合并报销 $count 笔，共 $batchSymbol${formatMinor(batchTotalMinor)}',
           ),
         ),
       );
@@ -1017,6 +1048,12 @@ class _BatchBottomActionBar extends StatelessWidget {
       (sum, r) => sum + r.item.remainingMinor,
     );
 
+    final currencies = selectedRows.map((r) => r.item.currencyCode).toSet();
+    final isMixedCurrency = currencies.length > 1;
+    final displaySymbol = selectedRows.isNotEmpty
+        ? selectedRows.first.currencySymbol
+        : currencySymbol;
+
     return Material(
       color: cs.surfaceContainer,
       elevation: 3,
@@ -1028,7 +1065,9 @@ class _BatchBottomActionBar extends StatelessWidget {
             children: [
               Expanded(
                 child: Text(
-                  '已选 ${selectedRows.length} 笔 · 合计 $currencySymbol${formatMinor(totalMinor)}',
+                  isMixedCurrency
+                      ? '已选 ${selectedRows.length} 笔 · 含多币种，请按单币种合并'
+                      : '已选 ${selectedRows.length} 笔 · 合计 $displaySymbol${formatMinor(totalMinor)}',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(
@@ -1194,7 +1233,7 @@ class _SingleReimburseSheetState extends ConsumerState<_SingleReimburseSheet> {
         widget.row.item.recordId,
         amount.toJson(),
         _selectedAssetId,
-        formatDate(_selectedDate),
+        recordTimeMs,
         remark,
       ]);
       await service.addReimbursement(
@@ -1451,7 +1490,7 @@ class _BatchReimburseSheetState extends ConsumerState<_BatchReimburseSheet> {
         'batch-session',
         [for (final r in widget.rows) r.item.recordId],
         _selectedAssetId,
-        formatDate(_selectedDate),
+        recordTimeMs,
         remark,
       ]);
 

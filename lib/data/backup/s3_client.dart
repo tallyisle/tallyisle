@@ -88,7 +88,7 @@ final class S3Config {
 
   String get targetFingerprint => sha256Hex(
     utf8.encode(
-      's3|${endpoint.trim().toLowerCase()}|${bucket.trim()}|$normalizedPrefix|$forcePathStyle',
+      's3|${endpoint.trim().toLowerCase()}|${bucket.trim()}|$normalizedPrefix|$forcePathStyle|${accessKeyId.trim()}',
     ),
   );
 
@@ -348,6 +348,7 @@ final class S3Client {
         .openUrl('GET', signed.target.requestUri)
         .timeout(controlTimeout);
     _applySignedHeaders(req, signed);
+    req.headers.set(HttpHeaders.acceptEncodingHeader, 'identity');
     final res = await req.close().timeout(transferTimeout);
 
     if (res.statusCode == 404) {
@@ -379,7 +380,10 @@ final class S3Client {
         onProgress?.call(received, expectedLength);
       }
     }
-    if (expectedLength >= 0 && received != expectedLength) {
+    if (expectedLength >= 0 &&
+        res.compressionState !=
+            HttpClientResponseCompressionState.decompressed &&
+        received != expectedLength) {
       throw const Failure(
         FailureCode.remoteUnavailable,
         '下载中断：S3 对象字节长度与响应头不一致',
@@ -505,64 +509,67 @@ final class S3Client {
 
   /// Lists objects under `config.remotePrefix/[relativePrefix]` via S3
   /// `ListObjectsV2` (`GET ?list-type=2&prefix=...`), following pagination.
-  Future<List<S3ObjectMetadata>> listObjects({String relativePrefix = ''}) =>
-      _withClient((client) async {
-        _requireConfigured();
-        final rootPrefix = '${normalizeS3Prefix(config.remotePrefix)}/';
-        final queryPrefix = joinS3ObjectKey(
-          config.remotePrefix,
-          relativePrefix,
-          trailingSlash: true,
+  Future<List<S3ObjectMetadata>> listObjects({
+    String relativePrefix = '',
+    String? delimiter,
+  }) => _withClient((client) async {
+    _requireConfigured();
+    final rootPrefix = '${normalizeS3Prefix(config.remotePrefix)}/';
+    final queryPrefix = joinS3ObjectKey(
+      config.remotePrefix,
+      relativePrefix,
+      trailingSlash: true,
+    );
+
+    final results = <S3ObjectMetadata>[];
+    String? continuationToken;
+
+    for (var pageIdx = 0; pageIdx < _maxListPages; pageIdx++) {
+      final query = <String, String>{
+        'list-type': '2',
+        'prefix': queryPrefix,
+        if (delimiter != null && delimiter.isNotEmpty) 'delimiter': delimiter,
+        if (continuationToken != null) 'continuation-token': continuationToken,
+      };
+      final signed = _sign(method: 'GET', queryParameters: query);
+      final req = await client
+          .openUrl('GET', signed.target.requestUri)
+          .timeout(controlTimeout);
+      _applySignedHeaders(req, signed);
+      req.headers.set(HttpHeaders.acceptEncodingHeader, 'identity');
+      final res = await req.close().timeout(controlTimeout);
+      final xmlBody = await utf8.decoder
+          .bind(res.timeout(transferTimeout))
+          .join();
+
+      if (res.statusCode != 200) {
+        _throwForErrorStatus(res.statusCode, xmlBody, action: '获取 S3 对象列表');
+      }
+
+      final page = parseS3ListObjectsV2Xml(xmlBody);
+      for (final obj in page.objects) {
+        if (!obj.key.startsWith(rootPrefix)) continue;
+        final rel = obj.key.substring(rootPrefix.length);
+        if (rel.isEmpty || rel.endsWith('/')) continue;
+        results.add(
+          S3ObjectMetadata(
+            relativePath: rel,
+            fullKey: obj.key,
+            sizeBytes: obj.sizeBytes,
+            modifiedAtMs: obj.lastModifiedMs,
+            etag: obj.etag,
+          ),
         );
+      }
 
-        final results = <S3ObjectMetadata>[];
-        String? continuationToken;
+      if (!page.isTruncated || page.nextContinuationToken == null) {
+        break;
+      }
+      continuationToken = page.nextContinuationToken;
+    }
 
-        for (var pageIdx = 0; pageIdx < _maxListPages; pageIdx++) {
-          final query = <String, String>{
-            'list-type': '2',
-            'prefix': queryPrefix,
-            if (continuationToken != null)
-              'continuation-token': continuationToken,
-          };
-          final signed = _sign(method: 'GET', queryParameters: query);
-          final req = await client
-              .openUrl('GET', signed.target.requestUri)
-              .timeout(controlTimeout);
-          _applySignedHeaders(req, signed);
-          final res = await req.close().timeout(controlTimeout);
-          final xmlBody = await utf8.decoder
-              .bind(res.timeout(transferTimeout))
-              .join();
-
-          if (res.statusCode != 200) {
-            _throwForErrorStatus(res.statusCode, xmlBody, action: '获取 S3 对象列表');
-          }
-
-          final page = parseS3ListObjectsV2Xml(xmlBody);
-          for (final obj in page.objects) {
-            if (!obj.key.startsWith(rootPrefix)) continue;
-            final rel = obj.key.substring(rootPrefix.length);
-            if (rel.isEmpty || rel.endsWith('/')) continue;
-            results.add(
-              S3ObjectMetadata(
-                relativePath: rel,
-                fullKey: obj.key,
-                sizeBytes: obj.sizeBytes,
-                modifiedAtMs: obj.lastModifiedMs,
-                etag: obj.etag,
-              ),
-            );
-          }
-
-          if (!page.isTruncated || page.nextContinuationToken == null) {
-            break;
-          }
-          continuationToken = page.nextContinuationToken;
-        }
-
-        return results;
-      });
+    return results;
+  });
 
   /// Performs a real write -> read byte verification -> delete probe against
   /// the configured S3 bucket and prefix.
@@ -677,8 +684,11 @@ final class S3BackupTarget implements BackupTarget, CloudSyncObjectStore {
       _client.deleteObject(relativePath, ignoreNotFound: true);
 
   /// Arbitrary relative-prefix `ListObjectsV2`.
-  Future<List<S3ObjectMetadata>> listObjects({String relativePrefix = ''}) =>
-      _client.listObjects(relativePrefix: relativePrefix);
+  Future<List<S3ObjectMetadata>> listObjects({
+    String relativePrefix = '',
+    String? delimiter,
+  }) =>
+      _client.listObjects(relativePrefix: relativePrefix, delimiter: delimiter);
 
   /// Real write/read/delete probe.
   Future<void> testConnection() => _client.testConnection();
@@ -691,7 +701,10 @@ final class S3BackupTarget implements BackupTarget, CloudSyncObjectStore {
       allowEmpty: true,
     );
     final relPrefix = dirSegs.join('/');
-    final objects = await _client.listObjects(relativePrefix: relPrefix);
+    final objects = await _client.listObjects(
+      relativePrefix: relPrefix,
+      delimiter: '/',
+    );
     final stripPrefix = relPrefix.isEmpty ? '' : '$relPrefix/';
     final names = <String>{};
     for (final obj in objects) {
@@ -714,7 +727,7 @@ final class S3BackupTarget implements BackupTarget, CloudSyncObjectStore {
   @override
   Future<List<BackupFileMetadata>> listBackups() async {
     _requireConfigured();
-    final objects = await _client.listObjects();
+    final objects = await _client.listObjects(delimiter: '/');
     final items = <BackupFileMetadata>[];
     for (final obj in objects) {
       if (obj.relativePath.contains('/')) continue;

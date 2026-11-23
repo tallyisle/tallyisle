@@ -374,7 +374,7 @@ void main() {
             '日常 账本/2026',
             DateTime(2026, 5, 9, 8, 7, 6),
           ),
-          'categories_日常_账本_2026_20260509_080706.json',
+          'TallyIsle_categories_20260509_080706.json',
         );
       },
     );
@@ -703,46 +703,147 @@ void main() {
       },
     );
 
-    test(
-      'DiyToolbarConfig normalizes missing/corrupt JSON, toggles, and reorders',
-      () {
-        final def = DiyToolbarConfig.defaults();
-        expect(def.items, hasLength(DiyToolbarAction.values.length));
-        expect(def.isEnabled(DiyToolbarAction.frequentRemarks), isFalse);
-        expect(
-          def.visibleActions,
-          DiyToolbarAction.values.where((a) => a.defaultEnabled).toList(),
-        );
+    test('DiyToolbarConfig normalizes missing/corrupt JSON, toggles, and reorders', () {
+      final def = DiyToolbarConfig.defaults();
+      expect(def.items, hasLength(DiyToolbarAction.values.length));
+      expect(def.isEnabled(DiyToolbarAction.frequentRemarks), isFalse);
+      expect(
+        def.visibleActions,
+        DiyToolbarAction.values.where((a) => a.defaultEnabled).toList(),
+      );
 
-        // Corrupt or partial JSON recovers missing actions cleanly
-        final fallback = DiyToolbarConfig.decode('{not-json');
-        expect(fallback.items, def.items);
+      // Corrupt or partial JSON recovers missing actions cleanly
+      final fallback = DiyToolbarConfig.decode('{not-json');
+      expect(fallback.items, def.items);
 
-        final partial = DiyToolbarConfig.decode(
-          jsonEncode({
-            'items': [
-              {'key': 'location', 'enabled': true},
-              {'key': 'tags', 'enabled': false},
-              {'key': 'location', 'enabled': false}, // duplicate ignored
-              {'key': 'unknown_action', 'enabled': true}, // unknown ignored
-            ],
-          }),
-        );
-        expect(partial.items.first.action, DiyToolbarAction.location);
-        expect(partial.items[1].action, DiyToolbarAction.tags);
-        expect(partial.isEnabled(DiyToolbarAction.tags), isFalse);
-        expect(partial.items, hasLength(DiyToolbarAction.values.length));
+      final partial = DiyToolbarConfig.decode(
+        jsonEncode({
+          'items': [
+            {'key': 'location', 'enabled': true},
+            {'key': 'tags', 'enabled': false},
+            {'key': 'location', 'enabled': false}, // duplicate ignored
+            {'key': 'unknown_action', 'enabled': true}, // unknown ignored
+          ],
+        }),
+      );
+      expect(partial.items.first.action, DiyToolbarAction.location);
+      expect(partial.items[1].action, DiyToolbarAction.tags);
+      expect(partial.isEnabled(DiyToolbarAction.tags), isFalse);
+      expect(partial.items, hasLength(DiyToolbarAction.values.length));
 
-        final moved = def
-            .setEnabled(DiyToolbarAction.templates, false)
-            .moveItem(3, 0);
-        expect(moved.items.first.action, DiyToolbarAction.location);
-        expect(moved.isEnabled(DiyToolbarAction.templates), isFalse);
+      final moved = def
+          .setEnabled(DiyToolbarAction.templates, false)
+          .moveItem(3, 0);
+      expect(moved.items.first.action, DiyToolbarAction.location);
+      expect(moved.isEnabled(DiyToolbarAction.templates), isFalse);
 
-        final roundTrip = DiyToolbarConfig.decode(moved.encode());
-        expect(roundTrip.items, moved.items);
-      },
-    );
+      final roundTrip = DiyToolbarConfig.decode(moved.encode());
+      expect(roundTrip.items, moved.items);
+
+      // Two-group split (7 sortable toolbar pills + 4 fixed auxiliary switches)
+      expect(
+        DiyToolbarAction.values.where((a) => a.isSortableToolbarPill).toList(),
+        const <DiyToolbarAction>[
+          DiyToolbarAction.tags,
+          DiyToolbarAction.images,
+          DiyToolbarAction.discount,
+          DiyToolbarAction.location,
+          DiyToolbarAction.excludeBudget,
+          DiyToolbarAction.excludeExIn,
+          DiyToolbarAction.currency,
+        ],
+      );
+      expect(
+        DiyToolbarAction.values.where((a) => !a.isSortableToolbarPill).toList(),
+        const <DiyToolbarAction>[
+          DiyToolbarAction.templates,
+          DiyToolbarAction.frequentRemarks,
+          DiyToolbarAction.keypadMultiplyDivide,
+          DiyToolbarAction.autoSelectFirstCategory,
+        ],
+      );
+      expect(def.sortableItems, hasLength(7));
+      expect(def.fixedSwitchItems, hasLength(4));
+
+      // moveSortableItem reorders ONLY among the 7 sortable pills while preserving
+      // fixed switches, picker styles, default account, and version: 1 JSON storage.
+      final styled = def
+          .copyWithStyles(
+            datePickerStyle: RecordDatePickerStyle.wheel,
+            timePickerStyle: RecordTimePickerStyle.dial,
+          )
+          .copyWithDefaultAccount(
+            autoSelectDefaultAccount: true,
+            defaultAccountId: 7,
+          )
+          .setEnabled(DiyToolbarAction.autoSelectFirstCategory, true);
+      final reordered = styled.moveSortableItem(6, 0);
+      expect(
+        reordered.sortableItems.map((e) => e.action).toList(),
+        const <DiyToolbarAction>[
+          DiyToolbarAction.currency,
+          DiyToolbarAction.tags,
+          DiyToolbarAction.images,
+          DiyToolbarAction.discount,
+          DiyToolbarAction.location,
+          DiyToolbarAction.excludeBudget,
+          DiyToolbarAction.excludeExIn,
+        ],
+      );
+      expect(
+        reordered.fixedSwitchItems.map((e) => e.action).toList(),
+        const <DiyToolbarAction>[
+          DiyToolbarAction.templates,
+          DiyToolbarAction.frequentRemarks,
+          DiyToolbarAction.keypadMultiplyDivide,
+          DiyToolbarAction.autoSelectFirstCategory,
+        ],
+      );
+      expect(
+        reordered.isEnabled(DiyToolbarAction.autoSelectFirstCategory),
+        isTrue,
+      );
+      expect(reordered.toJson()['version'], 1);
+      final decodedReordered = DiyToolbarConfig.decode(reordered.encode());
+      expect(decodedReordered, reordered);
+
+      expect(() => def.moveSortableItem(-1, 0), _fails(FailureCode.validation));
+      expect(() => def.moveSortableItem(0, 7), _fails(FailureCode.validation));
+
+      // Legacy interleaved JSON keeps sortable relative order & canonical fixed switches.
+      final legacyInterleaved = DiyToolbarConfig.decode(
+        jsonEncode({
+          'version': 1,
+          'items': [
+            {'key': 'auto_select_first_cat', 'enabled': true},
+            {'key': 'currency', 'enabled': true},
+            {'key': 'templates', 'enabled': false},
+            {'key': 'tags', 'enabled': true},
+          ],
+        }),
+      );
+      expect(
+        legacyInterleaved.sortableItems.take(2).map((e) => e.action).toList(),
+        const <DiyToolbarAction>[
+          DiyToolbarAction.currency,
+          DiyToolbarAction.tags,
+        ],
+      );
+      expect(
+        legacyInterleaved.fixedSwitchItems.map((e) => e.action).toList(),
+        const <DiyToolbarAction>[
+          DiyToolbarAction.templates,
+          DiyToolbarAction.frequentRemarks,
+          DiyToolbarAction.keypadMultiplyDivide,
+          DiyToolbarAction.autoSelectFirstCategory,
+        ],
+      );
+      expect(legacyInterleaved.isEnabled(DiyToolbarAction.templates), isFalse);
+      expect(
+        legacyInterleaved.isEnabled(DiyToolbarAction.autoSelectFirstCategory),
+        isTrue,
+      );
+    });
 
     test(
       'buildReceiptViewModel formats Money (BigInt) amounts, discount, FX, location, and brand',

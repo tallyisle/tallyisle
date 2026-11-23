@@ -4,10 +4,13 @@ import 'dart:math';
 import '../../core/failure.dart';
 import 'tally_backup.dart';
 
-const int cloudSyncFormatVersion = 1;
+const int currentCloudSyncHeadFormat = 2;
+const int cloudSyncFormatVersion = currentCloudSyncHeadFormat;
 const String cloudSyncHeadPath = 'sync/head.json';
-const String cloudSyncLatestDbPath = 'sync/latest_db.tally';
+const String cloudSyncRevisionsDir = 'sync/revisions';
+const String legacyCloudSyncLatestDbPath = 'sync/latest_db.tally';
 const String cloudSyncAttachmentsDir = 'sync/attachments';
+const int maxSanitizedAttachmentBasenameUtf8Bytes = 120;
 
 const String prefKeyCloudSyncSettings = 'cloud_sync_settings';
 const String prefKeyCloudSyncCursor = 'cloud_sync_cursor';
@@ -524,10 +527,13 @@ String shortDeviceId(String deviceId) {
 }
 
 /// Formats a zero-data-loss conflict snapshot filename:
-/// `conflict_<deviceIdShort>_<YYYYMMDD_HHMMSS>.tally`.
+/// `conflict_<deviceIdShort>_<YYYYMMDD_HHMMSS>.tally`, appending a
+/// collision-safe `_2` / `_3` suffix when [existingFileNames] already has a
+/// conflict file from the same second (`S-08`).
 String formatConflictBackupFileName({
   required String deviceId,
   required DateTime when,
+  Iterable<String> existingFileNames = const <String>[],
 }) {
   String pad2(int n) => n.toString().padLeft(2, '0');
   final y = when.year.toString().padLeft(4, '0');
@@ -536,7 +542,133 @@ String formatConflictBackupFileName({
   final hh = pad2(when.hour);
   final mm = pad2(when.minute);
   final ss = pad2(when.second);
-  return 'conflict_${shortDeviceId(deviceId)}_${y}${m}${d}_${hh}${mm}${ss}.tally';
+  final base =
+      'conflict_${shortDeviceId(deviceId)}_${y}${m}${d}_${hh}${mm}${ss}.tally';
+  return resolveCollisionSafeBackupFileName(base, existingFileNames);
+}
+
+/// Builds immutable versioned sync snapshot path:
+/// `sync/revisions/db_r<rev>_<sha16>.tally` (`S-01`).
+String buildCloudSyncRevisionPath({
+  required int revision,
+  required String dataSha256,
+}) {
+  if (revision < 1) {
+    throw Failure(FailureCode.validation, '非法的云同步版本号：$revision');
+  }
+  final cleanSha = dataSha256.trim().toLowerCase();
+  if (!_hex64LowerOrUpper.hasMatch(cleanSha)) {
+    throw Failure(FailureCode.validation, '非法的同步数据摘要：$dataSha256');
+  }
+  return '$cloudSyncRevisionsDir/db_r${revision}_${cleanSha.substring(0, 16)}.tally';
+}
+
+/// Validates that [rawPath] is a safe relative snapshot path directly under
+/// `sync/revisions/` without path traversal, backslashes, or `.tmp` suffix (`S-01`).
+String validateCloudSyncDatabasePath(String rawPath) {
+  final trimmed = rawPath.trim();
+  if (trimmed.isEmpty) {
+    throw const Failure(
+      FailureCode.corruptData,
+      '远端 head.json 缺少 databasePath',
+    );
+  }
+  if (trimmed.contains(r'\') ||
+      trimmed.contains('\x00') ||
+      trimmed.startsWith('/') ||
+      trimmed.endsWith('/')) {
+    throw Failure(
+      FailureCode.corruptData,
+      '远端 head.json databasePath 非法：$rawPath',
+    );
+  }
+  final segments = trimmed.split('/');
+  if (segments.length != 3 ||
+      segments[0] != 'sync' ||
+      segments[1] != 'revisions') {
+    throw Failure(
+      FailureCode.corruptData,
+      '远端 head.json databasePath 必须位于 sync/revisions/ 下：$rawPath',
+    );
+  }
+  final fileName = segments[2];
+  final lowerName = fileName.toLowerCase();
+  if (fileName.isEmpty ||
+      fileName == '.' ||
+      fileName == '..' ||
+      fileName.contains('..') ||
+      lowerName.endsWith('.tmp') ||
+      !lowerName.endsWith('.tally')) {
+    throw Failure(
+      FailureCode.corruptData,
+      '远端 head.json databasePath 文件名非法：$rawPath',
+    );
+  }
+  return 'sync/revisions/$fileName';
+}
+
+final RegExp _syncRevisionFilePattern = RegExp(
+  r'^db_r([1-9][0-9]*)_([0-9a-fA-F]{16})\.tally$',
+);
+
+/// Parses `db_r<rev>_<sha16>.tally` inside `sync/revisions/`, or returns `null`.
+({int revision, String sha16})? parseSyncRevisionFileName(String fileName) {
+  final m = _syncRevisionFilePattern.firstMatch(fileName.trim());
+  if (m == null) return null;
+  final rev = int.tryParse(m.group(1)!);
+  if (rev == null || rev < 1) return null;
+  return (revision: rev, sha16: m.group(2)!.toLowerCase());
+}
+
+/// Selects superseded `sync/revisions/*` filenames safe to prune after
+/// [currentRevision] (`[currentDatabasePath]`) has been committed to `head.json`,
+/// always preserving the current revision AND the immediate previous revision
+/// (`r(N-1)` / [previousDatabasePath]) so an in-flight reader on the prior
+/// revision is never broken (`S-01`).
+List<String> selectSupersededSyncRevisionFileNames(
+  Iterable<String> existingFileNames, {
+  required int currentRevision,
+  required String currentDatabasePath,
+  String? previousDatabasePath,
+}) {
+  final keepNames = <String>{
+    currentDatabasePath.split('/').last,
+    if (previousDatabasePath != null && previousDatabasePath.contains('/'))
+      previousDatabasePath.split('/').last,
+  };
+
+  int? highestPriorRev;
+  for (final name in existingFileNames) {
+    final parsed = parseSyncRevisionFileName(name);
+    if (parsed == null) continue;
+    if (parsed.revision < currentRevision) {
+      if (highestPriorRev == null || parsed.revision > highestPriorRev) {
+        highestPriorRev = parsed.revision;
+      }
+    }
+  }
+
+  final minProtectedRev = currentRevision - 1;
+  final toDelete = <String>[];
+  for (final name in existingFileNames) {
+    if (keepNames.contains(name)) continue;
+    final parsed = parseSyncRevisionFileName(name);
+    if (parsed == null) continue;
+    if (parsed.revision >= minProtectedRev) continue;
+    if (highestPriorRev != null && parsed.revision == highestPriorRev) {
+      continue;
+    }
+    toDelete.add(name);
+  }
+  toDelete.sort();
+  return toDelete;
+}
+
+/// Returns `true` when decoded `head.json` is an incompatible legacy format
+/// (`format < 2`) that must route into conflict protection (`S-01`).
+bool isLegacyCloudSyncHeadJson(Map<String, Object?> json) {
+  final format = json['format'];
+  return format is int && format >= 1 && format < currentCloudSyncHeadFormat;
 }
 
 /// Returns `true` when [fileName] is a protected conflict snapshot (`conflict_*`).
@@ -555,7 +687,23 @@ List<String> selectNonConflictBackupsToPrune(
   return selectBackupsToPrune(routineOnly, keepCount: keepCount);
 }
 
-/// Sanitizes an attachment archive path's basename for `sync/attachments/<sha256>__<basename>`.
+String _truncateUtf8ByRunes(String input, int maxBytes) {
+  if (maxBytes <= 0 || input.isEmpty) return '';
+  final sb = StringBuffer();
+  var usedBytes = 0;
+  for (final rune in input.runes) {
+    final ch = String.fromCharCode(rune);
+    final chBytes = utf8.encode(ch).length;
+    if (usedBytes + chBytes > maxBytes) break;
+    sb.write(ch);
+    usedBytes += chBytes;
+  }
+  return sb.toString();
+}
+
+/// Sanitizes an attachment archive path's basename for `sync/attachments/<sha256>__<basename>`,
+/// truncating UTF-8 byte length safely to `<= 120` bytes while preserving the
+/// file extension (`S-08`).
 String sanitizeAttachmentBasename(String archiveOrRelPath) {
   final normalized = archiveOrRelPath.replaceAll(r'\', '/').trim();
   final idx = normalized.lastIndexOf('/');
@@ -567,7 +715,31 @@ String sanitizeAttachmentBasename(String archiveOrRelPath) {
   if (cleaned.isEmpty || cleaned == '.' || cleaned == '..') {
     return 'attachment.bin';
   }
-  return cleaned;
+  if (utf8.encode(cleaned).length <= maxSanitizedAttachmentBasenameUtf8Bytes) {
+    return cleaned;
+  }
+
+  final dotIdx = cleaned.lastIndexOf('.');
+  String stem = cleaned;
+  String ext = '';
+  if (dotIdx > 0) {
+    final candidateExt = cleaned.substring(dotIdx);
+    if (candidateExt.length > 1 && utf8.encode(candidateExt).length <= 24) {
+      stem = cleaned.substring(0, dotIdx);
+      ext = candidateExt;
+    }
+  }
+  final extBytes = utf8.encode(ext).length;
+  final maxStemBytes = maxSanitizedAttachmentBasenameUtf8Bytes - extBytes;
+  var truncatedStem = _truncateUtf8ByRunes(stem, maxStemBytes);
+  if (truncatedStem.isEmpty || truncatedStem == '.' || truncatedStem == '..') {
+    truncatedStem = 'att';
+  }
+  final candidate = '$truncatedStem$ext';
+  if (candidate.isEmpty || candidate == '.' || candidate == '..') {
+    return 'attachment.bin';
+  }
+  return candidate;
 }
 
 /// Builds deduplicated object name `<sha256>__<basename>`.
@@ -652,8 +824,31 @@ String computeCanonicalSyncDataSha256({
   return sha256Hex(utf8.encode(canonicalJson));
 }
 
+const List<String> _defaultSeedExpenseCategoryNames = <String>[
+  '餐饮',
+  '购物',
+  '交通',
+  '娱乐',
+  '零食',
+  '日用品',
+  '生活居家',
+  '话费',
+  '运动',
+  '医疗',
+  '发红包',
+  '捐款',
+];
+
+const List<String> _defaultSeedIncomeCategoryNames = <String>[
+  '工资',
+  '零花钱',
+  '奖金',
+  '收红包',
+];
+
 /// Returns `true` when [tables] + [attachmentCount] represent a brand-new
-/// freshly seeded local database with zero user-entered records/assets/notes.
+/// freshly seeded local database with zero user-entered records/assets/notes
+/// AND uncustomized default `account_book` #1 and `record_category` rows (`S-09`).
 bool isFreshSeedSnapshot(
   Map<String, List<Map<String, Object?>>> tables, {
   required int attachmentCount,
@@ -686,6 +881,48 @@ bool isFreshSeedSnapshot(
   }
   final books = tables['account_book'] ?? const <Map<String, Object?>>[];
   if (books.length > 1) return false;
+  if (books.length == 1) {
+    final book = books.single;
+    if ((book['id'] ?? 1) != 1 ||
+        (book['name'] ?? '日常账本') != '日常账本' ||
+        (book['type'] ?? 1) != 1 ||
+        (book['cover'] ?? '') != '' ||
+        (book['sort'] ?? 1) != 1 ||
+        (book['status'] ?? 0) != 0 ||
+        (book['start_day'] ?? 1) != 1 ||
+        (book['display_way'] ?? 0) != 0 ||
+        (book['extra_info'] != null && book['extra_info'] != '')) {
+      return false;
+    }
+  }
+
+  final categories = tables['record_category'];
+  if (categories != null && (categories.isNotEmpty || books.isNotEmpty)) {
+    const expectedTotal = 16;
+    if (categories.length != expectedTotal) return false;
+    for (var i = 0; i < expectedTotal; i++) {
+      final row = categories[i];
+      final expectedName = i < _defaultSeedExpenseCategoryNames.length
+          ? _defaultSeedExpenseCategoryNames[i]
+          : _defaultSeedIncomeCategoryNames[i -
+                _defaultSeedExpenseCategoryNames.length];
+      final expectedType = i < _defaultSeedExpenseCategoryNames.length ? 0 : 1;
+      final isHidden = row['is_hide'];
+      if ((row['id'] ?? (i + 1)) != i + 1 ||
+          row['name'] != expectedName ||
+          row['type'] != expectedType ||
+          (row['sort'] ?? i) != i ||
+          (row['parent_cat_id'] ?? -1) != -1 ||
+          (row['account_book_id'] ?? 1) != 1 ||
+          (isHidden == true || isHidden == 1) ||
+          (row['icon'] ?? '') != '' ||
+          (row['color_fill'] != null && row['color_fill'] != '') ||
+          (row['extra_info'] != null && row['extra_info'] != '')) {
+        return false;
+      }
+    }
+  }
+
   final currencies = tables['currency'] ?? const <Map<String, Object?>>[];
   if (currencies.length > 1) return false;
   if (currencies.length == 1 && currencies.single['code'] != 'CNY') {
@@ -694,12 +931,13 @@ bool isFreshSeedSnapshot(
   return true;
 }
 
-/// Parsed remote `sync/head.json` pointer (§2.2).
+/// Parsed remote `sync/head.json` pointer (`format: 2`, `S-01`).
 final class CloudSyncHead {
   CloudSyncHead({
-    this.format = cloudSyncFormatVersion,
+    this.format = currentCloudSyncHeadFormat,
     required this.revision,
     required String dataSha256,
+    String? databasePath,
     required this.updatedAtMs,
     required this.deviceId,
     required this.deviceName,
@@ -707,6 +945,13 @@ final class CloudSyncHead {
     required List<String> attachmentFiles,
     Map<String, String>? attachmentManifest,
   }) : dataSha256 = dataSha256.toLowerCase(),
+       databasePath = validateCloudSyncDatabasePath(
+         databasePath ??
+             buildCloudSyncRevisionPath(
+               revision: revision,
+               dataSha256: dataSha256,
+             ),
+       ),
        attachmentFiles = List<String>.unmodifiable(
          List<String>.from(attachmentFiles)..sort(),
        ),
@@ -720,6 +965,7 @@ final class CloudSyncHead {
   final int format;
   final int revision;
   final String dataSha256;
+  final String databasePath;
   final int updatedAtMs;
   final String deviceId;
   final String deviceName;
@@ -760,6 +1006,7 @@ final class CloudSyncHead {
     'format': format,
     'revision': revision,
     'dataSha256': dataSha256,
+    'databasePath': databasePath,
     'updatedAtMs': updatedAtMs,
     'deviceId': deviceId,
     'deviceName': deviceName,
@@ -773,9 +1020,23 @@ final class CloudSyncHead {
     if (format is! int || format < 1) {
       throw const Failure(FailureCode.corruptData, '远端 head.json 缺少有效的 format');
     }
-    if (format > cloudSyncFormatVersion) {
+    if (format > currentCloudSyncHeadFormat) {
       throw const Failure(FailureCode.upgradeRequired, '云端同步格式版本较新，请升级帐屿后同步');
     }
+    if (format < currentCloudSyncHeadFormat) {
+      throw Failure(
+        FailureCode.corruptData,
+        '远端同步清单为旧版格式（format=$format），需冲突保护升级',
+      );
+    }
+    final rawDatabasePath = json['databasePath'];
+    if (rawDatabasePath is! String || rawDatabasePath.trim().isEmpty) {
+      throw const Failure(
+        FailureCode.corruptData,
+        '远端 head.json 缺少 databasePath',
+      );
+    }
+    final databasePath = validateCloudSyncDatabasePath(rawDatabasePath);
     final revision = json['revision'];
     if (revision is! int || revision < 1) {
       throw const Failure(FailureCode.corruptData, '远端 head.json revision 无效');
@@ -852,6 +1113,7 @@ final class CloudSyncHead {
       format: format,
       revision: revision,
       dataSha256: dataSha256,
+      databasePath: databasePath,
       updatedAtMs: updatedAtMs,
       deviceId: deviceId,
       deviceName: deviceName,
@@ -953,35 +1215,44 @@ final class SyncDecision {
   final int? nextRevision;
 }
 
-/// Pure deterministic state machine evaluating what [syncNow] must do (`R5`).
+/// Pure deterministic state machine evaluating what [syncNow] must do (`R5`, `S-01`).
 SyncDecision decideSyncAction({
   required LocalSyncCursor cursor,
   required String localDataSha256,
   required bool isLocalFreshEmpty,
   required CloudSyncHead? remoteHead,
   bool hasRemoteOrphanLatestDb = false,
+  bool hasLegacyIncompatibleRemoteHead = false,
+  int? legacyRemoteRevision,
   SyncConflictResolution? resolution,
 }) {
   final cleanLocalSha = localDataSha256.toLowerCase();
+  final hasUnusableRemoteState =
+      hasRemoteOrphanLatestDb || hasLegacyIncompatibleRemoteHead;
 
   if (resolution == SyncConflictResolution.useRemote) {
     if (remoteHead == null && !hasRemoteOrphanLatestDb) {
-      throw const Failure(FailureCode.validation, '云端尚无同步快照，无法采用云端版本');
+      throw const Failure(FailureCode.validation, '云端尚无有效同步快照，无法采用云端版本');
     }
     return const SyncDecision(action: SyncActionType.pullRemote);
   }
   if (resolution == SyncConflictResolution.useLocal) {
+    final baseRev = remoteHead?.revision ?? legacyRemoteRevision ?? 0;
     return SyncDecision(
       action: SyncActionType.pushLocal,
-      nextRevision: (remoteHead?.revision ?? 0) + 1,
+      nextRevision: baseRev + 1,
     );
   }
 
-  // Remote head missing: if `sync/latest_db.tally` already exists on remote
-  // without `sync/head.json`, NEVER treat the remote as an empty cloud!
+  // Remote head missing or legacy format < 2: if an orphan revision snapshot or
+  // legacy `format: 1` state already exists on remote, NEVER treat the remote
+  // as an empty cloud!
   if (remoteHead == null) {
-    if (hasRemoteOrphanLatestDb) {
-      return const SyncDecision(action: SyncActionType.conflict);
+    if (hasUnusableRemoteState) {
+      return SyncDecision(
+        action: SyncActionType.conflict,
+        nextRevision: legacyRemoteRevision,
+      );
     }
     return const SyncDecision(
       action: SyncActionType.pushLocal,

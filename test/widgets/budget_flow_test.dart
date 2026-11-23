@@ -11,7 +11,9 @@ import 'package:tallyisle/domain/model/codes.dart';
 import 'package:tallyisle/domain/rules/billing_period.dart';
 import 'package:tallyisle/domain/rules/budget_rules.dart';
 import 'package:tallyisle/features/budget/budget_page.dart';
+import 'package:tallyisle/features/budget/budget_providers.dart';
 import 'package:tallyisle/features/budget/budget_widgets.dart';
+import 'package:tallyisle/features/common/year_month_picker_dialog.dart';
 
 void main() {
   driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
@@ -389,6 +391,277 @@ void main() {
       // Tapping the card body itself still fires onTap.
       await tester.tap(find.byKey(const Key('budget_summary_card')));
       expect(cardTappedCount, 1);
+
+      await tester.pumpWidget(const SizedBox());
+      await settle(tester);
+      await tester.pump(const Duration(seconds: 1));
+    },
+  );
+
+  testWidgets(
+    'BudgetPage: year/year-month pickers respect custom startDay, show 回本月/回本年 reset pills, and have zero overflow at 360x640 @ 1.2x',
+    (tester) async {
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        tester.platformDispatcher.clearTextScaleFactorTestValue();
+      });
+
+      tester.view.physicalSize = const Size(360, 640);
+      tester.view.devicePixelRatio = 1.0;
+      tester.platformDispatcher.textScaleFactorTestValue = 1.2;
+
+      final db = AppDatabase(NativeDatabase.memory());
+      // Configure custom book startDay = 15
+      await (db.update(db.accountBooks)..where((b) => b.id.equals(1))).write(
+        const AccountBooksCompanion(startDay: Value(15)),
+      );
+
+      final now = DateTime.now();
+      final curMonth = BillingPeriod.containing(now, 15);
+      final curYear = BillingPeriod.containingYear(now, 15);
+      final targetYear = curYear.year - 1;
+
+      await tester.pumpWidget(buildApp(const BudgetPage(), db));
+      await settle(tester);
+      expect(tester.takeException(), isNull);
+      expect(
+        find.text('${curMonth.year} 年 ${curMonth.month} 月'),
+        findsOneWidget,
+      );
+      expect(find.byKey(const Key('budget_period_reset')), findsNothing);
+
+      // Tap period title -> opens Year-Month picker; jump to targetYear-02
+      await tester.tap(find.byKey(const Key('budget-period-picker-trigger')));
+      await settle(tester);
+      expect(tester.takeException(), isNull);
+      await tester.tap(find.byKey(const Key('ym-picker-toggle-year-grid')));
+      await settle(tester);
+      await tester.tap(find.byKey(Key('ym-picker-year-$targetYear')));
+      await settle(tester);
+      await tester.tap(find.byKey(const Key('ym-picker-month-2')));
+      await settle(tester);
+      expect(tester.takeException(), isNull);
+      expect(find.text('$targetYear 年 2 月'), findsOneWidget);
+      expect(find.byKey(const Key('budget_period_reset')), findsOneWidget);
+      expect(find.text('回本月'), findsOneWidget);
+
+      // Tap 回本月 -> returns to curMonth (startDay=15)
+      await tester.tap(find.byKey(const Key('budget_period_reset')));
+      await settle(tester);
+      expect(
+        find.text('${curMonth.year} 年 ${curMonth.month} 月'),
+        findsOneWidget,
+      );
+      expect(find.byKey(const Key('budget_period_reset')), findsNothing);
+
+      // Switch to yearly budget -> tap period title -> opens Year-Only picker; jump to targetYear
+      await tester.tap(find.text('年预算'));
+      await settle(tester);
+      expect(find.text('${curYear.year} 年'), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('budget-period-picker-trigger')));
+      await settle(tester);
+      expect(tester.takeException(), isNull);
+      await tester.tap(find.byKey(Key('y-picker-year-$targetYear')));
+      await settle(tester);
+      expect(tester.takeException(), isNull);
+      expect(find.text('$targetYear 年'), findsOneWidget);
+      expect(find.byKey(const Key('budget_period_reset')), findsOneWidget);
+      expect(find.text('回本年'), findsOneWidget);
+
+      // Tap 回本年 -> returns to curYear
+      await tester.tap(find.byKey(const Key('budget_period_reset')));
+      await settle(tester);
+      expect(find.text('${curYear.year} 年'), findsOneWidget);
+      expect(find.byKey(const Key('budget_period_reset')), findsNothing);
+
+      await tester.pumpWidget(const SizedBox());
+      await settle(tester);
+      await tester.pump(const Duration(seconds: 1));
+    },
+  );
+
+  testWidgets(
+    'YearMonthPicker & YearOnlyPicker honor explicit billing currentYear/currentMonth for shortcut visibility, pop result, and highlight',
+    (tester) async {
+      ({int year, int month})? pickedYm;
+      int? pickedY;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (ctx) => Scaffold(
+              body: Column(
+                children: [
+                  ElevatedButton(
+                    key: const Key('open-ym-same'),
+                    onPressed: () async {
+                      pickedYm = await showYearMonthPickerDialog(
+                        ctx,
+                        initialYear: 2024,
+                        initialMonth: 7,
+                        currentYear: 2024,
+                        currentMonth: 7,
+                      );
+                    },
+                    child: const Text('YM_SAME'),
+                  ),
+                  ElevatedButton(
+                    key: const Key('open-ym-diff'),
+                    onPressed: () async {
+                      pickedYm = await showYearMonthPickerDialog(
+                        ctx,
+                        initialYear: 2024,
+                        initialMonth: 3,
+                        currentYear: 2024,
+                        currentMonth: 7,
+                      );
+                    },
+                    child: const Text('YM_DIFF'),
+                  ),
+                  ElevatedButton(
+                    key: const Key('open-y-same'),
+                    onPressed: () async {
+                      pickedY = await showYearOnlyPickerDialog(
+                        ctx,
+                        initialYear: 2024,
+                        currentYear: 2024,
+                      );
+                    },
+                    child: const Text('Y_SAME'),
+                  ),
+                  ElevatedButton(
+                    key: const Key('open-y-diff'),
+                    onPressed: () async {
+                      pickedY = await showYearOnlyPickerDialog(
+                        ctx,
+                        initialYear: 2022,
+                        currentYear: 2024,
+                      );
+                    },
+                    child: const Text('Y_DIFF'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+
+      // 1. YM when initial == billing current (2024-07 != DateTime.now()): `本月` pill MUST be hidden!
+      await tester.tap(find.byKey(const Key('open-ym-same')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('ym-picker-jump-current')), findsNothing);
+      await tester.tapAt(const Offset(5, 5));
+      await tester.pumpAndSettle();
+
+      // 2. YM when initial (2024-03) != billing current (2024-07):
+      // `ym-picker-month-7` gets primaryContainer highlight & `本月` pops (2024, 7)!
+      await tester.tap(find.byKey(const Key('open-ym-diff')));
+      await tester.pumpAndSettle();
+      final ctx = tester.element(find.byKey(const Key('ym-picker-month-7')));
+      final scheme = Theme.of(ctx).colorScheme;
+      final curTileMaterial = tester.widget<Material>(
+        find.descendant(
+          of: find.byKey(const Key('ym-picker-month-7')),
+          matching: find.byType(Material),
+        ),
+      );
+      final selTileMaterial = tester.widget<Material>(
+        find.descendant(
+          of: find.byKey(const Key('ym-picker-month-3')),
+          matching: find.byType(Material),
+        ),
+      );
+      expect(curTileMaterial.color, scheme.primaryContainer);
+      expect(selTileMaterial.color, scheme.primary);
+      expect(find.byKey(const Key('ym-picker-jump-current')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('ym-picker-jump-current')));
+      await tester.pumpAndSettle();
+      expect(pickedYm, (year: 2024, month: 7));
+
+      // 3. Year-only when initial == billing current (2024): `本年` hidden!
+      await tester.tap(find.byKey(const Key('open-y-same')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('y-picker-jump-current')), findsNothing);
+      await tester.tapAt(const Offset(5, 5));
+      await tester.pumpAndSettle();
+
+      // 4. Year-only when initial (2022) != billing current (2024):
+      // `y-picker-year-2024` gets primaryContainer highlight & `本年` pops 2024!
+      await tester.tap(find.byKey(const Key('open-y-diff')));
+      await tester.pumpAndSettle();
+      final yCurMaterial = tester.widget<Material>(
+        find.descendant(
+          of: find.byKey(const Key('y-picker-year-2024')),
+          matching: find.byType(Material),
+        ),
+      );
+      expect(yCurMaterial.color, scheme.primaryContainer);
+      expect(find.byKey(const Key('y-picker-jump-current')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('y-picker-jump-current')));
+      await tester.pumpAndSettle();
+      expect(pickedY, 2024);
+    },
+  );
+
+  testWidgets(
+    'BudgetPage with startDay > today: tapping picker 本月 returns to offset 0 (not +1)',
+    (tester) async {
+      final now = DateTime.now();
+      if (now.day > 27) {
+        // Only skipped on days 28..31 when startDay (max 28) cannot exceed today.
+        return;
+      }
+      final shiftedStartDay = now.day + 1;
+      final db = AppDatabase(NativeDatabase.memory());
+      await (db.update(db.accountBooks)..where((b) => b.id.equals(1))).write(
+        AccountBooksCompanion(startDay: Value(shiftedStartDay)),
+      );
+
+      final activeBillingMonth = BillingPeriod.containing(now, shiftedStartDay);
+      // Sanity check: billing month differs from calendar month!
+      expect(activeBillingMonth.month, isNot(now.month));
+
+      late ProviderContainer container;
+      await tester.pumpWidget(
+        ProviderScope(
+          retry: (_, _) => null,
+          overrides: [databaseProvider.overrideWith((ref) async => db)],
+          child: Consumer(
+            builder: (context, ref, _) {
+              container = ProviderScope.containerOf(context, listen: false);
+              return const MaterialApp(home: BudgetPage());
+            },
+          ),
+        ),
+      );
+      await settle(tester);
+
+      // At offset 0: opening picker MUST NOT show `本月` shortcut!
+      expect(container.read(budgetOffsetProvider), 0);
+      await tester.tap(find.byKey(const Key('budget-period-picker-trigger')));
+      await settle(tester);
+      expect(find.byKey(const Key('ym-picker-jump-current')), findsNothing);
+      await tester.tapAt(const Offset(5, 5));
+      await settle(tester);
+
+      // Step to offset -1, open picker, tap `本月` -> MUST return to offset 0 (not +1)!
+      await tester.tap(find.byKey(const Key('budget_period_prev')));
+      await settle(tester);
+      expect(container.read(budgetOffsetProvider), -1);
+      await tester.tap(find.byKey(const Key('budget-period-picker-trigger')));
+      await settle(tester);
+      expect(find.byKey(const Key('ym-picker-jump-current')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('ym-picker-jump-current')));
+      await settle(tester);
+      expect(container.read(budgetOffsetProvider), 0);
+      expect(find.byKey(const Key('budget_period_reset')), findsNothing);
+      expect(
+        find.text('${activeBillingMonth.year} 年 ${activeBillingMonth.month} 月'),
+        findsOneWidget,
+      );
 
       await tester.pumpWidget(const SizedBox());
       await settle(tester);

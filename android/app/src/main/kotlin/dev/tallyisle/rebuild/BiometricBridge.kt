@@ -13,6 +13,7 @@ import android.os.Looper
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
+import java.util.Locale
 import java.util.concurrent.Executor
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -171,13 +172,14 @@ class BiometricBridge(private val activity: Activity) {
 
         cancelCurrentSession("已开启新的生物识别请求")
 
+        val isZh = isChineseLocale()
         val title = call.argument<String>("title")
             ?.takeIf { it.isNotBlank() }
-            ?: "验证身份以解锁帐屿"
+            ?: if (isZh) "验证身份以解锁帐屿" else "Verify identity to unlock TallyIsle"
         val subtitle = call.argument<String>("subtitle")?.takeIf { it.isNotBlank() }
         val negativeText = call.argument<String>("negativeButtonText")
             ?.takeIf { it.isNotBlank() }
-            ?: "使用数字密码"
+            ?: if (isZh) "使用数字密码" else "Use PIN"
 
         val signal = CancellationSignal()
         val session = AuthSession(signal = signal, result = result)
@@ -260,6 +262,18 @@ class BiometricBridge(private val activity: Activity) {
                 e.message ?: "无法调起系统生物识别，请使用数字密码",
             )
         }
+    }
+
+    private fun isChineseLocale(): Boolean {
+        val locale = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            activity.resources.configuration.locales.let {
+                if (it.isEmpty) Locale.getDefault() else it[0]
+            }
+        } else {
+            @Suppress("DEPRECATION")
+            activity.resources.configuration.locale ?: Locale.getDefault()
+        }
+        return locale.language.equals("zh", ignoreCase = true)
     }
 
     private fun finishSession(session: AuthSession, outcome: String, message: String) {

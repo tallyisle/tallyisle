@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="accessibility_service_label">帐屿自动记账辅助服务</string>
-    <string name="accessibility_service_description">用于在支付成功或账单详情界面本地提取付款金额与商户文本，生成帐屿待确认记账草稿。所有识别仅在本机离线执行，不上传任何屏幕数据。</string>
-    <string name="accessibility_service_summary">本地提取付款信息并生成待确认记账草稿</string>
+    <string name="accessibility_service_label">TallyIsle Auto-Bookkeeping</string>
+    <string name="accessibility_service_description">Extracts payment amount and merchant text locally on payment success or bill detail screens to create pending TallyIsle drafts. All recognition runs offline on this device and never uploads screen data.</string>
+    <string name="accessibility_service_summary">Extract payment details locally to create pending drafts</string>
 
-    <string name="widget_quick_add_label">帐屿 · 快捷记账</string>
-    <string name="widget_quick_add_desc">1×1 桌面快捷入口，点击直达帐屿记一笔页面</string>
-    <string name="widget_month_summary_label">帐屿 · 月度收支概览</string>
-    <string name="widget_month_summary_desc">2×2 卡片展示当前账本本期支出、收入与结余，并支持一键记账</string>
-    <string name="widget_month_bar_label">帐屿 · 月度横条</string>
-    <string name="widget_month_bar_desc">4×1 横条展示当前账本本期支出、收入、今日支出与快捷记账按钮</string>
+    <string name="widget_quick_add_label">TallyIsle · Quick Add</string>
+    <string name="widget_quick_add_desc">1x1 home screen shortcut to open TallyIsle quick bookkeeping</string>
+    <string name="widget_month_summary_label">TallyIsle · Monthly Summary</string>
+    <string name="widget_month_summary_desc">2x2 card showing current book expense, income, balance, and quick add</string>
+    <string name="widget_month_bar_label">TallyIsle · Monthly Bar</string>
+    <string name="widget_month_bar_desc">4x1 bar showing current book expense, income, today expense, and quick add</string>
 </resources>

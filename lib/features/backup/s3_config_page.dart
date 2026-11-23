@@ -180,6 +180,7 @@ class _S3ConfigPageState extends ConsumerState<S3ConfigPage> {
       ref
         ..invalidate(s3ConfigProvider)
         ..invalidate(cloudSyncSettingsProvider)
+        ..invalidate(cloudSyncCursorProvider)
         ..invalidate(s3BackupsProvider)
         ..invalidate(activeCloudBackupsProvider);
       if (!mounted) return;
@@ -218,6 +219,7 @@ class _S3ConfigPageState extends ConsumerState<S3ConfigPage> {
       ref
         ..invalidate(s3ConfigProvider)
         ..invalidate(cloudSyncSettingsProvider)
+        ..invalidate(cloudSyncCursorProvider)
         ..invalidate(s3BackupsProvider)
         ..invalidate(activeCloudBackupsProvider);
       if (!mounted) return;

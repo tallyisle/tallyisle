@@ -578,7 +578,12 @@ class _DesktopNavigationScaffoldState
     final scheme = Theme.of(context).colorScheme;
     final isExpanded = DesktopAdaptive.isExpandedDesktop(context);
     final selectedIndex = widget.shell.currentIndex;
-    final bookName = ref.watch(currentBookProvider).value?.name ?? '帐屿';
+    final fallbackBrand =
+        Localizations.localeOf(context).languageCode.toLowerCase() == 'zh'
+        ? '帐屿'
+        : 'TallyIsle';
+    final bookName =
+        ref.watch(currentBookProvider).value?.name ?? fallbackBrand;
     final draftCount = ref.watch(autoBillDraftCountProvider);
     final syncSettings = ref.watch(cloudSyncSettingsProvider).value;
     final rawSyncCursor = ref.watch(cloudSyncCursorProvider).value;

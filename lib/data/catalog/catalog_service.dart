@@ -5,6 +5,8 @@ import 'package:drift/drift.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../core/failure.dart';
+import '../../core/money.dart';
+import '../../domain/rules/budget_rules.dart' show BudgetExtra;
 import '../db/database.dart';
 import '../db/failures.dart';
 import '../db/seed.dart';
@@ -464,16 +466,25 @@ final class CatalogService {
       }
 
       final inClause = affectedIds.join(',');
-      final recCountRow = await db
+      final refCountRow = await db
           .customSelect(
-            'SELECT COUNT(*) AS c FROM record WHERE record_cat_id IN ($inClause)',
+            'SELECT ('
+            '(SELECT COUNT(*) FROM record WHERE record_cat_id IN ($inClause)) + '
+            '(SELECT COUNT(*) FROM installment WHERE cat_id IN ($inClause)) + '
+            '(SELECT COUNT(*) FROM record_period WHERE cat_id IN ($inClause)) + '
+            '(SELECT COUNT(*) FROM record_template WHERE record_cat_id IN ($inClause)) + '
+            '(SELECT COUNT(*) FROM budget WHERE record_cat_id IN ($inClause))'
+            ') AS c',
           )
           .getSingle();
-      final count = (recCountRow.data['c'] as int?) ?? 0;
+      final totalRefs = (refCountRow.data['c'] as int?) ?? 0;
 
-      if (count > 0) {
+      if (totalRefs > 0) {
         if (targetCategoryId == null) {
-          throw const Failure(FailureCode.validation, '该分类下有账单，请选择迁移目标分类');
+          throw const Failure(
+            FailureCode.validation,
+            '该分类下存在关联账单、预算、分期、周期或模板，请选择迁移目标分类',
+          );
         }
         if (affectedIds.contains(targetCategoryId)) {
           throw const Failure(FailureCode.validation, '不能迁移到即将被删除的分类');
@@ -497,9 +508,28 @@ final class CatalogService {
           updates: {db.records},
         );
         await db.customUpdate(
-          'UPDATE budget SET record_cat_id = ? WHERE record_cat_id IN ($inClause)',
+          'UPDATE installment SET cat_id = ? WHERE cat_id IN ($inClause)',
           variables: [Variable.withInt(targetCategoryId)],
-          updates: {db.budgets},
+          updates: {db.installments},
+        );
+        await db.customUpdate(
+          'UPDATE record_period SET cat_id = ? WHERE cat_id IN ($inClause)',
+          variables: [Variable.withInt(targetCategoryId)],
+          updates: {db.recordPeriods},
+        );
+        await db.customUpdate(
+          'UPDATE record_template SET record_cat_id = ? WHERE record_cat_id IN ($inClause)',
+          variables: [Variable.withInt(targetCategoryId)],
+          updates: {db.recordTemplates},
+        );
+        await db.customUpdate(
+          'UPDATE remark SET record_cat_id = ? WHERE record_cat_id IN ($inClause)',
+          variables: [Variable.withInt(targetCategoryId)],
+          updates: {db.remarks},
+        );
+        await _migrateBudgetsAtomic(
+          affectedIds: affectedIds,
+          targetCategoryId: targetCategoryId,
         );
       }
 
@@ -511,6 +541,99 @@ final class CatalogService {
     },
     (_) {},
   );
+
+  /// Migrates budgets from [affectedIds] to [targetCategoryId], merging and
+  /// deduplicating rows that share `(bookId, section, budgetType)`.
+  Future<void> _migrateBudgetsAtomic({
+    required List<int> affectedIds,
+    required int targetCategoryId,
+  }) async {
+    final sourceBudgets =
+        await (db.select(db.budgets)
+              ..where((t) => t.recordCatId.isIn(affectedIds))
+              ..orderBy([(t) => OrderingTerm.asc(t.id)]))
+            .get();
+    if (sourceBudgets.isEmpty) return;
+
+    final groups = <(int, String, int), List<Budget>>{};
+    for (final b in sourceBudgets) {
+      groups
+          .putIfAbsent((b.bookId, b.section, b.budgetType), () => <Budget>[])
+          .add(b);
+    }
+
+    for (final entry in groups.entries) {
+      final (bookId, section, budgetType) = entry.key;
+      final groupRows = entry.value;
+      final existingTarget =
+          await (db.select(db.budgets)
+                ..where(
+                  (t) =>
+                      t.bookId.equals(bookId) &
+                      t.section.equals(section) &
+                      t.budgetType.equals(budgetType) &
+                      t.recordCatId.equals(targetCategoryId),
+                )
+                ..orderBy([(t) => OrderingTerm.asc(t.id)])
+                ..limit(1))
+              .getSingleOrNull();
+
+      final Budget survivor;
+      final List<Budget> toMergeAndDelete;
+      if (existingTarget != null) {
+        survivor = existingTarget;
+        toMergeAndDelete = groupRows;
+      } else {
+        survivor = groupRows.first;
+        toMergeAndDelete = groupRows.sublist(1);
+      }
+
+      var totalAmount = survivor.amountMinor;
+      final survivorExtra = BudgetExtra.fromJson(
+        survivor.extraInfo,
+        fallbackAmountMinor: survivor.amountMinor,
+      );
+      var totalBase = survivorExtra.baseMinor;
+      var autoCopy = survivorExtra.autoCopy;
+      var forward = survivorExtra.forward;
+
+      for (final other in toMergeAndDelete) {
+        totalAmount += other.amountMinor;
+        final otherExtra = BudgetExtra.fromJson(
+          other.extraInfo,
+          fallbackAmountMinor: other.amountMinor,
+        );
+        totalBase += otherExtra.baseMinor;
+        autoCopy = autoCopy || otherExtra.autoCopy;
+        forward = forward || otherExtra.forward;
+      }
+
+      final mergedAmount = Money.minor(totalAmount).storageMinor;
+      final mergedBase = Money.minor(totalBase).storageMinor;
+      final mergedExtra = BudgetExtra(
+        autoCopy: autoCopy,
+        forward: forward,
+        baseMinor: mergedBase,
+      ).toJsonString();
+
+      await (db.update(
+        db.budgets,
+      )..where((t) => t.id.equals(survivor.id))).write(
+        BudgetsCompanion(
+          recordCatId: Value(targetCategoryId),
+          amountMinor: Value(mergedAmount),
+          extraInfo: Value(mergedExtra),
+        ),
+      );
+
+      if (toMergeAndDelete.isNotEmpty) {
+        final idsToDelete = [for (final r in toMergeAndDelete) r.id];
+        await (db.delete(
+          db.budgets,
+        )..where((t) => t.id.isIn(idsToDelete))).go();
+      }
+    }
+  }
 
   // ---------------------------------------------------------------------------
   // Tags (F-018)

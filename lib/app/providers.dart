@@ -82,6 +82,7 @@ final class PeriodOffset extends Notifier<int> {
   void previous() => state = state - 1;
   void next() => state = state + 1;
   void reset() => state = 0;
+  void setOffset(int offset) => state = offset;
 }
 
 final periodOffsetProvider = NotifierProvider<PeriodOffset, int>(

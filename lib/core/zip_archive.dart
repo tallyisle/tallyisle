@@ -1,5 +1,6 @@
+import 'dart:async';
 import 'dart:convert';
-import 'dart:io' show ZLibCodec;
+import 'dart:io' show File, FileMode, RandomAccessFile, ZLibCodec;
 import 'dart:typed_data';
 
 import 'failure.dart';
@@ -324,6 +325,251 @@ final class ZipArchive {
     }
 
     return ZipArchive(entries);
+  }
+
+  /// Reads ONLY the ZIP End of Central Directory (EOCD) tail and Central
+  /// Directory from [file], then seeks to and inflates ONLY [entryName] without
+  /// reading or inflating any other entries (such as large attachment photos)
+  /// into RAM (`S-10`).
+  ///
+  /// Returns `null` if [entryName] is not present in the archive.
+  static Future<ZipEntry?> readSingleEntryFromFile(
+    File file,
+    String entryName,
+  ) {
+    final completer = Completer<ZipEntry?>();
+    Zone.root.run(() async {
+      try {
+        completer.complete(
+          await _readSingleEntryFromFileOnRoot(file, entryName),
+        );
+      } catch (e, st) {
+        completer.completeError(e, st);
+      }
+    });
+    return completer.future;
+  }
+
+  static Future<ZipEntry?> _readSingleEntryFromFileOnRoot(
+    File file,
+    String entryName,
+  ) async {
+    final cleanTarget = validateZipEntryPath(entryName);
+    if (!await file.exists()) {
+      throw const Failure(FailureCode.storageUnavailable, '备份文件不存在');
+    }
+
+    final raf = await file.open(mode: FileMode.read);
+    try {
+      final fileLength = await raf.length();
+      if (fileLength < 22) {
+        throw const Failure(FailureCode.corruptData, '备份文件不是有效的 ZIP 压缩包');
+      }
+
+      const maxEocdTail = 22 + 0xFFFF;
+      final tailLen = fileLength > maxEocdTail ? maxEocdTail : fileLength;
+      final tailStart = fileLength - tailLen;
+      await raf.setPosition(tailStart);
+      final tailBytes = await _readExactBytes(raf, tailLen);
+      final tailData = ByteData.sublistView(tailBytes);
+
+      int? eocdRelPos;
+      for (var pos = tailBytes.length - 22; pos >= 0; pos--) {
+        if (tailData.getUint32(pos, Endian.little) == _eocdSig) {
+          final commentLen = tailData.getUint16(pos + 20, Endian.little);
+          if (tailStart + pos + 22 + commentLen == fileLength) {
+            eocdRelPos = pos;
+            break;
+          }
+        }
+      }
+      if (eocdRelPos == null) {
+        throw const Failure(FailureCode.corruptData, '未找到有效的 ZIP 结尾目录记录（EOCD）');
+      }
+
+      final diskNum = tailData.getUint16(eocdRelPos + 4, Endian.little);
+      final cdDisk = tailData.getUint16(eocdRelPos + 6, Endian.little);
+      if (diskNum != 0 || cdDisk != 0) {
+        throw const Failure(FailureCode.corruptData, '不支持分卷 ZIP 压缩包');
+      }
+
+      final totalEntries = tailData.getUint16(eocdRelPos + 10, Endian.little);
+      final cdSize = tailData.getUint32(eocdRelPos + 12, Endian.little);
+      final cdOffset = tailData.getUint32(eocdRelPos + 16, Endian.little);
+      final eocdFileOffset = tailStart + eocdRelPos;
+      if (cdOffset + cdSize > eocdFileOffset) {
+        throw const Failure(FailureCode.corruptData, 'ZIP 中央目录边界损坏');
+      }
+
+      final Uint8List cdBytes;
+      if (cdOffset >= tailStart) {
+        final relStart = cdOffset - tailStart;
+        cdBytes = Uint8List.sublistView(tailBytes, relStart, relStart + cdSize);
+      } else {
+        await raf.setPosition(cdOffset);
+        cdBytes = await _readExactBytes(raf, cdSize);
+      }
+      final cdData = ByteData.sublistView(cdBytes);
+
+      final seenNames = <String>{};
+      var cursor = 0;
+      ({
+        ZipCompressionMethod method,
+        int modTime,
+        int modDate,
+        int expectedCrc,
+        int compressedSize,
+        int uncompressedSize,
+        int localHeaderOffset,
+      })?
+      matched;
+
+      for (var i = 0; i < totalEntries; i++) {
+        if (cursor + 46 > cdSize) {
+          throw const Failure(FailureCode.corruptData, 'ZIP 中央目录条目截断');
+        }
+        final sig = cdData.getUint32(cursor, Endian.little);
+        if (sig != _centralHeaderSig) {
+          throw const Failure(FailureCode.corruptData, 'ZIP 中央目录签名损坏');
+        }
+
+        final flags = cdData.getUint16(cursor + 8, Endian.little);
+        if ((flags & _encryptedFlag) != 0) {
+          throw const Failure(FailureCode.corruptData, '不支持加密的 ZIP 备份包');
+        }
+
+        final methodCode = cdData.getUint16(cursor + 10, Endian.little);
+        final modTime = cdData.getUint16(cursor + 12, Endian.little);
+        final modDate = cdData.getUint16(cursor + 14, Endian.little);
+        final expectedCrc = cdData.getUint32(cursor + 16, Endian.little);
+        final compressedSize = cdData.getUint32(cursor + 20, Endian.little);
+        final uncompressedSize = cdData.getUint32(cursor + 24, Endian.little);
+        final nameLen = cdData.getUint16(cursor + 28, Endian.little);
+        final extraLen = cdData.getUint16(cursor + 30, Endian.little);
+        final commentLen = cdData.getUint16(cursor + 32, Endian.little);
+        final localHeaderOffset = cdData.getUint32(cursor + 42, Endian.little);
+
+        final headerEnd = cursor + 46 + nameLen + extraLen + commentLen;
+        if (headerEnd > cdSize) {
+          throw const Failure(FailureCode.corruptData, 'ZIP 中央目录元数据越界');
+        }
+
+        final nameBytes = Uint8List.sublistView(
+          cdBytes,
+          cursor + 46,
+          cursor + 46 + nameLen,
+        );
+        final rawName = _decodeEntryName(
+          nameBytes,
+          isUtf8: (flags & _utf8Flag) != 0,
+        );
+        cursor = headerEnd;
+
+        if (rawName.endsWith('/')) {
+          final dirCheck = rawName.substring(0, rawName.length - 1);
+          if (dirCheck.isNotEmpty) {
+            validateZipEntryPath(dirCheck);
+          }
+          continue;
+        }
+
+        final safeName = validateZipEntryPath(rawName);
+        if (!seenNames.add(safeName)) {
+          throw Failure(FailureCode.corruptData, 'ZIP 包含重复文件条目：$safeName');
+        }
+
+        final method = ZipCompressionMethod.fromCode(methodCode);
+        if (safeName == cleanTarget) {
+          matched = (
+            method: method,
+            modTime: modTime,
+            modDate: modDate,
+            expectedCrc: expectedCrc,
+            compressedSize: compressedSize,
+            uncompressedSize: uncompressedSize,
+            localHeaderOffset: localHeaderOffset,
+          );
+        }
+      }
+
+      if (matched == null) {
+        return null;
+      }
+
+      if (matched.localHeaderOffset + 30 > cdOffset) {
+        throw const Failure(FailureCode.corruptData, 'ZIP 本地文件头偏移越界');
+      }
+      await raf.setPosition(matched.localHeaderOffset);
+      final localHdrBytes = await _readExactBytes(raf, 30);
+      final localHdr = ByteData.sublistView(localHdrBytes);
+      if (localHdr.getUint32(0, Endian.little) != _localHeaderSig) {
+        throw const Failure(FailureCode.corruptData, 'ZIP 本地文件头签名损坏');
+      }
+      final localFlags = localHdr.getUint16(6, Endian.little);
+      if ((localFlags & _encryptedFlag) != 0) {
+        throw const Failure(FailureCode.corruptData, '不支持加密的 ZIP 备份包');
+      }
+      final _ = localFlags & _dataDescriptorFlag;
+      final localNameLen = localHdr.getUint16(26, Endian.little);
+      final localExtraLen = localHdr.getUint16(28, Endian.little);
+
+      final dataStart =
+          matched.localHeaderOffset + 30 + localNameLen + localExtraLen;
+      final dataEnd = dataStart + matched.compressedSize;
+      if (dataStart < 0 || dataEnd > cdOffset) {
+        throw const Failure(FailureCode.corruptData, 'ZIP 压缩数据区越界');
+      }
+
+      await raf.setPosition(dataStart);
+      final compressedSlice = await _readExactBytes(
+        raf,
+        matched.compressedSize,
+      );
+      final Uint8List uncompressed;
+      try {
+        uncompressed = switch (matched.method) {
+          ZipCompressionMethod.stored => compressedSlice,
+          ZipCompressionMethod.deflate => Uint8List.fromList(
+            ZLibCodec(raw: true).decode(compressedSlice),
+          ),
+        };
+      } catch (_) {
+        throw Failure(FailureCode.corruptData, '解压文件失败：$cleanTarget');
+      }
+
+      if (uncompressed.length != matched.uncompressedSize) {
+        throw Failure(FailureCode.corruptData, '文件长度校验失败：$cleanTarget');
+      }
+      if (crc32(uncompressed) != matched.expectedCrc) {
+        throw Failure(FailureCode.corruptData, '文件 CRC-32 校验失败：$cleanTarget');
+      }
+
+      return ZipEntry(
+        name: cleanTarget,
+        bytes: uncompressed,
+        method: matched.method,
+        modifiedAt: _decodeDosDateTime(matched.modTime, matched.modDate),
+      );
+    } finally {
+      await raf.close();
+    }
+  }
+
+  static Future<Uint8List> _readExactBytes(
+    RandomAccessFile raf,
+    int length,
+  ) async {
+    if (length == 0) return Uint8List(0);
+    final out = Uint8List(length);
+    var offset = 0;
+    while (offset < length) {
+      final readCount = await raf.readInto(out, offset, length);
+      if (readCount <= 0) {
+        throw const Failure(FailureCode.corruptData, 'ZIP 文件意外截断');
+      }
+      offset += readCount;
+    }
+    return out;
   }
 
   static int _findEndOfCentralDirectory(Uint8List bytes, ByteData data) {

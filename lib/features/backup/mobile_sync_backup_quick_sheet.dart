@@ -9,10 +9,9 @@ import '../../data/backup/webdav_client.dart';
 import '../../domain/rules/cloud_sync_rules.dart';
 import '../../platform/files.dart';
 import '../common/common.dart';
-import '../migration/migration_providers.dart';
-import '../reminder/reminder_providers.dart';
 import 'backup_page.dart';
 import 'backup_providers.dart';
+import 'post_restore_refresh.dart';
 
 /// Snapshot of sync/backup status for mobile quick entry widgets without
 /// forcing cold-start DB initialization in standalone widget layout tests.
@@ -97,7 +96,14 @@ final mobileSyncQuickPreviewProvider = Provider<MobileSyncQuickPreview>((ref) {
   );
 });
 
-void _invalidateBackupState(WidgetRef ref, {required bool didPullOrRestore}) {
+Future<void> _invalidateBackupState(
+  WidgetRef ref, {
+  required bool didPullOrRestore,
+}) async {
+  if (didPullOrRestore) {
+    await invalidateAllAfterDatabaseReplace(ref);
+    return;
+  }
   ref
     ..invalidate(localBackupsProvider)
     ..invalidate(webDavBackupsProvider)
@@ -105,20 +111,6 @@ void _invalidateBackupState(WidgetRef ref, {required bool didPullOrRestore}) {
     ..invalidate(activeCloudBackupsProvider)
     ..invalidate(cloudSyncCursorProvider)
     ..invalidate(lastBackupAtMsProvider);
-  if (didPullOrRestore) {
-    ref.read(periodOffsetProvider.notifier).reset();
-    ref.read(calendarMonthOffsetProvider.notifier).reset();
-    ref
-      ..invalidate(currentBookIdProvider)
-      ..invalidate(booksProvider)
-      ..invalidate(assetsProvider)
-      ..invalidate(assetBooksProvider)
-      ..invalidate(currenciesProvider)
-      ..invalidate(tagsProvider)
-      ..invalidate(remindersProvider)
-      ..invalidate(reminderCountProvider)
-      ..invalidate(migrationLocalSummaryProvider);
-  }
 }
 
 void _openFullBackupPage(BuildContext context) {
@@ -225,19 +217,22 @@ class _MobileSyncBackupQuickSheetState
       if (!mounted) return;
       switch (outcome.status) {
         case CloudSyncStatus.alreadyUpToDate:
-          _invalidateBackupState(ref, didPullOrRestore: false);
+          await _invalidateBackupState(ref, didPullOrRestore: false);
+          if (!mounted) return;
           Navigator.of(context).pop();
           _showToast(messenger, '多端数据已是最新（版本 r${outcome.revision}）');
         case CloudSyncStatus.pushed:
-          _invalidateBackupState(ref, didPullOrRestore: false);
+          await _invalidateBackupState(ref, didPullOrRestore: false);
+          if (!mounted) return;
           Navigator.of(context).pop();
           _showToast(messenger, '已推送最新快照至云端（版本 r${outcome.revision}）');
         case CloudSyncStatus.pulled:
-          _invalidateBackupState(ref, didPullOrRestore: true);
+          await _invalidateBackupState(ref, didPullOrRestore: true);
+          if (!mounted) return;
           Navigator.of(context).pop();
           _showToast(messenger, '已从云端同步最新数据（版本 r${outcome.revision}）');
         case CloudSyncStatus.conflict:
-          _invalidateBackupState(ref, didPullOrRestore: false);
+          await _invalidateBackupState(ref, didPullOrRestore: false);
           pendingConflict = outcome;
       }
     } catch (e) {
@@ -275,7 +270,8 @@ class _MobileSyncBackupQuickSheetState
       final service = await ref.read(tallyBackupServiceProvider.future);
       final saved = await service.createLocalBackup();
       if (!mounted) return;
-      _invalidateBackupState(ref, didPullOrRestore: false);
+      await _invalidateBackupState(ref, didPullOrRestore: false);
+      if (!mounted) return;
       Navigator.of(context).pop();
       _showToast(messenger, '已生成本地备份：${saved.fileName}');
     } catch (e) {
@@ -309,7 +305,8 @@ class _MobileSyncBackupQuickSheetState
           fileAccess: fileAccess,
         );
         if (!mounted) return;
-        _invalidateBackupState(ref, didPullOrRestore: false);
+        await _invalidateBackupState(ref, didPullOrRestore: false);
+        if (!mounted) return;
         Navigator.of(context).pop();
         _showToast(messenger, '已保存备份文件：$name');
       } else {
@@ -632,22 +629,22 @@ class _MobileMeSyncQuickCardState extends ConsumerState<MobileMeSyncQuickCard> {
         if (!mounted) return;
         switch (outcome.status) {
           case CloudSyncStatus.alreadyUpToDate:
-            _invalidateBackupState(ref, didPullOrRestore: false);
+            await _invalidateBackupState(ref, didPullOrRestore: false);
             _toast('多端数据已是最新（版本 r${outcome.revision}）');
           case CloudSyncStatus.pushed:
-            _invalidateBackupState(ref, didPullOrRestore: false);
+            await _invalidateBackupState(ref, didPullOrRestore: false);
             _toast('已推送最新快照至云端（版本 r${outcome.revision}）');
           case CloudSyncStatus.pulled:
-            _invalidateBackupState(ref, didPullOrRestore: true);
+            await _invalidateBackupState(ref, didPullOrRestore: true);
             _toast('已从云端同步最新数据（版本 r${outcome.revision}）');
           case CloudSyncStatus.conflict:
-            _invalidateBackupState(ref, didPullOrRestore: false);
+            await _invalidateBackupState(ref, didPullOrRestore: false);
             pendingConflict = outcome;
         }
       } else {
         final saved = await service.createLocalBackup();
         if (!mounted) return;
-        _invalidateBackupState(ref, didPullOrRestore: false);
+        await _invalidateBackupState(ref, didPullOrRestore: false);
         _toast('已生成本地备份：${saved.fileName}');
       }
     } catch (e) {
@@ -669,7 +666,7 @@ class _MobileMeSyncQuickCardState extends ConsumerState<MobileMeSyncQuickCard> {
           final service = await ref.read(tallyBackupServiceProvider.future);
           final resolved = await service.syncNow(resolution: choice);
           if (!mounted) return;
-          _invalidateBackupState(
+          await _invalidateBackupState(
             ref,
             didPullOrRestore: resolved.status == CloudSyncStatus.pulled,
           );

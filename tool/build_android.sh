@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Builds both the arm64 Debug APK (release/帐屿-开发版.apk) and the slim arm64
-# Release APK (release/帐屿-正式版.apk), signed with the same debug.keystore so
+# Builds both the arm64 Debug APK (release/TallyIsle-debug.apk) and the slim arm64
+# Release APK (release/TallyIsle-release.apk), signed with the same debug.keystore so
 # Android devices can seamlessly overwrite-install between the two profiles.
 set -euo pipefail
 source "$(dirname "$0")/env.sh"
@@ -46,18 +46,18 @@ mkdir -p "$TALLYISLE_PROJECT/release"
 
 flutter pub get --enforce-lockfile --offline
 
-echo "==> [1/2] Building Debug APK (release/帐屿-开发版.apk) ..."
+echo "==> [1/2] Building Debug APK (release/TallyIsle-debug.apk) ..."
 flutter build apk --debug --no-pub --target-platform android-arm64 "$@"
 cp "$TALLYISLE_PROJECT/build/app/outputs/flutter-apk/app-debug.apk" \
-  "$TALLYISLE_PROJECT/release/帐屿-开发版.apk"
+  "$TALLYISLE_PROJECT/release/TallyIsle-debug.apk"
 
-echo "==> [2/2] Building Slim Release APK (release/帐屿-正式版.apk) ..."
+echo "==> [2/2] Building Slim Release APK (release/TallyIsle-release.apk) ..."
 flutter build apk --release --no-pub --target-platform android-arm64 --tree-shake-icons "$@"
 cp "$TALLYISLE_PROJECT/build/app/outputs/flutter-apk/app-release.apk" \
-  "$TALLYISLE_PROJECT/release/帐屿-正式版.apk"
+  "$TALLYISLE_PROJECT/release/TallyIsle-release.apk"
 
 # Refresh plugin registrant for local test/debug runs without touching pubspec.lock.
 flutter pub get --enforce-lockfile --offline >/dev/null
 
-ls -lh "$TALLYISLE_PROJECT/release/帐屿-开发版.apk" "$TALLYISLE_PROJECT/release/帐屿-正式版.apk"
-sha256sum "$TALLYISLE_PROJECT/release/帐屿-开发版.apk" "$TALLYISLE_PROJECT/release/帐屿-正式版.apk"
+ls -lh "$TALLYISLE_PROJECT/release/TallyIsle-debug.apk" "$TALLYISLE_PROJECT/release/TallyIsle-release.apk"
+sha256sum "$TALLYISLE_PROJECT/release/TallyIsle-debug.apk" "$TALLYISLE_PROJECT/release/TallyIsle-release.apk"

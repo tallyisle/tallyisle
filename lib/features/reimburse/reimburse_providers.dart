@@ -10,6 +10,8 @@ import '../../app/providers.dart'
         databaseProvider;
 import '../../data/db/database.dart';
 import '../../domain/model/codes.dart';
+import '../../domain/rules/asset_overview.dart' show RateTable;
+import '../../domain/rules/currency_rates.dart' show defaultCurrencySymbol;
 import '../../domain/rules/reimburse_overview.dart';
 
 /// Scope toggle state for `ReimbursePage`:
@@ -242,10 +244,13 @@ final reimburseViewProvider = Provider<AsyncValue<ReimburseViewData>>((ref) {
     }
   }
 
+  final rates = RateTable({for (final c in currencies) c.code: c.rateToAnchor});
+
   final overview = computeReimburseOverview(
     scopedBills,
     liveReceipts: liveReceipts,
     baseCurrencyCode: baseCurrencyCode,
+    rates: rates,
   );
 
   ReimburseBillRowView buildRowView(ReimburseBillItem item) {
@@ -272,7 +277,9 @@ final reimburseViewProvider = Provider<AsyncValue<ReimburseViewData>>((ref) {
         ? '无账户'
         : (fundingAsset?.name ?? '账户已删除');
     final bookName = bookById[item.bookId]?.name ?? '日常账本';
-    final currencySymbol = symbolByCode[item.currencyCode] ?? '¥';
+    final currencySymbol =
+        symbolByCode[item.currencyCode] ??
+        defaultCurrencySymbol(item.currencyCode);
 
     return ReimburseBillRowView(
       item: item,

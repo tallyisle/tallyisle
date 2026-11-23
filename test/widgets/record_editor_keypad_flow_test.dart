@@ -1391,10 +1391,10 @@ void main() {
                 remark: '分类已删回退测试',
               ),
             );
-            await CatalogService(db).deleteCategory(
-              commandId: 'delete-temp-cat-for-tpl',
-              categoryId: tempCatId,
-            );
+            // Simulate a legacy/imported template whose category row no longer exists.
+            await (db.delete(
+              db.recordCategories,
+            )..where((c) => c.id.equals(tempCatId))).go();
           });
 
           Finder summaryText(String label) => find.descendant(
