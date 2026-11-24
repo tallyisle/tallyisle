@@ -148,7 +148,7 @@ class _UrlSchemePageState extends ConsumerState<UrlSchemePage> {
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        '双协议兼容支持',
+                        '外部协议支持',
                         style: theme.textTheme.titleMedium?.copyWith(
                           fontWeight: FontWeight.bold,
                         ),
@@ -158,7 +158,7 @@ class _UrlSchemePageState extends ConsumerState<UrlSchemePage> {
                 ),
                 const SizedBox(height: 8),
                 const Text(
-                  '帐屿同时支持主协议头 tallyisle:// 与兼容协议头 yyjz://，'
+                  '帐屿支持外部协议头 tallyisle://，'
                   '可通过快捷指令、桌面自动化脚本或外部应用一键跳转页面或直接静默记账。',
                 ),
               ],
@@ -416,24 +416,14 @@ class _TemplateCard extends StatelessWidget {
                   onPressed: () => onFill(template.tallyIsleUri),
                 ),
                 ActionChip(
-                  key: Key('url_template_copy_primary_$index'),
+                  key: Key('url_template_copy_$index'),
                   visualDensity: isDesktop ? null : VisualDensity.compact,
                   materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   padding: EdgeInsets.symmetric(horizontal: isDesktop ? 8 : 4),
                   labelStyle: theme.textTheme.labelSmall,
                   avatar: const Icon(Icons.copy, size: 15),
                   label: const Text('复制 tallyisle://'),
-                  onPressed: () => onCopy(template.tallyIsleUri, '主协议'),
-                ),
-                ActionChip(
-                  key: Key('url_template_copy_legacy_$index'),
-                  visualDensity: isDesktop ? null : VisualDensity.compact,
-                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  padding: EdgeInsets.symmetric(horizontal: isDesktop ? 8 : 4),
-                  labelStyle: theme.textTheme.labelSmall,
-                  avatar: const Icon(Icons.history, size: 15),
-                  label: const Text('复制 yyjz://'),
-                  onPressed: () => onCopy(template.legacyUri, '兼容协议'),
+                  onPressed: () => onCopy(template.tallyIsleUri, '协议'),
                 ),
               ],
             ),

@@ -13,7 +13,7 @@ import io.flutter.plugin.common.MethodChannel
 
 /**
  * Unified Android native MethodChannel bridge (`dev.tallyisle/automation`) for:
- *  - `F-033` `tallyisle://` & `yyjz://` external deep-link capture & live dispatch
+ *  - `F-033` `tallyisle://` external deep-link capture & live dispatch
  *  - `F-034` Desktop AppWidget snapshot sync & pin requests
  *  - `F-020` AccessibilityService permission check, settings jump, & captured event inbox
  */
@@ -40,13 +40,13 @@ class AutomationBridge(
     }
 
     /**
-     * Captures an incoming `tallyisle://` or `yyjz://` deep-link [Intent] from `onCreate`
+     * Captures an incoming `tallyisle://` deep-link [Intent] from `onCreate`
      * or `onNewIntent`. Returns `true` when the intent carried a supported external URI.
      */
     fun captureIntent(incomingIntent: Intent?, notifyFlutter: Boolean = true): Boolean {
         val data: Uri = incomingIntent?.data ?: return false
         val scheme = data.scheme?.lowercase().orEmpty()
-        if (scheme != "tallyisle" && scheme != "yyjz") return false
+        if (scheme != "tallyisle") return false
         val host = data.host?.lowercase().orEmpty()
         if (host == "reminder" || host == "reminder-open") return false
 

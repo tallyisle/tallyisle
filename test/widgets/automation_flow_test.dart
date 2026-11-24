@@ -43,7 +43,7 @@ void main() {
   }
 
   testWidgets(
-    'UrlSchemePage (F-033): executes live yyjz://addbill and persists record into SQLite',
+    'UrlSchemePage (F-033): executes live tallyisle://addbill, rejects yyjz://, and renders zero yyjz copy',
     (tester) async {
       final db = AppDatabase(NativeDatabase.memory());
       final autoBridge = InMemoryAutoBillBridge();
@@ -66,10 +66,15 @@ void main() {
       await settle(tester);
 
       expect(find.byKey(const Key('url_scheme_page')), findsOneWidget);
+      expect(find.textContaining('yyjz'), findsNothing);
+      expect(find.textContaining('双协议'), findsNothing);
+      expect(find.text('复制 yyjz://'), findsNothing);
+      expect(find.byKey(const Key('url_template_copy_legacy_0')), findsNothing);
+      expect(find.byKey(const Key('url_template_copy_0')), findsOneWidget);
 
       await tester.enterText(
         find.byKey(const Key('url_scheme_test_input')),
-        'yyjz://addbill?type=0&money=26.80&category=餐饮&remark=测试快捷早餐',
+        'tallyisle://addbill?type=0&money=26.80&category=餐饮&remark=测试快捷早餐',
       );
       await tester.tap(find.byKey(const Key('url_scheme_execute_button')));
       await settle(tester);
@@ -82,6 +87,16 @@ void main() {
       expect(rows, hasLength(1));
       expect(rows!.single.moneyMinor, BigInt.from(2680));
       expect(rows.single.remark, '测试快捷早餐');
+
+      // Legacy yyjz:// scheme is rejected with validation error
+      await tester.enterText(
+        find.byKey(const Key('url_scheme_test_input')),
+        'yyjz://addbill?type=0&money=12.00',
+      );
+      await tester.tap(find.byKey(const Key('url_scheme_execute_button')));
+      await settle(tester);
+      expect(find.byKey(const Key('url_scheme_result_error')), findsOneWidget);
+      expect(find.textContaining('仅支持 tallyisle://'), findsOneWidget);
 
       // Test navigation URI as well
       await tester.enterText(

@@ -105,7 +105,7 @@ void main() {
 
         final service = UrlSchemeService(db, ledgerService: ledger);
         const uri =
-            'yyjz://addbill?type=0&money=22.00&discount=3.50'
+            'tallyisle://addbill?type=0&money=22.00&discount=3.50'
             '&category=餐饮>咖啡&asset1=招商储蓄卡&remark=生椰拿铁&tags=提神';
         final fixedCmd = cmd();
 
@@ -120,7 +120,7 @@ void main() {
         // Conflicting payload with same commandId must fail
         await expectLater(
           () => service.executeUri(
-            'yyjz://addbill?type=0&money=99.00',
+            'tallyisle://addbill?type=0&money=99.00',
             commandId: fixedCmd,
           ),
           throwsA(
@@ -231,6 +231,35 @@ void main() {
             commandId: cmd(),
           ),
           throwsA(isA<Failure>()),
+        );
+
+        // Legacy yyjz:// scheme is rejected cleanly
+        await expectLater(
+          () => service.executeUri('yyjz://home', commandId: cmd()),
+          throwsA(
+            isA<Failure>()
+                .having((f) => f.code, 'code', FailureCode.validation)
+                .having(
+                  (f) => f.message,
+                  'message',
+                  contains('仅支持 tallyisle://'),
+                ),
+          ),
+        );
+        await expectLater(
+          () => service.executeUri(
+            'yyjz://addbill?type=0&money=22.00',
+            commandId: cmd(),
+          ),
+          throwsA(
+            isA<Failure>()
+                .having((f) => f.code, 'code', FailureCode.validation)
+                .having(
+                  (f) => f.message,
+                  'message',
+                  contains('仅支持 tallyisle://'),
+                ),
+          ),
         );
       },
     );
