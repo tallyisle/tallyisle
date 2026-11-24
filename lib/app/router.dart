@@ -8,6 +8,7 @@ import '../features/assets/assets_page.dart';
 import '../features/attachments/bill_images_page.dart';
 import '../features/automation/auto_bill_page.dart';
 import '../features/automation/desktop_widgets_page.dart';
+import '../features/automation/mcp_settings_page.dart';
 import '../features/automation/ocr_bill_page.dart';
 import '../features/automation/url_scheme_page.dart';
 import '../features/backup/backup_page.dart';
@@ -611,6 +612,10 @@ GoRouter buildRouter({
       builder: (_, _) => const AutoBillPage(),
     ),
     GoRoute(path: '/automation/ocr', builder: (_, _) => const OcrBillPage()),
+    GoRoute(
+      path: '/automation/mcp',
+      builder: (_, _) => const McpSettingsPage(),
+    ),
   ],
 );
 

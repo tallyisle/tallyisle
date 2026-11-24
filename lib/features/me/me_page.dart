@@ -9,6 +9,7 @@ import '../automation/auto_bill_page.dart';
 import '../automation/automation_providers.dart'
     show autoBillDraftCountProvider;
 import '../automation/desktop_widgets_page.dart';
+import '../automation/mcp_settings_page.dart';
 import '../automation/ocr_bill_page.dart';
 import '../automation/url_scheme_page.dart';
 import '../backup/backup_page.dart';
@@ -310,6 +311,12 @@ List<_MeSectionData> _buildMeSections({
         title: '外部快捷链接 (URL Scheme)',
         route: '/automation/url-scheme',
       ),
+      const _MeMenuEntry(
+        key: Key('me-mcp'),
+        icon: Icons.hub_outlined,
+        title: 'MCP 服务 (AI Agents)',
+        route: '/automation/mcp',
+      ),
     ],
   ),
   const _MeSectionData(
@@ -380,6 +387,7 @@ const Set<String> _supportedEmbeddedRoutes = <String>{
   '/automation/ocr',
   '/automation/widgets',
   '/automation/url-scheme',
+  '/automation/mcp',
   '/security/app-lock',
   '/settings',
   '/settings/diy-toolbar',
@@ -453,6 +461,7 @@ Widget _buildEmbeddedMePage(BuildContext context, String route) =>
       '/automation/ocr' => const OcrBillPage(),
       '/automation/widgets' => const DesktopWidgetsPage(),
       '/automation/url-scheme' => const UrlSchemePage(),
+      '/automation/mcp' => const McpSettingsPage(),
       '/security/app-lock' => const AppLockSettingsPage(),
       '/settings' => const SettingsPage(),
       '/settings/diy-toolbar' => const DiyToolbarSettingsPage(),

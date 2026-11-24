@@ -6,6 +6,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/app_version.dart';
+import '../data/automation/mcp_server_service.dart';
 import '../data/backup/backup_sync_scheduler.dart';
 import '../data/backup/tally_backup_service.dart';
 import '../domain/rules/app_settings_rules.dart';
@@ -100,6 +101,7 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
   AppLifecycleListener? _lifecycleListener;
   BackupSyncScheduler? _backupSyncScheduler;
   TallyBackupService? _schedulerService;
+  McpServerService? _mcpServerService;
   Future<BackupSyncScheduler?>? _schedulerInitFuture;
   StreamSubscription<String>? _launchRouteSub;
   StreamSubscription<String>? _deepLinkSub;
@@ -434,6 +436,14 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
         if (_disposed || !mounted) return;
         await service.syncToPlatform();
       });
+      if (isInitial) {
+        await safeStep(() async {
+          final service = await ref.read(mcpServerServiceProvider.future);
+          if (_disposed || !mounted) return;
+          _mcpServerService = service;
+          await service.syncWithStoredConfig();
+        });
+      }
     } finally {
       _syncRunning = false;
     }
@@ -445,6 +455,9 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
     WidgetsBinding.instance.removeObserver(this);
     _lifecycleListener?.dispose();
     _lifecycleListener = null;
+    final mcpService = _mcpServerService;
+    _mcpServerService = null;
+    unawaited(mcpService?.stop());
     final scheduler = _backupSyncScheduler;
     _backupSyncScheduler = null;
     _schedulerService = null;

@@ -55,6 +55,7 @@ import 'package:tallyisle/features/assets/assets_page.dart';
 import 'package:tallyisle/features/attachments/bill_images_page.dart';
 import 'package:tallyisle/features/automation/auto_bill_page.dart';
 import 'package:tallyisle/features/automation/automation_providers.dart';
+import 'package:tallyisle/features/automation/mcp_settings_page.dart';
 import 'package:tallyisle/features/automation/ocr_bill_page.dart';
 import 'package:tallyisle/features/automation/url_scheme_page.dart';
 import 'package:tallyisle/features/backup/backup_page.dart';
@@ -1232,7 +1233,7 @@ void main() {
             violations: violations,
           );
 
-          // At 1280x800, walk ALL 33 desktop MePage directory items in-place!
+          // At 1280x800, walk ALL 34 desktop MePage directory items in-place!
           if (size == const Size(1280, 800)) {
             const meKeys = <String>[
               'me-books',
@@ -1263,6 +1264,7 @@ void main() {
               'me-auto-bill',
               'me-ocr',
               'me-url-scheme',
+              'me-mcp',
               'me-app-lock',
               'me-settings',
               'me-diy-toolbar',
@@ -1819,6 +1821,7 @@ void main() {
           },
         ),
         ('UrlSchemePage', () => const UrlSchemePage(), null),
+        ('McpSettingsPage', () => const McpSettingsPage(), null),
         ('AppLockSettingsPage', () => const AppLockSettingsPage(), null),
         ('SettingsPage', () => const SettingsPage(), null),
         ('DiyToolbarSettingsPage', () => const DiyToolbarSettingsPage(), null),

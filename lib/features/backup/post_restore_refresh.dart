@@ -180,12 +180,23 @@ Future<void> _invalidateAllAfterDatabaseReplaceImpl({
     activeWidgetCountsProvider,
     autoMapRulesProvider,
     autoBillDraftsProvider,
+    mcpServerConfigProvider,
+    mcpRuntimeStatusProvider,
   ];
 
   for (final p in providersToInvalidate) {
     try {
       invalidate(p);
     } catch (_) {}
+  }
+
+  if (exists(databaseProvider) && exists(mcpServerServiceProvider)) {
+    try {
+      final mcpService = await read(mcpServerServiceProvider.future);
+      await mcpService.syncWithStoredConfig();
+    } catch (_) {
+      // Non-blocking MCP listener sync after database replace.
+    }
   }
 
   if (syncPlatformWidgets && exists(databaseProvider)) {
