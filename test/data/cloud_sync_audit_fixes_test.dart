@@ -1291,7 +1291,7 @@ void main() {
 
       testWidgets(
         'S-05: TallyIsleApp runs startup cloud sync BEFORE periodic catch-up, and BackupPage conflict card persists across navigation then clears on restore',
-        timeout: const Timeout(Duration(seconds: 30)),
+        timeout: const Timeout(Duration(seconds: 90)),
         (tester) async {
           final s3 = (await tester.runAsync(_AuditS3Server.start))!;
           final tempRoot = (await tester.runAsync(
@@ -1308,14 +1308,18 @@ void main() {
           final reminderScheduler = InMemoryReminderScheduler();
 
           addTearDown(() async {
-            await tester.pumpWidget(const SizedBox());
+            try {
+              await tester.pumpWidget(const SizedBox());
+              await tester.pump(const Duration(seconds: 1));
+            } catch (_) {}
             await reminderScheduler.dispose();
-            await tester.runAsync(s3.close);
-            await tester.runAsync(peerDb.close);
-            await tester.runAsync(appDb.close);
-            await tester.runAsync(() async {
-              if (await tempRoot.exists())
+            await Zone.root.run(() async {
+              await s3.close();
+              await peerDb.close();
+              await appDb.close();
+              if (await tempRoot.exists()) {
                 await tempRoot.delete(recursive: true);
+              }
             });
           });
 

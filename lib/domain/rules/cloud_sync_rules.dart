@@ -204,6 +204,8 @@ final class CloudSyncSettings {
     this.syncOnSchedule = false,
     int scheduleIntervalMinutes = 60,
     this.autoArchiveBackupEnabled = true,
+    this.showHomeQuickEntry = false,
+    this.showMeQuickEntry = false,
     required this.deviceId,
     this.deviceName = '帐屿本机',
   }) : syncOnStartup =
@@ -228,6 +230,8 @@ final class CloudSyncSettings {
   final bool syncOnSchedule;
   final int scheduleIntervalMinutes;
   final bool autoArchiveBackupEnabled;
+  final bool showHomeQuickEntry;
+  final bool showMeQuickEntry;
   final String deviceId;
   final String deviceName;
 
@@ -249,6 +253,8 @@ final class CloudSyncSettings {
     bool? syncOnSchedule,
     int? scheduleIntervalMinutes,
     bool? autoArchiveBackupEnabled,
+    bool? showHomeQuickEntry,
+    bool? showMeQuickEntry,
     String? deviceId,
     String? deviceName,
   }) {
@@ -281,6 +287,8 @@ final class CloudSyncSettings {
           scheduleIntervalMinutes ?? this.scheduleIntervalMinutes,
       autoArchiveBackupEnabled:
           autoArchiveBackupEnabled ?? this.autoArchiveBackupEnabled,
+      showHomeQuickEntry: showHomeQuickEntry ?? this.showHomeQuickEntry,
+      showMeQuickEntry: showMeQuickEntry ?? this.showMeQuickEntry,
       deviceId: deviceId ?? this.deviceId,
       deviceName: deviceName ?? this.deviceName,
     );
@@ -297,6 +305,8 @@ final class CloudSyncSettings {
     'sync_on_schedule': syncOnSchedule,
     'schedule_interval_minutes': scheduleIntervalMinutes,
     'auto_archive_backup_enabled': autoArchiveBackupEnabled,
+    'show_home_quick_entry': showHomeQuickEntry,
+    'show_me_quick_entry': showMeQuickEntry,
     'device_id': deviceId,
     'device_name': deviceName.trim().isEmpty ? '帐屿本机' : deviceName.trim(),
   };
@@ -336,6 +346,8 @@ final class CloudSyncSettings {
       scheduleIntervalMinutes: rawSchedule is int ? rawSchedule : 60,
       autoArchiveBackupEnabled:
           (json['auto_archive_backup_enabled'] as bool?) ?? true,
+      showHomeQuickEntry: (json['show_home_quick_entry'] as bool?) ?? false,
+      showMeQuickEntry: (json['show_me_quick_entry'] as bool?) ?? false,
       deviceId: rawDeviceId.isEmpty ? fallbackDeviceId : rawDeviceId,
       deviceName: rawDeviceName.isEmpty ? fallbackDeviceName : rawDeviceName,
     );
@@ -354,6 +366,8 @@ final class CloudSyncSettings {
           other.syncOnSchedule == syncOnSchedule &&
           other.scheduleIntervalMinutes == scheduleIntervalMinutes &&
           other.autoArchiveBackupEnabled == autoArchiveBackupEnabled &&
+          other.showHomeQuickEntry == showHomeQuickEntry &&
+          other.showMeQuickEntry == showMeQuickEntry &&
           other.deviceId == deviceId &&
           other.deviceName == deviceName);
 
@@ -368,6 +382,8 @@ final class CloudSyncSettings {
     syncOnSchedule,
     scheduleIntervalMinutes,
     autoArchiveBackupEnabled,
+    showHomeQuickEntry,
+    showMeQuickEntry,
     deviceId,
     deviceName,
   );

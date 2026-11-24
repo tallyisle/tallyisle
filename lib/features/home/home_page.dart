@@ -14,6 +14,7 @@ import '../../domain/rules/asset_overview.dart';
 import '../../domain/rules/billing_period.dart';
 import '../../domain/rules/income_expense.dart';
 import '../books/book_switcher_modal.dart';
+import '../backup/backup_providers.dart';
 import '../backup/mobile_sync_backup_quick_sheet.dart';
 import '../budget/budget_providers.dart'
     show budgetOffsetProvider, budgetOverviewForOffsetProvider;
@@ -198,6 +199,10 @@ class _HomePageState extends ConsumerState<HomePage> {
 
     final isDesktop = DesktopAdaptive.isDesktop(context);
     final isExpandedDesktop = DesktopAdaptive.isExpandedDesktop(context);
+    final quickEntryVis =
+        (ref.exists(databaseProvider) || ref.exists(cloudSyncSettingsProvider))
+        ? ref.watch(quickSyncEntryVisibilityProvider)
+        : (showHome: false, showMe: false);
 
     Widget body;
     if (!isDesktop) {
@@ -279,7 +284,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                 ),
               ),
               actions: [
-                if (!isDesktop)
+                if (!isDesktop && quickEntryVis.showHome)
                   IconButton(
                     key: const Key('home-sync-backup-button'),
                     tooltip: '同步与备份',

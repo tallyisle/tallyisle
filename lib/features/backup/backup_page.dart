@@ -197,6 +197,22 @@ class _BackupPageState extends ConsumerState<BackupPage>
     }
   }
 
+  Future<void> _updateQuickEntryVisibility({
+    bool? showHome,
+    bool? showMe,
+  }) async {
+    try {
+      final service = await ref.read(tallyBackupServiceProvider.future);
+      await service.updateQuickEntryVisibility(
+        showHomeQuickEntry: showHome,
+        showMeQuickEntry: showMe,
+      );
+      ref.invalidate(cloudSyncSettingsProvider);
+    } catch (e) {
+      _showMessage(safeMessage(e));
+    }
+  }
+
   Future<void> _updateLocalAutoBackupPolicy(
     LocalAutoBackupPolicy nextPolicy,
   ) async {
@@ -790,15 +806,14 @@ class _BackupPageState extends ConsumerState<BackupPage>
       data: (c) => c,
       orElse: S3Config.unconfigured,
     );
-    final syncSettings = syncSettingsAsync.maybeWhen(
-      data: (s) => s,
-      orElse: () => CloudSyncSettings(
-        backend: davConfig.isConfigured
-            ? CloudBackendType.webdav
-            : CloudBackendType.none,
-        deviceId: 'pending',
-      ),
-    );
+    final syncSettings =
+        syncSettingsAsync.value ??
+        CloudSyncSettings(
+          backend: davConfig.isConfigured
+              ? CloudBackendType.webdav
+              : CloudBackendType.none,
+          deviceId: 'pending',
+        );
     final localPolicy = localPolicyAsync.maybeWhen(
       data: (p) => p,
       orElse: () => LocalAutoBackupPolicy.defaults,
@@ -2080,6 +2095,62 @@ class _BackupPageState extends ConsumerState<BackupPage>
                           ),
                         ),
                       ),
+                      if (!isDesktop) ...[
+                        const SizedBox(height: 12),
+                        Card(
+                          key: const Key('quick_entry_visibility_card'),
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  '快捷入口显示',
+                                  style: Theme.of(
+                                    context,
+                                  ).textTheme.titleMedium,
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  '开启后在移动端对应页面顶部显示一键同步与本地备份入口（默认关闭）。',
+                                  style: Theme.of(context).textTheme.bodySmall,
+                                ),
+                                const SizedBox(height: 8),
+                                SwitchListTile(
+                                  key: const Key(
+                                    'backup_show_home_quick_entry_switch',
+                                  ),
+                                  contentPadding: EdgeInsets.zero,
+                                  dense: true,
+                                  title: const Text('明细页顶栏快捷按钮'),
+                                  subtitle: const Text('在明细页右上角显示同步与备份图标按钮'),
+                                  value: syncSettings.showHomeQuickEntry,
+                                  onChanged: effectiveBusy
+                                      ? null
+                                      : (v) => _updateQuickEntryVisibility(
+                                          showHome: v,
+                                        ),
+                                ),
+                                SwitchListTile(
+                                  key: const Key(
+                                    'backup_show_me_quick_entry_switch',
+                                  ),
+                                  contentPadding: EdgeInsets.zero,
+                                  dense: true,
+                                  title: const Text('更多页顶部快捷卡片'),
+                                  subtitle: const Text('在更多页顶部常驻一键同步与备份卡片'),
+                                  value: syncSettings.showMeQuickEntry,
+                                  onChanged: effectiveBusy
+                                      ? null
+                                      : (v) => _updateQuickEntryVisibility(
+                                          showMe: v,
+                                        ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),

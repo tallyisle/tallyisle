@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../app/adaptive.dart';
+import '../../app/providers.dart';
 import '../attachments/bill_images_page.dart';
 import '../automation/auto_bill_page.dart';
 import '../automation/automation_providers.dart'
@@ -11,6 +12,7 @@ import '../automation/desktop_widgets_page.dart';
 import '../automation/ocr_bill_page.dart';
 import '../automation/url_scheme_page.dart';
 import '../backup/backup_page.dart';
+import '../backup/backup_providers.dart';
 import '../backup/mobile_sync_backup_quick_sheet.dart';
 import '../bank_cards/bank_cards_page.dart';
 import '../batch_edit/batch_edit_page.dart';
@@ -643,6 +645,10 @@ class _MePageState extends ConsumerState<MePage> {
     final isDark = theme.brightness == Brightness.dark;
     final draftCount = ref.watch(autoBillDraftCountProvider);
     final isDesktop = DesktopAdaptive.isDesktop(context);
+    final quickEntryVis =
+        (ref.exists(databaseProvider) || ref.exists(cloudSyncSettingsProvider))
+        ? ref.watch(quickSyncEntryVisibilityProvider)
+        : (showHome: false, showMe: false);
     final rawSection = _currentRouterUri(context)?.queryParameters['section'];
     if (rawSection != _lastSyncedSectionParam) {
       _lastSyncedSectionParam = rawSection;
@@ -809,13 +815,14 @@ class _MePageState extends ConsumerState<MePage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            if (!isDesktop) MobileMeSyncQuickCard(cardColor: sectionCardColor),
+            if (!isDesktop && quickEntryVis.showMe)
+              MobileMeSyncQuickCard(cardColor: sectionCardColor),
             for (var i = 0; i < sections.length; i++)
               _buildCardSection(
                 context,
                 section: sections[i],
                 sectionCardColor: sectionCardColor,
-                isFirst: i == 0 && isDesktop,
+                isFirst: i == 0 && (isDesktop || !quickEntryVis.showMe),
               ),
           ],
         ),

@@ -435,6 +435,20 @@ final class TallyBackupService {
     await saveCloudSyncSettings(updated);
   }
 
+  /// Updates mobile quick-entry visibility switches in `ti_preference`
+  /// (`cloud_sync_settings`) without requiring a configured cloud backend.
+  Future<void> updateQuickEntryVisibility({
+    bool? showHomeQuickEntry,
+    bool? showMeQuickEntry,
+  }) async {
+    final current = await getCloudSyncSettings();
+    final updated = current.copyWith(
+      showHomeQuickEntry: showHomeQuickEntry,
+      showMeQuickEntry: showMeQuickEntry,
+    );
+    await saveCloudSyncSettings(updated);
+  }
+
   /// Reactive stream of [LocalAutoBackupPolicy] from `ti_preference`.
   Stream<LocalAutoBackupPolicy> watchLocalAutoBackupPolicy() =>
       (db.select(db.preferences)

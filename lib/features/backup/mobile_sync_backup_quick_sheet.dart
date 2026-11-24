@@ -35,6 +35,19 @@ final class MobileSyncQuickPreview {
   final String statusLine;
 }
 
+final quickSyncEntryVisibilityProvider =
+    Provider<({bool showHome, bool showMe})>((ref) {
+      if (!ref.exists(databaseProvider) &&
+          !ref.exists(cloudSyncSettingsProvider)) {
+        return (showHome: false, showMe: false);
+      }
+      final s = ref.watch(cloudSyncSettingsProvider).value;
+      return (
+        showHome: s?.showHomeQuickEntry ?? false,
+        showMe: s?.showMeQuickEntry ?? false,
+      );
+    });
+
 final mobileSyncQuickPreviewProvider = Provider<MobileSyncQuickPreview>((ref) {
   if (!ref.exists(databaseProvider)) {
     return const MobileSyncQuickPreview.fallback();
