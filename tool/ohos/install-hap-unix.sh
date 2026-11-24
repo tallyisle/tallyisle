@@ -37,11 +37,12 @@ echo "[1/3] 已找到调试工具: $HDC_CMD"
 HAP_FILE="${1:-}"
 if [[ -z "$HAP_FILE" ]]; then
   for pattern in \
-    "$SCRIPT_DIR"/*已签名*.hap \
-    "$SCRIPT_DIR"/*signed*.hap \
-    "$PWD"/*已签名*.hap \
-    "$PWD"/*signed*.hap \
-    "$HOME/Downloads"/*帐屿*已签名*.hap \
+    "$SCRIPT_DIR"/TallyIsle-HarmonyOS-signed-debug.hap \
+    "$SCRIPT_DIR"/*-signed*.hap \
+    "$PWD"/TallyIsle-HarmonyOS-signed-debug.hap \
+    "$PWD"/*-signed*.hap \
+    "$HOME/Downloads"/TallyIsle-HarmonyOS-signed-debug.hap \
+    "$HOME/Downloads"/*-signed*.hap \
     "$SCRIPT_DIR"/*.hap \
     "$PWD"/*.hap; do
     if [[ -f "$pattern" ]]; then
@@ -53,13 +54,13 @@ fi
 
 if [[ -z "$HAP_FILE" || ! -f "$HAP_FILE" ]]; then
   echo "[错误] 未找到 .hap 安装包。"
-  echo "用法: bash $0 /path/to/帐屿-HarmonyOS-已签名调试版.hap"
+  echo "用法: bash $0 /path/to/TallyIsle-HarmonyOS-signed-debug.hap"
   exit 1
 fi
 
-if [[ "$HAP_FILE" == *"unsigned"* || "$HAP_FILE" == *"未签名"* ]]; then
+if [[ "$HAP_FILE" == *"unsigned"* ]]; then
   echo "[警告] 检测到未签名安装包: $HAP_FILE"
-  echo "鸿蒙真机无法直接安装未签名包（会报错 9568320）。请使用已签名调试版 .hap！"
+  echo "鸿蒙真机无法直接安装未签名包（会报错 9568320）。请使用 TallyIsle-HarmonyOS-signed-debug.hap！"
   echo ""
 fi
 

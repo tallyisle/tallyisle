@@ -20,14 +20,19 @@ class _DesktopWidgetsPageState extends ConsumerState<DesktopWidgetsPage> {
   Future<void> _syncSnapshot() async {
     setState(() => _syncing = true);
     try {
+      final isSupported =
+          ref.read(appWidgetBridgeProvider).capability.state ==
+          CapabilityState.available;
       final service = await ref.read(widgetSnapshotServiceProvider.future);
       await service.syncToPlatform();
       ref.invalidate(widgetSnapshotProvider);
       ref.invalidate(activeWidgetCountsProvider);
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('已同步最新账本数据到桌面小组件')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(isSupported ? '已同步最新账本数据到桌面小组件' : '已刷新小组件实时预览数据'),
+        ),
+      );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(
@@ -84,10 +89,11 @@ class _DesktopWidgetsPageState extends ConsumerState<DesktopWidgetsPage> {
       ),
       body: asyncBody(snapshotAsync, (snapshot) {
         final counts = countsAsync.value ?? const <DesktopWidgetKind, int>{};
+        final isWidgetSupported = capability.state == CapabilityState.available;
         return ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            if (capability.state != CapabilityState.available)
+            if (!isWidgetSupported)
               Padding(
                 padding: const EdgeInsets.only(bottom: 16),
                 child: Container(
@@ -110,7 +116,9 @@ class _DesktopWidgetsPageState extends ConsumerState<DesktopWidgetsPage> {
               kind: DesktopWidgetKind.quickAdd,
               activeCount: counts[DesktopWidgetKind.quickAdd] ?? 0,
               description: '1×1 极简图标入口，点击直接拉起“记一笔”页面。',
-              onPin: () => _pinWidget(DesktopWidgetKind.quickAdd),
+              onPin: isWidgetSupported
+                  ? () => _pinWidget(DesktopWidgetKind.quickAdd)
+                  : null,
               preview: const _QuickAddPreviewCard(),
             ),
             const SizedBox(height: 16),
@@ -118,7 +126,9 @@ class _DesktopWidgetsPageState extends ConsumerState<DesktopWidgetsPage> {
               kind: DesktopWidgetKind.monthSummary,
               activeCount: counts[DesktopWidgetKind.monthSummary] ?? 0,
               description: '2×2 卡片实时展示当前账本本期支出、收入与预算剩余（或结余）。',
-              onPin: () => _pinWidget(DesktopWidgetKind.monthSummary),
+              onPin: isWidgetSupported
+                  ? () => _pinWidget(DesktopWidgetKind.monthSummary)
+                  : null,
               preview: _MonthSummaryPreviewCard(snapshot: snapshot),
             ),
             const SizedBox(height: 16),
@@ -126,33 +136,37 @@ class _DesktopWidgetsPageState extends ConsumerState<DesktopWidgetsPage> {
               kind: DesktopWidgetKind.monthBar,
               activeCount: counts[DesktopWidgetKind.monthBar] ?? 0,
               description: '4×1 紧凑横条同时展示本期支出、本期收入、今日支出与快捷记账按钮。',
-              onPin: () => _pinWidget(DesktopWidgetKind.monthBar),
+              onPin: isWidgetSupported
+                  ? () => _pinWidget(DesktopWidgetKind.monthBar)
+                  : null,
               preview: _MonthBarPreviewCard(snapshot: snapshot),
             ),
-            const SizedBox(height: 20),
-            Card(
-              key: const Key('widget_add_guide_card'),
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      '手动添加小组件指引',
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
+            if (isWidgetSupported) ...[
+              const SizedBox(height: 20),
+              Card(
+                key: const Key('widget_add_guide_card'),
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '手动添加小组件指引',
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 8),
-                    const Text('1. 返回手机系统桌面，长按空白区域进入桌面编辑模式。'),
-                    const SizedBox(height: 4),
-                    const Text('2. 点击“小组件 / Widgets”，在列表中找到“帐屿”。'),
-                    const SizedBox(height: 4),
-                    const Text('3. 选择 1×1、2×2 或 4×1 尺寸并拖拽至桌面即可实时联动。'),
-                  ],
+                      const SizedBox(height: 8),
+                      const Text('1. 返回手机系统桌面，长按空白区域进入桌面编辑模式。'),
+                      const SizedBox(height: 4),
+                      const Text('2. 点击“小组件 / Widgets”，在列表中找到“帐屿”。'),
+                      const SizedBox(height: 4),
+                      const Text('3. 选择 1×1、2×2 或 4×1 尺寸并拖拽至桌面即可实时联动。'),
+                    ],
+                  ),
                 ),
               ),
-            ),
+            ],
           ],
         );
       }),
@@ -173,7 +187,7 @@ class _WidgetPreviewSection extends StatelessWidget {
   final int activeCount;
   final String description;
   final Widget preview;
-  final VoidCallback onPin;
+  final VoidCallback? onPin;
 
   @override
   Widget build(BuildContext context) {
@@ -230,8 +244,20 @@ class _WidgetPreviewSection extends StatelessWidget {
               child: FilledButton.tonalIcon(
                 key: Key('widget_pin_${kind.wireKey}'),
                 onPressed: onPin,
-                icon: const Icon(Icons.add_to_home_screen, size: 18),
-                label: const Text('添加到桌面', maxLines: 1, softWrap: false),
+                icon: Icon(
+                  onPin != null
+                      ? Icons.add_to_home_screen
+                      : Icons.block_outlined,
+                  size: 18,
+                ),
+                label: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    onPin != null ? '添加到桌面' : '仅支持 Android 系统桌面',
+                    maxLines: 1,
+                    softWrap: false,
+                  ),
+                ),
               ),
             ),
           ],

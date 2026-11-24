@@ -173,9 +173,7 @@ final class MethodChannelAutoBillBridge implements AutoBillBridge {
   @override
   Capability get capability => Capability(
     CapabilityState.available,
-    _isOhos
-        ? 'HarmonyOS 外部链接（tallyisle:// / yyjz://）桥接已接入'
-        : 'Android 原生自动记账与外部链接桥接已接入',
+    _isOhos ? 'HarmonyOS 外部链接（tallyisle://）桥接已接入' : 'Android 原生自动记账与外部链接桥接已接入',
   );
 
   @override

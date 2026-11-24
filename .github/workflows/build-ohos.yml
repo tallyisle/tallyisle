@@ -16,6 +16,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: build-ohos-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+
 env:
   UPSTREAM_FLUTTER_VERSION: '3.47.7'
   OHOS_FLUTTER_COMMIT: '650641656fef1d0578f0bc1ed8f7a35087fc99f3'
@@ -205,7 +209,7 @@ jobs:
             UNSIGNED_HAP="build/ohos/hap/entry-default-unsigned.hap"
           fi
           test -f "$UNSIGNED_HAP"
-          cp "$UNSIGNED_HAP" "帐屿-HarmonyOS-未签名版.hap"
+          cp "$UNSIGNED_HAP" "TallyIsle-HarmonyOS-unsigned.hap"
 
       - name: Sign HAP with DevEco Debug Credentials (Method A, optional)
         env:
@@ -236,21 +240,21 @@ jobs:
               -appCertFile "$SIGN_DIR/debug.cer" \
               -profileFile "$SIGN_DIR/debug.p7b" \
               -inForm zip \
-              -inFile "帐屿-HarmonyOS-未签名版.hap" \
+              -inFile "TallyIsle-HarmonyOS-unsigned.hap" \
               -signAlg SHA256withECDSA \
               -keystoreFile "$SIGN_DIR/debug.p12" \
               -keystorePwd "$OHOS_KEYSTORE_PWD" \
-              -outFile "帐屿-HarmonyOS-已签名调试版.hap" \
+              -outFile "TallyIsle-HarmonyOS-signed-debug.hap" \
               -compatibleVersion 12 \
               -signCode 1
 
-            test -f "帐屿-HarmonyOS-已签名调试版.hap"
+            test -f "TallyIsle-HarmonyOS-signed-debug.hap"
             echo "### HarmonyOS NEXT 构建与自动签名完成" >> "$GITHUB_STEP_SUMMARY"
-            echo "- 已生成可直接真机安装的签名包：\`帐屿-HarmonyOS-已签名调试版.hap\`" >> "$GITHUB_STEP_SUMMARY"
+            echo "- 已生成可直接真机安装的签名包：\`TallyIsle-HarmonyOS-signed-debug.hap\`" >> "$GITHUB_STEP_SUMMARY"
             echo "- 下载产物压缩包解压后，连接鸿蒙手机双击 \`install-hap-windows.bat\`（或运行 \`bash install-hap-unix.sh\`）即可一键安装。" >> "$GITHUB_STEP_SUMMARY"
           else
             echo "### HarmonyOS NEXT 构建完成（未配置调试签名 Secrets）" >> "$GITHUB_STEP_SUMMARY"
-            echo "- 已生成未签名安装包：\`帐屿-HarmonyOS-未签名版.hap\`" >> "$GITHUB_STEP_SUMMARY"
+            echo "- 已生成未签名安装包：\`TallyIsle-HarmonyOS-unsigned.hap\`" >> "$GITHUB_STEP_SUMMARY"
             echo "- 如需云端自动生成可直装真机的签名包，请在仓库 Settings -> Secrets and variables -> Actions 中配置 \`OHOS_P12_BASE64\`、\`OHOS_CER_BASE64\`、\`OHOS_P7B_BASE64\`、\`OHOS_KEY_ALIAS\`、\`OHOS_KEY_PWD\`、\`OHOS_KEYSTORE_PWD\`。" >> "$GITHUB_STEP_SUMMARY"
           fi
 
@@ -261,7 +265,7 @@ jobs:
       - name: Stage one-click installer scripts alongside HAP
         run: |
           mkdir -p dist-ohos
-          cp 帐屿-HarmonyOS-*.hap dist-ohos/
+          cp TallyIsle-HarmonyOS-*.hap dist-ohos/
           cp tool/ohos/install-hap-windows.bat dist-ohos/
           cp tool/ohos/install-hap-unix.sh dist-ohos/
 

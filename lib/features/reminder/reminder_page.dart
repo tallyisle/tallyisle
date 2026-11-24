@@ -262,7 +262,7 @@ class _DesktopReminderSyncBanner extends StatelessWidget {
           const SizedBox(width: 12),
           Expanded(
             child: Text(
-              '桌面端关闭窗口后不常驻后台发通知；您在此配置的提醒规则会随本地 .tally 备份或 WebDAV / S3 云同步在 Android 手机端定时生效。',
+              '桌面端关闭窗口后不常驻后台发通知；您在此配置的提醒规则会随本地 .tally 备份或 WebDAV / S3 云同步在 Android / HarmonyOS 移动端定时生效。',
               style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 13),
             ),
           ),

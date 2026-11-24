@@ -62,6 +62,16 @@ class FileContent {
   }
 }
 
+function decodeDisplayName(rawName: string): string {
+  const queryIndex: number = rawName.indexOf('?');
+  const trimmed: string = queryIndex >= 0 ? rawName.substring(0, queryIndex) : rawName;
+  try {
+    return decodeURIComponent(trimmed);
+  } catch (_err) {
+    return trimmed;
+  }
+}
+
 function sanitizeFileName(displayName: string): string {
   const badCharacters: Array<string> = ['..', '/'];
   const segments: Array<string> = displayName.split('/');
@@ -246,7 +256,7 @@ export class FileSelectorApiImpl {
         const path: string = paths[i];
         const oldFile: fs.File = fs.openSync(path);
         try {
-          const sanitizedName: string = sanitizeFileName(oldFile.name);
+          const sanitizedName: string = sanitizeFileName(decodeDisplayName(oldFile.name));
           // Align with Android {cacheDir}/{uuid}/{fileName}; use system mkdtemp for unique subdir.
           const targetDir: string = fs.mkdtempSync(folder + '/file_selector-XXXXXX');
           const newFile: string = targetDir + '/' + sanitizedName;
@@ -423,7 +433,7 @@ export class FileSelectorApiImpl {
     selectedUri: string,
     copyToCache: () => Promise<Array<string>>
   ): Promise<FileResponse | null> {
-    const fileName: string = selectedUri.substring(selectedUri.lastIndexOf('/') + 1);
+    const fileName: string = decodeDisplayName(selectedUri.substring(selectedUri.lastIndexOf('/') + 1));
     const content: FileContent | null = FileSelectorApiImpl.readFileContent(selectedUri, fileName);
     if (content == null) {
       return null;

@@ -41,7 +41,7 @@ echo [1/3] 已找到调试工具: "!HDC_CMD!"
 :: 2. Locate signed HAP file (drag-and-drop argument or current folder)
 set "HAP_FILE=%~1"
 if not defined HAP_FILE (
-    for %%F in ("%~dp0*已签名*.hap" "%~dp0*signed*.hap" "%CD%\*已签名*.hap" "%CD%\*signed*.hap") do (
+    for %%F in ("%~dp0TallyIsle-HarmonyOS-signed-debug.hap" "%~dp0*-signed*.hap" "%CD%\TallyIsle-HarmonyOS-signed-debug.hap" "%CD%\*-signed*.hap") do (
         if not defined HAP_FILE if exist "%%~fF" set "HAP_FILE=%%~fF"
     )
 )
@@ -53,17 +53,17 @@ if not defined HAP_FILE (
 
 if not defined HAP_FILE (
     echo [错误] 未在本文件夹找到 .hap 安装包。
-    echo 请把 GitHub Actions 下载解压出的「帐屿-HarmonyOS-已签名调试版.hap」放到本脚本同一目录，或直接拖到本脚本图标上！
+    echo 请把 GitHub Actions 下载解压出的「TallyIsle-HarmonyOS-signed-debug.hap」放到本脚本同一目录，或直接拖到本脚本图标上！
     echo.
     pause
     exit /b 1
 )
 
-echo "!HAP_FILE!" | findstr /i "unsigned 未签名" >nul
+echo "!HAP_FILE!" | findstr /i "unsigned" >nul
 if %ERRORLEVEL% EQU 0 (
     echo [警告] 检测到未签名安装包: "!HAP_FILE!"
     echo 鸿蒙真机无法直接安装未签名包（会报错 9568320）。
-    echo 请先配置 GitHub Secrets 生成「已签名调试版」，或在 DevEco Studio 中打开 ohos 目录自动签名运行。
+    echo 请先配置 GitHub Secrets 生成「TallyIsle-HarmonyOS-signed-debug.hap」，或在 DevEco Studio 中打开 ohos 目录自动签名运行。
     echo.
 )
 

@@ -34,16 +34,33 @@ DesktopWindowSizeClass classifyDesktopWindowWidth(double width) {
 
 /// Returns `true` when [platform] is a desktop operating system
 /// (`Windows`, `Linux`, or `macOS`).
+///
+/// Mobile and non-desktop targets (`Android`, `iOS`, `HarmonyOS` / `ohos`,
+/// `Fuchsia`) resolve to `false`. Uses a wildcard arm so this switch compiles
+/// cleanly on both `CPF-Flutter` (which adds `TargetPlatform.ohos`) and
+/// upstream official Flutter.
 bool isDesktopTargetPlatform(TargetPlatform platform) {
   return switch (platform) {
     TargetPlatform.linux ||
     TargetPlatform.windows ||
     TargetPlatform.macOS => true,
-    TargetPlatform.android ||
-    TargetPlatform.iOS ||
-    TargetPlatform.fuchsia => false,
+    _ => false,
   };
 }
+
+/// Returns `true` when [platform] is HarmonyOS (`TargetPlatform.ohos`), using
+/// `.name` comparison for bidirectional upstream Flutter compatibility.
+bool isOhosTargetPlatform(TargetPlatform platform) => platform.name == 'ohos';
+
+/// Returns `true` when [platform] supports native Android `AppWidget` home
+/// screen widgets (`F-034`).
+bool isAndroidAppWidgetSupportedPlatform(TargetPlatform platform) =>
+    platform == TargetPlatform.android;
+
+/// Returns `true` when [platform] supports Android `AccessibilityService`
+/// payment notification/window capture (`F-020`).
+bool isAndroidAccessibilitySupportedPlatform(TargetPlatform platform) =>
+    platform == TargetPlatform.android;
 
 /// Optional test override for desktop mode (`null` defers to [TargetPlatform]).
 final desktopModeOverrideProvider = Provider<bool?>((ref) => null);
@@ -70,8 +87,8 @@ class DesktopAdaptiveScope extends InheritedWidget {
 
 /// Unified dual-axis adaptive query helper (`Platform` × `Viewport Width`).
 ///
-/// Mobile (`Android` / `iOS`) always resolves [isDesktop] to `false`,
-/// guaranteeing zero visual or behavioral changes on phones and tablets.
+/// Mobile (`Android` / `iOS` / `HarmonyOS`) always resolves [isDesktop] to
+/// `false`, guaranteeing zero visual or behavioral changes on phones and tablets.
 abstract final class DesktopAdaptive {
   /// Whether desktop UI & keyboard-first ergonomics are active.
   static bool isDesktop(BuildContext context) {
@@ -81,6 +98,16 @@ abstract final class DesktopAdaptive {
     }
     return isDesktopTargetPlatform(Theme.of(context).platform);
   }
+
+  /// Whether the active platform is HarmonyOS (`TargetPlatform.ohos`).
+  static bool isOhos(BuildContext context) =>
+      isOhosTargetPlatform(Theme.of(context).platform);
+
+  /// Whether native Android `AppWidget` home-screen widgets are supported in
+  /// the current UI context (`false` on desktop, HarmonyOS, and iOS).
+  static bool supportsAndroidAppWidgets(BuildContext context) =>
+      !isDesktop(context) &&
+      isAndroidAppWidgetSupportedPlatform(Theme.of(context).platform);
 
   /// Whether the active platform uses macOS modifier conventions (`⌘` / `⌥`).
   static bool isMacOS(BuildContext context) =>

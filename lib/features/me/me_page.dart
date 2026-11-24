@@ -104,7 +104,7 @@ final class _MeSectionData {
 }
 
 List<_MeSectionData> _buildMeSections({
-  required bool isDesktop,
+  required bool showAndroidWidgets,
   required int draftCount,
 }) => [
   const _MeSectionData(
@@ -298,7 +298,7 @@ List<_MeSectionData> _buildMeSections({
         title: '账单截图识图',
         route: '/automation/ocr',
       ),
-      if (!isDesktop)
+      if (showAndroidWidgets)
         const _MeMenuEntry(
           key: Key('me-widgets'),
           icon: Icons.widgets_outlined,
@@ -484,13 +484,13 @@ class _MePageState extends ConsumerState<MePage> {
 
   static String? _normalizeSectionRoute(
     String? raw, {
-    required bool isDesktop,
+    required bool showAndroidWidgets,
   }) {
     if (raw == null) return null;
     final trimmed = raw.trim();
     if (trimmed.isEmpty) return null;
     final candidate = trimmed.startsWith('/') ? trimmed : '/$trimmed';
-    if (isDesktop && candidate == '/automation/widgets') {
+    if (!showAndroidWidgets && candidate == '/automation/widgets') {
       return null;
     }
     return _supportedEmbeddedRoutes.contains(candidate) ? candidate : null;
@@ -506,8 +506,13 @@ class _MePageState extends ConsumerState<MePage> {
   }
 
   void _selectEmbeddedRoute(BuildContext context, String route) {
-    final isDesktop = DesktopAdaptive.isDesktop(context);
-    final normalized = _normalizeSectionRoute(route, isDesktop: isDesktop);
+    final showAndroidWidgets = DesktopAdaptive.supportsAndroidAppWidgets(
+      context,
+    );
+    final normalized = _normalizeSectionRoute(
+      route,
+      showAndroidWidgets: showAndroidWidgets,
+    );
     if (normalized == null) return;
     if (_selectedRoute != normalized) {
       setState(() => _selectedRoute = normalized);
@@ -654,6 +659,9 @@ class _MePageState extends ConsumerState<MePage> {
     final isDark = theme.brightness == Brightness.dark;
     final draftCount = ref.watch(autoBillDraftCountProvider);
     final isDesktop = DesktopAdaptive.isDesktop(context);
+    final showAndroidWidgets = DesktopAdaptive.supportsAndroidAppWidgets(
+      context,
+    );
     final quickEntryVis =
         (ref.exists(databaseProvider) || ref.exists(cloudSyncSettingsProvider))
         ? ref.watch(quickSyncEntryVisibilityProvider)
@@ -661,13 +669,16 @@ class _MePageState extends ConsumerState<MePage> {
     final rawSection = _currentRouterUri(context)?.queryParameters['section'];
     if (rawSection != _lastSyncedSectionParam) {
       _lastSyncedSectionParam = rawSection;
-      final target = _normalizeSectionRoute(rawSection, isDesktop: isDesktop);
+      final target = _normalizeSectionRoute(
+        rawSection,
+        showAndroidWidgets: showAndroidWidgets,
+      );
       if (target != null && target != _selectedRoute) {
         _selectedRoute = target;
       }
     }
     final sections = _buildMeSections(
-      isDesktop: isDesktop,
+      showAndroidWidgets: showAndroidWidgets,
       draftCount: draftCount,
     );
 

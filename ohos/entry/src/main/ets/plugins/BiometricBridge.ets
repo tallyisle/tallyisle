@@ -8,6 +8,7 @@ import {
   MethodResult,
 } from '@ohos/flutter_ohos';
 import { BusinessError } from '@ohos.base';
+import { i18n } from '@kit.LocalizationKit';
 import userAuth from '@ohos.userIAM.userAuth';
 
 const TAG: string = 'TallyIsleBiometricBridge';
@@ -147,6 +148,15 @@ function probeAuthTypeStatus(authType: userAuth.UserAuthType): number {
   }
 }
 
+function isChineseSystemLanguage(): boolean {
+  try {
+    const language: string = i18n.System.getSystemLanguage();
+    return language.trim().toLowerCase().startsWith('zh');
+  } catch (_err) {
+    return false;
+  }
+}
+
 function buildChallengeBytes(): Uint8Array {
   const challenge: Uint8Array = new Uint8Array(8);
   let seed: number = Date.now();
@@ -276,17 +286,23 @@ export class BiometricBridge implements MethodCallHandler {
 
     this.cancelCurrentSession('已开启新的生物识别请求');
 
+    const isZh: boolean = isChineseSystemLanguage();
+    const defaultTitle: string = isZh
+      ? '验证身份以解锁帐屿'
+      : 'Verify identity to unlock TallyIsle';
+    const defaultNegative: string = isZh ? '使用数字密码' : 'Use PIN';
+
     const rawTitleArg: Any = call.argument('title');
     const titleText: string =
       (typeof rawTitleArg === 'string' && rawTitleArg.trim().length > 0)
         ? rawTitleArg.trim().substring(0, 200)
-        : '验证身份以解锁帐屿';
+        : defaultTitle;
 
     const rawNegArg: Any = call.argument('negativeButtonText');
     const negativeText: string =
       (typeof rawNegArg === 'string' && rawNegArg.trim().length > 0)
         ? rawNegArg.trim().substring(0, 60)
-        : '使用数字密码';
+        : defaultNegative;
 
     const session: AuthSession = new AuthSession(result);
     this.activeSession = session;

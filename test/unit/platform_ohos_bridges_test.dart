@@ -1,4 +1,7 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+import 'dart:ui' show Locale;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -131,9 +134,20 @@ void main() {
           'message': '已切换为数字密码验证',
         };
         expect(
-          (await auth.authenticate()).outcome,
+          (await auth.authenticate(
+            title: '   ',
+            negativeButtonText: '',
+          )).outcome,
           BiometricAuthOutcome.cancelled,
         );
+        final fallbackArgs =
+            calls.lastWhere((c) => c.method == 'authenticate').arguments
+                as Map<Object?, Object?>;
+        expect(
+          fallbackArgs['title'],
+          anyOf('验证身份以解锁帐屿', 'Verify identity to unlock TallyIsle'),
+        );
+        expect(fallbackArgs['negativeButtonText'], anyOf('使用数字密码', 'Use PIN'));
 
         authReply = <String, Object?>{
           'outcome': 'lockout',
@@ -148,11 +162,33 @@ void main() {
         expect(calls.last.method, 'cancelAuthentication');
       },
     );
+
+    test(
+      'resolves bilingual biometric default copy for zh and non-zh locales',
+      () {
+        const zhCn = Locale('zh', 'CN');
+        const zhTw = Locale('zh', 'TW');
+        const enUs = Locale('en', 'US');
+
+        expect(defaultBiometricPromptTitle(zhCn), '验证身份以解锁帐屿');
+        expect(defaultBiometricPromptTitle(zhTw), '验证身份以解锁帐屿');
+        expect(
+          defaultBiometricPromptTitle(enUs),
+          'Verify identity to unlock TallyIsle',
+        );
+        expect(defaultBiometricNegativeButtonText(zhCn), '使用数字密码');
+        expect(defaultBiometricNegativeButtonText(enUs), 'Use PIN');
+        expect(defaultBiometricPromptSubtitle(zhCn), contains('指纹或面容'));
+        expect(defaultBiometricPromptSubtitle(enUs), contains('fingerprint'));
+        expect(defaultBiometricUnsupportedReason(zhCn), contains('数字密码'));
+        expect(defaultBiometricUnsupportedReason(enUs), contains('PIN'));
+      },
+    );
   });
 
   group('HarmonyOS AutoBillBridge & AppWidgetBridge (dev.tallyisle/automation)', () {
     test(
-      'handles tallyisle:// & yyjz:// deep links while honestly reporting AccessibilityService & desktop widgets as unsupported (ADR-008)',
+      'handles tallyisle:// deep links exclusively while honestly reporting AccessibilityService & desktop widgets as unsupported (ADR-008)',
       () async {
         final ohosTargets = TargetPlatform.values
             .where((p) => p.name == 'ohos')
@@ -203,6 +239,8 @@ void main() {
 
         expect(bridge.capability.state, CapabilityState.available);
         expect(bridge.capability.reason, contains('HarmonyOS'));
+        expect(bridge.capability.reason, contains('tallyisle://'));
+        expect(bridge.capability.reason.toLowerCase(), isNot(contains('yyjz')));
 
         // Cold-start deep link consumption
         expect(
@@ -214,7 +252,7 @@ void main() {
         // Before listener attaches, native onDeepLink receives false so native keeps pendingDeepLinkUri
         final unhandledReply = await _sendNativeToFlutterCall(
           automationChannelName,
-          const MethodCall('onDeepLink', 'yyjz://add?money=15'),
+          const MethodCall('onDeepLink', 'tallyisle://add?money=15'),
         );
         expect(
           const StandardMethodCodec().decodeEnvelope(unhandledReply!),
@@ -228,14 +266,14 @@ void main() {
 
         final handledReply = await _sendNativeToFlutterCall(
           automationChannelName,
-          const MethodCall('onDeepLink', 'yyjz://add?money=15'),
+          const MethodCall('onDeepLink', 'tallyisle://add?money=15'),
         );
         expect(
           const StandardMethodCodec().decodeEnvelope(handledReply!),
           isTrue,
         );
         await Future<void>.delayed(Duration.zero);
-        expect(receivedLinks, const <String>['yyjz://add?money=15']);
+        expect(receivedLinks, const <String>['tallyisle://add?money=15']);
 
         // Honest unsupported AccessibilityService status on HarmonyOS (both normal & error fallback)
         final status = await bridge.getAccessibilityStatus();
@@ -360,6 +398,140 @@ void main() {
             ),
           ),
         );
+      },
+    );
+  });
+
+  group('HarmonyOS native manifest, bilingual resources, and import bridges', () {
+    test(
+      'app.json5 version matches 0.6.0+8 and module.json5 exposes exclusive tallyisle:// & permissions',
+      () {
+        final appJson =
+            jsonDecode(File('ohos/AppScope/app.json5').readAsStringSync())
+                as Map<String, Object?>;
+        final app = appJson['app']! as Map<String, Object?>;
+        expect(app['versionName'], '0.6.0');
+        expect(app['versionCode'], 8);
+
+        final moduleRaw = File(
+          'ohos/entry/src/main/module.json5',
+        ).readAsStringSync();
+        expect(moduleRaw.toLowerCase(), isNot(contains('yyjz')));
+        final moduleJson = jsonDecode(moduleRaw) as Map<String, Object?>;
+        final module = moduleJson['module']! as Map<String, Object?>;
+        final abilities = module['abilities']! as List<Object?>;
+        final entryAbility = abilities.single! as Map<String, Object?>;
+        final skills = entryAbility['skills']! as List<Object?>;
+        final schemes = <String>[];
+        for (final skill in skills) {
+          final uris =
+              (skill! as Map<String, Object?>)['uris'] as List<Object?>?;
+          if (uris == null) continue;
+          for (final uri in uris) {
+            final scheme = (uri! as Map<String, Object?>)['scheme'] as String?;
+            if (scheme != null) schemes.add(scheme);
+          }
+        }
+        expect(schemes, const <String>['tallyisle']);
+
+        final permissions = (module['requestPermissions']! as List<Object?>)
+            .map((e) => (e! as Map<String, Object?>)['name'] as String)
+            .toSet();
+        expect(
+          permissions,
+          containsAll(const <String>[
+            'ohos.permission.INTERNET',
+            'ohos.permission.ACCESS_BIOMETRIC',
+          ]),
+        );
+      },
+    );
+
+    test(
+      'bilingual AppScope and entry string.json cover base, en_US, zh_CN, zh_TW, zh_HK',
+      () {
+        String readStringEntry(String path, String key) {
+          final raw =
+              jsonDecode(File(path).readAsStringSync()) as Map<String, Object?>;
+          final entries = raw['string']! as List<Object?>;
+          for (final item in entries) {
+            final map = item! as Map<String, Object?>;
+            if (map['name'] == key) {
+              return map['value']! as String;
+            }
+          }
+          fail('Missing key "$key" in $path');
+        }
+
+        const expectedLabels = <String, String>{
+          'base': 'TallyIsle',
+          'en_US': 'TallyIsle',
+          'zh_CN': '帐屿',
+          'zh_TW': '帐屿',
+          'zh_HK': '帐屿',
+        };
+        for (final entry in expectedLabels.entries) {
+          final qualifier = entry.key;
+          final expectedLabel = entry.value;
+          expect(
+            readStringEntry(
+              'ohos/AppScope/resources/$qualifier/element/string.json',
+              'app_name',
+            ),
+            expectedLabel,
+          );
+          expect(
+            readStringEntry(
+              'ohos/entry/src/main/resources/$qualifier/element/string.json',
+              'EntryAbility_label',
+            ),
+            expectedLabel,
+          );
+        }
+      },
+    );
+
+    test(
+      'AutomationBridge.ets, BiometricBridge.ets, and file_selector_ohos enforce scheme, bilingual fallback, and third-party import extensions',
+      () {
+        final automationEts = File(
+          'ohos/entry/src/main/ets/plugins/AutomationBridge.ets',
+        ).readAsStringSync();
+        expect(automationEts, contains("tallyisle://"));
+        expect(automationEts.toLowerCase(), isNot(contains('yyjz')));
+
+        final biometricEts = File(
+          'ohos/entry/src/main/ets/plugins/BiometricBridge.ets',
+        ).readAsStringSync();
+        expect(biometricEts, contains('i18n.System.getSystemLanguage()'));
+        expect(biometricEts, contains('验证身份以解锁帐屿'));
+        expect(biometricEts, contains('Verify identity to unlock TallyIsle'));
+        expect(biometricEts, contains('使用数字密码'));
+        expect(biometricEts, contains('Use PIN'));
+
+        final fileSelectorUtilEts = File(
+          'third_party/ohos_packages/file_selector_ohos/ohos/src/main/ets/file_selector/FileSelectorUtil.ets',
+        ).readAsStringSync();
+        for (final expectedExt in const <String>[
+          'csv',
+          'tsv',
+          'xlsx',
+          'xls',
+          'json',
+          'zip',
+          'db',
+          'sqlite',
+          'sqlite3',
+        ]) {
+          expect(fileSelectorUtilEts, contains("'$expectedExt'"));
+        }
+        expect(fileSelectorUtilEts, contains('MAX_FILE_SUFFIX_FILTERS'));
+
+        final fileSelectorApiEts = File(
+          'third_party/ohos_packages/file_selector_ohos/ohos/src/main/ets/file_selector/FileSelectorApiImpl.ets',
+        ).readAsStringSync();
+        expect(fileSelectorApiEts, contains('decodeURIComponent'));
+        expect(fileSelectorApiEts, contains('file_selector-XXXXXX'));
       },
     );
   });

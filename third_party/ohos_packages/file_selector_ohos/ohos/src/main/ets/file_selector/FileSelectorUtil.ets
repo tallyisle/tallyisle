@@ -20,8 +20,17 @@ import { Log } from '@ohos/flutter_ohos';
 
 const TAG = 'FileSelectorUtil';
 
+const MAX_FILE_SUFFIX_FILTERS: number = 100;
+
 function normalizeFileSuffix(extensionType: string): string {
-  return extensionType.startsWith('.') ? extensionType : '.' + extensionType;
+  let normalized: string = extensionType.trim();
+  while (normalized.startsWith('.')) {
+    normalized = normalized.substring(1);
+  }
+  if (normalized.length === 0) {
+    return '';
+  }
+  return '.' + normalized;
 }
 
 /** 通配符 MIME 对应的扩展名集合 */
@@ -58,11 +67,14 @@ const MIME_TO_EXTENSIONS: Map<string, string[]> = new Map<string, string[]>([
   ['application/vnd.openxmlformats-officedocument.presentationml.presentation', ['pptx']],
   ['text/plain', ['txt', 'log']],
   ['text/csv', ['csv']],
+  ['text/tab-separated-values', ['tsv']],
   ['text/html', ['html', 'htm']],
   ['text/xml', ['xml']],
   ['application/json', ['json']],
   ['application/xml', ['xml']],
   ['application/zip', ['zip']],
+  ['application/vnd.sqlite3', ['db', 'sqlite', 'sqlite3']],
+  ['application/x-sqlite3', ['db', 'sqlite', 'sqlite3']],
   ['application/gzip', ['gz']],
   ['application/x-tar', ['tar']],
   ['application/x-7z-compressed', ['7z']],
@@ -158,19 +170,34 @@ export async function filePicker(
     documentSelectOptions.maxSelectNumber = selectorNumber;
   }
   let fileSuffixSet: Set<string> = new Set<string>();
+  let allowAll: boolean = false;
   if (allowedTypes.extensions != null) {
     for (let extensionType of allowedTypes.extensions) {
-      fileSuffixSet.add(normalizeFileSuffix(extensionType));
+      const normalized: string = normalizeFileSuffix(extensionType);
+      if (normalized === '.*') {
+        allowAll = true;
+      } else if (normalized.length > 0) {
+        fileSuffixSet.add(normalized);
+      }
     }
   }
   if (allowedTypes.mimeTypes != null && allowedTypes.mimeTypes.length > 0) {
+    for (let mime of allowedTypes.mimeTypes) {
+      if (mime.trim() === '*/*') {
+        allowAll = true;
+      }
+    }
     let derived: string[] = tryConvertMimetypesToExtensions(allowedTypes.mimeTypes);
     for (let extensionType of derived) {
-      fileSuffixSet.add(normalizeFileSuffix(extensionType));
+      const normalized: string = normalizeFileSuffix(extensionType);
+      if (normalized.length > 0) {
+        fileSuffixSet.add(normalized);
+      }
     }
   }
-  // Omit fileSuffixFilters when empty to allow all types, aligned with setType("*/*").
-  if (fileSuffixSet.size > 0) {
+  // Omit fileSuffixFilters when empty, wildcarded, or exceeding OpenHarmony's 100-entry cap
+  // so custom extensions (.tally, .penny, .yy, .yi2a, .db) remain selectable.
+  if (!allowAll && fileSuffixSet.size > 0 && fileSuffixSet.size <= MAX_FILE_SUFFIX_FILTERS) {
     documentSelectOptions.fileSuffixFilters = Array.from(fileSuffixSet);
   }
   try {

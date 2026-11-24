@@ -100,8 +100,9 @@ const String biometricChannelName = 'dev.tallyisle/biometrics';
 
 /// Platform boundary for OS biometric authentication (`ADR-008`, `F-024`).
 ///
-/// Android native delegates to `BiometricBridge.kt` (`android.hardware.biometrics.BiometricPrompt`).
-/// Non-Android hosts (Linux, Web, desktop) degrade cleanly to `unsupportedPlatform`
+/// Android native delegates to `BiometricBridge.kt` (`android.hardware.biometrics.BiometricPrompt`),
+/// and HarmonyOS native delegates to `BiometricBridge.ets` (`@ohos.userIAM.userAuth`).
+/// Other hosts (Linux, Web, desktop) degrade cleanly to `unsupportedPlatform`
 /// so PIN unlock always works without throwing plugin errors.
 abstract interface class BiometricAuthenticator {
   Capability get capability;

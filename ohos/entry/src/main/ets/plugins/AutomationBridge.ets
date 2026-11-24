@@ -17,14 +17,10 @@ function extractSupportedDeepLink(rawUri: string): string | null {
     return null;
   }
   const lower: string = trimmed.toLowerCase();
-  let rest: string = '';
-  if (lower.startsWith('tallyisle://')) {
-    rest = lower.substring(12);
-  } else if (lower.startsWith('yyjz://')) {
-    rest = lower.substring(7);
-  } else {
+  if (!lower.startsWith('tallyisle://')) {
     return null;
   }
+  const rest: string = lower.substring(12);
 
   let endIdx: number = rest.length;
   const slashIdx: number = rest.indexOf('/');
@@ -99,7 +95,7 @@ export class AutomationBridge implements MethodCallHandler {
   }
 
   /**
-   * Captures an incoming `tallyisle://` or `yyjz://` deep-link [Want] from `onCreate`
+   * Captures an incoming `tallyisle://` deep-link [Want] from `onCreate`
    * or `onNewWant`. Clears `want.uri` when matched so Flutter's default navigation channel
    * does not push the raw custom-scheme URI as an unknown route.
    */
