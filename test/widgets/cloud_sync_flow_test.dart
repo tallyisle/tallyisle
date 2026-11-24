@@ -7,15 +7,19 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
+import 'package:tallyisle/app/adaptive.dart';
+import 'package:tallyisle/app/app.dart';
 import 'package:tallyisle/app/providers.dart';
 import 'package:tallyisle/data/backup/s3_client.dart';
 import 'package:tallyisle/data/backup/tally_backup_service.dart';
 import 'package:tallyisle/data/db/database.dart';
 import 'package:tallyisle/data/reminder/reminder_service.dart';
+import 'package:tallyisle/domain/rules/cloud_sync_rules.dart';
 import 'package:tallyisle/domain/rules/s3_sigv4_rules.dart';
 import 'package:tallyisle/domain/rules/tally_backup.dart';
 import 'package:tallyisle/features/backup/backup_page.dart';
 import 'package:tallyisle/features/backup/backup_providers.dart';
+import 'package:tallyisle/features/backup/mobile_sync_backup_quick_sheet.dart';
 import 'package:tallyisle/features/reminder/reminder_providers.dart';
 import 'package:tallyisle/platform/files.dart';
 import 'package:tallyisle/platform/notifications.dart';
@@ -726,6 +730,177 @@ void main() {
       ))!;
       expect(localStillOn.hasAnyTrigger, isTrue);
 
+      await tester.pumpWidget(const SizedBox());
+      await settle(tester);
+      await tester.pump(const Duration(seconds: 1));
+    },
+  );
+
+  testWidgets(
+    'Desktop shell and Mobile sync quick sheet/card display 检测到同步冲突 · 待处理 with sync_problem_rounded when lastConflictFileName is pending',
+    (tester) async {
+      HttpOverrides.global = null;
+      late final AppDatabase db;
+      await tester.runAsync(() async {
+        db = AppDatabase(NativeDatabase.memory());
+      });
+      final scheduler = InMemoryReminderScheduler();
+      addTearDown(() async {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        await tester.pumpWidget(const SizedBox());
+        await scheduler.dispose();
+        await tester.runAsync(db.close);
+      });
+
+      const s3Cfg = S3Config(
+        endpoint: 'https://s3.example.com',
+        region: 'auto',
+        bucket: 'conflict-bucket',
+        accessKeyId: 'AKIA_CONFLICT',
+        secretAccessKey: 'SECRET_CONFLICT',
+        remotePrefix: 'TallyIsle',
+      );
+      final conflictCursor = LocalSyncCursor(
+        lastSyncedRevision: 6,
+        lastSyncedDataSha256: 'a' * 64,
+        lastSyncedAtMs: DateTime(2026, 11, 24, 9, 15).millisecondsSinceEpoch,
+        targetFingerprint: s3Cfg.targetFingerprint,
+        lastConflictFileName: 'conflict_dev01_20261124_092000.tally',
+        lastConflictSha256: 'b' * 64,
+      );
+
+      // 1. Mobile quick card + bottom sheet warning state
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1.0;
+
+      await tester.pumpWidget(
+        ProviderScope(
+          key: const ValueKey<String>('mobile_conflict_scope'),
+          retry: (_, _) => null,
+          overrides: [
+            databaseProvider.overrideWith((ref) async => db),
+            reminderSchedulerProvider.overrideWithValue(scheduler),
+            s3ConfigProvider.overrideWith(
+              (ref) => Stream<S3Config>.value(s3Cfg),
+            ),
+            cloudSyncSettingsProvider.overrideWith(
+              (ref) => Stream<CloudSyncSettings>.value(
+                const CloudSyncSettings(
+                  backend: CloudBackendType.s3,
+                  explicitBackend: true,
+                  deviceId: 'dev01',
+                ),
+              ),
+            ),
+            cloudSyncCursorProvider.overrideWith(
+              (ref) => Stream<LocalSyncCursor>.value(conflictCursor),
+            ),
+          ],
+          child: MaterialApp(
+            home: Scaffold(
+              body: Consumer(
+                builder: (ctx, ref, _) {
+                  ref.watch(databaseProvider);
+                  return Column(
+                    children: [
+                      const MobileMeSyncQuickCard(cardColor: Colors.white),
+                      FilledButton(
+                        key: const Key('open_quick_sheet_for_conflict'),
+                        onPressed: () => showMobileSyncBackupQuickSheet(ctx),
+                        child: const Text('打开快捷面板'),
+                      ),
+                    ],
+                  );
+                },
+              ),
+            ),
+          ),
+        ),
+      );
+      await settle(tester);
+
+      expect(find.textContaining('已同步 r6'), findsNothing);
+      expect(find.text('检测到同步冲突 · 待处理'), findsOneWidget);
+      expect(find.byIcon(Icons.sync_problem_rounded), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('open_quick_sheet_for_conflict')));
+      await settle(tester);
+      expect(
+        tester
+            .widget<Text>(find.byKey(const Key('quick_sheet_status_text')))
+            .data,
+        '检测到同步冲突 · 待处理',
+      );
+      expect(find.byIcon(Icons.sync_problem_rounded), findsNWidgets(2));
+      Navigator.of(
+        tester.element(find.byKey(const Key('mobile_sync_backup_quick_sheet'))),
+      ).pop();
+      await settle(tester);
+
+      // 2. Desktop shell expanded sidebar (1280x800) & compact rail (900x700)
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1.0;
+
+      await tester.pumpWidget(
+        ProviderScope(
+          key: const ValueKey<String>('desktop_conflict_scope'),
+          retry: (_, _) => null,
+          overrides: [
+            desktopModeOverrideProvider.overrideWithValue(true),
+            databaseProvider.overrideWith((ref) async => db),
+            reminderSchedulerProvider.overrideWithValue(scheduler),
+            s3ConfigProvider.overrideWith(
+              (ref) => Stream<S3Config>.value(s3Cfg),
+            ),
+            cloudSyncSettingsProvider.overrideWith(
+              (ref) => Stream<CloudSyncSettings>.value(
+                const CloudSyncSettings(
+                  backend: CloudBackendType.s3,
+                  explicitBackend: true,
+                  deviceId: 'dev01',
+                ),
+              ),
+            ),
+            cloudSyncCursorProvider.overrideWith(
+              (ref) => Stream<LocalSyncCursor>.value(conflictCursor),
+            ),
+          ],
+          child: const TallyIsleApp(),
+        ),
+      );
+      await settle(tester);
+
+      expect(find.byKey(const Key('desktop-sidebar')), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('desktop-nav-sync-status')),
+          matching: find.text('检测到同步冲突 · 待处理'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('desktop-nav-sync-status')),
+          matching: find.byIcon(Icons.sync_problem_rounded),
+        ),
+        findsOneWidget,
+      );
+
+      // Resize to 900x700 compact rail -> still renders sync_problem_rounded warning icon
+      tester.view.physicalSize = const Size(900, 700);
+      await settle(tester);
+      expect(find.byKey(const Key('desktop-nav-rail')), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('desktop-nav-sync-status')),
+          matching: find.byIcon(Icons.sync_problem_rounded),
+        ),
+        findsOneWidget,
+      );
+
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
       await tester.pumpWidget(const SizedBox());
       await settle(tester);
       await tester.pump(const Duration(seconds: 1));

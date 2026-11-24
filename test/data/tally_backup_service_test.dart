@@ -34,6 +34,7 @@ final class _LoopbackWebDavServer {
   String expectedPass = 'secret_token_123';
   bool rejectMoveWith405 = false;
   int? overrideHeadContentLength;
+  int? truncateStoredBytesTo;
 
   String get baseUrl => 'http://127.0.0.1:${_server.port}/dav';
 
@@ -148,7 +149,11 @@ final class _LoopbackWebDavServer {
           req.response.statusCode = HttpStatus.conflict;
         } else {
           final existed = files.containsKey(path);
-          files[path] = builder.takeBytes();
+          final rawBytes = builder.takeBytes();
+          final limit = truncateStoredBytesTo;
+          files[path] = limit != null && rawBytes.length > limit
+              ? Uint8List.sublistView(rawBytes, 0, limit)
+              : rawBytes;
           modifiedTimes[path] = DateTime.utc(2026, 11, 1, 0, 0, ++_clockTick);
           req.response.statusCode = existed
               ? HttpStatus.noContent
@@ -978,8 +983,24 @@ void main() {
           ]),
         );
 
-        // If HEAD Content-Length mismatches, upload fails with remoteUnavailable
+        // Stale HEAD Content-Length on an intact small upload recovers via
+        // no-cache GET byte verification instead of false-failing.
         server.overrideHeadContentLength = 7;
+        server.requestLog.clear();
+        await service.uploadBackupToWebDav(customFileName: 'Stale_Head.tally');
+        expect(
+          server.requestLog,
+          containsAllInOrder(<String>[
+            'HEAD /dav/TallyIsle/backups/Stale_Head.tally',
+            'GET /dav/TallyIsle/backups/Stale_Head.tally',
+          ]),
+        );
+        server.overrideHeadContentLength = null;
+        await service.deleteWebDavBackup('Stale_Head.tally');
+
+        // If the remote file is genuinely truncated, both HEAD and no-cache GET
+        // verification fail with remoteUnavailable.
+        server.truncateStoredBytesTo = 7;
         await expectLater(
           service.uploadBackupToWebDav(customFileName: 'Corrupt_Len.tally'),
           throwsA(
@@ -990,7 +1011,7 @@ void main() {
             ),
           ),
         );
-        server.overrideHeadContentLength = null;
+        server.truncateStoredBytesTo = null;
         server.rejectMoveWith405 = false;
         await service.deleteWebDavBackup('Corrupt_Len.tally');
 

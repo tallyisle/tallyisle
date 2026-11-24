@@ -923,9 +923,11 @@ class _ExpandedDesktopSidebar extends StatelessWidget {
                         Icon(
                           syncSummary.icon,
                           size: 16,
-                          color: syncSummary.isCloudActive
-                              ? scheme.primary
-                              : scheme.onSurfaceVariant,
+                          color: syncSummary.hasConflict
+                              ? scheme.error
+                              : (syncSummary.isCloudActive
+                                    ? scheme.primary
+                                    : scheme.onSurfaceVariant),
                         ),
                         const SizedBox(width: 8),
                         Expanded(
@@ -934,8 +936,12 @@ class _ExpandedDesktopSidebar extends StatelessWidget {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: theme.textTheme.labelSmall?.copyWith(
-                              color: scheme.onSurfaceVariant,
-                              fontWeight: FontWeight.w500,
+                              color: syncSummary.hasConflict
+                                  ? scheme.error
+                                  : scheme.onSurfaceVariant,
+                              fontWeight: syncSummary.hasConflict
+                                  ? FontWeight.w600
+                                  : FontWeight.w500,
                             ),
                           ),
                         ),
@@ -1104,9 +1110,11 @@ class _CompactDesktopRail extends StatelessWidget {
                 icon: Icon(
                   syncSummary.icon,
                   size: 19,
-                  color: syncSummary.isCloudActive
-                      ? scheme.primary
-                      : scheme.onSurfaceVariant,
+                  color: syncSummary.hasConflict
+                      ? scheme.error
+                      : (syncSummary.isCloudActive
+                            ? scheme.primary
+                            : scheme.onSurfaceVariant),
                 ),
               ),
             ],
@@ -1334,15 +1342,34 @@ class _RailSlot extends StatelessWidget {
   }
 }
 
-({bool isCloudActive, IconData icon, String shortLabel, String tooltip})
+({
+  bool isCloudActive,
+  bool hasConflict,
+  IconData icon,
+  String shortLabel,
+  String tooltip,
+})
 _describeSyncStatus(CloudSyncSettings? settings, LocalSyncCursor? cursor) {
   final backend = settings?.backend ?? CloudBackendType.none;
   if (backend == CloudBackendType.none) {
     return (
       isCloudActive: false,
+      hasConflict: false,
       icon: Icons.cloud_off_outlined,
       shortLabel: '本地离线 · 备份同步',
       tooltip: '纯本地离线存储（点击配置本地自动备份或 WebDAV / S3 云同步）',
+    );
+  }
+
+  final conflictFile = cursor?.lastConflictFileName?.trim();
+  if (conflictFile != null && conflictFile.isNotEmpty) {
+    return (
+      isCloudActive: true,
+      hasConflict: true,
+      icon: Icons.sync_problem_rounded,
+      shortLabel: '检测到同步冲突 · 待处理',
+      tooltip:
+          '${backend.displayLabel} 检测到同步冲突 · 待处理（已归档保护 $conflictFile，点击处理）',
     );
   }
 
@@ -1350,6 +1377,7 @@ _describeSyncStatus(CloudSyncSettings? settings, LocalSyncCursor? cursor) {
   if (cursor == null || cursor.isNeverSynced || lastMs == null || lastMs <= 0) {
     return (
       isCloudActive: true,
+      hasConflict: false,
       icon: Icons.cloud_sync_outlined,
       shortLabel: '${backend.displayLabel} · 待同步',
       tooltip: '已启用 ${backend.displayLabel} 云同步（点击查看同步与备份详情）',
@@ -1363,6 +1391,7 @@ _describeSyncStatus(CloudSyncSettings? settings, LocalSyncCursor? cursor) {
   final rev = cursor.lastSyncedRevision;
   return (
     isCloudActive: true,
+    hasConflict: false,
     icon: Icons.cloud_done_outlined,
     shortLabel: '${backend.displayLabel} · $stamp',
     tooltip: '${backend.displayLabel} 已同步 r$rev · $stamp（点击管理）',

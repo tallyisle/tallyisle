@@ -148,3 +148,15 @@ final silentCloudSyncBootstrapProvider = FutureProvider<CloudSyncOutcome?>((
   final service = await ref.watch(tallyBackupServiceProvider.future);
   return service.runSilentCloudSyncIfNeeded();
 });
+
+/// Invalidates all local/cloud backup lists, sync cursor, and last-backup
+/// timestamps after backup creation or single/batch deletion.
+void invalidateBackupHistoryProviders(WidgetRef ref) {
+  ref
+    ..invalidate(localBackupsProvider)
+    ..invalidate(webDavBackupsProvider)
+    ..invalidate(s3BackupsProvider)
+    ..invalidate(activeCloudBackupsProvider)
+    ..invalidate(cloudSyncCursorProvider)
+    ..invalidate(lastBackupAtMsProvider);
+}

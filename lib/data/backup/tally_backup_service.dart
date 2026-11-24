@@ -1118,14 +1118,122 @@ final class TallyBackupService {
     return fileName;
   }
 
+  static String _validateSafeBackupFileName(String fileName) {
+    final trimmed = fileName.trim();
+    if (trimmed.isEmpty ||
+        trimmed == '.' ||
+        trimmed == '..' ||
+        trimmed.contains('/') ||
+        trimmed.contains(r'\') ||
+        trimmed.contains('\x00') ||
+        !WebDavClient.isSupportedBackupFileName(trimmed)) {
+      throw Failure(FailureCode.validation, '非法的备份文件名：$fileName');
+    }
+    return trimmed;
+  }
+
+  static List<String> _validateUniqueBackupFileNames(List<String> fileNames) {
+    final seen = <String>{};
+    final result = <String>[];
+    for (final raw in fileNames) {
+      final clean = _validateSafeBackupFileName(raw);
+      if (seen.add(clean)) {
+        result.add(clean);
+      }
+    }
+    return result;
+  }
+
   Future<List<BackupFileMetadata>> listLocalBackups() =>
       localTarget.listBackups();
 
-  Future<void> deleteLocalBackup(String fileName) =>
-      localTarget.deleteBackup(fileName);
+  Future<void> deleteLocalBackup(String fileName) async {
+    final clean = _validateSafeBackupFileName(fileName);
+    await _runExclusive(() => _deleteLocalBackupsUnlocked(<String>[clean]));
+  }
+
+  /// Batch-deletes the specified `.tally` / `.tallyzip` files from the local
+  /// backup directory after upfront filename validation, clearing any matching
+  /// `lastConflictFileName` on [LocalSyncCursor].
+  Future<int> deleteLocalBackups(List<String> fileNames) async {
+    final cleanNames = _validateUniqueBackupFileNames(fileNames);
+    if (cleanNames.isEmpty) return 0;
+    return _runExclusive(() => _deleteLocalBackupsUnlocked(cleanNames));
+  }
+
+  Future<int> _deleteLocalBackupsUnlocked(List<String> cleanNames) async {
+    final deletedCount = await LocalDirectoryBackupTarget._runRootIo(() async {
+      final dir = await _localBackupsDirProvider();
+      if (!await dir.exists()) return 0;
+      var count = 0;
+      for (final name in cleanNames) {
+        final file = File(p.join(dir.path, name));
+        if (await file.exists()) {
+          await file.delete();
+          count++;
+        }
+      }
+      return count;
+    });
+
+    final cursor = await getSyncCursor();
+    final conflictName = cursor.lastConflictFileName?.trim();
+    if (conflictName != null &&
+        conflictName.isNotEmpty &&
+        cleanNames.contains(conflictName)) {
+      await _saveSyncCursor(cursor.copyWith(clearConflictRecord: true));
+    }
+    return deletedCount;
+  }
+
+  /// Exports a specific historical `.tally` backup (from either local backups
+  /// or the active cloud target) via OS Save-As or Share sheet.
+  Future<String> exportExistingBackup({
+    required String fileName,
+    required bool isCloud,
+    required FileAccess fileAccess,
+    BackupProgressCallback? onProgress,
+  }) async {
+    final cleanName = _validateSafeBackupFileName(fileName);
+    final Uint8List bytes;
+    if (isCloud) {
+      final settings = await getCloudSyncSettings();
+      bytes = switch (settings.backend) {
+        CloudBackendType.s3 => await (await getS3Target()).readBackup(
+          cleanName,
+          onProgress: onProgress,
+        ),
+        CloudBackendType.webdav => await (await getWebDavTarget()).readBackup(
+          cleanName,
+          onProgress: onProgress,
+        ),
+        CloudBackendType.none => throw const Failure(
+          FailureCode.validation,
+          '云存储通道未启用',
+        ),
+      };
+    } else {
+      bytes = await localTarget.readBackup(cleanName, onProgress: onProgress);
+    }
+
+    if (fileAccess.saveLocationCapability.state == CapabilityState.available) {
+      await fileAccess.saveBytes(cleanName, bytes);
+      return cleanName;
+    }
+    if (fileAccess.shareCapability.state == CapabilityState.available) {
+      await fileAccess.shareBytes(
+        cleanName,
+        bytes,
+        subject: '帐屿历史备份 $cleanName',
+      );
+      return cleanName;
+    }
+    throw const Failure(FailureCode.storageUnavailable, '当前平台不支持导出文件');
+  }
 
   Future<TallyManifest> restoreLocalBackup(String fileName) async {
-    final bytes = await localTarget.readBackup(fileName);
+    final clean = _validateSafeBackupFileName(fileName);
+    final bytes = await localTarget.readBackup(clean);
     return restoreFromBytes(bytes);
   }
 
@@ -1347,27 +1455,71 @@ final class TallyBackupService {
 
   /// Deletes a remote `.tally` backup from WebDAV (§1.8).
   Future<void> deleteWebDavBackup(String fileName) async {
-    final target = await getWebDavTarget();
-    await target.deleteBackup(fileName);
+    final clean = _validateSafeBackupFileName(fileName);
+    await _runExclusive(() async {
+      final target = await getWebDavTarget();
+      await target.deleteBackup(clean);
+    });
   }
 
   /// Deletes a remote `.tally` backup from S3.
   Future<void> deleteS3Backup(String fileName) async {
-    final target = await getS3Target();
-    await target.deleteBackup(fileName);
+    final clean = _validateSafeBackupFileName(fileName);
+    await _runExclusive(() async {
+      final target = await getS3Target();
+      await target.deleteBackup(clean);
+    });
   }
 
   /// Deletes a historical `.tally` backup from whichever cloud target is active.
   Future<void> deleteActiveCloudBackup(String fileName) async {
+    final clean = _validateSafeBackupFileName(fileName);
+    await _runExclusive(
+      () => _deleteActiveCloudBackupsUnlocked(<String>[clean]),
+    );
+  }
+
+  /// Batch-deletes historical `.tally` / `.tallyzip` backups from whichever
+  /// cloud target is active, serialized under [_runExclusive].
+  Future<int> deleteActiveCloudBackups(List<String> fileNames) async {
+    final cleanNames = _validateUniqueBackupFileNames(fileNames);
+    if (cleanNames.isEmpty) return 0;
+    return _runExclusive(() => _deleteActiveCloudBackupsUnlocked(cleanNames));
+  }
+
+  Future<int> _deleteActiveCloudBackupsUnlocked(List<String> cleanNames) async {
     final settings = await getCloudSyncSettings();
-    return switch (settings.backend) {
-      CloudBackendType.s3 => deleteS3Backup(fileName),
-      CloudBackendType.webdav => deleteWebDavBackup(fileName),
-      CloudBackendType.none => throw const Failure(
-        FailureCode.validation,
-        '云存储通道未启用',
-      ),
-    };
+    final BackupTarget target;
+    switch (settings.backend) {
+      case CloudBackendType.s3:
+        final s3 = await getS3Config();
+        if (!s3.isConfigured) {
+          throw const Failure(FailureCode.validation, 'S3 对象存储未配置');
+        }
+        target = S3BackupTarget(
+          s3,
+          httpClientFactory: httpClientFactory,
+          nowMs: _nowMs,
+        );
+      case CloudBackendType.webdav:
+        final dav = await getWebDavConfig();
+        if (!dav.isConfigured) {
+          throw const Failure(FailureCode.validation, 'WebDAV 未配置');
+        }
+        target = WebDavBackupTarget(
+          dav,
+          httpClientFactory: httpClientFactory,
+          nowMs: _nowMs,
+        );
+      case CloudBackendType.none:
+        throw const Failure(FailureCode.validation, '云存储通道未启用');
+    }
+    var deleted = 0;
+    for (final name in cleanNames) {
+      await target.deleteBackup(name);
+      deleted++;
+    }
+    return deleted;
   }
 
   /// Returns epoch milliseconds of the last successful backup, if any.
@@ -1740,6 +1892,17 @@ final class TallyBackupService {
 
     switch (decision.action) {
       case SyncActionType.noOp:
+        if (remoteHead != null) {
+          await _selfHealMissingRemoteSnapshotIfNeeded(
+            store: store,
+            remoteHead: remoteHead,
+            localTables: localTables,
+            localAttachments: localAttachments,
+            localAttChecksums: localAttChecksums,
+            localDataSha256: localDataSha256,
+            onProgress: onProgress,
+          );
+        }
         if (cursor.lastConflictFileName != null ||
             cursor.lastConflictSha256 != null) {
           await _saveSyncCursor(
@@ -1758,8 +1921,17 @@ final class TallyBackupService {
         );
 
       case SyncActionType.fastForwardCursor:
+        await _selfHealMissingRemoteSnapshotIfNeeded(
+          store: store,
+          remoteHead: remoteHead!,
+          localTables: localTables,
+          localAttachments: localAttachments,
+          localAttChecksums: localAttChecksums,
+          localDataSha256: localDataSha256,
+          onProgress: onProgress,
+        );
         final updatedCursor = cursor.copyWith(
-          lastSyncedRevision: remoteHead!.revision,
+          lastSyncedRevision: remoteHead.revision,
           lastSyncedDataSha256: localDataSha256,
           lastSyncedAtMs: _nowMs(),
           targetFingerprint: store.targetFingerprint,
@@ -1850,6 +2022,75 @@ final class TallyBackupService {
           localDataSha256: localDataSha256,
         );
     }
+  }
+
+  Future<void> _selfHealMissingRemoteSnapshotIfNeeded({
+    required CloudSyncObjectStore store,
+    required CloudSyncHead remoteHead,
+    required Map<String, List<Map<String, Object?>>> localTables,
+    required Map<String, Uint8List> localAttachments,
+    required Map<String, String> localAttChecksums,
+    required String localDataSha256,
+    BackupProgressCallback? onProgress,
+  }) async {
+    final cleanLocalSha = localDataSha256.toLowerCase();
+    final existingObj = await store.headObject(remoteHead.databasePath);
+    if (existingObj != null || cleanLocalSha != remoteHead.dataSha256) {
+      return;
+    }
+
+    if (localAttachments.isNotEmpty) {
+      final existingAtts = await store.listRelativeFileNames(
+        cloudSyncAttachmentsDir,
+      );
+      final sortedPaths = localAttachments.keys.toList()..sort();
+      for (final archivePath in sortedPaths) {
+        final sha = localAttChecksums[archivePath]!;
+        final objName = buildAttachmentObjectName(
+          sha256: sha,
+          archivePath: archivePath,
+        );
+        if (existingAtts.contains(objName)) continue;
+        await store.putObject(
+          '$cloudSyncAttachmentsDir/$objName',
+          localAttachments[archivePath]!,
+        );
+      }
+    }
+
+    final healedLightweightDb = packTallyArchive(
+      tables: localTables,
+      createdAtMs: _nowMs(),
+      appVersion: appVersion,
+      includeAttachments: false,
+    );
+    await store.putObject(
+      remoteHead.databasePath,
+      healedLightweightDb.bytes,
+      onProgress: onProgress,
+    );
+  }
+
+  Future<_RemoteHeadProbe> _readRemoteSyncHead(
+    CloudSyncObjectStore store,
+  ) async {
+    final bytes = await store.getObjectOrNull(cloudSyncHeadPath);
+    if (bytes == null) {
+      return const _RemoteHeadProbe.missing();
+    }
+    final Object? decoded;
+    try {
+      decoded = jsonDecode(utf8.decode(bytes));
+    } catch (_) {
+      throw const Failure(FailureCode.corruptData, '远端 sync/head.json 解析失败');
+    }
+    if (decoded is! Map<String, Object?>) {
+      throw const Failure(FailureCode.corruptData, '远端 sync/head.json 格式损坏');
+    }
+    if (isLegacyCloudSyncHeadJson(decoded)) {
+      return const _RemoteHeadProbe.legacy();
+    }
+    return _RemoteHeadProbe.valid(CloudSyncHead.fromJson(decoded));
   }
 
   Future<_RemoteSyncState> _inspectRemoteSyncState(
@@ -2316,6 +2557,7 @@ final class TallyBackupService {
     final headBytes = Uint8List.fromList(
       utf8.encode(const JsonEncoder.withIndent('  ').convert(newHead.toJson())),
     );
+    CloudSyncHead committedHead = newHead;
     try {
       await store.putObject(
         cloudSyncHeadPath,
@@ -2323,13 +2565,36 @@ final class TallyBackupService {
         contentType: 'application/json; charset=utf-8',
       );
     } catch (_) {
+      _RemoteHeadProbe? remoteProbe;
       try {
-        await store.deleteObject(revisionPath);
-      } catch (_) {}
-      rethrow;
+        remoteProbe = await _readRemoteSyncHead(store);
+      } catch (_) {
+        remoteProbe = null;
+      }
+      if (remoteProbe == null) {
+        // Reading remote head failed (network outage or corrupt JSON):
+        // NEVER blindly delete revisionPath!
+        rethrow;
+      }
+      final probedHead = remoteProbe.head;
+      if (probedHead != null &&
+          probedHead.revision == nextRevision &&
+          probedHead.dataSha256 == localDataSha256.toLowerCase() &&
+          probedHead.databasePath == revisionPath) {
+        // Remote head.json already committed newHead on the server; keep
+        // revisionPath, persist local cursor, and complete push cleanly.
+        committedHead = probedHead;
+      } else {
+        if (probedHead == null || probedHead.databasePath != revisionPath) {
+          try {
+            await store.deleteObject(revisionPath);
+          } catch (_) {}
+        }
+        rethrow;
+      }
     }
 
-    // 5. Persist local `prefKeyCloudSyncCursor`.
+    // 5. Persist local `prefKeyCloudSyncCursor` (clearing any conflict record).
     final updatedCursor = LocalSyncCursor(
       lastSyncedRevision: nextRevision,
       lastSyncedDataSha256: localDataSha256,
@@ -2397,7 +2662,7 @@ final class TallyBackupService {
       status: CloudSyncStatus.pushed,
       revision: nextRevision,
       localDataSha256: localDataSha256,
-      remoteHead: newHead,
+      remoteHead: committedHead,
       uploadedAttachments: uploadedCount,
       archivedBackupFileName: archivedName,
     );
@@ -4159,6 +4424,24 @@ final class _ValidatedDatabaseRows {
   final List<ImportPlatform> importPlatforms;
   final List<Note> notes;
   final List<Currency> currencies;
+}
+
+enum _RemoteHeadProbeState { missing, legacyFormat, valid }
+
+final class _RemoteHeadProbe {
+  const _RemoteHeadProbe.missing()
+    : state = _RemoteHeadProbeState.missing,
+      head = null;
+
+  const _RemoteHeadProbe.legacy()
+    : state = _RemoteHeadProbeState.legacyFormat,
+      head = null;
+
+  const _RemoteHeadProbe.valid(CloudSyncHead this.head)
+    : state = _RemoteHeadProbeState.valid;
+
+  final _RemoteHeadProbeState state;
+  final CloudSyncHead? head;
 }
 
 final class _RemoteSyncState {

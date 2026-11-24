@@ -20,14 +20,17 @@ final class MobileSyncQuickPreview {
     required this.isCloudReady,
     required this.backendLabel,
     required this.statusLine,
+    this.hasConflict = false,
   });
 
   const MobileSyncQuickPreview.fallback()
     : isCloudReady = false,
+      hasConflict = false,
       backendLabel = '本地与云端',
       statusLine = '单设备快照接力 · 一键同步与本地备份';
 
   final bool isCloudReady;
+  final bool hasConflict;
   final String backendLabel;
   final String statusLine;
 }
@@ -86,11 +89,20 @@ final mobileSyncQuickPreviewProvider = Provider<MobileSyncQuickPreview>((ref) {
       ? rawCursor
       : rawCursor.scopedToTarget(targetFingerprint);
 
-  final status = (cursor.isNeverSynced || cursor.lastSyncedAtMs == null)
-      ? '${settings.backend.displayLabel} 已就绪 · 换设备前请先同步'
-      : '${settings.backend.displayLabel} · 已同步 r${cursor.lastSyncedRevision} · ${formatDateTime(DateTime.fromMillisecondsSinceEpoch(cursor.lastSyncedAtMs!))}';
+  final conflictFile = cursor.lastConflictFileName?.trim();
+  final hasConflict = conflictFile != null && conflictFile.isNotEmpty;
+  final String status;
+  if (hasConflict) {
+    status = '检测到同步冲突 · 待处理';
+  } else if (cursor.isNeverSynced || cursor.lastSyncedAtMs == null) {
+    status = '${settings.backend.displayLabel} 已就绪 · 换设备前请先同步';
+  } else {
+    status =
+        '${settings.backend.displayLabel} · 已同步 r${cursor.lastSyncedRevision} · ${formatDateTime(DateTime.fromMillisecondsSinceEpoch(cursor.lastSyncedAtMs!))}';
+  }
   return MobileSyncQuickPreview(
     isCloudReady: true,
+    hasConflict: hasConflict,
     backendLabel: settings.backend.displayLabel,
     statusLine: status,
   );
@@ -382,9 +394,11 @@ class _MobileSyncBackupQuickSheetState
               Row(
                 children: [
                   Icon(
-                    Icons.cloud_sync_outlined,
+                    preview.hasConflict
+                        ? Icons.sync_problem_rounded
+                        : Icons.cloud_sync_outlined,
                     size: 22,
-                    color: scheme.primary,
+                    color: preview.hasConflict ? scheme.error : scheme.primary,
                   ),
                   const SizedBox(width: 8),
                   Expanded(
@@ -425,7 +439,10 @@ class _MobileSyncBackupQuickSheetState
                 preview.statusLine,
                 key: const Key('quick_sheet_status_text'),
                 style: theme.textTheme.bodySmall?.copyWith(
-                  color: scheme.onSurfaceVariant,
+                  color: preview.hasConflict
+                      ? scheme.error
+                      : scheme.onSurfaceVariant,
+                  fontWeight: preview.hasConflict ? FontWeight.w600 : null,
                 ),
               ),
               const SizedBox(height: 10),
@@ -714,16 +731,19 @@ class _MobileMeSyncQuickCardState extends ConsumerState<MobileMeSyncQuickCard> {
                   width: 34,
                   height: 34,
                   decoration: BoxDecoration(
-                    color: fgTone.withValues(alpha: isDark ? 0.16 : 0.12),
+                    color: (preview.hasConflict ? scheme.error : fgTone)
+                        .withValues(alpha: isDark ? 0.16 : 0.12),
                     borderRadius: BorderRadius.circular(10),
                   ),
                   alignment: Alignment.center,
                   child: Icon(
-                    preview.isCloudReady
-                        ? Icons.cloud_sync_outlined
-                        : Icons.backup_outlined,
+                    preview.hasConflict
+                        ? Icons.sync_problem_rounded
+                        : (preview.isCloudReady
+                              ? Icons.cloud_sync_outlined
+                              : Icons.backup_outlined),
                     size: 19,
-                    color: fgTone,
+                    color: preview.hasConflict ? scheme.error : fgTone,
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -749,7 +769,12 @@ class _MobileMeSyncQuickCardState extends ConsumerState<MobileMeSyncQuickCard> {
                         softWrap: false,
                         overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.labelSmall?.copyWith(
-                          color: scheme.onSurfaceVariant,
+                          color: preview.hasConflict && !syncInProgress
+                              ? scheme.error
+                              : scheme.onSurfaceVariant,
+                          fontWeight: preview.hasConflict && !syncInProgress
+                              ? FontWeight.w600
+                              : null,
                         ),
                       ),
                     ],

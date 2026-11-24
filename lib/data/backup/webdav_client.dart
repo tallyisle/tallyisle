@@ -52,6 +52,13 @@ abstract interface class BackupTarget {
   Future<void> deleteBackup(String fileName);
 }
 
+/// Metadata returned by a lightweight remote object existence check (`HEAD` / list).
+final class CloudSyncObjectHead {
+  const CloudSyncObjectHead({this.sizeBytes});
+
+  final int? sizeBytes;
+}
+
 /// Unified relative-path object operations used by multi-device snapshot sync
 /// across both WebDAV and S3 backends.
 abstract interface class CloudSyncObjectStore {
@@ -77,6 +84,26 @@ abstract interface class CloudSyncObjectStore {
   Future<void> deleteObject(String relativePath);
 
   Future<Set<String>> listRelativeFileNames(String relativeDir);
+}
+
+/// Lightweight existence / metadata check for [CloudSyncObjectStore] without
+/// downloading full snapshot payloads.
+extension CloudSyncObjectStoreHeadExtension on CloudSyncObjectStore {
+  Future<CloudSyncObjectHead?> headObject(String relativePath) async {
+    final self = this;
+    if (self is WebDavBackupTarget) {
+      return self.headObject(relativePath);
+    }
+    final segments = validateCloudRelativeSegments(relativePath);
+    final parentDir = segments.length > 1
+        ? segments.sublist(0, segments.length - 1).join('/')
+        : '';
+    final names = await listRelativeFileNames(parentDir);
+    if (!names.contains(segments.last)) {
+      return null;
+    }
+    return const CloudSyncObjectHead();
+  }
 }
 
 /// User-configured WebDAV endpoint and backup policy settings (§1.1, §1.5, §6.2, §6.3).
@@ -203,6 +230,7 @@ final class WebDavClient {
     this.nowMs,
     this.controlTimeout = const Duration(seconds: 25),
     this.transferTimeout = const Duration(seconds: 90),
+    this.staleHeadRetryDelay = const Duration(milliseconds: 80),
   }) : _httpClientFactory = httpClientFactory ?? _defaultHttpClient;
 
   final WebDavConfig config;
@@ -210,10 +238,12 @@ final class WebDavClient {
   final int Function()? nowMs;
   final Duration controlTimeout;
   final Duration transferTimeout;
+  final Duration staleHeadRetryDelay;
 
   final Set<String> _verifiedCollectionPaths = <String>{};
 
   static const int _uploadChunkSize = 32 * 1024;
+  static const int _smallPayloadVerifyMaxBytes = 256 * 1024;
   static const String _probeFileName = '.tallyisle_write_probe.tmp';
   static const String _propfindBody =
       '<?xml version="1.0" encoding="utf-8"?>'
@@ -750,7 +780,7 @@ final class WebDavClient {
         contentType: contentType,
         onProgress: onProgress,
       );
-      await _verifyHeadContentLengthOn(client, finalUri, bytes.length);
+      await _verifyHeadContentLengthOn(client, finalUri, bytes);
       return;
     }
 
@@ -768,10 +798,14 @@ final class WebDavClient {
     HttpClient client,
     Uri uri, {
     BackupProgressCallback? onProgress,
+    bool noCache = true,
   }) async {
     final req = await client.getUrl(uri).timeout(controlTimeout);
     req.headers.set(HttpHeaders.authorizationHeader, _basicAuthHeader);
     req.headers.set(HttpHeaders.acceptEncodingHeader, 'identity');
+    if (noCache) {
+      req.headers.set(HttpHeaders.cacheControlHeader, 'no-cache');
+    }
     final res = await req.close().timeout(transferTimeout);
     if (res.statusCode == 404 || res.statusCode == 410) {
       await res.drain<void>().timeout(controlTimeout);
@@ -869,16 +903,67 @@ final class WebDavClient {
   Future<void> _verifyHeadContentLengthOn(
     HttpClient client,
     Uri uri,
-    int expectedLength,
+    Uint8List uploadedBytes,
   ) async {
+    final expectedLength = uploadedBytes.length;
+    final initialCheck = await _probeHeadLengthOn(client, uri, noCache: false);
+    if (initialCheck.skipLengthVerification ||
+        initialCheck.remoteLength == null ||
+        initialCheck.remoteLength == expectedLength) {
+      return;
+    }
+
+    // Overwriting an existing WebDAV object (such as `sync/head.json`) via
+    // fallback `PUT` can hit a short-lived stale `HEAD` metadata cache on
+    // Nutstore / Alist / CDN gateways right at 0ms. Wait briefly and perform a
+    // cache-busted verification before declaring a mismatch.
+    if (staleHeadRetryDelay > Duration.zero) {
+      await Future<void>.delayed(staleHeadRetryDelay);
+    }
+
+    if (expectedLength <= _smallPayloadVerifyMaxBytes) {
+      final verified = await _verifySmallPayloadViaNoCacheGetOn(
+        client,
+        uri,
+        uploadedBytes,
+      );
+      if (verified) {
+        return;
+      }
+      throw const Failure(
+        FailureCode.remoteUnavailable,
+        'WebDAV 远端文件 Content-Length 校验不一致，已拒绝确认上传',
+      );
+    }
+
+    final retryCheck = await _probeHeadLengthOn(client, uri, noCache: true);
+    if (retryCheck.skipLengthVerification ||
+        retryCheck.remoteLength == expectedLength) {
+      return;
+    }
+    throw const Failure(
+      FailureCode.remoteUnavailable,
+      'WebDAV 远端文件 Content-Length 校验不一致，已拒绝确认上传',
+    );
+  }
+
+  Future<({bool skipLengthVerification, int? remoteLength})> _probeHeadLengthOn(
+    HttpClient client,
+    Uri uri, {
+    required bool noCache,
+  }) async {
     final req = await client.openUrl('HEAD', uri).timeout(controlTimeout);
     req.headers.set(HttpHeaders.authorizationHeader, _basicAuthHeader);
     req.headers.set(HttpHeaders.acceptEncodingHeader, 'identity');
+    if (noCache) {
+      req.headers.set(HttpHeaders.cacheControlHeader, 'no-cache');
+      req.headers.set(HttpHeaders.pragmaHeader, 'no-cache');
+    }
     final res = await req.close().timeout(controlTimeout);
     await res.drain<void>().timeout(controlTimeout);
     if (res.statusCode == 405 || res.statusCode == 501) {
       // Lightweight WebDAV server does not implement HEAD; direct PUT succeeded.
-      return;
+      return (skipLengthVerification: true, remoteLength: null);
     }
     _checkAuthAndStorageStatus(res.statusCode, action: '校验远端备份长度');
     if (res.statusCode < 200 || res.statusCode >= 300) {
@@ -896,7 +981,7 @@ final class WebDavClient {
         (contentEncoding != null &&
             contentEncoding.isNotEmpty &&
             contentEncoding != 'identity')) {
-      return;
+      return (skipLengthVerification: true, remoteLength: null);
     }
     final contentLengthHeader = res.headers.value(
       HttpHeaders.contentLengthHeader,
@@ -904,13 +989,83 @@ final class WebDavClient {
     final remoteLength = contentLengthHeader != null
         ? int.tryParse(contentLengthHeader.trim())
         : (res.contentLength >= 0 ? res.contentLength : null);
-    if (remoteLength != null && remoteLength != expectedLength) {
-      throw const Failure(
+    return (skipLengthVerification: false, remoteLength: remoteLength);
+  }
+
+  Future<bool> _verifySmallPayloadViaNoCacheGetOn(
+    HttpClient client,
+    Uri uri,
+    Uint8List uploadedBytes,
+  ) async {
+    final req = await client.getUrl(uri).timeout(controlTimeout);
+    req.headers.set(HttpHeaders.authorizationHeader, _basicAuthHeader);
+    req.headers.set(HttpHeaders.acceptEncodingHeader, 'identity');
+    req.headers.set(HttpHeaders.cacheControlHeader, 'no-cache');
+    req.headers.set(HttpHeaders.pragmaHeader, 'no-cache');
+    final res = await req.close().timeout(transferTimeout);
+    if (res.statusCode == 404 || res.statusCode == 410) {
+      await res.drain<void>().timeout(controlTimeout);
+      return false;
+    }
+    _checkAuthAndStorageStatus(res.statusCode, action: '回读校验远端文件');
+    if (res.statusCode != 200) {
+      await res.drain<void>().timeout(controlTimeout);
+      throw Failure(
         FailureCode.remoteUnavailable,
-        'WebDAV 远端文件 Content-Length 校验不一致，已拒绝确认上传',
+        '下载 WebDAV 文件失败（状态码 ${res.statusCode}）',
       );
     }
+    final builder = BytesBuilder(copy: false);
+    await for (final chunk in res.timeout(transferTimeout)) {
+      builder.add(chunk);
+    }
+    final fetched = builder.takeBytes();
+    if (fetched.length != uploadedBytes.length) {
+      return false;
+    }
+    return sha256Hex(fetched) == sha256Hex(uploadedBytes);
   }
+
+  /// Checks whether an arbitrary relative object exists under `remoteDirectory`
+  /// via `HEAD` (falling back to `PROPFIND` listing when `HEAD` returns `405`/`501`),
+  /// returning `null` on `404`.
+  Future<CloudSyncObjectHead?> headRelativeFileOrNull(String relativePath) =>
+      _withClient((client) async {
+        final segments = validateCloudRelativeSegments(relativePath);
+        final uri = _relativePathUri(segments);
+        final req = await client.openUrl('HEAD', uri).timeout(controlTimeout);
+        req.headers.set(HttpHeaders.authorizationHeader, _basicAuthHeader);
+        req.headers.set(HttpHeaders.acceptEncodingHeader, 'identity');
+        req.headers.set(HttpHeaders.cacheControlHeader, 'no-cache');
+        final res = await req.close().timeout(controlTimeout);
+        await res.drain<void>().timeout(controlTimeout);
+        if (res.statusCode == 404 || res.statusCode == 410) {
+          return null;
+        }
+        if (res.statusCode == 405 || res.statusCode == 501) {
+          final parentDir = segments.length > 1
+              ? segments.sublist(0, segments.length - 1).join('/')
+              : '';
+          final names = await listRelativeFileNames(parentDir);
+          return names.contains(segments.last)
+              ? const CloudSyncObjectHead()
+              : null;
+        }
+        _checkAuthAndStorageStatus(res.statusCode, action: '检查远端同步对象');
+        if (res.statusCode < 200 || res.statusCode >= 300) {
+          throw Failure(
+            FailureCode.remoteUnavailable,
+            'WebDAV HEAD 校验失败（状态码 ${res.statusCode}）',
+          );
+        }
+        final contentLengthHeader = res.headers.value(
+          HttpHeaders.contentLengthHeader,
+        );
+        final len = contentLengthHeader != null
+            ? int.tryParse(contentLengthHeader.trim())
+            : (res.contentLength >= 0 ? res.contentLength : null);
+        return CloudSyncObjectHead(sizeBytes: len);
+      });
 
   Future<void> _deleteUriOn(
     HttpClient client,
@@ -1321,5 +1476,11 @@ final class WebDavBackupTarget implements BackupTarget, CloudSyncObjectStore {
   Future<Set<String>> listRelativeFileNames(String relativeDir) async {
     _requireConfigured();
     return _client.listRelativeFileNames(relativeDir);
+  }
+
+  /// Checks whether [relativePath] exists on WebDAV without downloading its body.
+  Future<CloudSyncObjectHead?> headObject(String relativePath) async {
+    _requireConfigured();
+    return _client.headRelativeFileOrNull(relativePath);
   }
 }

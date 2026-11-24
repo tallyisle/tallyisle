@@ -13,6 +13,7 @@ import '../../domain/rules/tally_backup.dart';
 import '../../platform/files.dart';
 import '../common/common.dart';
 import '../common/desktop_modal_page.dart';
+import 'backup_history_sheet.dart';
 import 'backup_providers.dart';
 import 'post_restore_refresh.dart';
 import 's3_config_page.dart';
@@ -544,10 +545,50 @@ class _BackupPageState extends ConsumerState<BackupPage>
     try {
       final service = await ref.read(tallyBackupServiceProvider.future);
       await service.deleteLocalBackup(item.fileName);
-      ref.invalidate(localBackupsProvider);
+      if (!mounted) return;
+      if (_pendingConflict?.conflictBackupFileName == item.fileName) {
+        setState(_clearPendingConflict);
+      }
+      _refreshAfterBackupChange();
       _showMessage('已删除本地备份：${item.fileName}');
     } catch (e) {
       _showMessage(safeMessage(e));
+    }
+  }
+
+  Future<void> _openLocalBackupHistoryDialog() async {
+    final outcome = await showBackupHistoryManagementDialog(
+      context,
+      source: BackupHistorySource.local,
+    );
+    if (!mounted || outcome == null) return;
+    if (outcome.didRestore) {
+      setState(_clearPendingConflict);
+      _showMessage('恢复完成：共导入 ${outcome.restoredTotalRows} 条数据');
+      return;
+    }
+    if (outcome.deletedLocalFileNames.isNotEmpty) {
+      final pendingName = _pendingConflict?.conflictBackupFileName;
+      if (pendingName != null &&
+          outcome.deletedLocalFileNames.contains(pendingName)) {
+        setState(_clearPendingConflict);
+      }
+      _refreshAfterBackupChange();
+    }
+  }
+
+  Future<void> _openCloudBackupHistoryDialog(
+    CloudBackendType activeBackend,
+  ) async {
+    final outcome = await showBackupHistoryManagementDialog(
+      context,
+      source: BackupHistorySource.cloud,
+      cloudBackend: activeBackend,
+    );
+    if (!mounted || outcome == null) return;
+    if (outcome.didRestore) {
+      setState(_clearPendingConflict);
+      _showMessage('云端恢复完成：共导入 ${outcome.restoredTotalRows} 条数据');
     }
   }
 
@@ -669,6 +710,8 @@ class _BackupPageState extends ConsumerState<BackupPage>
       }
     }
   }
+
+  static const int _maxInlineBackupItems = 3;
 
   static const ButtonStyle _compactButtonStyle = ButtonStyle(
     padding: WidgetStatePropertyAll(
@@ -1678,15 +1721,38 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                       child: Text('暂无应用内本地备份'),
                                     );
                                   }
+                                  final inlineItems = items
+                                      .take(_maxInlineBackupItems)
+                                      .toList();
                                   return Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.stretch,
                                     children: [
-                                      for (final item in items)
+                                      for (final item in inlineItems)
                                         ListTile(
                                           key: Key(
                                             'local_backup_item_${item.fileName}',
                                           ),
+                                          dense: true,
                                           contentPadding: EdgeInsets.zero,
-                                          title: Text(item.fileName),
+                                          title: Row(
+                                            children: [
+                                              if (isConflictBackupFileName(
+                                                item.fileName,
+                                              )) ...[
+                                                const ConflictBackupBadge(),
+                                                const SizedBox(width: 6),
+                                              ],
+                                              Expanded(
+                                                child: Text(
+                                                  item.fileName,
+                                                  maxLines: 1,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
                                           subtitle: Text(
                                             <String>[
                                               '${formatDateTime(DateTime.fromMillisecondsSinceEpoch(item.modifiedAtMs))} · ${_formatSize(item.sizeBytes)}',
@@ -1704,6 +1770,14 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                                 key: Key(
                                                   'local_restore_${item.fileName}',
                                                 ),
+                                                style: TextButton.styleFrom(
+                                                  visualDensity:
+                                                      VisualDensity.compact,
+                                                  padding:
+                                                      const EdgeInsets.symmetric(
+                                                        horizontal: 8,
+                                                      ),
+                                                ),
                                                 onPressed: effectiveBusy
                                                     ? null
                                                     : () =>
@@ -1716,6 +1790,8 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                                 key: Key(
                                                   'local_delete_${item.fileName}',
                                                 ),
+                                                visualDensity:
+                                                    VisualDensity.compact,
                                                 tooltip: '删除',
                                                 onPressed: effectiveBusy
                                                     ? null
@@ -1730,6 +1806,26 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                             ],
                                           ),
                                         ),
+                                      const SizedBox(height: 6),
+                                      SizedBox(
+                                        width: double.infinity,
+                                        child: OutlinedButton.icon(
+                                          key: const Key(
+                                            'open_all_local_backups_button',
+                                          ),
+                                          style: _compactButtonStyle,
+                                          onPressed: effectiveBusy
+                                              ? null
+                                              : _openLocalBackupHistoryDialog,
+                                          icon: const Icon(
+                                            Icons.manage_search_rounded,
+                                            size: 18,
+                                          ),
+                                          label: _singleLineText(
+                                            '查看全部（共 ${items.length} 份）/ 批量管理',
+                                          ),
+                                        ),
+                                      ),
                                     ],
                                   );
                                 },
@@ -1869,15 +1965,38 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                         child: Text('远端目录暂无备份文件'),
                                       );
                                     }
+                                    final inlineItems = items
+                                        .take(_maxInlineBackupItems)
+                                        .toList();
                                     return Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.stretch,
                                       children: [
-                                        for (final item in items)
+                                        for (final item in inlineItems)
                                           ListTile(
                                             key: Key(
                                               'webdav_backup_item_${item.fileName}',
                                             ),
+                                            dense: true,
                                             contentPadding: EdgeInsets.zero,
-                                            title: Text(item.fileName),
+                                            title: Row(
+                                              children: [
+                                                if (isConflictBackupFileName(
+                                                  item.fileName,
+                                                )) ...[
+                                                  const ConflictBackupBadge(),
+                                                  const SizedBox(width: 6),
+                                                ],
+                                                Expanded(
+                                                  child: Text(
+                                                    item.fileName,
+                                                    maxLines: 1,
+                                                    overflow:
+                                                        TextOverflow.ellipsis,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
                                             subtitle: Text(
                                               isConflictBackupFileName(
                                                     item.fileName,
@@ -1892,6 +2011,14 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                                   key: Key(
                                                     'webdav_restore_${item.fileName}',
                                                   ),
+                                                  style: TextButton.styleFrom(
+                                                    visualDensity:
+                                                        VisualDensity.compact,
+                                                    padding:
+                                                        const EdgeInsets.symmetric(
+                                                          horizontal: 8,
+                                                        ),
+                                                  ),
                                                   onPressed: effectiveBusy
                                                       ? null
                                                       : () =>
@@ -1905,6 +2032,8 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                                   key: Key(
                                                     'webdav_delete_${item.fileName}',
                                                   ),
+                                                  visualDensity:
+                                                      VisualDensity.compact,
                                                   tooltip: '删除',
                                                   onPressed: effectiveBusy
                                                       ? null
@@ -1920,6 +2049,29 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                               ],
                                             ),
                                           ),
+                                        const SizedBox(height: 6),
+                                        SizedBox(
+                                          width: double.infinity,
+                                          child: OutlinedButton.icon(
+                                            key: const Key(
+                                              'open_all_cloud_backups_button',
+                                            ),
+                                            style: _compactButtonStyle,
+                                            onPressed: effectiveBusy
+                                                ? null
+                                                : () =>
+                                                      _openCloudBackupHistoryDialog(
+                                                        activeBackend,
+                                                      ),
+                                            icon: const Icon(
+                                              Icons.manage_search_rounded,
+                                              size: 18,
+                                            ),
+                                            label: _singleLineText(
+                                              '查看全部（共 ${items.length} 份）/ 批量管理',
+                                            ),
+                                          ),
+                                        ),
                                       ],
                                     );
                                   },

@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -7,8 +8,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
+import 'package:tallyisle/app/adaptive.dart';
 import 'package:tallyisle/app/providers.dart';
+import 'package:tallyisle/data/backup/tally_backup_service.dart';
+import 'package:tallyisle/data/backup/webdav_client.dart';
 import 'package:tallyisle/data/db/database.dart';
+import 'package:tallyisle/data/reminder/reminder_service.dart';
+import 'package:tallyisle/domain/rules/cloud_sync_rules.dart';
 import 'package:tallyisle/features/backup/backup_page.dart';
 import 'package:tallyisle/features/backup/backup_providers.dart';
 import 'package:tallyisle/features/reminder/reminder_providers.dart';
@@ -464,6 +470,338 @@ void main() {
       await settle(tester);
 
       expect(server.files, isEmpty);
+
+      await tester.pumpWidget(const SizedBox());
+      await settle(tester);
+      await tester.pump(const Duration(seconds: 1));
+    },
+  );
+
+  testWidgets(
+    'BackupPage folds inline local & cloud backups to latest 3 with 冲突保护 badges, and BackupHistoryManagementDialog filters, exports, and batch-deletes on 360x640 mobile and 1280x800 desktop without overflow',
+    (tester) async {
+      HttpOverrides.global = null;
+      late final AppDatabase db;
+      await tester.runAsync(() async {
+        db = AppDatabase(NativeDatabase.memory());
+      });
+      final scheduler = InMemoryReminderScheduler();
+      final tempRoot = (await tester.runAsync(
+        () => Directory.systemTemp.createTemp('tally_widget_bk_fold_'),
+      ))!;
+      final server = (await tester.runAsync(_WidgetTestWebDavServer.start))!;
+
+      addTearDown(() async {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        await tester.pumpWidget(const SizedBox());
+        await scheduler.dispose();
+        await tester.runAsync(server.close);
+        await tester.runAsync(db.close);
+        await tester.runAsync(() async {
+          if (await tempRoot.exists()) {
+            await tempRoot.delete(recursive: true);
+          }
+        });
+      });
+
+      final localDir = Directory(p.join(tempRoot.path, 'local'));
+      final attDir = Directory(p.join(tempRoot.path, 'att'));
+      late final TallyBackupService service;
+      late final Uint8List validArchiveBytes;
+
+      const fiveNamesNewestFirst = <String>[
+        'conflict_dev1_20261124_100500.tally',
+        'backup_20261124_100400.tally',
+        'conflict_dev1_20261124_100300.tally',
+        'backup_20261124_100200.tally',
+        'backup_20261124_100100.tally',
+      ];
+
+      await tester.runAsync(() async {
+        await db
+            .into(db.notes)
+            .insert(
+              NotesCompanion.insert(
+                title: const Value('折叠与批管验证'),
+                content: '共五份备份测试',
+                createTime: 3000,
+                updateTime: 3000,
+              ),
+            );
+        service = TallyBackupService(
+          db,
+          reminderService: ReminderService(db, scheduler: scheduler),
+          localBackupsDirectoryProvider: () async => localDir,
+          attachmentsDirectoryProvider: () async => attDir,
+        );
+        final davCfg = WebDavConfig(
+          serverUrl: server.baseUrl,
+          username: 'dav_user',
+          password: 'dav_password',
+          remoteDirectory: '/TallyFold',
+          keepCount: 20,
+        );
+        await service.saveWebDavConfig(davCfg);
+        validArchiveBytes = (await service.createBackupBytes()).bytes;
+
+        await localDir.create(recursive: true);
+        server.collections.add('/dav/TallyFold');
+        for (var i = 0; i < fiveNamesNewestFirst.length; i++) {
+          final name = fiveNamesNewestFirst[i];
+          final ts = DateTime(2026, 11, 24, 10, 5 - i);
+          final localFile = File(p.join(localDir.path, name));
+          await localFile.writeAsBytes(validArchiveBytes, flush: true);
+          await localFile.setLastModified(ts);
+          server.files['/dav/TallyFold/$name'] = validArchiveBytes;
+        }
+
+        // Seed pending conflict cursor pointing to the newest local conflict archive
+        await db
+            .into(db.preferences)
+            .insertOnConflictUpdate(
+              PreferencesCompanion.insert(
+                key: prefKeyCloudSyncCursor,
+                value: jsonEncode(
+                  LocalSyncCursor(
+                    lastSyncedRevision: 3,
+                    lastSyncedDataSha256: 'a' * 64,
+                    lastSyncedAtMs: DateTime(
+                      2026,
+                      11,
+                      24,
+                      9,
+                    ).millisecondsSinceEpoch,
+                    targetFingerprint: davCfg.targetFingerprint,
+                    lastConflictFileName: 'conflict_dev1_20261124_100500.tally',
+                    lastConflictSha256: 'b' * 64,
+                  ).toJson(),
+                ),
+              ),
+            );
+      });
+
+      String? exportedName;
+      Uint8List? exportedBytes;
+      final fakeFileAccess = FileAccess(
+        onSaveBytes: (name, bytes, _) async {
+          exportedName = name;
+          exportedBytes = bytes;
+        },
+      );
+
+      // 1. Render on narrow 360x640 mobile viewport with 1.2x text scale!
+      tester.view.physicalSize = const Size(360, 640);
+      tester.view.devicePixelRatio = 1.0;
+
+      await tester.pumpWidget(
+        ProviderScope(
+          key: const ValueKey<String>('mobile_fold_scope'),
+          retry: (_, _) => null,
+          overrides: [
+            databaseProvider.overrideWith((ref) async => db),
+            reminderSchedulerProvider.overrideWithValue(scheduler),
+            backupFileAccessProvider.overrideWithValue(fakeFileAccess),
+            backupLocalDirectoryOverrideProvider.overrideWithValue(
+              () async => localDir,
+            ),
+            backupAttachmentsDirectoryOverrideProvider.overrideWithValue(
+              () async => attDir,
+            ),
+          ],
+          child: MediaQuery(
+            data: const MediaQueryData(
+              size: Size(360, 640),
+              textScaler: TextScaler.linear(1.2),
+            ),
+            child: const MaterialApp(home: BackupPage()),
+          ),
+        ),
+      );
+      await settle(tester);
+      expect(tester.takeException(), isNull);
+
+      // Verify inline Local Backups shows ONLY the latest 3 items and hides the 2 older ones
+      for (final visibleName in fiveNamesNewestFirst.take(3)) {
+        expect(
+          find.byKey(Key('local_backup_item_$visibleName')),
+          findsOneWidget,
+        );
+      }
+      for (final foldedName in fiveNamesNewestFirst.skip(3)) {
+        expect(find.byKey(Key('local_backup_item_$foldedName')), findsNothing);
+      }
+      // Verify inline Cloud Backups also shows ONLY the latest 3 items
+      for (final visibleName in fiveNamesNewestFirst.take(3)) {
+        expect(
+          find.byKey(Key('webdav_backup_item_$visibleName')),
+          findsOneWidget,
+        );
+      }
+      for (final foldedName in fiveNamesNewestFirst.skip(3)) {
+        expect(find.byKey(Key('webdav_backup_item_$foldedName')), findsNothing);
+      }
+      expect(find.text('冲突保护'), findsWidgets);
+      expect(find.text('查看全部（共 5 份）/ 批量管理'), findsNWidgets(2));
+
+      // 2. Open Local BackupHistoryManagementDialog on 360x640 mobile
+      final openLocalAllBtn = find.byKey(
+        const Key('open_all_local_backups_button'),
+      );
+      await tester.ensureVisible(openLocalAllBtn);
+      await settle(tester);
+      await tester.tap(openLocalAllBtn);
+      await settle(tester);
+      expect(tester.takeException(), isNull);
+      expect(
+        find.byKey(const Key('backup_history_management_dialog')),
+        findsOneWidget,
+      );
+
+      // Filter chips: 冲突保护包 -> shows only the 2 conflict items
+      await tester.tap(find.byKey(const Key('backup_filter_conflict')));
+      await settle(tester);
+      expect(
+        find.byKey(
+          const Key('backup_history_row_conflict_dev1_20261124_100500.tally'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(
+          const Key('backup_history_row_backup_20261124_100400.tally'),
+        ),
+        findsNothing,
+      );
+
+      // Filter chips: 常规备份 -> shows routine items, then tap 选中全部冲突包 -> switches & selects all conflicts!
+      await tester.tap(find.byKey(const Key('backup_filter_routine')));
+      await settle(tester);
+      await tester.tap(
+        find.byKey(const Key('backup_history_select_conflicts_button')),
+      );
+      await settle(tester);
+      expect(find.text('删除已选 (2)'), findsOneWidget);
+
+      // Single-item export from BackupHistoryManagementDialog
+      await tester.tap(
+        find.byKey(
+          const Key(
+            'backup_history_export_conflict_dev1_20261124_100500.tally',
+          ),
+        ),
+      );
+      await settle(tester);
+      expect(exportedName, 'conflict_dev1_20261124_100500.tally');
+      expect(exportedBytes, equals(validArchiveBytes));
+
+      // Test 全选 / 取消全选 on 全部 filter
+      await tester.tap(find.byKey(const Key('backup_filter_all')));
+      await settle(tester);
+      await tester.tap(
+        find.byKey(const Key('backup_history_select_all_button')),
+      );
+      await settle(tester);
+      expect(find.text('删除已选 (5)'), findsOneWidget);
+      await tester.tap(
+        find.byKey(const Key('backup_history_select_all_button')),
+      );
+      await settle(tester);
+      expect(find.text('删除已选 (0)'), findsOneWidget);
+
+      // Select all conflict archives and execute confirmed batch delete!
+      await tester.tap(
+        find.byKey(const Key('backup_history_select_conflicts_button')),
+      );
+      await settle(tester);
+      expect(find.text('删除已选 (2)'), findsOneWidget);
+      await tester.tap(
+        find.byKey(const Key('backup_history_batch_delete_button')),
+      );
+      await settle(tester);
+      expect(
+        find.byKey(const Key('backup_history_batch_delete_confirm_dialog')),
+        findsOneWidget,
+      );
+      await tester.tap(
+        find.byKey(const Key('backup_history_confirm_batch_delete_button')),
+      );
+      await settle(tester);
+      expect(tester.takeException(), isNull);
+
+      final remainingLocal = (await tester.runAsync(service.listLocalBackups))!;
+      expect(remainingLocal, hasLength(3));
+      expect(
+        remainingLocal.any((e) => e.fileName.startsWith('conflict_')),
+        isFalse,
+      );
+      // Deleting the local conflict archive cleared `lastConflictFileName`!
+      final cursorAfterLocalClean = (await tester.runAsync(
+        service.getSyncCursor,
+      ))!;
+      expect(cursorAfterLocalClean.lastConflictFileName, isNull);
+
+      // Close mobile sheet
+      await tester.tap(find.byKey(const Key('backup_history_close_button')));
+      await settle(tester);
+
+      // 3. Switch to 1280x800 Desktop mode and batch-delete Cloud Backups via modal dialog
+      tester.view.physicalSize = const Size(1280, 800);
+      await tester.pumpWidget(
+        ProviderScope(
+          key: const ValueKey<String>('desktop_fold_scope'),
+          retry: (_, _) => null,
+          overrides: [
+            desktopModeOverrideProvider.overrideWithValue(true),
+            databaseProvider.overrideWith((ref) async => db),
+            reminderSchedulerProvider.overrideWithValue(scheduler),
+            backupFileAccessProvider.overrideWithValue(fakeFileAccess),
+            backupLocalDirectoryOverrideProvider.overrideWithValue(
+              () async => localDir,
+            ),
+            backupAttachmentsDirectoryOverrideProvider.overrideWithValue(
+              () async => attDir,
+            ),
+          ],
+          child: const DesktopAdaptiveScope(
+            isDesktop: true,
+            child: MaterialApp(home: BackupPage()),
+          ),
+        ),
+      );
+      await settle(tester);
+      expect(tester.takeException(), isNull);
+
+      final openCloudAllBtn = find.byKey(
+        const Key('open_all_cloud_backups_button'),
+      );
+      await tester.ensureVisible(openCloudAllBtn);
+      await settle(tester);
+      await tester.tap(openCloudAllBtn);
+      await settle(tester);
+      expect(
+        find.byKey(const Key('backup_history_management_dialog')),
+        findsOneWidget,
+      );
+
+      await tester.tap(
+        find.byKey(const Key('backup_history_select_conflicts_button')),
+      );
+      await settle(tester);
+      await tester.tap(
+        find.byKey(const Key('backup_history_batch_delete_button')),
+      );
+      await settle(tester);
+      await tester.tap(
+        find.byKey(const Key('backup_history_confirm_batch_delete_button')),
+      );
+      await settle(tester);
+      expect(tester.takeException(), isNull);
+      expect(server.files, hasLength(3));
+      expect(server.files.keys.any((k) => k.contains('conflict_')), isFalse);
+
+      await tester.tap(find.byKey(const Key('backup_history_close_button')));
+      await settle(tester);
 
       await tester.pumpWidget(const SizedBox());
       await settle(tester);

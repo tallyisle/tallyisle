@@ -20,6 +20,7 @@ import 'package:tallyisle/domain/rules/cloud_sync_rules.dart';
 import 'package:tallyisle/domain/rules/receipt_diy_rules.dart';
 import 'package:tallyisle/domain/rules/s3_sigv4_rules.dart';
 import 'package:tallyisle/domain/rules/tally_backup.dart';
+import 'package:tallyisle/platform/files.dart';
 import 'package:tallyisle/platform/notifications.dart';
 
 /// Real loopback HTTP server verifying AWS Signature Version 4 (`AWS4-HMAC-SHA256`)
@@ -239,6 +240,15 @@ final class _LoopbackSyncWebDavServer {
   bool rejectAllMoveWith409 = false;
   bool failPutOnNonTmp = false;
   bool rejectExistingMkcolWith409 = false;
+  bool failPutAfterSavingHeadJson = false;
+  bool failPutBeforeSavingHeadJson = false;
+  bool failGetOnHeadJson = false;
+  int headCount = 0;
+  int getCount = 0;
+  String? lastHeadCacheControl;
+  String? lastGetCacheControl;
+  int? Function(String path, HttpRequest req)? overrideHeadLength;
+  Uint8List? Function(String path, HttpRequest req)? overrideGetBytes;
   Future<void> Function(String path)? onBeforeGet;
   int _tick = 0;
 
@@ -335,14 +345,21 @@ final class _LoopbackSyncWebDavServer {
           b.add(c);
         }
         final parent = p.posix.dirname(path);
-        if (failPutOnNonTmp && !path.toLowerCase().endsWith('.tmp')) {
+        final isHeadJsonNonTmp = path.endsWith('/sync/head.json');
+        if (isHeadJsonNonTmp && failPutBeforeSavingHeadJson) {
+          req.response.statusCode = HttpStatus.badGateway;
+        } else if (failPutOnNonTmp && !path.toLowerCase().endsWith('.tmp')) {
           req.response.statusCode = HttpStatus.badGateway;
         } else if (!collections.contains(parent)) {
           req.response.statusCode = HttpStatus.conflict;
         } else {
           files[path] = b.takeBytes();
           modifiedAt[path] = DateTime.utc(2026, 11, 11, 9, 0, ++_tick);
-          req.response.statusCode = HttpStatus.created;
+          if (isHeadJsonNonTmp && failPutAfterSavingHeadJson) {
+            req.response.statusCode = HttpStatus.badGateway;
+          } else {
+            req.response.statusCode = HttpStatus.created;
+          }
         }
         await req.response.close();
 
@@ -364,24 +381,38 @@ final class _LoopbackSyncWebDavServer {
 
       case 'HEAD':
         await req.drain<void>();
+        headCount++;
+        lastHeadCacheControl = req.headers.value(
+          HttpHeaders.cacheControlHeader,
+        );
         final headData = files[path];
         if (headData == null) {
           req.response.statusCode = HttpStatus.notFound;
         } else {
+          final forcedLen = overrideHeadLength?.call(path, req);
           req.response.statusCode = HttpStatus.ok;
           req.response.headers.set(
             HttpHeaders.contentLengthHeader,
-            '${headData.length}',
+            '${forcedLen ?? headData.length}',
           );
         }
         await req.response.close();
 
       case 'GET':
         await req.drain<void>();
+        getCount++;
+        lastGetCacheControl = req.headers.value(HttpHeaders.cacheControlHeader);
         if (onBeforeGet != null) {
           await onBeforeGet!(path);
         }
-        final data = files[path];
+        if (failGetOnHeadJson && path.endsWith('/sync/head.json')) {
+          req.response.statusCode = HttpStatus.serviceUnavailable;
+          await req.response.close();
+          return;
+        }
+        final data = overrideGetBytes != null
+            ? overrideGetBytes!(path, req)
+            : files[path];
         if (data == null) {
           req.response.statusCode = HttpStatus.notFound;
         } else {
@@ -1356,6 +1387,508 @@ void main() {
                 .having((f) => f.message, 'msg', contains('超时')),
           ),
         );
+      },
+    );
+
+    test(
+      'Workstream 1 (1-3 & 5): WebDAV stale HEAD cache fallback, non-destructive push head.json verification, missing snapshot self-heal, and batch backup deletion',
+      () async {
+        final davServer = await _LoopbackSyncWebDavServer.start()
+          ..rejectMoveOverwriteWith409 = true;
+        final s3Server = await _LoopbackSigV4S3Server.start();
+        addTearDown(davServer.close);
+        addTearDown(s3Server.close);
+
+        final tempRoot = await Directory.systemTemp.createTemp(
+          'ws1_sync_fixes_',
+        );
+        addTearDown(() async {
+          if (await tempRoot.exists()) await tempRoot.delete(recursive: true);
+        });
+
+        var now = 1794800000000;
+        final dbA = AppDatabase(NativeDatabase.memory(), nowMs: () => now);
+        final dbB = AppDatabase(NativeDatabase.memory(), nowMs: () => now);
+        addTearDown(dbA.close);
+        addTearDown(dbB.close);
+
+        final localBkDirA = Directory(p.join(tempRoot.path, 'bk_a'));
+        final attDirA = Directory(p.join(tempRoot.path, 'att_a'))
+          ..createSync(recursive: true);
+        final serviceA = TallyBackupService(
+          dbA,
+          reminderService: ReminderService(
+            dbA,
+            scheduler: InMemoryReminderScheduler(),
+          ),
+          localBackupsDirectoryProvider: () async => localBkDirA,
+          attachmentsDirectoryProvider: () async => attDirA,
+        );
+        final serviceB = TallyBackupService(
+          dbB,
+          reminderService: ReminderService(
+            dbB,
+            scheduler: InMemoryReminderScheduler(),
+          ),
+          localBackupsDirectoryProvider: () async =>
+              Directory(p.join(tempRoot.path, 'bk_b')),
+          attachmentsDirectoryProvider: () async =>
+              Directory(p.join(tempRoot.path, 'att_b')),
+        );
+
+        final davCfg = WebDavConfig(
+          serverUrl: davServer.baseUrl,
+          username: 'alice',
+          password: 'dav_password',
+          remoteDirectory: '/TallySync',
+        );
+        await serviceA.saveWebDavConfig(davCfg);
+        await serviceB.saveWebDavConfig(davCfg);
+        await serviceA.setAutoArchiveBackupEnabled(false);
+        await serviceB.setAutoArchiveBackupEnabled(false);
+
+        await dbA.select(dbA.accountBooks).get();
+        await dbB.select(dbB.accountBooks).get();
+        final ledgerA = LedgerService(dbA);
+        final walletId = await ledgerA.createAsset(
+          commandId: 'ws1-wallet',
+          name: '主力储蓄卡',
+          type: AssetType.normal,
+          initial: Money.parse('1000.00'),
+        );
+
+        // Initial r1 push & B pull
+        expect((await serviceA.syncNow()).revision, 1);
+        expect((await serviceB.syncNow()).revision, 1);
+
+        // ------------------------------------------------------------------
+        // 1a. Stale 0ms HEAD Content-Length on overwrite of small payload
+        // (`sync/head.json` <= 256 KB) falls back to no-cache GET + SHA-256!
+        // ------------------------------------------------------------------
+        final r1HeadLen =
+            davServer.files['/dav/TallySync/sync/head.json']!.length;
+        // Force a different JSON byte length on r2 (deviceName length change + recordCount)
+        await serviceA.saveCloudSyncSettings(
+          (await serviceA.getCloudSyncSettings()).copyWith(
+            deviceName: '帐屿主力手机-长设备名测试网关缓存',
+          ),
+        );
+        now += 5000;
+        await ledgerA.saveRecord(
+          commandId: 'ws1-rec-r2',
+          draft: RecordDraft(
+            bookId: 1,
+            type: RecordType.expense,
+            money: Money.parse('36.50'),
+            recordTime: now,
+            categoryId: 1,
+            assetId: walletId,
+            remark: '网关HEAD旧缓存验证',
+          ),
+        );
+
+        davServer.overrideHeadLength = (path, req) {
+          if (path == '/dav/TallySync/sync/head.json') {
+            return r1HeadLen; // Stale cached Content-Length from r1!
+          }
+          return null;
+        };
+        final pushR2 = await serviceA.syncNow();
+        davServer.overrideHeadLength = null;
+        expect(pushR2.status, CloudSyncStatus.pushed);
+        expect(pushR2.revision, 2);
+        expect(davServer.lastGetCacheControl, 'no-cache');
+        expect((await serviceA.getSyncCursor()).lastSyncedRevision, 2);
+        expect(
+          davServer.files.containsKey(
+            '/dav/TallySync/${pushR2.remoteHead!.databasePath}',
+          ),
+          isTrue,
+        );
+
+        // Next local edit + sync pushes r3 cleanly WITHOUT false-positive conflict!
+        now += 5000;
+        await ledgerA.saveRecord(
+          commandId: 'ws1-rec-r3',
+          draft: RecordDraft(
+            bookId: 1,
+            type: RecordType.expense,
+            money: Money.parse('13.50'),
+            recordTime: now,
+            categoryId: 1,
+            assetId: walletId,
+            remark: '单机连续记账无误报冲突',
+          ),
+        );
+        final pushR3 = await serviceA.syncNow();
+        expect(pushR3.status, CloudSyncStatus.pushed);
+        expect(pushR3.revision, 3);
+
+        // ------------------------------------------------------------------
+        // 1b. Large payload (> 256 KB) stale HEAD retries HEAD with no-cache,
+        // and genuine mismatches (both small & large) still fail closed!
+        // ------------------------------------------------------------------
+        final davClient = WebDavClient(
+          davCfg,
+          staleHeadRetryDelay: const Duration(milliseconds: 10),
+        );
+        final largeBytes = Uint8List.fromList(
+          List<int>.generate(300 * 1024, (i) => i & 0xFF),
+        );
+        // Seed existing target so MOVE 409 triggers fallback PUT + HEAD
+        davServer.files['/dav/TallySync/large.bin'] = Uint8List.fromList(<int>[
+          1,
+          2,
+          3,
+        ]);
+        davServer.overrideHeadLength = (path, req) {
+          if (path == '/dav/TallySync/large.bin') {
+            final cc = req.headers.value(HttpHeaders.cacheControlHeader);
+            return cc == 'no-cache' ? largeBytes.length : 3;
+          }
+          return null;
+        };
+        final getsBeforeLarge = davServer.getCount;
+        await davClient.putRelativeFile('large.bin', largeBytes);
+        davServer.overrideHeadLength = null;
+        // Large payload verified via no-cache HEAD retry without downloading 300 KB!
+        expect(davServer.getCount, getsBeforeLarge);
+        expect(davServer.lastHeadCacheControl, 'no-cache');
+
+        // Fail-closed on genuine small payload mismatch (GET returns corrupted bytes)
+        davServer.files['/dav/TallySync/small_bad.json'] = Uint8List.fromList(
+          utf8.encode('old'),
+        );
+        davServer.overrideHeadLength = (path, _) =>
+            path.endsWith('/small_bad.json') ? 3 : null;
+        davServer.overrideGetBytes = (path, _) =>
+            path.endsWith('/small_bad.json')
+            ? Uint8List.fromList(utf8.encode('corrupt!'))
+            : davServer.files[path];
+        await expectLater(
+          davClient.putRelativeFile(
+            'small_bad.json',
+            Uint8List.fromList(utf8.encode('expected-valid-json')),
+          ),
+          throwsA(
+            isA<Failure>().having(
+              (f) => f.message,
+              'msg',
+              contains('Content-Length 校验不一致'),
+            ),
+          ),
+        );
+        davServer.overrideHeadLength = null;
+        davServer.overrideGetBytes = null;
+
+        // Fail-closed on genuine large payload mismatch (both HEADs mismatch)
+        davServer.overrideHeadLength = (path, _) =>
+            path.endsWith('/large.bin') ? 99 : null;
+        await expectLater(
+          davClient.putRelativeFile('large.bin', largeBytes),
+          throwsA(
+            isA<Failure>().having(
+              (f) => f.message,
+              'msg',
+              contains('Content-Length 校验不一致'),
+            ),
+          ),
+        );
+        davServer.overrideHeadLength = null;
+
+        // ------------------------------------------------------------------
+        // 2a. `_executeSyncPush`: `putObject('sync/head.json')` throws AFTER
+        // server already saved `newHead` -> keeps `revisionPath`, updates
+        // cursor (clearing `lastConflictFileName`), and returns `pushed`!
+        // ------------------------------------------------------------------
+        // Seed a stale lastConflictFileName on A's cursor to verify it clears too
+        final curBeforeR4 = await serviceA.getSyncCursor();
+        await dbA
+            .into(dbA.preferences)
+            .insertOnConflictUpdate(
+              PreferencesCompanion.insert(
+                key: prefKeyCloudSyncCursor,
+                value: jsonEncode(
+                  curBeforeR4
+                      .copyWith(
+                        lastConflictFileName:
+                            'conflict_old_20261124_000000.tally',
+                        lastConflictSha256: 'b' * 64,
+                      )
+                      .toJson(),
+                ),
+              ),
+            );
+        now += 5000;
+        await ledgerA.saveRecord(
+          commandId: 'ws1-rec-r4',
+          draft: RecordDraft(
+            bookId: 1,
+            type: RecordType.expense,
+            money: Money.parse('50.00'),
+            recordTime: now,
+            categoryId: 1,
+            assetId: walletId,
+            remark: '网关返回502但远端head已落盘',
+          ),
+        );
+        davServer.failPutAfterSavingHeadJson = true;
+        final recoveredPushR4 = await serviceA.syncNow();
+        davServer.failPutAfterSavingHeadJson = false;
+        expect(recoveredPushR4.status, CloudSyncStatus.pushed);
+        expect(recoveredPushR4.revision, 4);
+        final r4DbServerKey =
+            '/dav/TallySync/${recoveredPushR4.remoteHead!.databasePath}';
+        expect(davServer.files.containsKey(r4DbServerKey), isTrue);
+        final curAfterR4 = await serviceA.getSyncCursor();
+        expect(curAfterR4.lastSyncedRevision, 4);
+        expect(curAfterR4.lastConflictFileName, isNull);
+        // Device B pulls r4 cleanly with zero 404!
+        final pullR4OnB = await serviceB.syncNow();
+        expect(pullR4OnB.status, CloudSyncStatus.pulled);
+        expect(pullR4OnB.revision, 4);
+
+        // ------------------------------------------------------------------
+        // 2b. `_executeSyncPush`: `putObject('sync/head.json')` throws AND
+        // reading remote `head.json` fails (network outage) -> rethrows
+        // WITHOUT deleting `revisionPath`!
+        // ------------------------------------------------------------------
+        now += 5000;
+        await ledgerA.saveRecord(
+          commandId: 'ws1-rec-r5',
+          draft: RecordDraft(
+            bookId: 1,
+            type: RecordType.expense,
+            money: Money.parse('18.00'),
+            recordTime: now,
+            categoryId: 1,
+            assetId: walletId,
+            remark: '断网不可盲删新快照',
+          ),
+        );
+        final expectedR5Sha = await serviceA.computeLocalDataSha256();
+        final expectedR5Path = buildCloudSyncRevisionPath(
+          revision: 5,
+          dataSha256: expectedR5Sha,
+        );
+        davServer.failPutAfterSavingHeadJson = true;
+        // Let initial & pre-commit GET succeed, then return 503 on the 3rd GET
+        // (when `_readRemoteSyncHead` tries to inspect remote `head.json`)!
+        var seenHeadGetDuringPush = 0;
+        davServer.onBeforeGet = (path) async {
+          if (path == '/dav/TallySync/sync/head.json') {
+            seenHeadGetDuringPush++;
+            if (seenHeadGetDuringPush >= 3) {
+              davServer.failGetOnHeadJson = true;
+            }
+          }
+        };
+        await expectLater(serviceA.syncNow(), throwsA(isA<Failure>()));
+        davServer.failPutAfterSavingHeadJson = false;
+        davServer.failGetOnHeadJson = false;
+        davServer.onBeforeGet = null;
+        // `db_r5` MUST still exist on server (not blindly deleted)!
+        expect(
+          davServer.files.containsKey('/dav/TallySync/$expectedR5Path'),
+          isTrue,
+        );
+
+        // Restore r4 head.json to test 2c cleanly:
+        davServer.files['/dav/TallySync/sync/head.json'] = Uint8List.fromList(
+          utf8.encode(jsonEncode(recoveredPushR4.remoteHead!.toJson())),
+        );
+        davServer.files.remove('/dav/TallySync/$expectedR5Path');
+
+        // ------------------------------------------------------------------
+        // 2c. `_executeSyncPush`: `putObject('sync/head.json')` fails BEFORE
+        // server updates `head.json` (remote head still r4 != r5) -> cleans up
+        // uncommitted `db_r5` and rethrows!
+        // ------------------------------------------------------------------
+        davServer.failPutBeforeSavingHeadJson = true;
+        await expectLater(serviceA.syncNow(), throwsA(isA<Failure>()));
+        davServer.failPutBeforeSavingHeadJson = false;
+        expect(
+          davServer.files.containsKey('/dav/TallySync/$expectedR5Path'),
+          isFalse,
+        );
+
+        // Now complete r5 push normally:
+        final pushR5 = await serviceA.syncNow();
+        expect(pushR5.status, CloudSyncStatus.pushed);
+        expect(pushR5.revision, 5);
+        final r5DbKey = '/dav/TallySync/${pushR5.remoteHead!.databasePath}';
+
+        // ------------------------------------------------------------------
+        // 3a & 3b. Self-heal missing remote `databasePath` on `noOp` and
+        // `fastForwardCursor` (WebDAV HEAD 404 + S3 ListObjectsV2 missing)!
+        // ------------------------------------------------------------------
+        // 3a: Delete remote `db_r5` while `head.json` points to r5 and A is at r5 (`noOp`)
+        davServer.files.remove(r5DbKey);
+        expect(davServer.files.containsKey(r5DbKey), isFalse);
+        final healNoOp = await serviceA.syncNow();
+        expect(healNoOp.status, CloudSyncStatus.alreadyUpToDate);
+        expect(davServer.files.containsKey(r5DbKey), isTrue);
+
+        // 3b: Rewind A's cursor to r4 while local data == remote r5, and delete `db_r5` (`fastForwardCursor`)
+        davServer.files.remove(r5DbKey);
+        await dbA
+            .into(dbA.preferences)
+            .insertOnConflictUpdate(
+              PreferencesCompanion.insert(
+                key: prefKeyCloudSyncCursor,
+                value: jsonEncode(
+                  (await serviceA.getSyncCursor())
+                      .copyWith(
+                        lastSyncedRevision: 4,
+                        lastSyncedDataSha256: '0' * 64,
+                        lastConflictFileName:
+                            'conflict_stale_20261124_010101.tally',
+                      )
+                      .toJson(),
+                ),
+              ),
+            );
+        final healFastForward = await serviceA.syncNow();
+        expect(healFastForward.status, CloudSyncStatus.alreadyUpToDate);
+        expect(healFastForward.revision, 5);
+        expect(davServer.files.containsKey(r5DbKey), isTrue);
+        expect((await serviceA.getSyncCursor()).lastConflictFileName, isNull);
+        // Device B pulls the self-healed r5 snapshot cleanly!
+        final pullR5OnB = await serviceB.syncNow();
+        expect(pullR5OnB.status, CloudSyncStatus.pulled);
+        expect(pullR5OnB.revision, 5);
+
+        // Also verify S3 self-heal when `databasePath` object is missing on S3:
+        final s3Cfg = S3Config(
+          endpoint: s3Server.endpoint,
+          region: 'auto',
+          bucket: s3Server.expectedBucket,
+          accessKeyId: s3Server.expectedAccessKey,
+          secretAccessKey: s3Server.expectedSecretKey,
+          remotePrefix: 'TallyIsle',
+        );
+        await serviceA.saveS3Config(s3Cfg);
+        await serviceA.setCloudBackend(CloudBackendType.s3);
+        final s3Push1 = await serviceA.syncNow();
+        expect(s3Push1.status, CloudSyncStatus.pushed);
+        final s3SnapKey = 'TallyIsle/${s3Push1.remoteHead!.databasePath}';
+        s3Server.objects.remove(s3SnapKey);
+        expect(s3Server.objects.containsKey(s3SnapKey), isFalse);
+        final s3Heal = await serviceA.syncNow();
+        expect(s3Heal.status, CloudSyncStatus.alreadyUpToDate);
+        expect(s3Server.objects.containsKey(s3SnapKey), isTrue);
+
+        // ------------------------------------------------------------------
+        // 5. Batch `deleteLocalBackups` & `deleteActiveCloudBackups` + export
+        // ------------------------------------------------------------------
+        final bkBytes = (await serviceA.createBackupBytes()).bytes;
+        await serviceA.localTarget.writeBackup(
+          'backup_20261120_100000.tally',
+          bkBytes,
+        );
+        await serviceA.localTarget.writeBackup(
+          'conflict_dev1_20261121_100000.tally',
+          bkBytes,
+        );
+        await serviceA.localTarget.writeBackup(
+          'backup_20261122_100000.tally',
+          bkBytes,
+        );
+        await dbA
+            .into(dbA.preferences)
+            .insertOnConflictUpdate(
+              PreferencesCompanion.insert(
+                key: prefKeyCloudSyncCursor,
+                value: jsonEncode(
+                  (await serviceA.getSyncCursor())
+                      .copyWith(
+                        lastConflictFileName:
+                            'conflict_dev1_20261121_100000.tally',
+                        lastConflictSha256: 'c' * 64,
+                      )
+                      .toJson(),
+                ),
+              ),
+            );
+
+        // Upfront validation rejects unsafe / non-.tally names without deleting anything
+        for (final invalid in <String>[
+          '../evil.tally',
+          'sub/evil.tally',
+          'not_a_backup.txt',
+          'staging.tally.tmp',
+        ]) {
+          await expectLater(
+            serviceA.deleteLocalBackups(<String>[
+              'backup_20261120_100000.tally',
+              invalid,
+            ]),
+            throwsA(
+              isA<Failure>().having(
+                (f) => f.code,
+                'code',
+                FailureCode.validation,
+              ),
+            ),
+          );
+        }
+        expect(await serviceA.listLocalBackups(), hasLength(3));
+
+        // Exporting a specific historical backup reads its exact bytes
+        Uint8List? exportedBytes;
+        String? exportedName;
+        await serviceA.exportExistingBackup(
+          fileName: 'conflict_dev1_20261121_100000.tally',
+          isCloud: false,
+          fileAccess: FileAccess(
+            onSaveBytes: (name, bytes, _) async {
+              exportedName = name;
+              exportedBytes = bytes;
+            },
+          ),
+        );
+        expect(exportedName, 'conflict_dev1_20261121_100000.tally');
+        expect(exportedBytes, equals(bkBytes));
+
+        // Deleting a non-conflict file preserves `lastConflictFileName`
+        expect(
+          await serviceA.deleteLocalBackups(<String>[
+            'backup_20261120_100000.tally',
+          ]),
+          1,
+        );
+        expect(
+          (await serviceA.getSyncCursor()).lastConflictFileName,
+          'conflict_dev1_20261121_100000.tally',
+        );
+
+        // Batch-deleting the conflict file clears `lastConflictFileName`!
+        expect(
+          await serviceA.deleteLocalBackups(<String>[
+            'conflict_dev1_20261121_100000.tally',
+            'backup_20261122_100000.tally',
+          ]),
+          2,
+        );
+        expect(await serviceA.listLocalBackups(), isEmpty);
+        expect((await serviceA.getSyncCursor()).lastConflictFileName, isNull);
+
+        // Cloud batch delete on active S3 target
+        await serviceA.uploadBackupToS3(
+          customFileName: 'backup_20261120_120000.tally',
+        );
+        await serviceA.uploadBackupToS3(
+          customFileName: 'conflict_dev1_20261121_120000.tally',
+        );
+        expect(await serviceA.listActiveCloudBackups(), hasLength(2));
+        expect(
+          await serviceA.deleteActiveCloudBackups(<String>[
+            'backup_20261120_120000.tally',
+            'conflict_dev1_20261121_120000.tally',
+          ]),
+          2,
+        );
+        expect(await serviceA.listActiveCloudBackups(), isEmpty);
       },
     );
   });
