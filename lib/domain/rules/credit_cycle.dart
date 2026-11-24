@@ -248,6 +248,65 @@ CreditStatementPeriod computePeriod({
   );
 }
 
+/// Steps [delta] statement periods from [current] (e.g. `-1` for previous,
+/// `+1` for next), crossing year boundaries (`1 <-> prevYear 12`) cleanly.
+CreditStatementPeriod adjacentCreditPeriod({
+  required CreditStatementPeriod current,
+  required CreditInfo creditInfo,
+  required int delta,
+}) {
+  final totalMonths = current.year * 12 + (current.periodIndex - 1) + delta;
+  final zeroBasedMonth = totalMonths % 12;
+  final targetYear = (totalMonths - zeroBasedMonth) ~/ 12;
+  return computePeriod(
+    year: targetYear,
+    month: zeroBasedMonth + 1,
+    billDay: creditInfo.billDay,
+    repaymentDay: creditInfo.repaymentDay,
+    repaymentAfterBillDay: creditInfo.repaymentAfterBillDay,
+    billDayCounted: creditInfo.billDayCounted,
+  );
+}
+
+/// Returns the active [CreditStatementPeriod] containing [today] for
+/// [creditInfo], falling back to [computePeriod] for `today.year`/`today.month`.
+CreditStatementPeriod currentCreditPeriodForToday({
+  required CreditInfo creditInfo,
+  required DateTime today,
+}) {
+  final targetMs = DateTime(
+    today.year,
+    today.month,
+    today.day,
+    12,
+  ).millisecondsSinceEpoch;
+  final base = computePeriod(
+    year: today.year,
+    month: today.month,
+    billDay: creditInfo.billDay,
+    repaymentDay: creditInfo.repaymentDay,
+    repaymentAfterBillDay: creditInfo.repaymentAfterBillDay,
+    billDayCounted: creditInfo.billDayCounted,
+  );
+  if (base.contains(targetMs)) return base;
+
+  final next = adjacentCreditPeriod(
+    current: base,
+    creditInfo: creditInfo,
+    delta: 1,
+  );
+  if (next.contains(targetMs)) return next;
+
+  final prev = adjacentCreditPeriod(
+    current: base,
+    creditInfo: creditInfo,
+    delta: -1,
+  );
+  if (prev.contains(targetMs)) return prev;
+
+  return base;
+}
+
 /// Helper to sum linked refund child amounts (CD-F02: prefers child record in query results).
 BigInt _sumLinkedRefunds(
   CreditCardRecord r,

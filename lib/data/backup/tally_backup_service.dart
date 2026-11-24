@@ -25,6 +25,9 @@ import 'webdav_client.dart';
 const String prefKeyWebDavConfig = 'backup_webdav_config';
 const String prefKeyLastBackupAtMs = 'backup_last_at_ms';
 const String prefKeyLastBackupDataSha256 = 'backup_last_data_sha256';
+const String prefKeyExternalBackupDirBinding = 'backup_external_dir_binding';
+const String prefKeyExternalBackupDirNeedsRebind =
+    'backup_external_dir_needs_rebind';
 const String _prefKeyCurrentBookId = 'current_book_id';
 
 /// Local app-managed backup directory implementation of [BackupTarget] (ADR-017).
@@ -184,6 +187,137 @@ final class LocalDirectoryBackupTarget implements BackupTarget {
   });
 }
 
+/// User-authorized external backup directory implementation of [BackupTarget]
+/// surviving app uninstall/reinstall across Android SAF, iOS Files Bookmark,
+/// HarmonyOS NEXT Download folder, macOS App-Scoped Bookmark, Windows, and Linux.
+final class ExternalDirectoryBackupTarget implements BackupTarget {
+  ExternalDirectoryBackupTarget(
+    this.binding, {
+    required this.fileAccess,
+    int Function()? nowMs,
+  }) : _nowMs = nowMs;
+
+  final ExternalBackupDirBinding binding;
+  final FileAccess fileAccess;
+  final int Function()? _nowMs;
+
+  @override
+  String get id => 'external_local';
+
+  @override
+  String get label => '外部安全备份目录（${binding.displayPath}）';
+
+  @override
+  Capability get capability => fileAccess.externalBackupDirCapability;
+
+  @override
+  Future<List<BackupFileMetadata>> listBackups() async {
+    final entries = await fileAccess.listExternalDirectoryFiles(binding);
+    final items = <BackupFileMetadata>[];
+
+    for (final entry in entries) {
+      final name = entry.fileName.trim();
+      final lower = name.toLowerCase();
+      if (lower.endsWith('.tmp')) continue;
+      if (!lower.endsWith('.tally') && !lower.endsWith('.tallyzip')) continue;
+
+      TallyManifest? manifest;
+      try {
+        if (binding.mode == ExternalBackupDirMode.path &&
+            !fileAccess.hasCustomDirectoryReadHandler) {
+          final manifestEntry = await LocalDirectoryBackupTarget._runRootIo(
+            () => ZipArchive.readSingleEntryFromFile(
+              File(p.join(binding.locator, name)),
+              tallyManifestFileName,
+            ),
+          );
+          if (manifestEntry != null) {
+            final decoded = jsonDecode(utf8.decode(manifestEntry.bytes));
+            if (decoded is Map<String, Object?>) {
+              manifest = TallyManifest.fromJson(decoded);
+            }
+          }
+        } else {
+          final bytes = await fileAccess.readExternalDirectoryFile(
+            binding,
+            name,
+          );
+          final zip = ZipArchive.decode(bytes);
+          final manifestEntry = zip[tallyManifestFileName];
+          if (manifestEntry != null) {
+            final decoded = jsonDecode(utf8.decode(manifestEntry.bytes));
+            if (decoded is Map<String, Object?>) {
+              manifest = TallyManifest.fromJson(decoded);
+            }
+          }
+        }
+      } catch (_) {
+        // Keep listing resilient even if a file is corrupted; restore reports exact error.
+      }
+
+      items.add(
+        BackupFileMetadata(
+          fileName: name,
+          sizeBytes: entry.sizeBytes,
+          modifiedAtMs: manifest?.createdAtMs ?? entry.modifiedAtMs,
+          manifest: manifest,
+        ),
+      );
+    }
+
+    items.sort((a, b) {
+      final byTime = b.modifiedAtMs.compareTo(a.modifiedAtMs);
+      if (byTime != 0) return byTime;
+      return b.fileName.compareTo(a.fileName);
+    });
+    return items;
+  }
+
+  @override
+  Future<BackupFileMetadata> writeBackup(
+    String fileName,
+    Uint8List bytes, {
+    BackupProgressCallback? onProgress,
+  }) async {
+    final cleanName = LocalDirectoryBackupTarget._validateFileName(fileName);
+    await fileAccess.writeExternalDirectoryFile(binding, cleanName, bytes);
+    onProgress?.call(bytes.length, bytes.length);
+
+    TallyManifest? manifest;
+    try {
+      manifest = unpackAndVerifyTallyArchive(bytes).manifest;
+    } catch (_) {}
+
+    final fallbackNow = _nowMs?.call() ?? DateTime.now().millisecondsSinceEpoch;
+    return BackupFileMetadata(
+      fileName: cleanName,
+      sizeBytes: bytes.length,
+      modifiedAtMs: manifest?.createdAtMs ?? fallbackNow,
+      manifest: manifest,
+    );
+  }
+
+  @override
+  Future<Uint8List> readBackup(
+    String fileName, {
+    BackupProgressCallback? onProgress,
+  }) async {
+    final cleanName = LocalDirectoryBackupTarget._validateFileName(fileName);
+    final bytes = await fileAccess.readExternalDirectoryFile(
+      binding,
+      cleanName,
+    );
+    onProgress?.call(bytes.length, bytes.length);
+    return bytes;
+  }
+
+  @override
+  Future<void> deleteBackup(String fileName) async {
+    final cleanName = LocalDirectoryBackupTarget._validateFileName(fileName);
+    await fileAccess.deleteExternalDirectoryFile(binding, cleanName);
+  }
+}
+
 /// Core backup, 3-stage atomic restore, and WebDAV orchestration service
 /// (`F-035`, `ADR-017`, `docs/modules/backup-webdav.md`).
 final class TallyBackupService {
@@ -192,18 +326,23 @@ final class TallyBackupService {
     required this.reminderService,
     Future<Directory> Function()? localBackupsDirectoryProvider,
     Future<Directory> Function()? attachmentsDirectoryProvider,
+    FileAccess? fileAccess,
     this.httpClientFactory,
     this.appVersion = appVersionName,
     this.beforeAttachmentSwapFinalizeForTest,
-  }) : _localBackupsDirProvider =
+  }) : hasCustomLocalDirOverride = localBackupsDirectoryProvider != null,
+       _localBackupsDirProvider =
            localBackupsDirectoryProvider ?? _defaultBackupsDirectory,
        _attachmentsDirProvider =
-           attachmentsDirectoryProvider ?? _defaultAttachmentsDirectory;
+           attachmentsDirectoryProvider ?? _defaultAttachmentsDirectory,
+       _fileAccess = fileAccess ?? const FileAccess();
 
   final AppDatabase db;
   final ReminderService reminderService;
+  final bool hasCustomLocalDirOverride;
   final Future<Directory> Function() _localBackupsDirProvider;
   final Future<Directory> Function() _attachmentsDirProvider;
+  final FileAccess _fileAccess;
   final HttpClient Function()? httpClientFactory;
   final String appVersion;
   FutureOr<void> Function()? beforeAttachmentSwapFinalizeForTest;
@@ -272,15 +411,41 @@ final class TallyBackupService {
 
   static Directory? _headlessSupportRoot;
 
-  static Future<Directory> _resolveSupportRoot() async {
-    try {
-      return await getApplicationSupportDirectory();
-    } on MissingPluginException {
-      return _headlessSupportRoot ??= await Directory.systemTemp.createTemp(
-        'tallyisle_support_',
-      );
-    }
+  /// Allows headless widget tests exercising default `!hasCustomLocalDirOverride`
+  /// flows to pin the fallback sandbox root inside a per-test temporary folder.
+  static void setHeadlessSupportRootForTest(Directory? directory) {
+    _headlessSupportRoot = directory;
   }
+
+  static Future<Directory> _resolveSupportRoot() =>
+      LocalDirectoryBackupTarget._runRootIo<Directory>(() async {
+        final pinnedOrCached = _headlessSupportRoot;
+        if (Platform.environment['FLUTTER_TEST'] == 'true') {
+          if (pinnedOrCached != null) {
+            if (!await pinnedOrCached.exists()) {
+              await pinnedOrCached.create(recursive: true);
+            }
+            return pinnedOrCached;
+          }
+          final created = await Directory.systemTemp.createTemp(
+            'tallyisle_support_',
+          );
+          _headlessSupportRoot = created;
+          return created;
+        }
+        try {
+          return await getApplicationSupportDirectory();
+        } on MissingPluginException {
+          if (pinnedOrCached != null && await pinnedOrCached.exists()) {
+            return pinnedOrCached;
+          }
+          final created = await Directory.systemTemp.createTemp(
+            'tallyisle_support_',
+          );
+          _headlessSupportRoot = created;
+          return created;
+        }
+      });
 
   static Future<Directory> _defaultBackupsDirectory() async {
     final support = await _resolveSupportRoot();
@@ -481,6 +646,205 @@ final class TallyBackupService {
               value: jsonEncode(policy.toJson()),
             ),
           ),
+    );
+  }
+
+  /// Reactive stream of [ExternalBackupDirBinding] from `ti_preference`.
+  Stream<ExternalBackupDirBinding?> watchExternalBackupDirBinding() =>
+      (db.select(db.preferences)
+            ..where((t) => t.key.equals(prefKeyExternalBackupDirBinding)))
+          .watchSingleOrNull()
+          .map((row) => ExternalBackupDirBinding.tryDecode(row?.value));
+
+  /// Current [ExternalBackupDirBinding] snapshot (`null` when unbound).
+  Future<ExternalBackupDirBinding?> getExternalBackupDirBinding() async {
+    final row = await guardDatabase(
+      () =>
+          (db.select(db.preferences)
+                ..where((t) => t.key.equals(prefKeyExternalBackupDirBinding)))
+              .getSingleOrNull(),
+    );
+    return ExternalBackupDirBinding.tryDecode(row?.value);
+  }
+
+  /// Reactive stream indicating whether the bound external directory became
+  /// inaccessible (e.g. unplugged drive or revoked permission) and fell back to sandbox.
+  Stream<bool> watchExternalBackupNeedsRebind() =>
+      (db.select(db.preferences)
+            ..where((t) => t.key.equals(prefKeyExternalBackupDirNeedsRebind)))
+          .watchSingleOrNull()
+          .map((row) => row?.value == 'true');
+
+  /// Current `needsRebind` flag snapshot.
+  Future<bool> getExternalBackupNeedsRebind() async {
+    final row = await guardDatabase(
+      () =>
+          (db.select(db.preferences)..where(
+                (t) => t.key.equals(prefKeyExternalBackupDirNeedsRebind),
+              ))
+              .getSingleOrNull(),
+    );
+    return row?.value == 'true';
+  }
+
+  Future<void> _setExternalBackupNeedsRebindIfChanged(bool needsRebind) async {
+    final current = await getExternalBackupNeedsRebind();
+    if (current == needsRebind) return;
+    await guardDatabase(
+      () => db
+          .into(db.preferences)
+          .insertOnConflictUpdate(
+            PreferencesCompanion.insert(
+              key: prefKeyExternalBackupDirNeedsRebind,
+              value: needsRebind ? 'true' : 'false',
+            ),
+          ),
+    );
+  }
+
+  /// Prompts the user to pick/authorize an external `.tally` backup directory,
+  /// migrates any existing `.tally`/`.tallyzip` files from the app sandbox
+  /// directory into the newly bound external directory (without overwriting
+  /// files already present), persists the binding, and clears `needsRebind`.
+  Future<ExternalBackupDirBinding> bindExternalBackupDirectory({
+    FileAccess? fileAccess,
+    String? initialDirectory,
+  }) async {
+    final access = fileAccess ?? _fileAccess;
+    String? effectiveInitial = initialDirectory;
+    if (effectiveInitial == null) {
+      final prev = await getExternalBackupDirBinding();
+      if (prev != null && prev.mode == ExternalBackupDirMode.path) {
+        effectiveInitial = prev.locator;
+      }
+    }
+
+    final picked = await access.pickExternalBackupDirectory(
+      initialDirectory: effectiveInitial,
+      nowMs: _nowMs(),
+    );
+
+    return _runExclusive(() async {
+      if (picked.mode == ExternalBackupDirMode.path &&
+          !access.hasCustomDirectoryCheckHandler &&
+          !access.hasCustomDirectoryWriteHandler) {
+        await LocalDirectoryBackupTarget._runRootIo(() async {
+          final dir = Directory(picked.locator);
+          if (!await dir.exists() && await dir.parent.exists()) {
+            await dir.create();
+          }
+        });
+      }
+
+      final accessible = await access.checkExternalDirectoryAccessible(picked);
+      if (!accessible) {
+        throw const Failure(
+          FailureCode.storageUnavailable,
+          '所选外部备份目录不可访问或无读写权限',
+        );
+      }
+
+      // Migrate any legacy/fallback `.tally`/`.tallyzip` backups from app sandbox.
+      final extEntries = await access.listExternalDirectoryFiles(picked);
+      final existingExtNames = <String>{
+        for (final entry in extEntries) entry.fileName,
+      };
+      final sandboxFiles = await LocalDirectoryBackupTarget._runRootIo(
+        () async {
+          final sandboxDir = await _localBackupsDirProvider();
+          if (!await sandboxDir.exists()) {
+            return const <({String name, Uint8List bytes})>[];
+          }
+          final collected = <({String name, Uint8List bytes})>[];
+          await for (final entity in sandboxDir.list(followLinks: false)) {
+            if (entity is! File) continue;
+            final name = p.basename(entity.path);
+            final lower = name.toLowerCase();
+            if (lower.endsWith('.tmp')) continue;
+            if (!lower.endsWith('.tally') && !lower.endsWith('.tallyzip')) {
+              continue;
+            }
+            if (existingExtNames.contains(name)) continue;
+            collected.add((name: name, bytes: await entity.readAsBytes()));
+          }
+          return collected;
+        },
+      );
+      for (final file in sandboxFiles) {
+        await access.writeExternalDirectoryFile(picked, file.name, file.bytes);
+      }
+
+      await guardDatabase(
+        () => db.transaction(() async {
+          await db
+              .into(db.preferences)
+              .insertOnConflictUpdate(
+                PreferencesCompanion.insert(
+                  key: prefKeyExternalBackupDirBinding,
+                  value: picked.encode(),
+                ),
+              );
+          await db
+              .into(db.preferences)
+              .insertOnConflictUpdate(
+                PreferencesCompanion.insert(
+                  key: prefKeyExternalBackupDirNeedsRebind,
+                  value: 'false',
+                ),
+              );
+        }),
+      );
+      return picked;
+    });
+  }
+
+  /// Opens the currently bound external backup directory in the desktop file manager.
+  Future<void> openBoundExternalBackupDirectory({
+    FileAccess? fileAccess,
+  }) async {
+    final binding = await getExternalBackupDirBinding();
+    if (binding == null) {
+      throw const Failure(FailureCode.validation, '尚未绑定外部备份目录');
+    }
+    await (fileAccess ?? _fileAccess).openBackupDirectory(binding);
+  }
+
+  Future<
+    ({
+      BackupTarget target,
+      ExternalBackupDirBinding? externalBinding,
+      bool fellBackToSandbox,
+    })
+  >
+  _resolveActiveLocalTarget() async {
+    final binding = await getExternalBackupDirBinding();
+    if (binding == null) {
+      return (
+        target: localTarget,
+        externalBinding: null,
+        fellBackToSandbox: false,
+      );
+    }
+    final accessible = await _fileAccess.checkExternalDirectoryAccessible(
+      binding,
+    );
+    if (accessible) {
+      await _setExternalBackupNeedsRebindIfChanged(false);
+      return (
+        target: ExternalDirectoryBackupTarget(
+          binding,
+          fileAccess: _fileAccess,
+          nowMs: _nowMs,
+        ),
+        externalBinding: binding,
+        fellBackToSandbox: false,
+      );
+    }
+    await _setExternalBackupNeedsRebindIfChanged(true);
+    return (
+      target: localTarget,
+      externalBinding: null,
+      fellBackToSandbox: true,
     );
   }
 
@@ -1041,44 +1405,96 @@ final class TallyBackupService {
     final packed = await createBackupBytes(
       includeAttachments: includeAttachments,
     );
-    String fileName;
-    if (customFileName != null) {
-      fileName = customFileName;
-    } else {
-      final base = formatTallyBackupFileName(
-        DateTime.fromMillisecondsSinceEpoch(packed.manifest.createdAtMs),
-      );
-      fileName = await _resolveUniqueLocalBackupFileName(base);
-    }
-    final saved = await localTarget.writeBackup(
-      fileName,
-      packed.bytes,
+    final result = await _writeBytesToLocalWithFallback(
+      packedBytes: packed.bytes,
+      createdAtMs: packed.manifest.createdAtMs,
+      customFileName: customFileName,
       onProgress: onProgress,
     );
     await _recordCompletedLocalBackupState(packed.manifest.createdAtMs);
-    await _pruneLocalBackupsIfNeeded(protectedFileName: saved.fileName);
-    return saved;
+    await _pruneBackupsOnTargetIfNeeded(
+      target: result.targetUsed,
+      protectedFileName: result.saved.fileName,
+    );
+    return result.saved;
   }
 
-  Future<String> _resolveUniqueLocalBackupFileName(String baseFileName) async {
-    final dir = await _localBackupsDirProvider();
-    if (!await dir.exists()) return baseFileName;
-    if (!await File(p.join(dir.path, baseFileName)).exists()) {
-      return baseFileName;
+  Future<({BackupFileMetadata saved, BackupTarget targetUsed})>
+  _writeBytesToLocalWithFallback({
+    required Uint8List packedBytes,
+    required int createdAtMs,
+    String? customFileName,
+    BackupProgressCallback? onProgress,
+  }) async {
+    final resolved = await _resolveActiveLocalTarget();
+    final extBinding = resolved.externalBinding;
+    if (extBinding != null) {
+      try {
+        final String fileName;
+        if (customFileName != null) {
+          fileName = customFileName;
+        } else {
+          final existingEntries = await _fileAccess.listExternalDirectoryFiles(
+            extBinding,
+          );
+          fileName = formatTallyBackupFileName(
+            DateTime.fromMillisecondsSinceEpoch(createdAtMs),
+            existingFileNames: existingEntries.map((e) => e.fileName),
+          );
+        }
+        final saved = await resolved.target.writeBackup(
+          fileName,
+          packedBytes,
+          onProgress: onProgress,
+        );
+        return (saved: saved, targetUsed: resolved.target);
+      } catch (_) {
+        await _setExternalBackupNeedsRebindIfChanged(true);
+      }
     }
-    final dotIdx = baseFileName.lastIndexOf('.');
-    final stem = dotIdx > 0 ? baseFileName.substring(0, dotIdx) : baseFileName;
-    final ext = dotIdx > 0 ? baseFileName.substring(dotIdx) : '';
-    var seq = 2;
-    while (await File(p.join(dir.path, '${stem}_$seq$ext')).exists()) {
-      seq++;
+
+    final String sandboxFileName;
+    if (customFileName != null) {
+      sandboxFileName = customFileName;
+    } else {
+      final base = formatTallyBackupFileName(
+        DateTime.fromMillisecondsSinceEpoch(createdAtMs),
+      );
+      sandboxFileName = await _resolveUniqueLocalBackupFileName(base);
     }
-    return '${stem}_$seq$ext';
+    final saved = await localTarget.writeBackup(
+      sandboxFileName,
+      packedBytes,
+      onProgress: onProgress,
+    );
+    return (saved: saved, targetUsed: localTarget);
   }
 
-  Future<void> _pruneLocalBackupsIfNeeded({String? protectedFileName}) async {
+  Future<String> _resolveUniqueLocalBackupFileName(String baseFileName) =>
+      LocalDirectoryBackupTarget._runRootIo(() async {
+        final dir = await _localBackupsDirProvider();
+        if (!await dir.exists()) return baseFileName;
+        if (!await File(p.join(dir.path, baseFileName)).exists()) {
+          return baseFileName;
+        }
+        final dotIdx = baseFileName.lastIndexOf('.');
+        final stem = dotIdx > 0
+            ? baseFileName.substring(0, dotIdx)
+            : baseFileName;
+        final ext = dotIdx > 0 ? baseFileName.substring(dotIdx) : '';
+        var seq = 2;
+        while (await File(p.join(dir.path, '${stem}_$seq$ext')).exists()) {
+          seq++;
+        }
+        return '${stem}_$seq$ext';
+      });
+
+  Future<void> _pruneBackupsOnTargetIfNeeded({
+    required BackupTarget target,
+    String? protectedFileName,
+  }) async {
     final policy = await getLocalAutoBackupPolicy();
-    final allLocal = await localTarget.listBackups();
+    final allLocal = await target.listBackups();
     final toPrune = selectNonConflictBackupsToPrune(
       allLocal.map(
         (b) => BackupRetentionItem(
@@ -1090,7 +1506,7 @@ final class TallyBackupService {
     );
     for (final name in toPrune) {
       if (name == protectedFileName) continue;
-      await localTarget.deleteBackup(name);
+      await target.deleteBackup(name);
     }
   }
 
@@ -1158,16 +1574,27 @@ final class TallyBackupService {
     return result;
   }
 
-  Future<List<BackupFileMetadata>> listLocalBackups() =>
-      localTarget.listBackups();
+  Future<List<BackupFileMetadata>> listLocalBackups() async {
+    final resolved = await _resolveActiveLocalTarget();
+    if (resolved.externalBinding != null) {
+      try {
+        return await resolved.target.listBackups();
+      } catch (_) {
+        await _setExternalBackupNeedsRebindIfChanged(true);
+        return localTarget.listBackups();
+      }
+    }
+    return localTarget.listBackups();
+  }
 
   Future<void> deleteLocalBackup(String fileName) async {
     final clean = _validateSafeBackupFileName(fileName);
     await _runExclusive(() => _deleteLocalBackupsUnlocked(<String>[clean]));
   }
 
-  /// Batch-deletes the specified `.tally` / `.tallyzip` files from the local
-  /// backup directory after upfront filename validation, clearing any matching
+  /// Batch-deletes the specified `.tally` / `.tallyzip` files from the active
+  /// local backup directory (bound external folder when accessible, otherwise
+  /// app sandbox) after upfront filename validation, clearing any matching
   /// `lastConflictFileName` on [LocalSyncCursor].
   Future<int> deleteLocalBackups(List<String> fileNames) async {
     final cleanNames = _validateUniqueBackupFileNames(fileNames);
@@ -1176,19 +1603,51 @@ final class TallyBackupService {
   }
 
   Future<int> _deleteLocalBackupsUnlocked(List<String> cleanNames) async {
-    final deletedCount = await LocalDirectoryBackupTarget._runRootIo(() async {
-      final dir = await _localBackupsDirProvider();
-      if (!await dir.exists()) return 0;
-      var count = 0;
+    final resolved = await _resolveActiveLocalTarget();
+    int deletedCount = 0;
+    if (resolved.externalBinding != null) {
+      final extEntries = await _fileAccess.listExternalDirectoryFiles(
+        resolved.externalBinding!,
+      );
+      final existingExt = <String>{for (final e in extEntries) e.fileName};
       for (final name in cleanNames) {
-        final file = File(p.join(dir.path, name));
-        if (await file.exists()) {
-          await file.delete();
-          count++;
+        if (existingExt.contains(name)) {
+          await _fileAccess.deleteExternalDirectoryFile(
+            resolved.externalBinding!,
+            name,
+          );
+          deletedCount++;
         }
       }
-      return count;
-    });
+      // Best-effort remove any migrated copy in app sandbox so deleted backups
+      // never resurrect when switching external folders later.
+      await LocalDirectoryBackupTarget._runRootIo(() async {
+        try {
+          final dir = await _localBackupsDirProvider();
+          if (!await dir.exists()) return;
+          for (final name in cleanNames) {
+            final file = File(p.join(dir.path, name));
+            if (await file.exists()) {
+              await file.delete();
+            }
+          }
+        } catch (_) {}
+      });
+    } else {
+      deletedCount = await LocalDirectoryBackupTarget._runRootIo(() async {
+        final dir = await _localBackupsDirProvider();
+        if (!await dir.exists()) return 0;
+        var count = 0;
+        for (final name in cleanNames) {
+          final file = File(p.join(dir.path, name));
+          if (await file.exists()) {
+            await file.delete();
+            count++;
+          }
+        }
+        return count;
+      });
+    }
 
     final cursor = await getSyncCursor();
     final conflictName = cursor.lastConflictFileName?.trim();
@@ -1227,7 +1686,11 @@ final class TallyBackupService {
         ),
       };
     } else {
-      bytes = await localTarget.readBackup(cleanName, onProgress: onProgress);
+      final resolved = await _resolveActiveLocalTarget();
+      bytes = await resolved.target.readBackup(
+        cleanName,
+        onProgress: onProgress,
+      );
     }
 
     if (fileAccess.saveLocationCapability.state == CapabilityState.available) {
@@ -1247,7 +1710,8 @@ final class TallyBackupService {
 
   Future<TallyManifest> restoreLocalBackup(String fileName) async {
     final clean = _validateSafeBackupFileName(fileName);
-    final bytes = await localTarget.readBackup(clean);
+    final resolved = await _resolveActiveLocalTarget();
+    final bytes = await resolved.target.readBackup(clean);
     return restoreFromBytes(bytes);
   }
 
@@ -2688,7 +3152,16 @@ final class TallyBackupService {
   Future<Set<String>> _collectExistingConflictAndBackupFileNames(
     BackupTarget cloudBackupTarget,
   ) async {
-    final localNames = await localTarget.listBackups().then(
+    final resolvedLocal = await _resolveActiveLocalTarget();
+    final activeLocalNames = resolvedLocal.externalBinding != null
+        ? await _fileAccess
+              .listExternalDirectoryFiles(resolvedLocal.externalBinding!)
+              .then(
+                (items) => items.map((e) => e.fileName),
+                onError: (_) => const <String>[],
+              )
+        : const <String>[];
+    final sandboxNames = await localTarget.listBackups().then(
       (items) => items.map((e) => e.fileName),
       onError: (_) => const <String>[],
     );
@@ -2696,7 +3169,25 @@ final class TallyBackupService {
       (items) => items.map((e) => e.fileName),
       onError: (_) => const <String>[],
     );
-    return <String>{...localNames, ...remoteNames};
+    return <String>{...activeLocalNames, ...sandboxNames, ...remoteNames};
+  }
+
+  Future<bool> _doesActiveLocalBackupExist(String fileName) async {
+    final resolved = await _resolveActiveLocalTarget();
+    if (resolved.externalBinding != null) {
+      try {
+        final entries = await _fileAccess.listExternalDirectoryFiles(
+          resolved.externalBinding!,
+        );
+        return entries.any((e) => e.fileName == fileName);
+      } catch (_) {
+        await _setExternalBackupNeedsRebindIfChanged(true);
+      }
+    }
+    return LocalDirectoryBackupTarget._runRootIo(() async {
+      final localDir = await _localBackupsDirProvider();
+      return File(p.join(localDir.path, fileName)).exists();
+    });
   }
 
   Future<String> _archiveOrphanRemoteSnapshotIfNeeded({
@@ -2706,11 +3197,9 @@ final class TallyBackupService {
     final orphanSha = sha256Hex(orphanBytes);
     if (_lastArchivedOrphanRemoteSha256 == orphanSha &&
         _lastArchivedOrphanRemoteFileName != null) {
-      final localDir = await _localBackupsDirProvider();
-      final existing = File(
-        p.join(localDir.path, _lastArchivedOrphanRemoteFileName!),
-      );
-      if (await existing.exists()) {
+      if (await _doesActiveLocalBackupExist(
+        _lastArchivedOrphanRemoteFileName!,
+      )) {
         return _lastArchivedOrphanRemoteFileName!;
       }
     }
@@ -2724,7 +3213,11 @@ final class TallyBackupService {
       when: DateTime.fromMillisecondsSinceEpoch(now),
       existingFileNames: existingNames,
     );
-    await localTarget.writeBackup(orphanConflictName, orphanBytes);
+    await _writeBytesToLocalWithFallback(
+      packedBytes: orphanBytes,
+      createdAtMs: now,
+      customFileName: orphanConflictName,
+    );
     await cloudBackupTarget.writeBackup(orphanConflictName, orphanBytes);
     _lastArchivedOrphanRemoteSha256 = orphanSha;
     _lastArchivedOrphanRemoteFileName = orphanConflictName;
@@ -2959,11 +3452,7 @@ final class TallyBackupService {
     } else if (cursor.lastConflictSha256 == localDataSha256 &&
         cursor.lastConflictFileName != null &&
         cursor.lastConflictFileName!.isNotEmpty) {
-      final localDir = await _localBackupsDirProvider();
-      final existing = File(
-        p.join(localDir.path, cursor.lastConflictFileName!),
-      );
-      if (await existing.exists()) {
+      if (await _doesActiveLocalBackupExist(cursor.lastConflictFileName!)) {
         conflictFileName = cursor.lastConflictFileName;
       }
     }
@@ -2985,7 +3474,11 @@ final class TallyBackupService {
         appVersion: appVersion,
         includeAttachments: true,
       );
-      await localTarget.writeBackup(conflictFileName, fullConflictPack.bytes);
+      await _writeBytesToLocalWithFallback(
+        packedBytes: fullConflictPack.bytes,
+        createdAtMs: now,
+        customFileName: conflictFileName,
+      );
       await cloudBackupTarget.writeBackup(
         conflictFileName,
         fullConflictPack.bytes,
@@ -3300,20 +3793,26 @@ final class TallyBackupService {
     );
   }
 
-  Future<Map<String, Uint8List>> _collectLocalAttachments() async {
-    final dir = await _attachmentsDirProvider();
-    if (!await dir.exists()) return const <String, Uint8List>{};
-    final result = <String, Uint8List>{};
-    await for (final entity in dir.list(recursive: true, followLinks: false)) {
-      if (entity is! File) continue;
-      final relSegments = p.split(p.relative(entity.path, from: dir.path));
-      if (relSegments.isEmpty) continue;
-      if (relSegments.last.toLowerCase().endsWith('.tmp')) continue;
-      final archivePath = normalizeAttachmentArchivePath(relSegments.join('/'));
-      result[archivePath] = await entity.readAsBytes();
-    }
-    return result;
-  }
+  Future<Map<String, Uint8List>> _collectLocalAttachments() =>
+      LocalDirectoryBackupTarget._runRootIo(() async {
+        final dir = await _attachmentsDirProvider();
+        if (!await dir.exists()) return const <String, Uint8List>{};
+        final result = <String, Uint8List>{};
+        await for (final entity in dir.list(
+          recursive: true,
+          followLinks: false,
+        )) {
+          if (entity is! File) continue;
+          final relSegments = p.split(p.relative(entity.path, from: dir.path));
+          if (relSegments.isEmpty) continue;
+          if (relSegments.last.toLowerCase().endsWith('.tmp')) continue;
+          final archivePath = normalizeAttachmentArchivePath(
+            relSegments.join('/'),
+          );
+          result[archivePath] = await entity.readAsBytes();
+        }
+        return result;
+      });
 
   Future<Map<String, List<Map<String, Object?>>>> _exportAll22Tables() async {
     final accountBooks = await (db.select(

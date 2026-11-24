@@ -800,5 +800,97 @@ void main() {
         expect(pastFolded.visible.length, 12);
       },
     );
+
+    test(
+      'adjacentCreditPeriod steps forward/backward across year boundaries cleanly',
+      () {
+        final info = CreditInfo({
+          'bill_day': 10,
+          'repayment_day': 28,
+          'repayment_day_after_bd': false,
+          'bill_day_count': true,
+        });
+
+        final jan2026 = computePeriod(
+          year: 2026,
+          month: 1,
+          billDay: 10,
+          repaymentDay: 28,
+          repaymentAfterBillDay: false,
+          billDayCounted: true,
+        );
+        final prev = adjacentCreditPeriod(
+          current: jan2026,
+          creditInfo: info,
+          delta: -1,
+        );
+        expect(prev.year, 2025);
+        expect(prev.periodIndex, 12);
+        expect(prev.start, DateTime(2025, 11, 11, 0, 0, 0, 0));
+        expect(prev.end, DateTime(2025, 12, 10, 23, 59, 59, 999));
+
+        final nextFromDec = adjacentCreditPeriod(
+          current: prev,
+          creditInfo: info,
+          delta: 1,
+        );
+        expect(nextFromDec.year, 2026);
+        expect(nextFromDec.periodIndex, 1);
+        expect(nextFromDec.start, DateTime(2025, 12, 11, 0, 0, 0, 0));
+        expect(nextFromDec.end, DateTime(2026, 1, 10, 23, 59, 59, 999));
+      },
+    );
+
+    test(
+      'currentCreditPeriodForToday locates the active cycle across bill-day & year boundaries',
+      () {
+        final infoCounted = CreditInfo({
+          'bill_day': 10,
+          'repayment_day': 28,
+          'repayment_day_after_bd': false,
+          'bill_day_count': true,
+        });
+
+        // On bill day (billDayCounted = true) -> still Period 4 (03-11 .. 04-10)
+        final onBillDay = currentCreditPeriodForToday(
+          creditInfo: infoCounted,
+          today: DateTime(2026, 4, 10),
+        );
+        expect(onBillDay.year, 2026);
+        expect(onBillDay.periodIndex, 4);
+
+        // Day after bill day -> Period 5 (04-11 .. 05-10)
+        final afterBillDay = currentCreditPeriodForToday(
+          creditInfo: infoCounted,
+          today: DateTime(2026, 4, 11),
+        );
+        expect(afterBillDay.year, 2026);
+        expect(afterBillDay.periodIndex, 5);
+
+        // December 15 -> crosses into 2027 Period 1 (2026-12-11 .. 2027-01-10)
+        final lateDec = currentCreditPeriodForToday(
+          creditInfo: infoCounted,
+          today: DateTime(2026, 12, 15),
+        );
+        expect(lateDec.year, 2027);
+        expect(lateDec.periodIndex, 1);
+
+        // Whole natural month (billDay = 1, billDayCounted = false)
+        final infoNatural = CreditInfo({
+          'bill_day': 1,
+          'repayment_day': 15,
+          'repayment_day_after_bd': false,
+          'bill_day_count': false,
+        });
+        final natApr = currentCreditPeriodForToday(
+          creditInfo: infoNatural,
+          today: DateTime(2026, 4, 20),
+        );
+        expect(natApr.year, 2026);
+        expect(natApr.periodIndex, 4);
+        expect(natApr.start, DateTime(2026, 4, 1, 0, 0, 0, 0));
+        expect(natApr.end, DateTime(2026, 4, 30, 23, 59, 59, 999));
+      },
+    );
   });
 }

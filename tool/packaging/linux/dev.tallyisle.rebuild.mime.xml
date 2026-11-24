@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/x-tallyisle-backup">
+    <comment>TallyIsle Backup Archive</comment>
+    <comment xml:lang="zh-CN">帐屿备份文件</comment>
+    <glob pattern="*.tally"/>
+    <icon name="dev.tallyisle.rebuild"/>
+  </mime-type>
+</mime-info>

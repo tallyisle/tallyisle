@@ -9,6 +9,7 @@ import 'package:tallyisle/data/db/database.dart';
 import 'package:tallyisle/data/ledger/ledger_service.dart';
 import 'package:tallyisle/domain/ledger/asset_json.dart';
 import 'package:tallyisle/domain/model/codes.dart';
+import 'package:tallyisle/features/assets/asset_detail_page.dart';
 import 'package:tallyisle/features/common/catalog_icons.dart';
 
 void main() {
@@ -121,8 +122,19 @@ void main() {
       await tester.tap(find.byKey(const Key('credit-tab-statements')));
       await settle();
 
-      expect(find.text('${now.year} 年'), findsOneWidget);
+      expect(find.byKey(const Key('statement-year-label')), findsOneWidget);
+      expect(find.text('${now.year}年'), findsOneWidget);
+      expect(find.byIcon(Icons.arrow_drop_down), findsNothing);
       expect(find.textContaining('期账单'), findsWidgets);
+
+      // Test StickyStatementYearSwitcher prev/reset + year-only picker dialog.
+      await tester.tap(find.byKey(const Key('statement-year-prev')));
+      await settle();
+      expect(find.text('${now.year - 1}年'), findsOneWidget);
+      expect(find.byKey(const Key('statement-year-reset')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('statement-year-reset')));
+      await settle();
+      expect(find.text('${now.year}年'), findsOneWidget);
 
       final futureToggle = find.byKey(
         const Key('credit-toggle-future-periods'),
@@ -153,12 +165,30 @@ void main() {
       await tester.tap(targetCard);
       await settle();
 
-      // Automatically switched back to "流水明细" with active period filter bar!
+      // Automatically switched back to "流水明细" with continuous period filter bar!
       expect(find.byKey(const Key('credit-period-filter-bar')), findsOneWidget);
+      expect(find.byKey(const Key('flow-filter-prev')), findsOneWidget);
+      expect(find.byKey(const Key('flow-filter-next')), findsOneWidget);
+      expect(find.byKey(const Key('flow-filter-pick')), findsOneWidget);
       expect(
         find.byKey(const Key('clear-credit-period-filter')),
         findsOneWidget,
       );
+
+      // Step to previous period via continuous nav button & verify no crash/overflow.
+      await tester.tap(find.byKey(const Key('flow-filter-prev')));
+      await settle();
+      expect(find.byKey(const Key('credit-period-filter-bar')), findsOneWidget);
+
+      // Tap period picker trigger on filter bar -> opens 3x4 credit period picker!
+      await tester.tap(find.byKey(const Key('flow-filter-pick')));
+      await settle();
+      expect(find.byKey(const Key('cp-picker-period-1')), findsOneWidget);
+      expect(find.byKey(const Key('cp-picker-period-12')), findsOneWidget);
+      expect(find.byIcon(Icons.arrow_drop_down), findsNothing);
+      await tester.tap(find.byKey(const Key('cp-picker-period-4')));
+      await settle();
+      expect(find.textContaining('第4期'), findsWidgets);
 
       // Clear period filter -> restores unfiltered flow view.
       await tester.tap(find.byKey(const Key('clear-credit-period-filter')));
@@ -166,6 +196,176 @@ void main() {
       expect(find.byKey(const Key('credit-period-filter-bar')), findsNothing);
       expect(find.text('-400.00'), findsOneWidget);
       expect(find.text('-180.00'), findsOneWidget);
+
+      // Tap calendar quick-jump button on sticky bar -> opens credit period picker!
+      await tester.tap(find.byKey(const Key('asset-flow-period-picker-btn')));
+      await settle();
+      expect(
+        find.byKey(const Key('cp-picker-toggle-year-grid')),
+        findsOneWidget,
+      );
+      await tester.tap(find.byKey(const Key('cp-picker-toggle-year-grid')));
+      await settle();
+      expect(find.byKey(Key('cp-picker-year-${now.year}')), findsOneWidget);
+      await tester.tap(find.byKey(Key('cp-picker-year-${now.year}')));
+      await settle();
+      await tester.tap(find.byKey(const Key('cp-picker-period-1')));
+      await settle();
+      expect(find.byKey(const Key('credit-period-filter-bar')), findsOneWidget);
+
+      await tester.pumpWidget(const SizedBox());
+      await settle();
+      await tester.pump(const Duration(seconds: 1));
+    },
+  );
+
+  testWidgets(
+    '360x640 @ 1.2x text scale: zero overflow on Fund & Credit sticky year switcher (with reset pill), filter bars, and 3x4 credit period picker dialog',
+    (tester) async {
+      tester.view.physicalSize = const Size(360, 640);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      final db = AppDatabase(NativeDatabase.memory());
+      final container = ProviderContainer(
+        overrides: [databaseProvider.overrideWith((ref) async => db)],
+      );
+      final ledger = await container.read(ledgerServiceProvider.future);
+      final now = DateTime.now();
+
+      final fundId = await ledger.createAsset(
+        commandId: 'stress-fund',
+        name: '招商储蓄卡',
+        initial: Money.parse('8800.00'),
+      );
+      final creditInfo = CreditInfo()
+        ..billDay = 10
+        ..repaymentDay = 28
+        ..billDayCounted = true;
+      final creditId = await ledger.createAsset(
+        commandId: 'stress-credit',
+        name: '招商经典白',
+        type: AssetType.credit,
+        limit: Money.parse('20000.00'),
+        initial: -Money.parse('680.00'),
+        creditInfo: creditInfo.encode(),
+      );
+
+      await ledger.saveRecord(
+        commandId: 'stress-fund-rec',
+        draft: RecordDraft(
+          bookId: 1,
+          type: RecordType.expense,
+          money: Money.parse('66.00'),
+          assetId: fundId,
+          recordTime: DateTime(
+            now.year,
+            now.month,
+            5,
+            12,
+          ).millisecondsSinceEpoch,
+          categoryId: 1,
+        ),
+      );
+      await ledger.saveRecord(
+        commandId: 'stress-credit-rec',
+        draft: RecordDraft(
+          bookId: 1,
+          type: RecordType.expense,
+          money: Money.parse('128.00'),
+          assetId: creditId,
+          recordTime: DateTime(
+            now.year,
+            now.month,
+            5,
+            12,
+          ).millisecondsSinceEpoch,
+          categoryId: 1,
+        ),
+      );
+
+      Future<void> settle() async {
+        for (var i = 0; i < 10; i++) {
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 20)),
+          );
+          await tester.pump();
+        }
+      }
+
+      Widget wrap(Widget home) => UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(
+          theme: ThemeData(
+            colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal),
+            useMaterial3: true,
+          ),
+          builder: (context, child) => MediaQuery(
+            data: MediaQuery.of(
+              context,
+            ).copyWith(textScaler: const TextScaler.linear(1.2)),
+            child: child ?? const SizedBox.shrink(),
+          ),
+          home: home,
+        ),
+      );
+
+      // 1. Fund account @ 360x640 1.2x
+      await tester.pumpWidget(wrap(AssetDetailPage(assetId: fundId)));
+      await settle();
+      expect(tester.takeException(), isNull);
+
+      await tester.tap(find.byKey(const Key('fund-tab-statements')));
+      await settle();
+      expect(tester.takeException(), isNull);
+
+      // Trigger reset pill next to year switcher on narrow 360dp @ 1.2x!
+      await tester.tap(find.byKey(const Key('statement-year-prev')));
+      await settle();
+      expect(tester.takeException(), isNull);
+      expect(find.byKey(const Key('statement-year-reset')), findsOneWidget);
+      expect(find.text('今年'), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('statement-year-reset')));
+      await settle();
+      await tester.tap(
+        find.byKey(Key('fund-statement-card-${now.year}-${now.month}')),
+      );
+      await settle();
+      expect(tester.takeException(), isNull);
+      expect(find.byKey(const Key('fund-month-filter-bar')), findsOneWidget);
+
+      // 2. Credit account @ 360x640 1.2x
+      await tester.pumpWidget(wrap(AssetDetailPage(assetId: creditId)));
+      await settle();
+      expect(tester.takeException(), isNull);
+
+      await tester.tap(find.byKey(const Key('credit-tab-statements')));
+      await settle();
+      expect(tester.takeException(), isNull);
+
+      await tester.tap(find.byKey(const Key('statement-year-prev')));
+      await settle();
+      expect(tester.takeException(), isNull);
+      expect(find.byKey(const Key('statement-year-reset')), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('credit-tab-flows')));
+      await settle();
+      expect(tester.takeException(), isNull);
+
+      // Open 3x4 credit period picker dialog @ 360x640 1.2x!
+      await tester.tap(find.byKey(const Key('asset-flow-period-picker-btn')));
+      await settle();
+      expect(tester.takeException(), isNull);
+      expect(find.byKey(const Key('cp-picker-period-12')), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('cp-picker-period-4')));
+      await settle();
+      expect(tester.takeException(), isNull);
+      expect(find.byKey(const Key('credit-period-filter-bar')), findsOneWidget);
 
       await tester.pumpWidget(const SizedBox());
       await settle();

@@ -131,6 +131,8 @@ Future<void> _invalidateBackupState(
   }
   ref
     ..invalidate(localBackupsProvider)
+    ..invalidate(externalBackupDirBindingProvider)
+    ..invalidate(externalBackupNeedsRebindProvider)
     ..invalidate(webDavBackupsProvider)
     ..invalidate(s3BackupsProvider)
     ..invalidate(activeCloudBackupsProvider)
@@ -293,6 +295,20 @@ class _MobileSyncBackupQuickSheetState
     });
     try {
       final service = await ref.read(tallyBackupServiceProvider.future);
+      final fileAccess = ref.read(backupFileAccessProvider);
+      final currentBinding = await service.getExternalBackupDirBinding();
+      if (currentBinding == null && !service.hasCustomLocalDirOverride) {
+        try {
+          await service.bindExternalBackupDirectory(fileAccess: fileAccess);
+        } on Failure catch (e) {
+          if (e.code == FailureCode.cancelled) {
+            return;
+          }
+          if (e.code != FailureCode.unsupportedCapability) {
+            rethrow;
+          }
+        }
+      }
       final saved = await service.createLocalBackup();
       if (!mounted) return;
       await _invalidateBackupState(ref, didPullOrRestore: false);
@@ -672,6 +688,20 @@ class _MobileMeSyncQuickCardState extends ConsumerState<MobileMeSyncQuickCard> {
             pendingConflict = outcome;
         }
       } else {
+        final fileAccess = ref.read(backupFileAccessProvider);
+        final currentBinding = await service.getExternalBackupDirBinding();
+        if (currentBinding == null && !service.hasCustomLocalDirOverride) {
+          try {
+            await service.bindExternalBackupDirectory(fileAccess: fileAccess);
+          } on Failure catch (e) {
+            if (e.code == FailureCode.cancelled) {
+              return;
+            }
+            if (e.code != FailureCode.unsupportedCapability) {
+              rethrow;
+            }
+          }
+        }
         final saved = await service.createLocalBackup();
         if (!mounted) return;
         await _invalidateBackupState(ref, didPullOrRestore: false);

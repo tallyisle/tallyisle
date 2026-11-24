@@ -125,15 +125,18 @@ jobs:
       - name: Build Windows Release
         run: flutter build windows --release
 
-      - name: Package Windows x64 archive
+      - name: Package Windows x64 installers (EXE, MSI, portable ZIP)
         shell: pwsh
-        run: Compress-Archive -Path "build/windows/x64/runner/Release/*" -DestinationPath "TallyIsle-Windows-x64.zip" -Force
+        run: pwsh -NoProfile -ExecutionPolicy Bypass -File tool/packaging/windows/package_windows.ps1
 
-      - name: Upload Windows artifact
+      - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
           name: TallyIsle-Windows-x64
-          path: TallyIsle-Windows-x64.zip
+          path: |
+            TallyIsle-Windows-x64-setup.exe
+            TallyIsle-Windows-x64.msi
+            TallyIsle-Windows-x64-portable.zip
           if-no-files-found: error
 
   build-linux:
@@ -147,7 +150,8 @@ jobs:
       - name: Install Linux desktop dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev build-essential
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev build-essential rpm flatpak flatpak-builder file desktop-file-utils
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
@@ -165,14 +169,19 @@ jobs:
       - name: Build Linux Release
         run: flutter build linux --release
 
-      - name: Package Linux x64 bundle
-        run: tar -C build/linux/x64/release/bundle -czf TallyIsle-Linux-x64.tar.gz .
+      - name: Package Linux x64 installers (DEB, RPM, AppImage, Flatpak, portable TAR.GZ)
+        run: bash tool/packaging/linux/package_linux.sh
 
-      - name: Upload Linux artifact
+      - name: Upload Linux artifacts
         uses: actions/upload-artifact@v4
         with:
           name: TallyIsle-Linux-x64
-          path: TallyIsle-Linux-x64.tar.gz
+          path: |
+            TallyIsle-Linux-x64.deb
+            TallyIsle-Linux-x64.rpm
+            TallyIsle-Linux-x64.AppImage
+            TallyIsle-Linux-x64.flatpak
+            TallyIsle-Linux-x64-portable.tar.gz
           if-no-files-found: error
 
   build-apple:
@@ -199,17 +208,17 @@ jobs:
       - name: Build macOS Release
         run: flutter build macos --release
 
-      - name: Ad-hoc sign & package macOS app
-        run: |
-          codesign --force --deep --preserve-metadata=entitlements --sign - build/macos/Build/Products/Release/TallyIsle.app || \
-            codesign --force --deep --sign - build/macos/Build/Products/Release/TallyIsle.app
-          ditto -c -k --sequesterRsrc --keepParent build/macos/Build/Products/Release/TallyIsle.app TallyIsle-macOS.zip
+      - name: Sign & package macOS installers (DMG, PKG, portable ZIP)
+        run: bash tool/packaging/macos/package_macos.sh
 
-      - name: Upload macOS artifact
+      - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
         with:
           name: TallyIsle-macOS
-          path: TallyIsle-macOS.zip
+          path: |
+            TallyIsle-macOS.dmg
+            TallyIsle-macOS.pkg
+            TallyIsle-macOS-portable.zip
           if-no-files-found: error
 
       - name: Build iOS Release (no codesign)
@@ -246,6 +255,11 @@ jobs:
         with:
           merge-multiple: true
           path: dist
+
+      - name: Generate SHA-256 checksums
+        run: |
+          (cd dist && sha256sum * > SHA256SUMS.txt)
+          ls -lh dist/
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

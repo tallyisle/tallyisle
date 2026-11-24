@@ -678,4 +678,269 @@ void main() {
       },
     );
   });
+
+  group('NaturalMonthPeriod & Fund Monthly Statements', () {
+    test(
+      'NaturalMonthPeriod bounds, leap years, contains, and year crossings',
+      () {
+        const feb2024 = NaturalMonthPeriod(year: 2024, month: 2);
+        expect(feb2024.start, DateTime(2024, 2, 1, 0, 0, 0, 0));
+        expect(feb2024.end, DateTime(2024, 2, 29, 23, 59, 59, 999));
+        expect(feb2024.contains(feb2024.startMs), isTrue);
+        expect(feb2024.contains(feb2024.endMs), isTrue);
+        expect(feb2024.contains(feb2024.startMs - 1), isFalse);
+        expect(feb2024.contains(feb2024.endMs + 1), isFalse);
+
+        const feb2026 = NaturalMonthPeriod(year: 2026, month: 2);
+        expect(feb2026.end, DateTime(2026, 2, 28, 23, 59, 59, 999));
+
+        const jan2026 = NaturalMonthPeriod(year: 2026, month: 1);
+        expect(
+          jan2026.previous(),
+          const NaturalMonthPeriod(year: 2025, month: 12),
+        );
+        expect(jan2026.next(), const NaturalMonthPeriod(year: 2026, month: 2));
+
+        const dec2026 = NaturalMonthPeriod(year: 2026, month: 12);
+        expect(dec2026.next(), const NaturalMonthPeriod(year: 2027, month: 1));
+        expect(
+          dec2026.previous(),
+          const NaturalMonthPeriod(year: 2026, month: 11),
+        );
+      },
+    );
+
+    test(
+      'calculateFundMonthlyStatements walks backward across years, carries forward empty past months, and nulls unstarted future empty months',
+      () {
+        final today = DateTime(2026, 4, 20);
+        // Sorted newest-first:
+        // 2026-04-10: expense 50 (-50)
+        // 2026-02-15: income 200 (+200)
+        // 2025-11-10: income 300 (+300)
+        final records = [
+          ReconRecord(
+            id: 'r-2026-04',
+            type: RecordType.expense,
+            moneyMinor: y(50),
+            assetId: accountA,
+            recordTime: DateTime(2026, 4, 10, 12).millisecondsSinceEpoch,
+          ),
+          ReconRecord(
+            id: 'r-2026-02',
+            type: RecordType.income,
+            moneyMinor: y(200),
+            assetId: accountA,
+            recordTime: DateTime(2026, 2, 15, 12).millisecondsSinceEpoch,
+          ),
+          ReconRecord(
+            id: 'r-2025-11',
+            type: RecordType.income,
+            moneyMinor: y(300),
+            assetId: accountA,
+            recordTime: DateTime(2025, 11, 10, 12).millisecondsSinceEpoch,
+          ),
+        ];
+
+        final stmts2026 = calculateFundMonthlyStatements(
+          currentBalance: y(1000),
+          accountId: accountA,
+          accountCurrency: 'CNY',
+          records: records,
+          selectedYear: 2026,
+          today: today,
+        );
+        expect(stmts2026.length, 12);
+        expect(stmts2026.map((s) => s.period.month).toList(), [
+          12,
+          11,
+          10,
+          9,
+          8,
+          7,
+          6,
+          5,
+          4,
+          3,
+          2,
+          1,
+        ]);
+
+        FundMonthlyStatementItem monthOf(
+          List<FundMonthlyStatementItem> list,
+          int m,
+        ) => list.firstWhere((s) => s.period.month == m);
+
+        // Future unstarted months (5..12) have null endingBalance.
+        for (var m = 5; m <= 12; m++) {
+          final item = monthOf(stmts2026, m);
+          expect(item.isFutureUnstarted, isTrue);
+          expect(item.isCurrentMonth, isFalse);
+          expect(item.recordCount, 0);
+          expect(item.endingBalance, isNull);
+        }
+
+        // Current month (4): inflow 0, outflow 50, net -50, endingBalance 1000.
+        final m4 = monthOf(stmts2026, 4);
+        expect(m4.isCurrentMonth, isTrue);
+        expect(m4.isFutureUnstarted, isFalse);
+        expect(m4.recordCount, 1);
+        expect(m4.inflow, BigInt.zero);
+        expect(m4.outflow, y(50));
+        expect(m4.netDelta, -y(50));
+        expect(m4.endingBalance, y(1000));
+
+        // Empty past month (3): carries forward 1050.
+        final m3 = monthOf(stmts2026, 3);
+        expect(m3.recordCount, 0);
+        expect(m3.endingBalance, y(1050));
+
+        // Month 2: inflow 200, endingBalance 1050.
+        final m2 = monthOf(stmts2026, 2);
+        expect(m2.recordCount, 1);
+        expect(m2.inflow, y(200));
+        expect(m2.netDelta, y(200));
+        expect(m2.endingBalance, y(1050));
+
+        // Month 1: empty past month before Feb +200 -> 850.
+        final m1 = monthOf(stmts2026, 1);
+        expect(m1.recordCount, 0);
+        expect(m1.endingBalance, y(850));
+
+        // Previous year (2025): rolls back 2026 records (-50 + 200 = +150) -> Dec 2025 end = 850!
+        final stmts2025 = calculateFundMonthlyStatements(
+          currentBalance: y(1000),
+          accountId: accountA,
+          accountCurrency: 'CNY',
+          records: records,
+          selectedYear: 2025,
+          today: today,
+        );
+        expect(monthOf(stmts2025, 12).endingBalance, y(850));
+        expect(monthOf(stmts2025, 11).endingBalance, y(850));
+        expect(monthOf(stmts2025, 11).inflow, y(300));
+        expect(monthOf(stmts2025, 10).endingBalance, y(550));
+        expect(monthOf(stmts2025, 1).endingBalance, y(550));
+      },
+    );
+
+    test(
+      'calculateFundMonthlyStatements handles pre-recorded future bills & multi-currency snapshots',
+      () {
+        final today = DateTime(2026, 4, 20);
+        final records = [
+          // Future pre-recorded USD transfer source (uses sm = 100 USD)
+          ReconRecord(
+            id: 'future-usd',
+            type: RecordType.transfer,
+            moneyMinor: y(720),
+            fromAssetId: accountA,
+            toAssetId: accountB,
+            recordTime: DateTime(2026, 8, 5, 10).millisecondsSinceEpoch,
+            currency: CurrencySnapshot(
+              sourceCode: 'USD',
+              sourceGross: y(100),
+              baseCode: 'CNY',
+              baseAmount: y(720),
+              assetCode: 'CNY',
+              assetNet: y(720),
+            ),
+          ),
+          // Current-month expense in USD (uses am = 25 USD)
+          ReconRecord(
+            id: 'curr-usd',
+            type: RecordType.expense,
+            moneyMinor: y(180),
+            assetId: accountA,
+            recordTime: DateTime(2026, 4, 10, 10).millisecondsSinceEpoch,
+            currency: CurrencySnapshot(
+              sourceCode: 'EUR',
+              sourceGross: y(23),
+              baseCode: 'CNY',
+              baseAmount: y(180),
+              assetCode: 'USD',
+              assetNet: y(25),
+            ),
+          ),
+        ];
+
+        final stmts = calculateFundMonthlyStatements(
+          currentBalance: y(500),
+          accountId: accountA,
+          accountCurrency: 'USD',
+          records: records,
+          selectedYear: 2026,
+          today: today,
+        );
+
+        FundMonthlyStatementItem m(int month) =>
+            stmts.firstWhere((s) => s.period.month == month);
+
+        // Months 9..12 have no records in or after them -> null.
+        expect(m(12).endingBalance, isNull);
+        expect(m(9).endingBalance, isNull);
+        // Month 8 has future-usd (-100) -> endingBalance 500.
+        expect(m(8).recordCount, 1);
+        expect(m(8).outflow, y(100));
+        expect(m(8).endingBalance, y(500));
+        // Months 5..7 are empty future months BEFORE Month 8's future record -> carry forward 600!
+        expect(m(7).endingBalance, y(600));
+        expect(m(5).endingBalance, y(600));
+        // Month 4 has curr-usd (-25) -> endingBalance 600, Month 3 endingBalance 625.
+        expect(m(4).outflow, y(25));
+        expect(m(4).endingBalance, y(600));
+        expect(m(3).endingBalance, y(625));
+      },
+    );
+
+    test(
+      'filterVisibleFundMonthlyStatements always keeps current month even at 0 records and folds other empty months',
+      () {
+        final today = DateTime(2026, 4, 20);
+        // Zero records in current year 2026:
+        final emptyYearStmts = calculateFundMonthlyStatements(
+          currentBalance: y(1000),
+          accountId: accountA,
+          records: const [],
+          selectedYear: 2026,
+          today: today,
+        );
+
+        final folded = filterVisibleFundMonthlyStatements(
+          statements: emptyYearStmts,
+          today: today,
+        );
+        expect(folded.hiddenEmptyCount, 11);
+        expect(folded.visible.length, 1);
+        expect(
+          folded.visible.first.period,
+          const NaturalMonthPeriod(year: 2026, month: 4),
+        );
+        expect(folded.visible.first.isCurrentMonth, isTrue);
+
+        final expanded = filterVisibleFundMonthlyStatements(
+          statements: emptyYearStmts,
+          today: today,
+          includeEmpty: true,
+        );
+        expect(expanded.hiddenEmptyCount, 11);
+        expect(expanded.visible.length, 12);
+
+        // Past year 2025 with zero records -> visible empty, hiddenEmptyCount = 12.
+        final pastEmptyStmts = calculateFundMonthlyStatements(
+          currentBalance: y(1000),
+          accountId: accountA,
+          records: const [],
+          selectedYear: 2025,
+          today: today,
+        );
+        final pastFolded = filterVisibleFundMonthlyStatements(
+          statements: pastEmptyStmts,
+          today: today,
+        );
+        expect(pastFolded.visible, isEmpty);
+        expect(pastFolded.hiddenEmptyCount, 12);
+      },
+    );
+  });
 }

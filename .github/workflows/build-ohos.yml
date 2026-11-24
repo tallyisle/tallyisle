@@ -272,6 +272,7 @@ jobs:
           cp TallyIsle-HarmonyOS-*.hap dist-ohos/
           cp tool/ohos/install-hap-windows.bat dist-ohos/
           cp tool/ohos/install-hap-unix.sh dist-ohos/
+          zip -j dist-ohos/TallyIsle-HarmonyOS-installer-kit.zip dist-ohos/TallyIsle-HarmonyOS-*.hap dist-ohos/install-hap-windows.bat dist-ohos/install-hap-unix.sh
 
       - name: Upload HarmonyOS HAP artifacts
         uses: actions/upload-artifact@v4
@@ -298,5 +299,7 @@ jobs:
       - name: Upload HarmonyOS HAP to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist-ohos/TallyIsle-HarmonyOS-*.hap
+          files: |
+            dist-ohos/TallyIsle-HarmonyOS-*.hap
+            dist-ohos/TallyIsle-HarmonyOS-installer-kit.zip
           generate_release_notes: true

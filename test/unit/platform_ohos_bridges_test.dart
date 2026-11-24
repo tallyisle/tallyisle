@@ -6,6 +6,7 @@ import 'dart:ui' show Locale;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:tallyisle/core/app_version.dart' as app_version;
 import 'package:tallyisle/core/failure.dart';
 import 'package:tallyisle/platform/app_widgets.dart';
 import 'package:tallyisle/platform/auto_bill_bridge.dart';
@@ -404,14 +405,14 @@ void main() {
 
   group('HarmonyOS native manifest, bilingual resources, and import bridges', () {
     test(
-      'app.json5 version matches 0.6.0+8 and module.json5 exposes exclusive tallyisle:// & permissions',
+      'app.json5 version matches appVersionName+appBuildNumber and module.json5 exposes exclusive tallyisle:// & permissions',
       () {
         final appJson =
             jsonDecode(File('ohos/AppScope/app.json5').readAsStringSync())
                 as Map<String, Object?>;
         final app = appJson['app']! as Map<String, Object?>;
-        expect(app['versionName'], '0.6.0');
-        expect(app['versionCode'], 8);
+        expect(app['versionName'], app_version.appVersionName);
+        expect(app['versionCode'], app_version.appBuildNumber);
 
         final moduleRaw = File(
           'ohos/entry/src/main/module.json5',

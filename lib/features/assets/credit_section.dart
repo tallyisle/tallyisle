@@ -102,7 +102,6 @@ class CreditPendingBanner extends StatelessWidget {
 /// (F-028 / docs/modules/credit-account.md).
 ///
 /// Features:
-/// - Year switcher with quick return to current year.
 /// - Default folding of unstarted future empty periods so active unissued and
 ///   latest issued statements appear immediately at the top.
 /// - Adaptive 2-column grid on wide viewports (`>= 540px`) and 1-column stack
@@ -173,191 +172,168 @@ class _CreditSectionState extends ConsumerState<CreditSection> {
     }
 
     final statementsAsync = ref.watch(creditStatementsProvider(asset));
-    final selectedYear = ref.watch(creditSelectedYearProvider);
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _YearSwitcher(
-            selectedYear: selectedYear,
-            showFilterHint: widget.onSelectPeriod != null,
-          ),
-          const SizedBox(height: 6),
-          statementsAsync.when(
-            data: (statements) {
-              if (statements.isEmpty) {
-                return const Card(
+      child: statementsAsync.when(
+        data: (statements) {
+          if (statements.isEmpty) {
+            return const Card(
+              child: Padding(
+                padding: EdgeInsets.all(24),
+                child: Center(child: Text('本年度暂无账单数据')),
+              ),
+            );
+          }
+
+          final filtered = filterVisibleCreditStatements(
+            statements: statements,
+            today: DateTime.now(),
+            includeFutureEmpty: _showFutureEmpty,
+          );
+          final visible = filtered.visible;
+          final futureEmptyCount = filtered.futureEmptyCount;
+
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (visible.isEmpty)
+                Card(
                   child: Padding(
-                    padding: EdgeInsets.all(24),
-                    child: Center(child: Text('本年度暂无账单数据')),
-                  ),
-                );
-              }
-
-              final filtered = filterVisibleCreditStatements(
-                statements: statements,
-                today: DateTime.now(),
-                includeFutureEmpty: _showFutureEmpty,
-              );
-              final visible = filtered.visible;
-              final futureEmptyCount = filtered.futureEmptyCount;
-
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  if (visible.isEmpty)
-                    Card(
-                      child: Padding(
-                        padding: const EdgeInsets.all(20),
-                        child: Center(
-                          child: Text(
-                            '本年度 $futureEmptyCount 期账单尚未开始',
-                            style: Theme.of(context).textTheme.bodyMedium
-                                ?.copyWith(
-                                  color: Theme.of(
-                                    context,
-                                  ).colorScheme.onSurfaceVariant,
-                                ),
-                          ),
+                    padding: const EdgeInsets.all(20),
+                    child: Center(
+                      child: Text(
+                        '本年度 $futureEmptyCount 期账单尚未开始',
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
                         ),
                       ),
-                    )
-                  else
-                    LayoutBuilder(
-                      builder: (context, constraints) {
-                        final twoColumn = constraints.maxWidth >= 540;
-                        if (!twoColumn) {
-                          return Column(
-                            children: [
-                              for (final item in visible)
-                                Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    vertical: 4,
-                                  ),
+                    ),
+                  ),
+                )
+              else
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final twoColumn = constraints.maxWidth >= 540;
+                    if (!twoColumn) {
+                      return Column(
+                        children: [
+                          for (final item in visible)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 4),
+                              child: _StatementCard(
+                                asset: asset,
+                                item: item,
+                                selected: _isSamePeriod(
+                                  widget.selectedPeriod,
+                                  item.period,
+                                ),
+                                onTap: widget.onSelectPeriod == null
+                                    ? null
+                                    : () => widget.onSelectPeriod!(item.period),
+                                onRepayAmount: widget.onRepayAmount,
+                              ),
+                            ),
+                        ],
+                      );
+                    }
+
+                    final rows = <Widget>[];
+                    for (var i = 0; i < visible.length; i += 2) {
+                      final leftItem = visible[i];
+                      final rightItem = i + 1 < visible.length
+                          ? visible[i + 1]
+                          : null;
+                      rows.add(
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 5),
+                          child: IntrinsicHeight(
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                Expanded(
                                   child: _StatementCard(
                                     asset: asset,
-                                    item: item,
+                                    item: leftItem,
                                     selected: _isSamePeriod(
                                       widget.selectedPeriod,
-                                      item.period,
+                                      leftItem.period,
                                     ),
                                     onTap: widget.onSelectPeriod == null
                                         ? null
                                         : () => widget.onSelectPeriod!(
-                                            item.period,
+                                            leftItem.period,
                                           ),
                                     onRepayAmount: widget.onRepayAmount,
                                   ),
                                 ),
-                            ],
-                          );
-                        }
-
-                        final rows = <Widget>[];
-                        for (var i = 0; i < visible.length; i += 2) {
-                          final leftItem = visible[i];
-                          final rightItem = i + 1 < visible.length
-                              ? visible[i + 1]
-                              : null;
-                          rows.add(
-                            Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 5),
-                              child: IntrinsicHeight(
-                                child: Row(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.stretch,
-                                  children: [
-                                    Expanded(
-                                      child: _StatementCard(
-                                        asset: asset,
-                                        item: leftItem,
-                                        selected: _isSamePeriod(
-                                          widget.selectedPeriod,
-                                          leftItem.period,
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: rightItem == null
+                                      ? const SizedBox.shrink()
+                                      : _StatementCard(
+                                          asset: asset,
+                                          item: rightItem,
+                                          selected: _isSamePeriod(
+                                            widget.selectedPeriod,
+                                            rightItem.period,
+                                          ),
+                                          onTap: widget.onSelectPeriod == null
+                                              ? null
+                                              : () => widget.onSelectPeriod!(
+                                                  rightItem.period,
+                                                ),
+                                          onRepayAmount: widget.onRepayAmount,
                                         ),
-                                        onTap: widget.onSelectPeriod == null
-                                            ? null
-                                            : () => widget.onSelectPeriod!(
-                                                leftItem.period,
-                                              ),
-                                        onRepayAmount: widget.onRepayAmount,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 10),
-                                    Expanded(
-                                      child: rightItem == null
-                                          ? const SizedBox.shrink()
-                                          : _StatementCard(
-                                              asset: asset,
-                                              item: rightItem,
-                                              selected: _isSamePeriod(
-                                                widget.selectedPeriod,
-                                                rightItem.period,
-                                              ),
-                                              onTap:
-                                                  widget.onSelectPeriod == null
-                                                  ? null
-                                                  : () =>
-                                                        widget.onSelectPeriod!(
-                                                          rightItem.period,
-                                                        ),
-                                              onRepayAmount:
-                                                  widget.onRepayAmount,
-                                            ),
-                                    ),
-                                  ],
                                 ),
-                              ),
+                              ],
                             ),
-                          );
-                        }
-                        return Column(
-                          key: const Key('credit-statements-two-column-grid'),
-                          children: rows,
-                        );
-                      },
+                          ),
+                        ),
+                      );
+                    }
+                    return Column(
+                      key: const Key('credit-statements-two-column-grid'),
+                      children: rows,
+                    );
+                  },
+                ),
+              if (futureEmptyCount > 0) ...[
+                const SizedBox(height: 6),
+                Center(
+                  child: TextButton.icon(
+                    key: const Key('credit-toggle-future-periods'),
+                    onPressed: () =>
+                        setState(() => _showFutureEmpty = !_showFutureEmpty),
+                    icon: Icon(
+                      _showFutureEmpty
+                          ? Icons.expand_less_rounded
+                          : Icons.expand_more_rounded,
+                      size: 18,
                     ),
-                  if (futureEmptyCount > 0) ...[
-                    const SizedBox(height: 6),
-                    Center(
-                      child: TextButton.icon(
-                        key: const Key('credit-toggle-future-periods'),
-                        onPressed: () => setState(
-                          () => _showFutureEmpty = !_showFutureEmpty,
-                        ),
-                        icon: Icon(
-                          _showFutureEmpty
-                              ? Icons.expand_less_rounded
-                              : Icons.expand_more_rounded,
-                          size: 18,
-                        ),
-                        label: Text(
-                          _showFutureEmpty
-                              ? '收起 $futureEmptyCount 期未开始空白账单'
-                              : '展开其余 $futureEmptyCount 期未开始账单',
-                        ),
-                      ),
+                    label: Text(
+                      _showFutureEmpty
+                          ? '收起 $futureEmptyCount 期未开始空白账单'
+                          : '展开其余 $futureEmptyCount 期未开始账单',
                     ),
-                  ],
-                ],
-              );
-            },
-            loading: () => const Center(
-              child: Padding(
-                padding: EdgeInsets.all(24),
-                child: CircularProgressIndicator(),
-              ),
-            ),
-            error: (e, _) => Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Text('账单加载出错: ${safeMessage(e)}'),
-              ),
-            ),
+                  ),
+                ),
+              ],
+            ],
+          );
+        },
+        loading: () => const Center(
+          child: Padding(
+            padding: EdgeInsets.all(24),
+            child: CircularProgressIndicator(),
           ),
-        ],
+        ),
+        error: (e, _) => Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Text('账单加载出错: ${safeMessage(e)}'),
+          ),
+        ),
       ),
     );
   }
@@ -366,78 +342,6 @@ class _CreditSectionState extends ConsumerState<CreditSection> {
     CreditStatementPeriod? a,
     CreditStatementPeriod b,
   ) => a != null && a.year == b.year && a.periodIndex == b.periodIndex;
-}
-
-class _YearSwitcher extends ConsumerWidget {
-  const _YearSwitcher({
-    required this.selectedYear,
-    this.showFilterHint = false,
-  });
-
-  final int selectedYear;
-  final bool showFilterHint;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final theme = Theme.of(context);
-    final currentYear = DateTime.now().year;
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final canShowHint = showFilterHint && constraints.maxWidth >= 420;
-        return Row(
-          children: [
-            IconButton(
-              key: const Key('credit-year-prev'),
-              visualDensity: VisualDensity.compact,
-              icon: const Icon(Icons.chevron_left),
-              tooltip: '上一年度',
-              onPressed: () =>
-                  ref.read(creditSelectedYearProvider.notifier).previous(),
-            ),
-            Text(
-              '$selectedYear 年',
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            IconButton(
-              key: const Key('credit-year-next'),
-              visualDensity: VisualDensity.compact,
-              icon: const Icon(Icons.chevron_right),
-              tooltip: '下一年度',
-              onPressed: () =>
-                  ref.read(creditSelectedYearProvider.notifier).next(),
-            ),
-            if (selectedYear != currentYear) ...[
-              const SizedBox(width: 4),
-              TextButton(
-                key: const Key('credit-year-reset'),
-                style: TextButton.styleFrom(
-                  visualDensity: VisualDensity.compact,
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                ),
-                onPressed: () =>
-                    ref.read(creditSelectedYearProvider.notifier).reset(),
-                child: const Text('回今年'),
-              ),
-            ],
-            const Spacer(),
-            if (canShowHint)
-              Flexible(
-                child: Text(
-                  '点击卡片可看当期流水',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              ),
-          ],
-        );
-      },
-    );
-  }
 }
 
 class _StatementCard extends StatelessWidget {

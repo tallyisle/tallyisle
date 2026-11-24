@@ -60,10 +60,19 @@ void main() {
       for (final expectedArtifact in const <String>[
         'TallyIsle-Android-release.apk',
         'TallyIsle-Android-debug.apk',
-        'TallyIsle-Windows-x64.zip',
-        'TallyIsle-Linux-x64.tar.gz',
-        'TallyIsle-macOS.zip',
+        'TallyIsle-Windows-x64-setup.exe',
+        'TallyIsle-Windows-x64.msi',
+        'TallyIsle-Windows-x64-portable.zip',
+        'TallyIsle-Linux-x64.deb',
+        'TallyIsle-Linux-x64.rpm',
+        'TallyIsle-Linux-x64.AppImage',
+        'TallyIsle-Linux-x64.flatpak',
+        'TallyIsle-Linux-x64-portable.tar.gz',
+        'TallyIsle-macOS.dmg',
+        'TallyIsle-macOS.pkg',
+        'TallyIsle-macOS-portable.zip',
         'TallyIsle-iOS-unsigned.ipa',
+        'SHA256SUMS.txt',
       ]) {
         expect(
           content,

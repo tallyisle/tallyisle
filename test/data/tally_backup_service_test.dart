@@ -15,6 +15,7 @@ import 'package:tallyisle/data/backup/webdav_client.dart';
 import 'package:tallyisle/data/db/database.dart';
 import 'package:tallyisle/data/reminder/reminder_service.dart';
 import 'package:tallyisle/data/repo/ledger_queries.dart';
+import 'package:tallyisle/domain/rules/cloud_sync_rules.dart';
 import 'package:tallyisle/domain/rules/tally_backup.dart';
 import 'package:tallyisle/platform/files.dart';
 import 'package:tallyisle/platform/notifications.dart';
@@ -1114,4 +1115,307 @@ void main() {
       },
     );
   });
+
+  group(
+    'External backup directory binding, migration, reinstall recovery, and fallback',
+    () {
+      test(
+        'migrates sandbox .tally/conflict files on bind, writes auto/conflict backups & prunes routine only, survives reinstall, and falls back to sandbox on unplugged drive',
+        () async {
+          final tempRoot = await Directory.systemTemp.createTemp(
+            'tally_ext_service_',
+          );
+          final server = await _LoopbackWebDavServer.start();
+          var now = 1764000000000;
+          final db1 = AppDatabase(NativeDatabase.memory(), nowMs: () => now);
+          addTearDown(() async {
+            await server.close();
+            await db1.close();
+            if (await tempRoot.exists()) {
+              await tempRoot.delete(recursive: true);
+            }
+          });
+
+          await _seedAll22Tables(db1);
+          final sandboxDir1 = Directory(p.join(tempRoot.path, 'sandbox_1'));
+          final attDir1 = Directory(p.join(tempRoot.path, 'att_1'));
+          final externalDir1 = Directory(p.join(tempRoot.path, 'external_1'));
+          final externalDir2 = Directory(p.join(tempRoot.path, 'external_2'));
+          await externalDir1.create(recursive: true);
+          await externalDir2.create(recursive: true);
+
+          var cancelPicker = false;
+          var currentPickedDir = externalDir1;
+          final fileAccess = FileAccess(
+            onPickBackupDirectory: (_) async {
+              if (cancelPicker) {
+                throw const Failure(FailureCode.cancelled, '已取消选择备份目录');
+              }
+              return ExternalBackupDirBinding(
+                mode: ExternalBackupDirMode.path,
+                locator: currentPickedDir.path,
+                displayPath: currentPickedDir.path,
+                boundAtMs: now,
+              );
+            },
+          );
+
+          final service1 = TallyBackupService(
+            db1,
+            reminderService: ReminderService(
+              db1,
+              scheduler: InMemoryReminderScheduler(),
+            ),
+            localBackupsDirectoryProvider: () async => sandboxDir1,
+            attachmentsDirectoryProvider: () async => attDir1,
+            fileAccess: fileAccess,
+          );
+          expect(service1.hasCustomLocalDirOverride, isTrue);
+
+          // 1. Pre-populate legacy sandbox with 1 routine backup + 1 conflict archive
+          await service1.createLocalBackup(
+            customFileName: 'backup_20261120_080000.tally',
+          );
+          await service1.createLocalBackup(
+            customFileName: 'conflict_olddev_20261120_090000.tally',
+          );
+          expect(
+            await File(
+              p.join(sandboxDir1.path, 'backup_20261120_080000.tally'),
+            ).exists(),
+            isTrue,
+          );
+
+          // 2. Cancelling picker throws FailureCode.cancelled and leaves binding null
+          cancelPicker = true;
+          await expectLater(
+            service1.bindExternalBackupDirectory(),
+            throwsA(
+              isA<Failure>().having(
+                (f) => f.code,
+                'code',
+                FailureCode.cancelled,
+              ),
+            ),
+          );
+          expect(await service1.getExternalBackupDirBinding(), isNull);
+          cancelPicker = false;
+
+          // 3. Binding externalDir1 migrates both sandbox .tally files into externalDir1!
+          final bound = await service1.bindExternalBackupDirectory();
+          expect(bound.locator, externalDir1.path);
+          expect(await service1.getExternalBackupNeedsRebind(), isFalse);
+          expect(
+            await File(
+              p.join(externalDir1.path, 'backup_20261120_080000.tally'),
+            ).exists(),
+            isTrue,
+          );
+          expect(
+            await File(
+              p.join(
+                externalDir1.path,
+                'conflict_olddev_20261120_090000.tally',
+              ),
+            ).exists(),
+            isTrue,
+          );
+
+          // 4. Configure keepCount = 2 + all 4 triggers; verify auto-backups & pruning
+          // target externalDir1 while NEVER deleting conflict_*.tally!
+          await service1.saveLocalAutoBackupPolicy(
+            const LocalAutoBackupPolicy(
+              keepCount: 2,
+              backupOnStartup: true,
+              backupOnExit: true,
+              backupOnIdle: true,
+              backupOnSchedule: true,
+              scheduleIntervalMinutes: 30,
+            ),
+          );
+
+          for (final (idx, trigger)
+              in AutoTriggerSource.values
+                  .where((t) => t != AutoTriggerSource.schedule)
+                  .indexed) {
+            now += 60 * 1000;
+            await db1
+                .into(db1.notes)
+                .insert(
+                  NotesCompanion.insert(
+                    title: Value('触发便签 $idx'),
+                    content: '内容 $idx',
+                    createTime: now,
+                    updateTime: now,
+                  ),
+                );
+            final autoSaved = await service1.runLocalAutoBackupForTrigger(
+              trigger,
+            );
+            expect(autoSaved, isNotNull);
+          }
+
+          final listedInExt1 = await service1.listLocalBackups();
+          final ext1Routine = listedInExt1
+              .where((e) => !isConflictBackupFileName(e.fileName))
+              .toList();
+          final ext1Conflicts = listedInExt1
+              .where((e) => isConflictBackupFileName(e.fileName))
+              .toList();
+          expect(ext1Routine, hasLength(2)); // pruned to keepCount = 2
+          expect(ext1Conflicts, hasLength(1)); // conflict_* preserved!
+
+          // 5. Simulate Cloud Sync conflict -> conflict_*.tally written into externalDir1!
+          final davCfg = WebDavConfig(
+            serverUrl: server.baseUrl,
+            username: server.expectedUser,
+            password: server.expectedPass,
+            remoteDirectory: '/TallySyncExt',
+          );
+          await service1.saveWebDavConfig(davCfg);
+          await service1.setCloudBackend(CloudBackendType.webdav);
+          await service1.syncNow(); // push r1
+
+          // Another device pushes r2 directly to remote store
+          final dbOther = AppDatabase(
+            NativeDatabase.memory(),
+            nowMs: () => now + 5000,
+          );
+          addTearDown(dbOther.close);
+          await dbOther
+              .into(dbOther.notes)
+              .insert(
+                NotesCompanion.insert(
+                  title: const Value('远端并发改动'),
+                  content: 'Device B',
+                  createTime: now + 5000,
+                  updateTime: now + 5000,
+                ),
+              );
+          final serviceOther = TallyBackupService(
+            dbOther,
+            reminderService: ReminderService(
+              dbOther,
+              scheduler: InMemoryReminderScheduler(),
+            ),
+          );
+          await serviceOther.saveWebDavConfig(davCfg);
+          await serviceOther.saveCloudSyncSettings(
+            const CloudSyncSettings(
+              backend: CloudBackendType.webdav,
+              explicitBackend: true,
+              deviceId: 'devB',
+              deviceName: 'Device B',
+            ),
+          );
+          await serviceOther.syncNow(
+            resolution: SyncConflictResolution.useLocal,
+          );
+
+          // Mutate db1 locally as well -> syncNow triggers conflict!
+          now += 10000;
+          await db1
+              .into(db1.notes)
+              .insert(
+                NotesCompanion.insert(
+                  title: const Value('本机并发改动'),
+                  content: 'Device A',
+                  createTime: now,
+                  updateTime: now,
+                ),
+              );
+          final conflictOutcome = await service1.syncNow();
+          expect(conflictOutcome.status, CloudSyncStatus.conflict);
+          expect(conflictOutcome.conflictBackupFileName, isNotNull);
+          expect(
+            await File(
+              p.join(
+                externalDir1.path,
+                conflictOutcome.conflictBackupFileName!,
+              ),
+            ).exists(),
+            isTrue,
+          );
+
+          // 6. Simulate App UNINSTALL + REINSTALL (brand-new empty DB & empty sandbox)
+          // Re-selecting externalDir1 immediately discovers all historical .tally files
+          // with parsed manifest row counts and restores 100% of user data!
+          final dbReinstalled = AppDatabase(
+            NativeDatabase.memory(),
+            nowMs: () => now + 20000,
+          );
+          addTearDown(dbReinstalled.close);
+          final freshSandbox = Directory(
+            p.join(tempRoot.path, 'fresh_reinstall_sandbox'),
+          );
+          final serviceReinstalled = TallyBackupService(
+            dbReinstalled,
+            reminderService: ReminderService(
+              dbReinstalled,
+              scheduler: InMemoryReminderScheduler(),
+            ),
+            localBackupsDirectoryProvider: () async => freshSandbox,
+            attachmentsDirectoryProvider: () async =>
+                Directory(p.join(tempRoot.path, 'fresh_att')),
+            fileAccess: fileAccess,
+          );
+          expect(
+            await dbReinstalled.select(dbReinstalled.notes).get(),
+            isEmpty,
+          );
+
+          await serviceReinstalled.bindExternalBackupDirectory();
+          final recoveredList = await serviceReinstalled.listLocalBackups();
+          expect(recoveredList.length, greaterThanOrEqualTo(4));
+          expect(recoveredList.first.manifest, isNotNull);
+          expect(recoveredList.first.manifest!.totalRows, greaterThan(0));
+
+          await serviceReinstalled.restoreLocalBackup(
+            conflictOutcome.conflictBackupFileName!,
+          );
+          final restoredNotes = await dbReinstalled
+              .select(dbReinstalled.notes)
+              .get();
+          expect(restoredNotes.any((n) => n.title == '本机并发改动'), isTrue);
+
+          // 7. Unplugged drive / inaccessible externalDir1 -> background auto-backup
+          // falls back cleanly to sandbox and sets needsRebind = true (ZERO data loss!),
+          // and re-binding externalDir2 migrates fallback files & clears needsRebind!
+          await externalDir1.delete(recursive: true);
+          now += 40 * 60 * 1000;
+          await db1
+              .into(db1.notes)
+              .insert(
+                NotesCompanion.insert(
+                  title: const Value('拔盘后便签'),
+                  content: '沙盒兜底不丢数据',
+                  createTime: now,
+                  updateTime: now,
+                ),
+              );
+          final fallbackSaved = await service1.runLocalAutoBackupForTrigger(
+            AutoTriggerSource.schedule,
+          );
+          expect(fallbackSaved, isNotNull);
+          expect(await service1.getExternalBackupNeedsRebind(), isTrue);
+          expect(
+            await File(
+              p.join(sandboxDir1.path, fallbackSaved!.fileName),
+            ).exists(),
+            isTrue,
+          );
+
+          currentPickedDir = externalDir2;
+          await service1.bindExternalBackupDirectory();
+          expect(await service1.getExternalBackupNeedsRebind(), isFalse);
+          expect(
+            await File(
+              p.join(externalDir2.path, fallbackSaved.fileName),
+            ).exists(),
+            isTrue,
+          );
+        },
+      );
+    },
+  );
 }

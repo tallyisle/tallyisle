@@ -273,3 +273,198 @@ List<MonthFlowGroup<T>> groupRecordsByMonth<T>({
   flush();
   return groups;
 }
+
+/// A natural calendar month window (`YYYY-MM-01 00:00:00.000` through
+/// `YYYY-MM-lastDay 23:59:59.999`).
+final class NaturalMonthPeriod {
+  const NaturalMonthPeriod({required this.year, required this.month})
+    : assert(month >= 1 && month <= 12);
+
+  final int year;
+  final int month;
+
+  /// Inclusive start of the calendar month (`00:00:00.000`).
+  DateTime get start => DateTime(year, month, 1, 0, 0, 0, 0);
+
+  /// Inclusive end of the calendar month (`23:59:59.999` on the last day).
+  DateTime get end => DateTime(year, month + 1, 0, 23, 59, 59, 999);
+
+  int get startMs => start.millisecondsSinceEpoch;
+  int get endMs => end.millisecondsSinceEpoch;
+
+  bool contains(int epochMs) => epochMs >= startMs && epochMs <= endMs;
+
+  NaturalMonthPeriod previous() => month == 1
+      ? NaturalMonthPeriod(year: year - 1, month: 12)
+      : NaturalMonthPeriod(year: year, month: month - 1);
+
+  NaturalMonthPeriod next() => month == 12
+      ? NaturalMonthPeriod(year: year + 1, month: 1)
+      : NaturalMonthPeriod(year: year, month: month + 1);
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is NaturalMonthPeriod && year == other.year && month == other.month;
+
+  @override
+  int get hashCode => Object.hash(year, month);
+
+  @override
+  String toString() => 'NaturalMonthPeriod($year-$month)';
+}
+
+/// A single natural-month statement summary for a fund account.
+final class FundMonthlyStatementItem {
+  const FundMonthlyStatementItem({
+    required this.period,
+    required this.inflow,
+    required this.outflow,
+    required this.endingBalance,
+    required this.recordCount,
+    required this.isCurrentMonth,
+    required this.isFutureUnstarted,
+  });
+
+  final NaturalMonthPeriod period;
+  final BigInt inflow;
+  final BigInt outflow;
+
+  /// Net balance change during [period] (`inflow - outflow`).
+  BigInt get netDelta => inflow - outflow;
+
+  /// Account balance at [period.endMs], or `null` for future unstarted months
+  /// with zero records and zero records after them (rendered as `'—'`).
+  final BigInt? endingBalance;
+
+  final int recordCount;
+  final bool isCurrentMonth;
+  final bool isFutureUnstarted;
+}
+
+/// Computes natural-month statements (`12..1`, newest-first) for [selectedYear]
+/// by walking backward from [currentBalance] in O(N + 12).
+///
+/// [records] must be sorted newest-first (`record_time DESC, record_id DESC`).
+/// Uses [recordForwardDelta] & [selectReconAmount] so every month's ending
+/// balance and inflow/outflow match [computeReconciliationBalances] and
+/// multi-currency `sc/ac/bc` snapshots 100%.
+List<FundMonthlyStatementItem> calculateFundMonthlyStatements({
+  required BigInt currentBalance,
+  required int accountId,
+  String? accountCurrency,
+  required List<ReconRecord> records,
+  required int selectedYear,
+  required DateTime today,
+}) {
+  final todayDate = DateTime(today.year, today.month, today.day);
+  var running = currentBalance;
+  var idx = 0;
+
+  // Roll back all records strictly newer than the end of selectedYear.
+  final yearEndMs = NaturalMonthPeriod(year: selectedYear, month: 12).endMs;
+  while (idx < records.length && records[idx].recordTime > yearEndMs) {
+    running -= recordForwardDelta(
+      record: records[idx],
+      accountId: accountId,
+      accountCurrency: accountCurrency,
+    );
+    idx++;
+  }
+
+  final items = <FundMonthlyStatementItem>[];
+  for (var m = 12; m >= 1; m--) {
+    final period = NaturalMonthPeriod(year: selectedYear, month: m);
+    final startMs = period.startMs;
+    final endMs = period.endMs;
+
+    // Guard against any records still newer than this month's endMs.
+    while (idx < records.length && records[idx].recordTime > endMs) {
+      running -= recordForwardDelta(
+        record: records[idx],
+        accountId: accountId,
+        accountCurrency: accountCurrency,
+      );
+      idx++;
+    }
+
+    // Because records are sorted newest-first, any index < idx strictly
+    // occurred after period.endMs.
+    final hasRecordsAfter = idx > 0;
+    final balanceAtMonthEnd = running;
+
+    var inflow = BigInt.zero;
+    var outflow = BigInt.zero;
+    var recordCount = 0;
+
+    while (idx < records.length && records[idx].recordTime >= startMs) {
+      final r = records[idx];
+      final delta = recordForwardDelta(
+        record: r,
+        accountId: accountId,
+        accountCurrency: accountCurrency,
+      );
+      if (delta > BigInt.zero) {
+        inflow += delta;
+      } else if (delta < BigInt.zero) {
+        outflow += -delta;
+      }
+      running -= delta;
+      recordCount++;
+      idx++;
+    }
+
+    final isCurrentMonth = selectedYear == today.year && m == today.month;
+    final isFutureUnstarted = DateTime(selectedYear, m, 1).isAfter(todayDate);
+    final endingBalance =
+        isFutureUnstarted && recordCount == 0 && !hasRecordsAfter
+        ? null
+        : balanceAtMonthEnd;
+
+    items.add(
+      FundMonthlyStatementItem(
+        period: period,
+        inflow: inflow,
+        outflow: outflow,
+        endingBalance: endingBalance,
+        recordCount: recordCount,
+        isCurrentMonth: isCurrentMonth,
+        isFutureUnstarted: isFutureUnstarted,
+      ),
+    );
+  }
+
+  return items;
+}
+
+/// Filters [statements] by hiding empty `0-record` months (both past and future
+/// unstarted) unless [includeEmpty] is `true`.
+///
+/// The current calendar month (`item.isCurrentMonth`) is ALWAYS kept visible
+/// even when its `recordCount == 0`.
+({List<FundMonthlyStatementItem> visible, int hiddenEmptyCount})
+filterVisibleFundMonthlyStatements({
+  required List<FundMonthlyStatementItem> statements,
+  required DateTime today,
+  bool includeEmpty = false,
+}) {
+  var hiddenEmptyCount = 0;
+  final visible = <FundMonthlyStatementItem>[];
+
+  for (final item in statements) {
+    final isCurrent =
+        item.isCurrentMonth ||
+        (item.period.year == today.year && item.period.month == today.month);
+    final isFoldableEmpty = !isCurrent && item.recordCount == 0;
+    if (isFoldableEmpty) {
+      hiddenEmptyCount++;
+      if (includeEmpty) {
+        visible.add(item);
+      }
+    } else {
+      visible.add(item);
+    }
+  }
+
+  return (visible: visible, hiddenEmptyCount: hiddenEmptyCount);
+}

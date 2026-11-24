@@ -1,0 +1,60 @@
+{
+  "app-id": "dev.tallyisle.rebuild",
+  "runtime": "org.gnome.Platform",
+  "runtime-version": "47",
+  "sdk": "org.gnome.Sdk",
+  "command": "tallyisle",
+  "finish-args": [
+    "--share=ipc",
+    "--socket=fallback-x11",
+    "--socket=wayland",
+    "--device=dri",
+    "--share=network",
+    "--filesystem=xdg-download",
+    "--filesystem=xdg-documents"
+  ],
+  "build-options": {
+    "strip": false,
+    "no-debuginfo": true
+  },
+  "modules": [
+    {
+      "name": "tallyisle",
+      "buildsystem": "simple",
+      "build-commands": [
+        "mkdir -p /app/tallyisle /app/bin",
+        "cp -a bundle/. /app/tallyisle/",
+        "chmod +x /app/tallyisle/tallyisle",
+        "ln -sf /app/tallyisle/tallyisle /app/bin/tallyisle",
+        "install -Dm644 dev.tallyisle.rebuild.desktop /app/share/applications/dev.tallyisle.rebuild.desktop",
+        "install -Dm644 dev.tallyisle.rebuild.metainfo.xml /app/share/metainfo/dev.tallyisle.rebuild.metainfo.xml",
+        "install -Dm644 dev.tallyisle.rebuild.mime.xml /app/share/mime/packages/dev.tallyisle.rebuild.mime.xml",
+        "for s in 16 32 64 128 256 512; do install -Dm644 icons/app_icon_${s}.png /app/share/icons/hicolor/${s}x${s}/apps/dev.tallyisle.rebuild.png; done"
+      ],
+      "sources": [
+        {
+          "type": "dir",
+          "path": "../../../build/linux/x64/release/bundle",
+          "dest": "bundle"
+        },
+        {
+          "type": "dir",
+          "path": "../../../macos/Runner/Assets.xcassets/AppIcon.appiconset",
+          "dest": "icons"
+        },
+        {
+          "type": "file",
+          "path": "dev.tallyisle.rebuild.desktop"
+        },
+        {
+          "type": "file",
+          "path": "dev.tallyisle.rebuild.metainfo.xml"
+        },
+        {
+          "type": "file",
+          "path": "dev.tallyisle.rebuild.mime.xml"
+        }
+      ]
+    }
+  ]
+}

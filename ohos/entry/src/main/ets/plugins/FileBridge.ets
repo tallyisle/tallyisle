@@ -40,6 +40,14 @@ function sanitizeFileName(raw: string, fallback: string): string {
   return normalized;
 }
 
+function normalizeDirectoryPath(rawPath: string): string {
+  let clean: string = rawPath.trim();
+  while (clean.length > 1 && clean.endsWith('/')) {
+    clean = clean.substring(0, clean.length - 1);
+  }
+  return clean;
+}
+
 function extractExtension(fileName: string): string {
   const dotIndex: number = fileName.lastIndexOf('.');
   if (dotIndex < 0 || dotIndex === fileName.length - 1) {
@@ -126,6 +134,24 @@ export class FileBridge implements MethodCallHandler {
       case 'openExternalUrl':
         this.handleOpenExternalUrl(call, result);
         break;
+      case 'pickBackupDirectory':
+        this.handlePickBackupDirectory(result);
+        break;
+      case 'checkDirectoryAccessible':
+        this.handleCheckDirectoryAccessible(call, result);
+        break;
+      case 'listDirectoryBackups':
+        this.handleListDirectoryBackups(call, result);
+        break;
+      case 'writeDirectoryBackup':
+        this.handleWriteDirectoryBackup(call, result);
+        break;
+      case 'readDirectoryBackup':
+        this.handleReadDirectoryBackup(call, result);
+        break;
+      case 'deleteDirectoryBackup':
+        this.handleDeleteDirectoryBackup(call, result);
+        break;
       default:
         result.notImplemented();
         break;
@@ -184,6 +210,210 @@ export class FileBridge implements MethodCallHandler {
       Log.e(TAG, 'DocumentViewPicker.save failed: ' + JSON.stringify(err));
       result.error(ERROR_IO, '文件未完成保存', null);
     });
+  }
+
+  private handlePickBackupDirectory(result: MethodResult): void {
+    const saveOptions: picker.DocumentSaveOptions = new picker.DocumentSaveOptions();
+    saveOptions.pickerMode = picker.DocumentSaveMode.DOWNLOAD;
+
+    let documentPicker: picker.DocumentViewPicker;
+    try {
+      documentPicker = new picker.DocumentViewPicker(this.context);
+    } catch (err) {
+      Log.e(TAG, 'Failed to create DocumentViewPicker for DOWNLOAD: ' + JSON.stringify(err));
+      result.error(ERROR_UNAVAILABLE, '无法打开系统下载目录授权', null);
+      return;
+    }
+
+    documentPicker.save(saveOptions).then((uris: Array<string>): void => {
+      if (!uris || uris.length === 0 || uris[0].length === 0) {
+        result.error(ERROR_CANCELLED, '已取消选择备份目录', null);
+        return;
+      }
+      try {
+        const dirPath: string = normalizeDirectoryPath(new fileUri.FileUri(uris[0]).path);
+        if (dirPath.length === 0) {
+          result.error(ERROR_IO, '未能解析公共下载目录路径', null);
+          return;
+        }
+        if (!fs.accessSync(dirPath)) {
+          fs.mkdirSync(dirPath);
+        }
+        const binding: Record<string, string> = {
+          'mode': 'ohosDownload',
+          'locator': dirPath,
+          'displayPath': '文件管理 / 下载 / 帐屿',
+        };
+        result.success(binding);
+      } catch (ioErr) {
+        Log.e(TAG, 'Failed resolving DOWNLOAD backup directory: ' + JSON.stringify(ioErr));
+        result.error(ERROR_IO, '无法准备公共下载备份目录', null);
+      }
+    }).catch((err: Error): void => {
+      Log.e(TAG, 'DocumentViewPicker DOWNLOAD save failed: ' + JSON.stringify(err));
+      result.error(ERROR_IO, '无法绑定公共下载备份目录', null);
+    });
+  }
+
+  private handleCheckDirectoryAccessible(call: MethodCall, result: MethodResult): void {
+    const locatorArg: Any = call.argument('locator');
+    const dirPath: string = typeof locatorArg === 'string' ? normalizeDirectoryPath(locatorArg) : '';
+    if (dirPath.length === 0) {
+      result.success(false);
+      return;
+    }
+    try {
+      if (!fs.accessSync(dirPath)) {
+        result.success(false);
+        return;
+      }
+      const stat: fs.Stat = fs.statSync(dirPath);
+      result.success(stat.isDirectory());
+    } catch (_err) {
+      result.success(false);
+    }
+  }
+
+  private handleListDirectoryBackups(call: MethodCall, result: MethodResult): void {
+    const locatorArg: Any = call.argument('locator');
+    const dirPath: string = typeof locatorArg === 'string' ? normalizeDirectoryPath(locatorArg) : '';
+    if (dirPath.length === 0) {
+      result.error(ERROR_INVALID_ARGS, '缺少目录定位标识', null);
+      return;
+    }
+    try {
+      if (!fs.accessSync(dirPath)) {
+        result.error(ERROR_IO, '外部备份目录不存在或不可访问', null);
+        return;
+      }
+      const entries: Array<string> = fs.listFileSync(dirPath);
+      const items: Array<Record<string, Object>> = [];
+      for (let i: number = 0; i < entries.length; i++) {
+        const name: string = entries[i];
+        if (name.toLowerCase().endsWith('.tmp')) {
+          continue;
+        }
+        const childPath: string = dirPath + '/' + name;
+        try {
+          const stat: fs.Stat = fs.statSync(childPath);
+          if (stat.isFile()) {
+            const item: Record<string, Object> = {
+              'fileName': name,
+              'sizeBytes': stat.size,
+              'modifiedAtMs': Math.floor(stat.mtime * 1000),
+            };
+            items.push(item);
+          }
+        } catch (_ignoreChild) {
+          // Ignore transient stat failure on individual child entry.
+        }
+      }
+      result.success(items);
+    } catch (err) {
+      Log.e(TAG, 'listDirectoryBackups failed: ' + JSON.stringify(err));
+      result.error(ERROR_IO, '无法读取外部备份目录', null);
+    }
+  }
+
+  private handleWriteDirectoryBackup(call: MethodCall, result: MethodResult): void {
+    const locatorArg: Any = call.argument('locator');
+    const dirPath: string = typeof locatorArg === 'string' ? normalizeDirectoryPath(locatorArg) : '';
+    const nameArg: Any = call.argument('fileName');
+    const rawName: string = typeof nameArg === 'string' ? nameArg : '';
+    const safeName: string = sanitizeFileName(rawName, '');
+    const bytesArg: Any = call.argument('bytes');
+    if (dirPath.length === 0 || safeName.length === 0 || !(bytesArg instanceof Uint8Array)) {
+      result.error(ERROR_INVALID_ARGS, '写入外部备份目录参数无效', null);
+      return;
+    }
+    const bytes: Uint8Array = bytesArg as Uint8Array;
+    const tmpPath: string = dirPath + '/' + safeName + '.tmp';
+    const finalPath: string = dirPath + '/' + safeName;
+    try {
+      if (!fs.accessSync(dirPath)) {
+        result.error(ERROR_IO, '外部备份目录不存在或不可访问', null);
+        return;
+      }
+      const slice: ArrayBuffer = bytes.buffer.slice(
+        bytes.byteOffset,
+        bytes.byteOffset + bytes.byteLength
+      );
+      const outFile: fs.File = fs.openSync(
+        tmpPath,
+        fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.TRUNC
+      );
+      try {
+        fs.writeSync(outFile.fd, slice);
+        fs.fsyncSync(outFile.fd);
+      } finally {
+        fs.closeSync(outFile);
+      }
+      fs.renameSync(tmpPath, finalPath);
+      result.success(null);
+    } catch (err) {
+      try {
+        if (fs.accessSync(tmpPath)) {
+          fs.unlinkSync(tmpPath);
+        }
+      } catch (_cleanupErr) {
+        // Ignore temp file cleanup error.
+      }
+      Log.e(TAG, 'writeDirectoryBackup failed: ' + JSON.stringify(err));
+      result.error(ERROR_IO, '写入外部备份文件失败', null);
+    }
+  }
+
+  private handleReadDirectoryBackup(call: MethodCall, result: MethodResult): void {
+    const locatorArg: Any = call.argument('locator');
+    const dirPath: string = typeof locatorArg === 'string' ? normalizeDirectoryPath(locatorArg) : '';
+    const nameArg: Any = call.argument('fileName');
+    const rawName: string = typeof nameArg === 'string' ? nameArg : '';
+    const safeName: string = sanitizeFileName(rawName, '');
+    if (dirPath.length === 0 || safeName.length === 0) {
+      result.error(ERROR_INVALID_ARGS, '读取外部备份文件参数无效', null);
+      return;
+    }
+    const targetPath: string = dirPath + '/' + safeName;
+    try {
+      if (!fs.accessSync(targetPath)) {
+        result.error(ERROR_IO, '外部备份文件不存在', null);
+        return;
+      }
+      const stat: fs.Stat = fs.statSync(targetPath);
+      const buffer: ArrayBuffer = new ArrayBuffer(stat.size);
+      const inFile: fs.File = fs.openSync(targetPath, fs.OpenMode.READ_ONLY);
+      try {
+        fs.readSync(inFile.fd, buffer);
+      } finally {
+        fs.closeSync(inFile);
+      }
+      result.success(new Uint8Array(buffer));
+    } catch (err) {
+      Log.e(TAG, 'readDirectoryBackup failed: ' + JSON.stringify(err));
+      result.error(ERROR_IO, '读取外部备份文件失败', null);
+    }
+  }
+
+  private handleDeleteDirectoryBackup(call: MethodCall, result: MethodResult): void {
+    const locatorArg: Any = call.argument('locator');
+    const dirPath: string = typeof locatorArg === 'string' ? normalizeDirectoryPath(locatorArg) : '';
+    const nameArg: Any = call.argument('fileName');
+    const rawName: string = typeof nameArg === 'string' ? nameArg : '';
+    const safeName: string = sanitizeFileName(rawName, '');
+    if (dirPath.length === 0 || safeName.length === 0) {
+      result.error(ERROR_INVALID_ARGS, '删除外部备份文件参数无效', null);
+      return;
+    }
+    const targetPath: string = dirPath + '/' + safeName;
+    try {
+      if (fs.accessSync(targetPath)) {
+        fs.unlinkSync(targetPath);
+      }
+      result.success(null);
+    } catch (err) {
+      Log.e(TAG, 'deleteDirectoryBackup failed: ' + JSON.stringify(err));
+      result.error(ERROR_IO, '删除外部备份文件失败', null);
+    }
   }
 
   private handleShareBytes(call: MethodCall, result: MethodResult): void {

@@ -10,6 +10,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:tallyisle/app/adaptive.dart';
 import 'package:tallyisle/app/providers.dart';
+import 'package:tallyisle/core/failure.dart';
 import 'package:tallyisle/data/backup/tally_backup_service.dart';
 import 'package:tallyisle/data/backup/webdav_client.dart';
 import 'package:tallyisle/data/db/database.dart';
@@ -17,6 +18,7 @@ import 'package:tallyisle/data/reminder/reminder_service.dart';
 import 'package:tallyisle/domain/rules/cloud_sync_rules.dart';
 import 'package:tallyisle/features/backup/backup_page.dart';
 import 'package:tallyisle/features/backup/backup_providers.dart';
+import 'package:tallyisle/features/backup/mobile_sync_backup_quick_sheet.dart';
 import 'package:tallyisle/features/reminder/reminder_providers.dart';
 import 'package:tallyisle/platform/files.dart';
 import 'package:tallyisle/platform/notifications.dart';
@@ -802,6 +804,333 @@ void main() {
 
       await tester.tap(find.byKey(const Key('backup_history_close_button')));
       await settle(tester);
+
+      await tester.pumpWidget(const SizedBox());
+      await settle(tester);
+      await tester.pump(const Duration(seconds: 1));
+    },
+  );
+
+  testWidgets(
+    'External backup directory banner, first-tap bind UX (BackupPage + QuickSheet + MeQuickCard), needsRebind recovery, and responsive viewports have zero layout errors',
+    (tester) async {
+      HttpOverrides.global = null;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+      tester.view.devicePixelRatio = 1.0;
+      tester.view.physicalSize = const Size(360, 640);
+
+      late final AppDatabase db;
+      await tester.runAsync(() async {
+        db = AppDatabase(NativeDatabase.memory());
+      });
+      final scheduler = InMemoryReminderScheduler();
+      final tempRoot = (await tester.runAsync(
+        () => Directory.systemTemp.createTemp('tally_widget_ext_dir_'),
+      ))!;
+      final extDir1 = Directory(p.join(tempRoot.path, 'ext_1'));
+      final extDir2 = Directory(p.join(tempRoot.path, 'ext_2'));
+      final supportRoot = Directory(p.join(tempRoot.path, 'headless_support'));
+      final attDir = Directory(p.join(tempRoot.path, 'att'));
+      TallyBackupService.setHeadlessSupportRootForTest(supportRoot);
+      await tester.runAsync(() async {
+        await extDir1.create(recursive: true);
+        await extDir2.create(recursive: true);
+        await supportRoot.create(recursive: true);
+      });
+
+      addTearDown(() async {
+        TallyBackupService.setHeadlessSupportRootForTest(null);
+        await tester.pumpWidget(const SizedBox());
+        await scheduler.dispose();
+        await tester.runAsync(db.close);
+        await tester.runAsync(() async {
+          if (await tempRoot.exists()) {
+            await tempRoot.delete(recursive: true);
+          }
+        });
+      });
+
+      var cancelPicker = true;
+      var activeExtDir = extDir1;
+      String? openedDirLocator;
+
+      final fakeFileAccess = FileAccess(
+        onPickBackupDirectory: (_) async {
+          if (cancelPicker) {
+            throw const Failure(FailureCode.cancelled, '已取消选择备份目录');
+          }
+          return ExternalBackupDirBinding(
+            mode: ExternalBackupDirMode.path,
+            locator: activeExtDir.path,
+            displayPath: '内部存储/Download/TallyBackups',
+            boundAtMs: 1764000000000,
+          );
+        },
+        onOpenBackupDirectory: (binding) async {
+          openedDirLocator = binding.locator;
+        },
+      );
+
+      // Note: Do NOT override backupLocalDirectoryOverrideProvider so
+      // `!service.hasCustomLocalDirOverride` exercises real first-tap bind UX!
+      Widget buildResponsiveBackupPage({
+        required Size size,
+        required bool isDesktop,
+        double textScale = 1.0,
+      }) {
+        return ProviderScope(
+          key: ValueKey<String>(
+            'ext_scope_${size.width}x${size.height}_$isDesktop',
+          ),
+          retry: (_, _) => null,
+          overrides: [
+            desktopModeOverrideProvider.overrideWithValue(isDesktop),
+            databaseProvider.overrideWith((ref) async => db),
+            reminderSchedulerProvider.overrideWithValue(scheduler),
+            backupFileAccessProvider.overrideWithValue(fakeFileAccess),
+            backupAttachmentsDirectoryOverrideProvider.overrideWithValue(
+              () async => attDir,
+            ),
+          ],
+          child: DesktopAdaptiveScope(
+            isDesktop: isDesktop,
+            child: MediaQuery(
+              data: MediaQueryData(
+                size: size,
+                textScaler: TextScaler.linear(textScale),
+              ),
+              child: const MaterialApp(home: BackupPage()),
+            ),
+          ),
+        );
+      }
+
+      // 1. Mobile 360x640 @ 1.2x text scale: unbound state + first-tap cancel -> clean no-op
+      await tester.pumpWidget(
+        buildResponsiveBackupPage(
+          size: const Size(360, 640),
+          isDesktop: false,
+          textScale: 1.2,
+        ),
+      );
+      await settle(tester);
+      expect(tester.takeException(), isNull);
+      expect(
+        find.byKey(const Key('external_backup_dir_banner')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('bind_external_backup_dir_button')),
+        findsOneWidget,
+      );
+
+      final createBtn = find.byKey(const Key('local_backup_create_button'));
+      await tester.ensureVisible(createBtn);
+      await settle(tester);
+      await tester.tap(createBtn);
+      await settle(tester);
+      expect(tester.takeException(), isNull);
+      // Cancelled picker: no error SnackBar and still unbound with 0 backups!
+      expect(find.textContaining('取消'), findsNothing);
+      expect(
+        find.byKey(const Key('bind_external_backup_dir_button')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const Key('local_backups_empty')), findsOneWidget);
+
+      // 2. Confirming directory picker on first tap of `local_backup_create_button`
+      // binds external folder AND immediately writes .tally into extDir1!
+      cancelPicker = false;
+      await tester.tap(createBtn);
+      await settle(tester);
+      expect(tester.takeException(), isNull);
+      expect(
+        find.textContaining('外部安全目录：内部存储/Download/TallyBackups（卸载 App 不丢失）'),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('change_external_backup_dir_button')),
+        findsOneWidget,
+      );
+      final ext1Files = await tester.runAsync(
+        () => extDir1.list().where((e) => e.path.endsWith('.tally')).length,
+      );
+      expect(ext1Files, 1);
+
+      // 3. Enable startup/focus auto-backup via UI switch, unplug/delete extDir1,
+      // and resume app -> auto-backup falls back to sandbox & sets needsRebind = true!
+      final startupSwitch = find.byKey(
+        const Key('local_backup_trigger_startup'),
+      );
+      await tester.ensureVisible(startupSwitch);
+      await settle(tester);
+      await tester.tap(startupSwitch);
+      await settle(tester);
+
+      await tester.runAsync(() async {
+        await extDir1.delete(recursive: true);
+        await db
+            .into(db.notes)
+            .insert(
+              NotesCompanion.insert(
+                title: const Value('沙盒回退便签'),
+                content: '拔出存储后自动保护',
+                createTime: 9000,
+                updateTime: 9000,
+              ),
+            );
+      });
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await settle(tester);
+      expect(tester.takeException(), isNull);
+      expect(
+        find.byKey(const Key('rebind_external_backup_dir_button')),
+        findsOneWidget,
+      );
+
+      // Rebind to extDir2 -> migrates sandbox fallback backup into extDir2 & clears error!
+      activeExtDir = extDir2;
+      final rebindBtn = find.byKey(
+        const Key('rebind_external_backup_dir_button'),
+      );
+      await tester.ensureVisible(rebindBtn);
+      await settle(tester);
+      await tester.tap(rebindBtn);
+      await settle(tester);
+      expect(tester.takeException(), isNull);
+      expect(
+        find.byKey(const Key('rebind_external_backup_dir_button')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const Key('change_external_backup_dir_button')),
+        findsOneWidget,
+      );
+      final ext2Files = await tester.runAsync(
+        () => extDir2.list().where((e) => e.path.endsWith('.tally')).length,
+      );
+      expect(ext2Files, greaterThanOrEqualTo(1));
+
+      // 4. Verify all 4 desktop probe viewports (`1280x800`, `1080x700`, `900x700`, `520x600`)
+      // render cleanly with zero RenderFlex overflows and `open_external_backup_dir_button` works!
+      for (final desktopSize in const <Size>[
+        Size(1280, 800),
+        Size(1080, 700),
+        Size(900, 700),
+        Size(520, 600),
+      ]) {
+        tester.view.physicalSize = desktopSize;
+        await tester.pumpWidget(
+          buildResponsiveBackupPage(size: desktopSize, isDesktop: true),
+        );
+        await settle(tester);
+        expect(
+          tester.takeException(),
+          isNull,
+          reason: 'Expected zero layout exceptions at $desktopSize',
+        );
+        expect(
+          find.byKey(const Key('open_external_backup_dir_button')),
+          findsOneWidget,
+        );
+      }
+
+      final openDirBtn = find.byKey(
+        const Key('open_external_backup_dir_button'),
+      );
+      await tester.ensureVisible(openDirBtn);
+      await settle(tester);
+      await tester.tap(openDirBtn);
+      await settle(tester);
+      expect(openedDirLocator, extDir2.path);
+
+      // 5. Verify QuickSheet (`quick_sheet_local_backup_button`) and `MobileMeSyncQuickCard`
+      // (`me-mobile-sync-quick-action`) first-tap UX when unbound!
+      final supportRootQuick = Directory(
+        p.join(tempRoot.path, 'headless_support_quick'),
+      );
+      final extQuickDir = Directory(p.join(tempRoot.path, 'ext_quick'));
+      late final AppDatabase dbQuick;
+      await tester.runAsync(() async {
+        await supportRootQuick.create(recursive: true);
+        await extQuickDir.create(recursive: true);
+        dbQuick = AppDatabase(NativeDatabase.memory());
+      });
+      TallyBackupService.setHeadlessSupportRootForTest(supportRootQuick);
+      addTearDown(() async {
+        await tester.pumpWidget(const SizedBox());
+        await tester.runAsync(dbQuick.close);
+      });
+      activeExtDir = extQuickDir;
+
+      tester.view.physicalSize = const Size(390, 844);
+      await tester.pumpWidget(
+        ProviderScope(
+          key: const ValueKey<String>('quick_sheet_ext_scope'),
+          retry: (_, _) => null,
+          overrides: [
+            databaseProvider.overrideWith((ref) async => dbQuick),
+            reminderSchedulerProvider.overrideWithValue(scheduler),
+            backupFileAccessProvider.overrideWithValue(fakeFileAccess),
+            backupAttachmentsDirectoryOverrideProvider.overrideWithValue(
+              () async => attDir,
+            ),
+          ],
+          child: MaterialApp(
+            home: Scaffold(
+              body: Builder(
+                builder: (ctx) => Column(
+                  children: [
+                    MobileMeSyncQuickCard(cardColor: Colors.grey.shade100),
+                    ElevatedButton(
+                      key: const Key('open_quick_sheet_trigger'),
+                      onPressed: () => showMobileSyncBackupQuickSheet(ctx),
+                      child: const Text('打开面板'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await settle(tester);
+
+      // Open QuickSheet -> first tap with cancelPicker = true stops cleanly without closing/error
+      cancelPicker = true;
+      await tester.tap(find.byKey(const Key('open_quick_sheet_trigger')));
+      await settle(tester);
+      await tester.tap(
+        find.byKey(const Key('quick_sheet_local_backup_button')),
+      );
+      await settle(tester);
+      expect(
+        find.byKey(const Key('mobile_sync_backup_quick_sheet')),
+        findsOneWidget,
+      );
+
+      // Confirm picker in QuickSheet -> binds extQuickDir and writes 1st .tally!
+      cancelPicker = false;
+      await tester.tap(
+        find.byKey(const Key('quick_sheet_local_backup_button')),
+      );
+      await settle(tester);
+      final quickFilesAfterSheet = await tester.runAsync(
+        () => extQuickDir.list().where((e) => e.path.endsWith('.tally')).length,
+      );
+      expect(quickFilesAfterSheet, 1);
+
+      // Tap `MobileMeSyncQuickCard` (`me-mobile-sync-quick-action`) -> writes 2nd .tally directly!
+      await tester.tap(find.byKey(const Key('me-mobile-sync-quick-action')));
+      await settle(tester);
+      final quickFilesAfterCard = await tester.runAsync(
+        () => extQuickDir.list().where((e) => e.path.endsWith('.tally')).length,
+      );
+      expect(quickFilesAfterCard, 2);
 
       await tester.pumpWidget(const SizedBox());
       await settle(tester);

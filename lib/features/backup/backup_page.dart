@@ -118,6 +118,8 @@ class _BackupPageState extends ConsumerState<BackupPage>
   void _refreshAfterBackupChange() {
     ref
       ..invalidate(localBackupsProvider)
+      ..invalidate(externalBackupDirBindingProvider)
+      ..invalidate(externalBackupNeedsRebindProvider)
       ..invalidate(webDavBackupsProvider)
       ..invalidate(s3BackupsProvider)
       ..invalidate(activeCloudBackupsProvider)
@@ -382,6 +384,48 @@ class _BackupPageState extends ConsumerState<BackupPage>
     }
   }
 
+  Future<void> _handleBindOrChangeExternalDir() async {
+    setState(() {
+      _busy = true;
+      _progressLabel = '正在绑定外部备份目录…';
+      _transferredBytes = 0;
+      _totalBytes = 0;
+    });
+    try {
+      final service = await ref.read(tallyBackupServiceProvider.future);
+      final fileAccess = ref.read(backupFileAccessProvider);
+      final binding = await service.bindExternalBackupDirectory(
+        fileAccess: fileAccess,
+      );
+      if (!mounted) return;
+      _refreshAfterBackupChange();
+      _showMessage('已绑定外部备份目录：${binding.displayPath}');
+    } on Failure catch (e) {
+      if (e.code != FailureCode.cancelled) {
+        _showMessage(e.message);
+      }
+    } catch (e) {
+      _showMessage(safeMessage(e));
+    } finally {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _progressLabel = null;
+        });
+      }
+    }
+  }
+
+  Future<void> _handleOpenExternalBackupDir() async {
+    try {
+      final service = await ref.read(tallyBackupServiceProvider.future);
+      final fileAccess = ref.read(backupFileAccessProvider);
+      await service.openBoundExternalBackupDirectory(fileAccess: fileAccess);
+    } catch (e) {
+      _showMessage(safeMessage(e));
+    }
+  }
+
   Future<void> _handleCreateLocalBackup() async {
     setState(() {
       _busy = true;
@@ -391,7 +435,22 @@ class _BackupPageState extends ConsumerState<BackupPage>
     });
     try {
       final service = await ref.read(tallyBackupServiceProvider.future);
+      final fileAccess = ref.read(backupFileAccessProvider);
+      final currentBinding = await service.getExternalBackupDirBinding();
+      if (currentBinding == null && !service.hasCustomLocalDirOverride) {
+        try {
+          await service.bindExternalBackupDirectory(fileAccess: fileAccess);
+        } on Failure catch (e) {
+          if (e.code == FailureCode.cancelled) {
+            return;
+          }
+          if (e.code != FailureCode.unsupportedCapability) {
+            rethrow;
+          }
+        }
+      }
       final saved = await service.createLocalBackup();
+      if (!mounted) return;
       _refreshAfterBackupChange();
       _showMessage('已生成本地备份：${saved.fileName}');
     } catch (e) {
@@ -763,6 +822,156 @@ class _BackupPageState extends ConsumerState<BackupPage>
     return '$minutes 分钟';
   }
 
+  Widget _buildExternalBackupDirBanner({
+    required BuildContext context,
+    required ExternalBackupDirBinding? binding,
+    required bool needsRebind,
+    required bool effectiveBusy,
+    required bool canBind,
+    required bool canOpenFolder,
+  }) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
+
+    const compactActionStyle = ButtonStyle(
+      visualDensity: VisualDensity.compact,
+      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      padding: WidgetStatePropertyAll(
+        EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      ),
+    );
+
+    final Color bgColor;
+    final Color borderColor;
+    final Color fgColor;
+    final IconData icon;
+    final String messageText;
+    final List<Widget> actions;
+
+    if (needsRebind) {
+      bgColor = scheme.errorContainer;
+      borderColor = scheme.error.withValues(alpha: isDark ? 0.5 : 0.35);
+      fgColor = scheme.onErrorContainer;
+      icon = Icons.folder_off_outlined;
+      final pathHint = binding == null ? '' : '（${binding.displayPath}）';
+      messageText = '外部备份目录不可访问$pathHint，近期自动备份已回退保存在应用沙盒，请重新绑定以免卸载丢失。';
+      actions = <Widget>[
+        FilledButton.tonal(
+          key: const Key('rebind_external_backup_dir_button'),
+          style: compactActionStyle,
+          onPressed: !effectiveBusy && canBind
+              ? _handleBindOrChangeExternalDir
+              : null,
+          child: _singleLineText('重新绑定'),
+        ),
+      ];
+    } else if (binding != null) {
+      bgColor = isDark
+          ? scheme.secondaryContainer.withValues(alpha: 0.38)
+          : scheme.secondaryContainer.withValues(alpha: 0.6);
+      borderColor = scheme.secondary.withValues(alpha: isDark ? 0.45 : 0.28);
+      fgColor = scheme.onSecondaryContainer;
+      icon = Icons.folder_special_outlined;
+      messageText = '外部安全目录：${binding.displayPath}（卸载 App 不丢失）';
+      actions = <Widget>[
+        if (canOpenFolder)
+          OutlinedButton(
+            key: const Key('open_external_backup_dir_button'),
+            style: compactActionStyle,
+            onPressed: effectiveBusy ? null : _handleOpenExternalBackupDir,
+            child: _singleLineText('打开文件夹'),
+          ),
+        OutlinedButton(
+          key: const Key('change_external_backup_dir_button'),
+          style: compactActionStyle,
+          onPressed: !effectiveBusy && canBind
+              ? _handleBindOrChangeExternalDir
+              : null,
+          child: _singleLineText('更改目录'),
+        ),
+      ];
+    } else {
+      bgColor = isDark
+          ? scheme.tertiaryContainer.withValues(alpha: 0.34)
+          : scheme.tertiaryContainer.withValues(alpha: 0.62);
+      borderColor = scheme.tertiary.withValues(alpha: isDark ? 0.45 : 0.3);
+      fgColor = scheme.onTertiaryContainer;
+      icon = Icons.folder_outlined;
+      messageText = '尚未绑定外部目录：未绑定时备份保存在应用沙盒（卸载即清除），建议选择外部文件夹持久保存。';
+      actions = <Widget>[
+        OutlinedButton(
+          key: const Key('bind_external_backup_dir_button'),
+          style: compactActionStyle,
+          onPressed: !effectiveBusy && canBind
+              ? _handleBindOrChangeExternalDir
+              : null,
+          child: _singleLineText('选择目录'),
+        ),
+      ];
+    }
+
+    return Container(
+      key: const Key('external_backup_dir_banner'),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: borderColor),
+      ),
+      child: LayoutBuilder(
+        builder: (ctx, constraints) {
+          final textWidget = Text(
+            messageText,
+            maxLines: 4,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: fgColor,
+              height: 1.35,
+              fontWeight: binding != null && !needsRebind
+                  ? FontWeight.w600
+                  : null,
+            ),
+          );
+
+          if (constraints.maxWidth >= 460) {
+            return Row(
+              children: [
+                Icon(icon, size: 18, color: fgColor),
+                const SizedBox(width: 8),
+                Expanded(child: textWidget),
+                const SizedBox(width: 8),
+                for (var i = 0; i < actions.length; i++) ...[
+                  if (i > 0) const SizedBox(width: 6),
+                  actions[i],
+                ],
+              ],
+            );
+          }
+
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Icon(icon, size: 18, color: fgColor),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(child: textWidget),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Wrap(spacing: 8, runSpacing: 6, children: actions),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
   static String _buildSyncStatusSummary({
     required CloudSyncSettings settings,
     required LocalSyncCursor cursor,
@@ -795,6 +1004,9 @@ class _BackupPageState extends ConsumerState<BackupPage>
         ref.watch(cloudSyncInProgressProvider).value ?? false;
     final effectiveBusy = _busy || serviceSyncing;
     final localListAsync = ref.watch(localBackupsProvider);
+    final externalBinding = ref.watch(externalBackupDirBindingProvider).value;
+    final externalNeedsRebind =
+        ref.watch(externalBackupNeedsRebindProvider).value ?? false;
     final lastBackupAsync = ref.watch(lastBackupAtMsProvider);
     final fileAccess = ref.watch(backupFileAccessProvider);
 
@@ -913,6 +1125,12 @@ class _BackupPageState extends ConsumerState<BackupPage>
         fileAccess.saveLocationCapability.state == CapabilityState.available;
     final canShareExternal =
         fileAccess.shareCapability.state == CapabilityState.available;
+    final canBindExternalDir =
+        fileAccess.externalBackupDirCapability.state ==
+        CapabilityState.available;
+    final canOpenExternalDir =
+        isDesktop &&
+        fileAccess.openDirectoryCapability.state == CapabilityState.available;
 
     return Scaffold(
       key: const Key('backup_page'),
@@ -1425,6 +1643,15 @@ class _BackupPageState extends ConsumerState<BackupPage>
                               Text(
                                 '离线单机可用，采用开放标准 ZIP 容器与三阶段原子校验恢复。',
                                 style: Theme.of(context).textTheme.bodySmall,
+                              ),
+                              const SizedBox(height: 10),
+                              _buildExternalBackupDirBanner(
+                                context: context,
+                                binding: externalBinding,
+                                needsRebind: externalNeedsRebind,
+                                effectiveBusy: effectiveBusy,
+                                canBind: canBindExternalDir,
+                                canOpenFolder: canOpenExternalDir,
                               ),
                               const SizedBox(height: 12),
                               Row(

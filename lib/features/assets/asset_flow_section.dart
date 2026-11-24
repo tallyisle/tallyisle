@@ -4,17 +4,19 @@ import 'package:go_router/go_router.dart';
 
 import '../../app/providers.dart';
 import '../../data/db/database.dart';
+import '../../domain/ledger/asset_json.dart';
 import '../../domain/model/codes.dart';
 import '../../domain/rules/credit_cycle.dart';
 import '../../domain/rules/reconciliation.dart';
 import '../common/catalog_icons.dart';
 import '../common/common.dart';
+import '../common/year_month_picker_dialog.dart';
 import '../records/record_labels.dart';
 import 'asset_detail_page.dart';
 import 'asset_flow_providers.dart';
 
 /// The account's bills across all books with optional reconciliation running
-/// balances and optional credit-statement period filtering
+/// balances and optional credit-statement period or natural-month filtering
 /// (docs/modules/reconciliation.md). Returns a sliver.
 class AssetFlowSection extends ConsumerWidget {
   const AssetFlowSection({
@@ -22,6 +24,9 @@ class AssetFlowSection extends ConsumerWidget {
     required this.asset,
     required this.reconMode,
     this.periodFilter,
+    this.monthFilter,
+    this.onChangePeriodFilter,
+    this.onChangeMonthFilter,
     this.onClearPeriodFilter,
     this.onOpenRecord,
   });
@@ -29,6 +34,9 @@ class AssetFlowSection extends ConsumerWidget {
   final Asset asset;
   final bool reconMode;
   final CreditStatementPeriod? periodFilter;
+  final NaturalMonthPeriod? monthFilter;
+  final ValueChanged<CreditStatementPeriod>? onChangePeriodFilter;
+  final ValueChanged<NaturalMonthPeriod>? onChangeMonthFilter;
   final VoidCallback? onClearPeriodFilter;
   final ValueChanged<String>? onOpenRecord;
 
@@ -59,13 +67,16 @@ class AssetFlowSection extends ConsumerWidget {
       ),
       data: (records) {
         final activePeriod = periodFilter;
-        final displayedRecords = activePeriod == null
-            ? records
-            : records
-                  .where((r) => activePeriod.contains(r.recordTime))
-                  .toList();
+        final activeMonth = activePeriod == null ? monthFilter : null;
+        final hasActiveFilter = activePeriod != null || activeMonth != null;
 
-        final groups = activePeriod == null
+        final displayedRecords = activePeriod != null
+            ? records.where((r) => activePeriod.contains(r.recordTime)).toList()
+            : activeMonth != null
+            ? records.where((r) => activeMonth.contains(r.recordTime)).toList()
+            : records;
+
+        final groups = !hasActiveFilter
             ? allGroups
             : groupRecordsByMonth<LedgerRecord>(
                 records: displayedRecords,
@@ -78,55 +89,16 @@ class AssetFlowSection extends ConsumerWidget {
               );
 
         final slivers = <Widget>[
-          if (activePeriod != null)
+          if (hasActiveFilter)
             SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-                child: Material(
-                  key: const Key('credit-period-filter-bar'),
-                  color: scheme.secondaryContainer.withValues(alpha: 0.65),
-                  borderRadius: BorderRadius.circular(10),
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 6, 6, 6),
-                    child: Row(
-                      children: [
-                        Icon(
-                          Icons.filter_alt_outlined,
-                          size: 16,
-                          color: scheme.onSecondaryContainer,
-                        ),
-                        const SizedBox(width: 6),
-                        Expanded(
-                          child: Text(
-                            '第 ${activePeriod.periodIndex} 期账单'
-                            '（${formatDate(activePeriod.start)} 至 ${formatDate(activePeriod.end)}）'
-                            ' · ${displayedRecords.length} 笔',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.labelMedium?.copyWith(
-                              color: scheme.onSecondaryContainer,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                        if (onClearPeriodFilter != null)
-                          TextButton.icon(
-                            key: const Key('clear-credit-period-filter'),
-                            style: TextButton.styleFrom(
-                              visualDensity: VisualDensity.compact,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                              ),
-                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                            ),
-                            onPressed: onClearPeriodFilter,
-                            icon: const Icon(Icons.close_rounded, size: 15),
-                            label: const Text('全部流水'),
-                          ),
-                      ],
-                    ),
-                  ),
-                ),
+              child: _ActivePeriodFilterBar(
+                asset: asset,
+                periodFilter: activePeriod,
+                monthFilter: activeMonth,
+                recordCount: displayedRecords.length,
+                onChangePeriodFilter: onChangePeriodFilter,
+                onChangeMonthFilter: onChangeMonthFilter,
+                onClear: onClearPeriodFilter,
               ),
             ),
         ];
@@ -140,11 +112,14 @@ class AssetFlowSection extends ConsumerWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      activePeriod != null ? '该账期内暂无流水记录' : '暂无账单明细',
+                      activePeriod != null
+                          ? '该账期内暂无流水记录'
+                          : activeMonth != null
+                          ? '该月暂无流水记录'
+                          : '暂无账单明细',
                       style: TextStyle(color: scheme.onSurfaceVariant),
                     ),
-                    if (activePeriod != null &&
-                        onClearPeriodFilter != null) ...[
+                    if (hasActiveFilter && onClearPeriodFilter != null) ...[
                       const SizedBox(height: 8),
                       OutlinedButton(
                         onPressed: onClearPeriodFilter,
@@ -170,14 +145,49 @@ class AssetFlowSection extends ConsumerWidget {
                 color: scheme.surfaceContainerHighest.withValues(alpha: 0.4),
                 padding: const EdgeInsets.symmetric(
                   horizontal: 16,
-                  vertical: 6,
+                  vertical: 4,
                 ),
                 child: Row(
                   children: [
-                    Text(
-                      '${group.year}年${group.month}月',
-                      style: theme.textTheme.labelMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
+                    Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        key: Key(
+                          'flow-month-header-${group.year}-${group.month}',
+                        ),
+                        borderRadius: BorderRadius.circular(6),
+                        onTap: onChangeMonthFilter == null
+                            ? null
+                            : () async {
+                                final now = DateTime.now();
+                                final picked = await showYearMonthPickerDialog(
+                                  context,
+                                  initialYear: group.year,
+                                  initialMonth: group.month,
+                                  currentYear: now.year,
+                                  currentMonth: now.month,
+                                );
+                                if (picked != null) {
+                                  onChangeMonthFilter!(
+                                    NaturalMonthPeriod(
+                                      year: picked.year,
+                                      month: picked.month,
+                                    ),
+                                  );
+                                }
+                              },
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 4,
+                            vertical: 2,
+                          ),
+                          child: Text(
+                            '${group.year}年${group.month}月',
+                            style: theme.textTheme.labelMedium?.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -318,6 +328,209 @@ class AssetFlowSection extends ConsumerWidget {
 
         return SliverMainAxisGroup(slivers: slivers);
       },
+    );
+  }
+}
+
+class _ActivePeriodFilterBar extends StatelessWidget {
+  const _ActivePeriodFilterBar({
+    required this.asset,
+    required this.periodFilter,
+    required this.monthFilter,
+    required this.recordCount,
+    required this.onChangePeriodFilter,
+    required this.onChangeMonthFilter,
+    required this.onClear,
+  });
+
+  final Asset asset;
+  final CreditStatementPeriod? periodFilter;
+  final NaturalMonthPeriod? monthFilter;
+  final int recordCount;
+  final ValueChanged<CreditStatementPeriod>? onChangePeriodFilter;
+  final ValueChanged<NaturalMonthPeriod>? onChangeMonthFilter;
+  final VoidCallback? onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final isCreditPeriod = periodFilter != null;
+
+    final String title;
+    final String rangeText;
+    if (periodFilter != null) {
+      final p = periodFilter!;
+      title = '${p.year}年 第${p.periodIndex}期 · $recordCount 笔';
+      rangeText = '${formatDate(p.start)} 至 ${formatDate(p.end)}';
+    } else {
+      final m = monthFilter!;
+      title = '${m.year}年${m.month}月 · $recordCount 笔';
+      rangeText = '${formatDate(m.start)} 至 ${formatDate(m.end)}';
+    }
+
+    final creditInfo = isCreditPeriod
+        ? CreditInfo.parse(asset.creditInfo)
+        : null;
+
+    void stepPeriod(int delta) {
+      if (periodFilter != null &&
+          creditInfo != null &&
+          onChangePeriodFilter != null) {
+        onChangePeriodFilter!(
+          adjacentCreditPeriod(
+            current: periodFilter!,
+            creditInfo: creditInfo,
+            delta: delta,
+          ),
+        );
+      } else if (monthFilter != null && onChangeMonthFilter != null) {
+        onChangeMonthFilter!(
+          delta < 0 ? monthFilter!.previous() : monthFilter!.next(),
+        );
+      }
+    }
+
+    Future<void> pickPeriod() async {
+      if (periodFilter != null &&
+          creditInfo != null &&
+          onChangePeriodFilter != null) {
+        final picked = await showCreditPeriodPickerDialog(
+          context,
+          creditInfo: creditInfo,
+          initialYear: periodFilter!.year,
+          initialPeriodIndex: periodFilter!.periodIndex,
+        );
+        if (picked != null) {
+          onChangePeriodFilter!(picked);
+        }
+      } else if (monthFilter != null && onChangeMonthFilter != null) {
+        final now = DateTime.now();
+        final picked = await showYearMonthPickerDialog(
+          context,
+          initialYear: monthFilter!.year,
+          initialMonth: monthFilter!.month,
+          currentYear: now.year,
+          currentMonth: now.month,
+        );
+        if (picked != null) {
+          onChangeMonthFilter!(
+            NaturalMonthPeriod(year: picked.year, month: picked.month),
+          );
+        }
+      }
+    }
+
+    final canStep = isCreditPeriod
+        ? (creditInfo != null && onChangePeriodFilter != null)
+        : (monthFilter != null && onChangeMonthFilter != null);
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+      child: Material(
+        key: Key(
+          isCreditPeriod ? 'credit-period-filter-bar' : 'fund-month-filter-bar',
+        ),
+        color: scheme.secondaryContainer.withValues(alpha: 0.65),
+        borderRadius: BorderRadius.circular(10),
+        clipBehavior: Clip.antiAlias,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(4, 4, 6, 4),
+          child: Row(
+            children: [
+              Tooltip(
+                message: isCreditPeriod ? '上一账期' : '上个月',
+                child: InkWell(
+                  key: const Key('flow-filter-prev'),
+                  borderRadius: BorderRadius.circular(8),
+                  onTap: canStep ? () => stepPeriod(-1) : null,
+                  child: SizedBox(
+                    width: 28,
+                    height: 34,
+                    child: Icon(
+                      Icons.chevron_left_rounded,
+                      size: 18,
+                      color: scheme.onSecondaryContainer,
+                    ),
+                  ),
+                ),
+              ),
+              Expanded(
+                child: InkWell(
+                  key: const Key('flow-filter-pick'),
+                  borderRadius: BorderRadius.circular(8),
+                  onTap: canStep ? pickPeriod : null,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 4,
+                      vertical: 2,
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.labelMedium?.copyWith(
+                            color: scheme.onSecondaryContainer,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        Text(
+                          rangeText,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: scheme.onSecondaryContainer.withValues(
+                              alpha: 0.8,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              Tooltip(
+                message: isCreditPeriod ? '下一账期' : '下个月',
+                child: InkWell(
+                  key: const Key('flow-filter-next'),
+                  borderRadius: BorderRadius.circular(8),
+                  onTap: canStep ? () => stepPeriod(1) : null,
+                  child: SizedBox(
+                    width: 28,
+                    height: 34,
+                    child: Icon(
+                      Icons.chevron_right_rounded,
+                      size: 18,
+                      color: scheme.onSecondaryContainer,
+                    ),
+                  ),
+                ),
+              ),
+              if (onClear != null)
+                TextButton.icon(
+                  key: Key(
+                    isCreditPeriod
+                        ? 'clear-credit-period-filter'
+                        : 'flow-filter-clear',
+                  ),
+                  style: TextButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                    minimumSize: const Size(0, 32),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  onPressed: onClear,
+                  icon: const Icon(Icons.close_rounded, size: 15),
+                  label: const Text('全部流水', maxLines: 1, softWrap: false),
+                ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

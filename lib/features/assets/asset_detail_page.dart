@@ -14,9 +14,11 @@ import '../../domain/model/codes.dart';
 import '../../domain/rules/asset_overview.dart';
 import '../../domain/rules/credit_cycle.dart';
 import '../../domain/rules/currency_rates.dart';
+import '../../domain/rules/reconciliation.dart';
 import '../common/catalog_icons.dart';
 import '../common/common.dart';
 import '../common/desktop_modal_page.dart';
+import '../common/year_month_picker_dialog.dart';
 import '../debt/debt_detail_page.dart';
 import '../debt/debt_providers.dart' show debtServiceProvider;
 import '../deposit/fixed_deposit_page.dart';
@@ -30,6 +32,7 @@ import 'asset_flow_providers.dart';
 import 'asset_flow_section.dart';
 import 'credit_providers.dart';
 import 'credit_section.dart';
+import 'fund_monthly_section.dart';
 
 Future<void> _pushRouteOrModal(
   BuildContext context,
@@ -122,15 +125,16 @@ class _AssetDetailPageState extends ConsumerState<AssetDetailPage> {
 
   final ScrollController _scrollController = ScrollController();
   bool _headerCollapsed = false;
-  int _activeTab = 0; // 0 = 流水明细, 1 = 账期账单
+  int _activeTab = 0; // 0 = 流水明细, 1 = 账期账单 / 月度账单
   bool _reconMode = false;
   CreditStatementPeriod? _periodFilter;
+  NaturalMonthPeriod? _monthFilter;
 
   @override
   void initState() {
     super.initState();
     _scrollController.addListener(_handleScroll);
-    _scheduleResetCreditYear();
+    _scheduleResetStatementYears();
   }
 
   @override
@@ -141,21 +145,69 @@ class _AssetDetailPageState extends ConsumerState<AssetDetailPage> {
       _activeTab = 0;
       _reconMode = false;
       _periodFilter = null;
+      _monthFilter = null;
       if (_scrollController.hasClients) {
         _scrollController.jumpTo(0);
       }
-      _scheduleResetCreditYear();
+      _scheduleResetStatementYears();
     }
   }
 
-  void _scheduleResetCreditYear() {
+  void _scheduleResetStatementYears() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       final currentYear = DateTime.now().year;
       if (ref.read(creditSelectedYearProvider) != currentYear) {
         ref.read(creditSelectedYearProvider.notifier).reset();
       }
+      if (ref.read(fundSelectedYearProvider) != currentYear) {
+        ref.read(fundSelectedYearProvider.notifier).reset();
+      }
     });
+  }
+
+  Future<void> _openFlowPeriodPicker(BuildContext context, Asset a) async {
+    final now = DateTime.now();
+    final isCredit = a.type == AssetType.credit;
+    final info = isCredit ? CreditInfo.parse(a.creditInfo) : null;
+    if (isCredit && info != null && info.configured) {
+      final currentCycle = currentCreditPeriodForToday(
+        creditInfo: info,
+        today: now,
+      );
+      final picked = await showCreditPeriodPickerDialog(
+        context,
+        creditInfo: info,
+        initialYear: _periodFilter?.year ?? currentCycle.year,
+        initialPeriodIndex:
+            _periodFilter?.periodIndex ?? currentCycle.periodIndex,
+        today: now,
+      );
+      if (picked != null && mounted) {
+        setState(() {
+          _periodFilter = picked;
+          _monthFilter = null;
+        });
+      }
+      return;
+    }
+
+    final picked = await showYearMonthPickerDialog(
+      context,
+      initialYear: _monthFilter?.year ?? now.year,
+      initialMonth: _monthFilter?.month ?? now.month,
+      currentYear: now.year,
+      currentMonth: now.month,
+    );
+    if (picked != null && mounted) {
+      setState(() {
+        _monthFilter = NaturalMonthPeriod(
+          year: picked.year,
+          month: picked.month,
+        );
+        _periodFilter = null;
+      });
+    }
   }
 
   void _handleScroll() {
@@ -300,7 +352,10 @@ class _AssetDetailPageState extends ConsumerState<AssetDetailPage> {
 
     Widget buildScrollableDetail(Asset a) {
       final isCredit = a.type == AssetType.credit;
-      final effectiveTab = isCredit ? _activeTab : 0;
+      final isDebt = a.type == AssetType.debt;
+      final isFund = !isCredit && !isDebt;
+      final hasStatementTab = isCredit || isFund;
+      final effectiveTab = hasStatementTab ? _activeTab : 0;
       final isDefaultAccount =
           a.status == AssetStatus.active &&
           a.type != AssetType.debt &&
@@ -314,6 +369,12 @@ class _AssetDetailPageState extends ConsumerState<AssetDetailPage> {
       final pendingBanner = isCredit
           ? ref.watch(creditPendingBannerProvider(a)).value
           : null;
+      final selectedStatementYear = isCredit
+          ? ref.watch(creditSelectedYearProvider)
+          : ref.watch(fundSelectedYearProvider);
+      final hasActiveFilter =
+          (isCredit && _periodFilter != null) ||
+          (!isDebt && _monthFilter != null);
 
       return CustomScrollView(
         controller: _scrollController,
@@ -341,14 +402,27 @@ class _AssetDetailPageState extends ConsumerState<AssetDetailPage> {
             pinned: true,
             delegate: _StickyDetailControlBarDelegate(
               isCredit: isCredit,
+              isDebt: isDebt,
               activeTab: effectiveTab,
               totalRecordCount: totalRecordCount,
               hasPendingRepayment: pendingBanner != null,
               reconMode: _reconMode,
+              hasActiveFilter: hasActiveFilter,
+              selectedStatementYear: selectedStatementYear,
               colorScheme: theme.colorScheme,
               textTheme: theme.textTheme,
               onTabChanged: (tab) => setState(() => _activeTab = tab),
               onReconChanged: (v) => setState(() => _reconMode = v),
+              onOpenPeriodPicker: isDebt
+                  ? null
+                  : () => _openFlowPeriodPicker(context, a),
+              onStatementYearChanged: (year) {
+                if (isCredit) {
+                  ref.read(creditSelectedYearProvider.notifier).setYear(year);
+                } else {
+                  ref.read(fundSelectedYearProvider.notifier).setYear(year);
+                }
+              },
             ),
           ),
           if (isCredit && effectiveTab == 1)
@@ -362,6 +436,22 @@ class _AssetDetailPageState extends ConsumerState<AssetDetailPage> {
                 onSelectPeriod: (period) {
                   setState(() {
                     _periodFilter = period;
+                    _monthFilter = null;
+                    _activeTab = 0;
+                  });
+                },
+              ),
+            )
+          else if (isFund && effectiveTab == 1)
+            SliverToBoxAdapter(
+              key: const ValueKey('asset-fund-monthly-section'),
+              child: FundMonthlySection(
+                asset: a,
+                selectedMonth: _monthFilter,
+                onSelectMonth: (period) {
+                  setState(() {
+                    _monthFilter = period;
+                    _periodFilter = null;
                     _activeTab = 0;
                   });
                 },
@@ -373,7 +463,23 @@ class _AssetDetailPageState extends ConsumerState<AssetDetailPage> {
               asset: a,
               reconMode: _reconMode,
               periodFilter: isCredit ? _periodFilter : null,
-              onClearPeriodFilter: () => setState(() => _periodFilter = null),
+              monthFilter: isDebt ? null : _monthFilter,
+              onChangePeriodFilter: isCredit
+                  ? (period) => setState(() {
+                      _periodFilter = period;
+                      _monthFilter = null;
+                    })
+                  : null,
+              onChangeMonthFilter: isDebt
+                  ? null
+                  : (period) => setState(() {
+                      _monthFilter = period;
+                      _periodFilter = null;
+                    }),
+              onClearPeriodFilter: () => setState(() {
+                _periodFilter = null;
+                _monthFilter = null;
+              }),
               onOpenRecord: (recordId) => _openRecordDetail(context, recordId),
             ),
           SliverToBoxAdapter(
@@ -1033,32 +1139,46 @@ class _HeaderMetricBlock extends StatelessWidget {
   }
 }
 
-/// Pinned 48dp single-row control bar shared across Fund and Credit accounts:
-/// - Left: `[流水明细 | 账期账单]` capsule on credit accounts; tonal
-///   `明细 · N 笔` badge at the exact same height & visual weight on fund accounts.
-/// - Right: pixel-aligned `对账模式` toggle (on flow view).
+/// Pinned 48dp single-row control bar shared across Fund, Credit, and Debt
+/// accounts:
+/// - Left: 34dp dual-tab capsule (`[流水明细 | 账期账单]` on credit accounts,
+///   `[流水明细 | 月度账单]` on fund accounts); tonal `明细 · N 笔` badge at the
+///   same height on debt accounts.
+/// - Right: on flow view (`activeTab == 0`), calendar quick-jump button
+///   (non-debt) + `对账模式` toggle; on statement view (`activeTab == 1`),
+///   shared 34dp `StickyStatementYearSwitcher`.
 class _StickyDetailControlBarDelegate extends SliverPersistentHeaderDelegate {
   const _StickyDetailControlBarDelegate({
     required this.isCredit,
+    required this.isDebt,
     required this.activeTab,
     required this.totalRecordCount,
     required this.hasPendingRepayment,
     required this.reconMode,
+    required this.hasActiveFilter,
+    required this.selectedStatementYear,
     required this.colorScheme,
     required this.textTheme,
     required this.onTabChanged,
     required this.onReconChanged,
+    required this.onOpenPeriodPicker,
+    required this.onStatementYearChanged,
   });
 
   final bool isCredit;
+  final bool isDebt;
   final int activeTab;
   final int totalRecordCount;
   final bool hasPendingRepayment;
   final bool reconMode;
+  final bool hasActiveFilter;
+  final int selectedStatementYear;
   final ColorScheme colorScheme;
   final TextTheme textTheme;
   final ValueChanged<int> onTabChanged;
   final ValueChanged<bool> onReconChanged;
+  final VoidCallback? onOpenPeriodPicker;
+  final ValueChanged<int> onStatementYearChanged;
 
   @override
   double get minExtent => 48.0;
@@ -1072,7 +1192,8 @@ class _StickyDetailControlBarDelegate extends SliverPersistentHeaderDelegate {
     double shrinkOffset,
     bool overlapsContent,
   ) {
-    final showReconControl = !isCredit || activeTab == 0;
+    final hasTabs = !isDebt;
+    final showReconControl = isDebt || activeTab == 0;
 
     return Material(
       key: const Key('asset-sticky-control-bar'),
@@ -1090,89 +1211,132 @@ class _StickyDetailControlBarDelegate extends SliverPersistentHeaderDelegate {
             ),
           ),
         ),
-        child: Row(
-          children: [
-            Flexible(
-              child: isCredit
-                  ? _CreditSectionTabs(
-                      activeTab: activeTab,
-                      hasPendingRepayment: hasPendingRepayment,
-                      onTabChanged: onTabChanged,
-                    )
-                  : Container(
-                      height: 34,
-                      padding: const EdgeInsets.symmetric(horizontal: 10),
-                      decoration: BoxDecoration(
-                        color: colorScheme.surfaceContainerHighest.withValues(
-                          alpha: 0.5,
-                        ),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.receipt_long_outlined,
-                            size: 15,
-                            color: colorScheme.onSurfaceVariant,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final compact = constraints.maxWidth < 380;
+            return Row(
+              children: [
+                Flexible(
+                  child: hasTabs
+                      ? _SectionTabs(
+                          flowsKey: isCredit
+                              ? const Key('credit-tab-flows')
+                              : const Key('fund-tab-flows'),
+                          statementsKey: isCredit
+                              ? const Key('credit-tab-statements')
+                              : const Key('fund-tab-statements'),
+                          statementsLabel: isCredit ? '账期账单' : '月度账单',
+                          activeTab: activeTab,
+                          hasPendingRepayment: isCredit && hasPendingRepayment,
+                          compact: compact,
+                          onTabChanged: onTabChanged,
+                        )
+                      : Container(
+                          height: 34,
+                          padding: const EdgeInsets.symmetric(horizontal: 10),
+                          decoration: BoxDecoration(
+                            color: colorScheme.surfaceContainerHighest
+                                .withValues(alpha: 0.5),
+                            borderRadius: BorderRadius.circular(10),
                           ),
-                          const SizedBox(width: 6),
-                          Flexible(
-                            child: FittedBox(
-                              fit: BoxFit.scaleDown,
-                              child: Text(
-                                '明细 · $totalRecordCount 笔',
-                                maxLines: 1,
-                                softWrap: false,
-                                style: textTheme.labelLarge?.copyWith(
-                                  fontWeight: FontWeight.w600,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.receipt_long_outlined,
+                                size: 15,
+                                color: colorScheme.onSurfaceVariant,
+                              ),
+                              const SizedBox(width: 6),
+                              Flexible(
+                                child: FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  child: Text(
+                                    '明细 · $totalRecordCount 笔',
+                                    maxLines: 1,
+                                    softWrap: false,
+                                    style: textTheme.labelLarge?.copyWith(
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                ),
+                SizedBox(width: compact ? 6 : 8),
+                if (showReconControl)
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (!isDebt && onOpenPeriodPicker != null) ...[
+                        Tooltip(
+                          message: isCredit ? '按账期筛选' : '按月份筛选',
+                          child: Material(
+                            color: hasActiveFilter
+                                ? colorScheme.primaryContainer
+                                : Colors.transparent,
+                            borderRadius: BorderRadius.circular(8),
+                            clipBehavior: Clip.antiAlias,
+                            child: InkWell(
+                              key: const Key('asset-flow-period-picker-btn'),
+                              borderRadius: BorderRadius.circular(8),
+                              onTap: onOpenPeriodPicker,
+                              child: SizedBox(
+                                width: 30,
+                                height: 30,
+                                child: Icon(
+                                  Icons.calendar_month_outlined,
+                                  size: 18,
+                                  color: hasActiveFilter
+                                      ? colorScheme.onPrimaryContainer
+                                      : colorScheme.onSurfaceVariant,
                                 ),
                               ),
                             ),
                           ),
-                        ],
+                        ),
+                        SizedBox(width: compact ? 4 : 6),
+                      ],
+                      Text(
+                        '对账模式',
+                        maxLines: 1,
+                        softWrap: false,
+                        style: textTheme.labelMedium?.copyWith(
+                          color: reconMode
+                              ? colorScheme.primary
+                              : colorScheme.onSurfaceVariant,
+                          fontWeight: reconMode
+                              ? FontWeight.w600
+                              : FontWeight.w500,
+                        ),
                       ),
-                    ),
-            ),
-            const SizedBox(width: 8),
-            if (showReconControl)
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    '对账模式',
-                    style: textTheme.labelMedium?.copyWith(
-                      color: reconMode
-                          ? colorScheme.primary
-                          : colorScheme.onSurfaceVariant,
-                      fontWeight: reconMode ? FontWeight.w600 : FontWeight.w500,
-                    ),
-                  ),
-                  const SizedBox(width: 4),
-                  SizedBox(
-                    height: 32,
-                    child: FittedBox(
-                      fit: BoxFit.scaleDown,
-                      child: Switch(
-                        key: const Key('reconciliation-switch'),
-                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        value: reconMode,
-                        onChanged: onReconChanged,
+                      SizedBox(width: compact ? 2 : 4),
+                      SizedBox(
+                        height: compact ? 30 : 32,
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Switch(
+                            key: const Key('reconciliation-switch'),
+                            materialTapTargetSize:
+                                MaterialTapTargetSize.shrinkWrap,
+                            value: reconMode,
+                            onChanged: onReconChanged,
+                          ),
+                        ),
                       ),
-                    ),
+                    ],
+                  )
+                else
+                  StickyStatementYearSwitcher(
+                    selectedYear: selectedStatementYear,
+                    compact: compact,
+                    onYearChanged: onStatementYearChanged,
                   ),
-                ],
-              )
-            else
-              Text(
-                '按账单周期汇总',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: textTheme.labelSmall?.copyWith(
-                  color: colorScheme.onSurfaceVariant,
-                ),
-              ),
-          ],
+              ],
+            );
+          },
         ),
       ),
     );
@@ -1181,24 +1345,35 @@ class _StickyDetailControlBarDelegate extends SliverPersistentHeaderDelegate {
   @override
   bool shouldRebuild(covariant _StickyDetailControlBarDelegate oldDelegate) {
     return isCredit != oldDelegate.isCredit ||
+        isDebt != oldDelegate.isDebt ||
         activeTab != oldDelegate.activeTab ||
         totalRecordCount != oldDelegate.totalRecordCount ||
         hasPendingRepayment != oldDelegate.hasPendingRepayment ||
         reconMode != oldDelegate.reconMode ||
+        hasActiveFilter != oldDelegate.hasActiveFilter ||
+        selectedStatementYear != oldDelegate.selectedStatementYear ||
         colorScheme != oldDelegate.colorScheme ||
         textTheme != oldDelegate.textTheme;
   }
 }
 
-class _CreditSectionTabs extends StatelessWidget {
-  const _CreditSectionTabs({
+class _SectionTabs extends StatelessWidget {
+  const _SectionTabs({
+    required this.flowsKey,
+    required this.statementsKey,
+    required this.statementsLabel,
     required this.activeTab,
     required this.hasPendingRepayment,
+    required this.compact,
     required this.onTabChanged,
   });
 
+  final Key flowsKey;
+  final Key statementsKey;
+  final String statementsLabel;
   final int activeTab;
   final bool hasPendingRepayment;
+  final bool compact;
   final ValueChanged<int> onTabChanged;
 
   @override
@@ -1231,7 +1406,7 @@ class _CreditSectionTabs extends StatelessWidget {
             key: key,
             onTap: () => onTabChanged(index),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10),
+              padding: EdgeInsets.symmetric(horizontal: compact ? 7 : 10),
               child: Center(
                 widthFactor: 1.0,
                 child: FittedBox(
@@ -1282,12 +1457,12 @@ class _CreditSectionTabs extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          segment(key: const Key('credit-tab-flows'), index: 0, label: '流水明细'),
+          segment(key: flowsKey, index: 0, label: '流水明细'),
           const SizedBox(width: 2),
           segment(
-            key: const Key('credit-tab-statements'),
+            key: statementsKey,
             index: 1,
-            label: '账期账单',
+            label: statementsLabel,
             showBadgeDot: hasPendingRepayment,
           ),
         ],

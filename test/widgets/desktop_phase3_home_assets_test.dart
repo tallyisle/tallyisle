@@ -682,9 +682,54 @@ void main() {
         '920.00',
       );
       expect(
-        find.descendant(of: detailPane, matching: find.text('明细 · 1 笔')),
+        find.descendant(
+          of: detailPane,
+          matching: find.byKey(const Key('fund-tab-flows')),
+        ),
         findsOneWidget,
       );
+      expect(
+        find.descendant(
+          of: detailPane,
+          matching: find.byKey(const Key('fund-tab-statements')),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: detailPane, matching: find.text('累计 1 笔流水')),
+        findsOneWidget,
+      );
+
+      // Switch fund account to '月度账单' tab -> renders 2-column grid + sticky year switcher!
+      await tester.tap(
+        find.descendant(
+          of: detailPane,
+          matching: find.byKey(const Key('fund-tab-statements')),
+        ),
+      );
+      await _settle(tester);
+      expect(
+        find.descendant(
+          of: detailPane,
+          matching: find.byKey(const Key('fund-statements-two-column-grid')),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: detailPane,
+          matching: find.byKey(const Key('statement-year-label')),
+        ),
+        findsOneWidget,
+      );
+      // Switch back to '流水明细' tab before toggling reconMode.
+      await tester.tap(
+        find.descendant(
+          of: detailPane,
+          matching: find.byKey(const Key('fund-tab-flows')),
+        ),
+      );
+      await _settle(tester);
 
       // Toggle reconciliation mode ON in right pane -> shows running balance '余额：920.00'!
       await tester.tap(

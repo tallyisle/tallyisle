@@ -75,3 +75,43 @@ final assetMonthGroupsProvider =
         ),
       );
     });
+
+/// Selected statement year for fund account monthly statement views.
+final class FundSelectedYearNotifier extends Notifier<int> {
+  @override
+  int build() => DateTime.now().year;
+  void setYear(int y) => state = y;
+  void previous() => state = state - 1;
+  void next() => state = state + 1;
+  void reset() => state = DateTime.now().year;
+}
+
+final fundSelectedYearProvider =
+    NotifierProvider<FundSelectedYearNotifier, int>(
+      FundSelectedYearNotifier.new,
+    );
+
+/// Natural-month statements (`12..1`, newest-first) for fund account [assetId]
+/// in [fundSelectedYearProvider].
+final fundMonthlyStatementsProvider =
+    Provider.family<List<FundMonthlyStatementItem>, int>((ref, assetId) {
+      final asset =
+          ref.watch(assetProvider(assetId)).value ??
+          ref
+              .watch(assetsProvider)
+              .value
+              ?.where((x) => x.id == assetId)
+              .firstOrNull;
+      final records =
+          ref.watch(assetRecordsProvider(assetId)).value ?? const [];
+      final selectedYear = ref.watch(fundSelectedYearProvider);
+      if (asset == null) return const [];
+      return calculateFundMonthlyStatements(
+        currentBalance: asset.balanceMinor,
+        accountId: asset.id,
+        accountCurrency: asset.currency,
+        records: records.map(reconRecordOf).toList(),
+        selectedYear: selectedYear,
+        today: DateTime.now(),
+      );
+    });

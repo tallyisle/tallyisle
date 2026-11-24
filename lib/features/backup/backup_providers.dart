@@ -31,12 +31,14 @@ final tallyBackupServiceProvider = FutureProvider<TallyBackupService>((
   final reminderService = await ref.watch(reminderServiceProvider.future);
   final localDirOverride = ref.watch(backupLocalDirectoryOverrideProvider);
   final attDirOverride = ref.watch(backupAttachmentsDirectoryOverrideProvider);
+  final fileAccess = ref.watch(backupFileAccessProvider);
   final httpFactory = ref.watch(backupHttpClientFactoryProvider);
   return TallyBackupService(
     db,
     reminderService: reminderService,
     localBackupsDirectoryProvider: localDirOverride,
     attachmentsDirectoryProvider: attDirOverride,
+    fileAccess: fileAccess,
     httpClientFactory: httpFactory,
   );
 });
@@ -65,6 +67,17 @@ final localAutoBackupPolicyProvider = StreamProvider<LocalAutoBackupPolicy>((
   yield* service.watchLocalAutoBackupPolicy();
 });
 
+final externalBackupDirBindingProvider =
+    StreamProvider<ExternalBackupDirBinding?>((ref) async* {
+      final service = await ref.watch(tallyBackupServiceProvider.future);
+      yield* service.watchExternalBackupDirBinding();
+    });
+
+final externalBackupNeedsRebindProvider = StreamProvider<bool>((ref) async* {
+  final service = await ref.watch(tallyBackupServiceProvider.future);
+  yield* service.watchExternalBackupNeedsRebind();
+});
+
 final cloudSyncCursorProvider = StreamProvider<LocalSyncCursor>((ref) async* {
   final service = await ref.watch(tallyBackupServiceProvider.future);
   yield* service.watchSyncCursor();
@@ -78,6 +91,8 @@ final cloudSyncInProgressProvider = StreamProvider<bool>((ref) async* {
 final localBackupsProvider = FutureProvider<List<BackupFileMetadata>>((
   ref,
 ) async {
+  // Watch binding changes so binding/switching external folders automatically refreshes list.
+  ref.watch(externalBackupDirBindingProvider);
   final service = await ref.watch(tallyBackupServiceProvider.future);
   return service.listLocalBackups();
 });
@@ -154,6 +169,8 @@ final silentCloudSyncBootstrapProvider = FutureProvider<CloudSyncOutcome?>((
 void invalidateBackupHistoryProviders(WidgetRef ref) {
   ref
     ..invalidate(localBackupsProvider)
+    ..invalidate(externalBackupDirBindingProvider)
+    ..invalidate(externalBackupNeedsRebindProvider)
     ..invalidate(webDavBackupsProvider)
     ..invalidate(s3BackupsProvider)
     ..invalidate(activeCloudBackupsProvider)
