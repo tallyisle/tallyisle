@@ -130,6 +130,7 @@ Future<void> _invalidateAllAfterDatabaseReplaceImpl({
     budgetPeriodRecordsProvider,
     budgetOverviewForOffsetProvider,
     budgetOverviewProvider,
+    resolvedRecordBudgetHintProvider,
     recordBudgetHintProvider,
     // Data health & settings
     dataHealthReportProvider,

@@ -557,19 +557,23 @@ class RecordBudgetHintBar extends ConsumerWidget {
       categoryId: categoryId,
     );
 
-    final hintAsync = ref.watch(recordBudgetHintProvider(query));
+    final hintAsync = ref.watch(resolvedRecordBudgetHintProvider(query));
 
     return hintAsync.when(
       loading: () => const SizedBox.shrink(),
       error: (_, __) => const SizedBox.shrink(),
-      data: (usage) {
-        if (usage == null) return const SizedBox.shrink();
+      data: (resolved) {
+        if (resolved == null) return const SizedBox.shrink();
+        final usage = resolved.usage;
 
         final isDark = Theme.of(context).brightness == Brightness.dark;
         final bgAlpha = isDark ? 45 : 25;
         final isSaving = usage.budgetType == BudgetTypeCode.savingCategory;
         final isTotal = usage.budgetType == BudgetTypeCode.total;
-        final label = isTotal ? '总预算' : (isSaving ? '储蓄目标' : '分类预算');
+        final periodPrefix = resolved.mode == BudgetMode.yearly ? '年' : '月';
+        final label = isTotal
+            ? '${periodPrefix}总预算'
+            : (isSaving ? '${periodPrefix}储蓄目标' : '${periodPrefix}分类预算');
 
         final String text;
         final Color textColor;

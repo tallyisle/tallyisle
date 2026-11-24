@@ -5,6 +5,7 @@ import '../../data/budget/budget_service.dart';
 import '../../data/db/database.dart';
 import '../../data/repo/budget_queries.dart';
 import '../../data/repo/ledger_queries.dart' show statEntryOf;
+import '../../domain/rules/app_settings_rules.dart';
 import '../../domain/rules/billing_period.dart';
 import '../../domain/rules/budget_rules.dart';
 
@@ -313,47 +314,78 @@ final class RecordBudgetHintQuery {
   int get hashCode => Object.hash(bookId, recordTime, categoryId);
 }
 
-final recordBudgetHintProvider =
-    FutureProvider.family<BudgetUsage?, RecordBudgetHintQuery>((
+/// Resolved real-time budget hint paired with the budget period mode it came from.
+final class ResolvedRecordBudgetHint {
+  const ResolvedRecordBudgetHint({required this.mode, required this.usage});
+
+  final BudgetMode mode;
+  final BudgetUsage usage;
+}
+
+final _budgetBookCategoriesProvider =
+    StreamProvider.family<List<RecordCategory>, int>((ref, bookId) async* {
+      final q = await ref.watch(budgetQueriesProvider.future);
+      yield* q.watchBookCategories(bookId);
+    });
+
+final _budgetsBySectionProvider =
+    StreamProvider.family<List<Budget>, ({int bookId, String section})>((
+      ref,
+      key,
+    ) async* {
+      final q = await ref.watch(budgetQueriesProvider.future);
+      yield* q.watchBudgets(key.bookId, key.section);
+    });
+
+final _budgetPeriodRecordsByRangeProvider =
+    StreamProvider.family<
+      List<LedgerRecord>,
+      ({int bookId, int startMs, int endMs})
+    >((ref, key) async* {
+      final q = await ref.watch(budgetQueriesProvider.future);
+      yield* q.watchBudgetPeriodRecords(key.bookId, key.startMs, key.endMs);
+    });
+
+final resolvedRecordBudgetHintProvider =
+    FutureProvider.family<ResolvedRecordBudgetHint?, RecordBudgetHintQuery>((
       ref,
       query,
     ) async {
       if (query.categoryId <= 0) return null;
-      final q = await ref.watch(budgetQueriesProvider.future);
-      final db = await ref.watch(databaseProvider.future);
 
-      final bookRow = await (db.select(
-        db.accountBooks,
-      )..where((t) => t.id.equals(query.bookId))).getSingleOrNull();
+      void listenForUpdates<T>(StreamProvider<T> provider) {
+        ref.listen<AsyncValue<T>>(provider, (prev, next) {
+          if (prev?.hasValue == true && next.hasValue) {
+            ref.invalidateSelf();
+          }
+        });
+      }
+
+      listenForUpdates(appSettingsProvider);
+      final settings =
+          ref.read(appSettingsProvider).value ??
+          await (await ref.watch(
+            appSettingsServiceProvider.future,
+          )).getSettings();
+      if (!settings.showRecordBudgetHint) return null;
+
+      final db = await ref.watch(databaseProvider.future);
+      final q = await ref.watch(budgetQueriesProvider.future);
+
+      listenForUpdates(booksProvider);
+      final books =
+          ref.read(booksProvider).value ??
+          await db.select(db.accountBooks).get();
+      final bookRow = books.where((b) => b.id == query.bookId).firstOrNull;
       final startDay = bookRow?.startDay ?? 1;
 
-      final mode = await q.getBudgetMode(query.bookId);
-      final recordDate = DateTime.fromMillisecondsSinceEpoch(query.recordTime);
-      final period = mode == BudgetMode.yearly
-          ? BillingPeriod.containingYear(recordDate, startDay)
-          : BillingPeriod.containing(recordDate, startDay);
-      final section = mode.sectionFor(period);
-
-      final budgets = await q.getBudgets(query.bookId, section);
-      if (budgets.isEmpty) return null;
-
-      final records = await q.getBudgetPeriodRecords(
+      final categoriesProviderForBook = _budgetBookCategoriesProvider(
         query.bookId,
-        period.startMs,
-        period.endMs,
       );
-      final categories = await q.getBookCategories(query.bookId);
-
-      final inputs = records
-          .map(
-            (r) => BudgetRecordInput(
-              recordId: r.recordId,
-              recordCatId: r.recordCatId,
-              entry: statEntryOf(r),
-            ),
-          )
-          .toList();
-
+      listenForUpdates(categoriesProviderForBook);
+      final categories =
+          ref.read(categoriesProviderForBook).value ??
+          await q.getBookCategories(query.bookId);
       final categoryNodes = categories
           .map(
             (c) => BudgetCategoryNode(
@@ -365,45 +397,130 @@ final recordBudgetHintProvider =
             ),
           )
           .toList();
-
       final categoryMap = {for (final c in categoryNodes) c.id: c};
 
-      BudgetUsage? totalUsage;
-      final totalBudget = budgets
-          .where(
-            (b) => b.budgetType == BudgetTypeCode.total && b.recordCatId == -1,
-          )
-          .firstOrNull;
-      if (totalBudget != null) {
-        totalUsage = computeTotalBudgetUsage(
-          amountMinor: totalBudget.amountMinor,
-          budgetId: totalBudget.id,
-          records: inputs,
+      final recordDate = DateTime.fromMillisecondsSinceEpoch(query.recordTime);
+
+      Future<BudgetUsage?> resolveForMode(BudgetMode mode) async {
+        final period = mode == BudgetMode.yearly
+            ? BillingPeriod.containingYear(recordDate, startDay)
+            : BillingPeriod.containing(recordDate, startDay);
+        final section = mode.sectionFor(period);
+
+        final budgetsProviderForSection = _budgetsBySectionProvider((
+          bookId: query.bookId,
+          section: section,
+        ));
+        listenForUpdates(budgetsProviderForSection);
+        final budgets =
+            ref.read(budgetsProviderForSection).value ??
+            await q.getBudgets(query.bookId, section);
+        if (budgets.isEmpty) return null;
+
+        final recordsProviderForRange = _budgetPeriodRecordsByRangeProvider((
+          bookId: query.bookId,
+          startMs: period.startMs,
+          endMs: period.endMs,
+        ));
+        listenForUpdates(recordsProviderForRange);
+        final records =
+            ref.read(recordsProviderForRange).value ??
+            await q.getBudgetPeriodRecords(
+              query.bookId,
+              period.startMs,
+              period.endMs,
+            );
+
+        final inputs = records
+            .map(
+              (r) => BudgetRecordInput(
+                recordId: r.recordId,
+                recordCatId: r.recordCatId,
+                entry: statEntryOf(r),
+              ),
+            )
+            .toList();
+
+        BudgetUsage? totalUsage;
+        final totalBudget = budgets
+            .where(
+              (b) =>
+                  b.budgetType == BudgetTypeCode.total && b.recordCatId == -1,
+            )
+            .firstOrNull;
+        if (totalBudget != null) {
+          totalUsage = computeTotalBudgetUsage(
+            amountMinor: totalBudget.amountMinor,
+            budgetId: totalBudget.id,
+            records: inputs,
+          );
+        }
+
+        final categoryBudgets = <int, BudgetUsage>{};
+        for (final b in budgets) {
+          if (b.budgetType == BudgetTypeCode.expenseCategory ||
+              b.budgetType == BudgetTypeCode.savingCategory) {
+            final node = categoryMap[b.recordCatId];
+            if (node != null) {
+              categoryBudgets[b.recordCatId] = computeCategoryBudgetUsage(
+                category: node,
+                allCategories: categoryNodes,
+                amountMinor: b.amountMinor,
+                budgetId: b.id,
+                budgetType: b.budgetType,
+                records: inputs,
+              );
+            }
+          }
+        }
+
+        return resolveRecordBudgetHint(
+          selectedCatId: query.categoryId,
+          categoryMap: categoryMap,
+          categoryBudgets: categoryBudgets,
+          totalBudget: totalUsage,
         );
       }
 
-      final categoryBudgets = <int, BudgetUsage>{};
-      for (final b in budgets) {
-        if (b.budgetType == BudgetTypeCode.expenseCategory ||
-            b.budgetType == BudgetTypeCode.savingCategory) {
-          final node = categoryMap[b.recordCatId];
-          if (node != null) {
-            categoryBudgets[b.recordCatId] = computeCategoryBudgetUsage(
-              category: node,
-              allCategories: categoryNodes,
-              amountMinor: b.amountMinor,
-              budgetId: b.id,
-              budgetType: b.budgetType,
-              records: inputs,
+      switch (settings.recordBudgetHintMode) {
+        case RecordBudgetHintMode.monthly:
+          final usage = await resolveForMode(BudgetMode.monthly);
+          return usage == null
+              ? null
+              : ResolvedRecordBudgetHint(
+                  mode: BudgetMode.monthly,
+                  usage: usage,
+                );
+        case RecordBudgetHintMode.yearly:
+          final usage = await resolveForMode(BudgetMode.yearly);
+          return usage == null
+              ? null
+              : ResolvedRecordBudgetHint(mode: BudgetMode.yearly, usage: usage);
+        case RecordBudgetHintMode.auto:
+          final monthlyUsage = await resolveForMode(BudgetMode.monthly);
+          if (monthlyUsage != null) {
+            return ResolvedRecordBudgetHint(
+              mode: BudgetMode.monthly,
+              usage: monthlyUsage,
             );
           }
-        }
+          final yearlyUsage = await resolveForMode(BudgetMode.yearly);
+          return yearlyUsage == null
+              ? null
+              : ResolvedRecordBudgetHint(
+                  mode: BudgetMode.yearly,
+                  usage: yearlyUsage,
+                );
       }
+    });
 
-      return resolveRecordBudgetHint(
-        selectedCatId: query.categoryId,
-        categoryMap: categoryMap,
-        categoryBudgets: categoryBudgets,
-        totalBudget: totalUsage,
+final recordBudgetHintProvider =
+    FutureProvider.family<BudgetUsage?, RecordBudgetHintQuery>((
+      ref,
+      query,
+    ) async {
+      final resolved = await ref.watch(
+        resolvedRecordBudgetHintProvider(query).future,
       );
+      return resolved?.usage;
     });

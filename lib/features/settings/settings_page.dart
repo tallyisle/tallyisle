@@ -205,6 +205,68 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                             ),
                     ),
                     const Divider(height: 1),
+                    SwitchListTile(
+                      key: const Key('setting_show_record_budget_hint_switch'),
+                      title: const Text('记账页显示预算提示'),
+                      subtitle: const Text('在“记一笔”面板实时显示当前分类或总预算剩余进度'),
+                      value: settings.showRecordBudgetHint,
+                      onChanged: _busy
+                          ? null
+                          : (val) => _updateSettings(
+                              settings.copyWith(showRecordBudgetHint: val),
+                            ),
+                    ),
+                    if (settings.showRecordBudgetHint)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            SizedBox(
+                              width: double.infinity,
+                              child: SegmentedButton<RecordBudgetHintMode>(
+                                key: const Key(
+                                  'setting_record_budget_mode_segmented',
+                                ),
+                                showSelectedIcon: false,
+                                segments: [
+                                  for (final mode
+                                      in RecordBudgetHintMode.values)
+                                    ButtonSegment<RecordBudgetHintMode>(
+                                      value: mode,
+                                      label: FittedBox(
+                                        fit: BoxFit.scaleDown,
+                                        child: Text(
+                                          mode.label,
+                                          maxLines: 1,
+                                          softWrap: false,
+                                        ),
+                                      ),
+                                    ),
+                                ],
+                                selected: <RecordBudgetHintMode>{
+                                  settings.recordBudgetHintMode,
+                                },
+                                onSelectionChanged: _busy
+                                    ? null
+                                    : (selected) => _updateSettings(
+                                        settings.copyWith(
+                                          recordBudgetHintMode: selected.first,
+                                        ),
+                                      ),
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              '自动：优先显示月预算，未设月预算时自动显示年预算',
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: theme.colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    const Divider(height: 1),
                     Padding(
                       padding: const EdgeInsets.all(16),
                       child: Column(

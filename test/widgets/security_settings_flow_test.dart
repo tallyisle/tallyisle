@@ -254,11 +254,15 @@ void main() {
       expect(persisted.themeSeedHex, '6A1B9A');
 
       // Navigate to AboutHelpPage
+      final aboutTile = find.byKey(const Key('nav_about_help_tile'));
       await tester.scrollUntilVisible(
-        find.byKey(const Key('nav_about_help_tile')),
+        aboutTile,
         200,
+        scrollable: find.byType(Scrollable).first,
       );
-      await tester.tap(find.byKey(const Key('nav_about_help_tile')));
+      await tester.ensureVisible(aboutTile);
+      await settle(tester);
+      await tester.tap(aboutTile);
       await settle(tester);
 
       expect(find.text('帐屿 · TallyIsle'), findsOneWidget);

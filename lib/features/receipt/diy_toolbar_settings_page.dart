@@ -215,7 +215,7 @@ class _DiyToolbarSettingsPageState
       children: [
         _buildSectionHeader(
           context,
-          title: '记账辅助开关（固定位置无需排序）',
+          title: '记账辅助开关',
           padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
         ),
         Padding(

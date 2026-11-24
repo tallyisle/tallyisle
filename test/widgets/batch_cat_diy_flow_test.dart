@@ -603,7 +603,8 @@ void main() {
         scrollable: find.byType(Scrollable).last,
       );
       await settle(tester);
-      expect(find.text('记账辅助开关（固定位置无需排序）'), findsOneWidget);
+      expect(find.text('记账辅助开关'), findsOneWidget);
+      expect(find.text('记账辅助开关（固定位置无需排序）'), findsNothing);
       expect(find.byKey(const Key('diy-fixed-switches-card')), findsOneWidget);
       for (final fixedKey in const <String>[
         'templates',
