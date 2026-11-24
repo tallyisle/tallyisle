@@ -235,28 +235,15 @@ class _YearMonthPickerDialogState extends State<_YearMonthPickerDialog> {
                             horizontal: 8,
                             vertical: 6,
                           ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Flexible(
-                                child: FittedBox(
-                                  fit: BoxFit.scaleDown,
-                                  child: Text(
-                                    '$_browsingYear年',
-                                    maxLines: 1,
-                                    style: theme.textTheme.titleMedium
-                                        ?.copyWith(fontWeight: FontWeight.bold),
-                                  ),
-                                ),
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text(
+                              '$_browsingYear年',
+                              maxLines: 1,
+                              style: theme.textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.bold,
                               ),
-                              Icon(
-                                _showingYearGrid
-                                    ? Icons.arrow_drop_up_rounded
-                                    : Icons.arrow_drop_down_rounded,
-                                size: 20,
-                                color: scheme.onSurfaceVariant,
-                              ),
-                            ],
+                            ),
                           ),
                         ),
                       ),

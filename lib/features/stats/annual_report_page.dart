@@ -240,24 +240,16 @@ class _AnnualReportPageState extends ConsumerState<AnnualReportPage> {
             onTap: () => _showYearPickerDialog(selectedYear),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Flexible(
-                    child: FittedBox(
-                      fit: BoxFit.scaleDown,
-                      child: Text(
-                        '$selectedYear年',
-                        maxLines: 1,
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  '$selectedYear年',
+                  maxLines: 1,
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
                   ),
-                  const Icon(Icons.arrow_drop_down),
-                ],
+                ),
               ),
             ),
           ),
