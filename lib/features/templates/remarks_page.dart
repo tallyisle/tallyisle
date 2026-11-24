@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/adaptive.dart';
 import '../../app/providers.dart';
 import '../../data/db/database.dart';
 import '../../domain/model/codes.dart';
 import '../attachments/attachment_providers.dart'
     show billAttachmentServiceProvider;
 import '../common/common.dart';
+import '../common/desktop_modal_page.dart';
 import '../receipt/receipt_diy_providers.dart'
     show DiyToolbarAction, DiyToolbarConfig, diyToolbarConfigProvider;
 import 'template_providers.dart';
@@ -234,197 +236,258 @@ class _RemarksPageState extends ConsumerState<RemarksPage> {
         ? _selectedFilter
         : _filterAll;
 
-    return Scaffold(
-      key: const Key('remarks_page'),
-      appBar: AppBar(title: const Text('常用备注管理')),
-      floatingActionButton: FloatingActionButton.extended(
-        key: const Key('add_remark_fab'),
-        onPressed: () => _openEditor(categories: bookCategories),
-        icon: const Icon(Icons.add),
-        label: const Text('新增备注'),
-      ),
-      body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 720),
-          child: Column(
-            children: [
-              Card(
-                margin: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-                elevation: 0,
-                color: remarksEnabled
-                    ? cs.primaryContainer.withAlpha(90)
-                    : cs.surfaceContainerLow,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  side: BorderSide(color: cs.outlineVariant.withAlpha(120)),
-                ),
-                child: SwitchListTile(
-                  key: const Key('remarks-feature-toggle'),
-                  dense: true,
-                  secondary: Icon(
-                    Icons.comment_outlined,
-                    color: remarksEnabled ? cs.primary : cs.onSurfaceVariant,
-                  ),
-                  title: const Text(
-                    '记一笔常用备注联想与自动统计',
-                    style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
-                  ),
-                  subtitle: Text(
-                    remarksEnabled
-                        ? '已开启：记账时展示分类常用备注候选，并在保存账单时自动累计备注词频'
-                        : '已关闭（默认）：记账时不展示备注候选条，也不自动统计新备注词频',
-                    style: const TextStyle(fontSize: 12),
-                  ),
-                  value: remarksEnabled,
-                  onChanged: _toggleBusy
-                      ? null
-                      : (enabled) => _toggleFrequentRemarks(diyConfig, enabled),
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-                child: Row(
-                  children: [
-                    Expanded(
-                      flex: 5,
-                      child: InputDecorator(
-                        decoration: const InputDecoration(
-                          labelText: '筛选分类',
-                          border: OutlineInputBorder(),
-                          isDense: true,
-                          contentPadding: EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 4,
-                          ),
-                        ),
-                        child: DropdownButtonHideUnderline(
-                          child: DropdownButton<int>(
-                            key: const Key('remarks_category_filter'),
-                            isExpanded: true,
-                            isDense: true,
-                            value: controlledFilter,
-                            items: [
-                              const DropdownMenuItem<int>(
-                                value: _filterAll,
-                                child: Text('全部分类'),
-                              ),
-                              const DropdownMenuItem<int>(
-                                value: noRef,
-                                child: Text('通用备注'),
-                              ),
-                              for (final c in bookCategories)
-                                DropdownMenuItem<int>(
-                                  value: c.id,
-                                  child: Text(c.name),
-                                ),
-                            ],
-                            onChanged: (v) {
-                              if (v == null) return;
-                              setState(() => _selectedFilter = v);
-                            },
-                          ),
-                        ),
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    final isPopupModal = isDesktop && ModalRoute.of(context) is PopupRoute;
+
+    return DesktopModalEscapeScope(
+      enabled: isPopupModal,
+      child: Scaffold(
+        key: const Key('remarks_page'),
+        appBar: AppBar(
+          leading: isPopupModal ? const CloseButton() : null,
+          scrolledUnderElevation: isDesktop ? 0 : null,
+          title: const Text('常用备注管理'),
+          actions: isDesktop
+              ? [
+                  FilledButton.icon(
+                    key: const Key('add_remark_fab'),
+                    style: FilledButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
                       ),
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      flex: 6,
-                      child: TextField(
-                        key: const Key('remarks_search_input'),
-                        controller: _searchController,
-                        decoration: InputDecoration(
-                          labelText: '搜索备注',
-                          isDense: true,
-                          border: const OutlineInputBorder(),
-                          prefixIcon: const Icon(Icons.search, size: 20),
-                          suffixIcon: _keyword.isEmpty
-                              ? null
-                              : IconButton(
-                                  icon: const Icon(Icons.clear, size: 18),
-                                  onPressed: () {
-                                    _searchController.clear();
-                                    setState(() => _keyword = '');
-                                  },
-                                ),
-                        ),
-                        onChanged: (v) => setState(() => _keyword = v.trim()),
+                    onPressed: () => _openEditor(categories: bookCategories),
+                    icon: const Icon(Icons.add, size: 18),
+                    label: const Text('新增备注'),
+                  ),
+                  const SizedBox(width: 12),
+                ]
+              : null,
+        ),
+        floatingActionButton: isDesktop
+            ? null
+            : FloatingActionButton.extended(
+                key: const Key('add_remark_fab'),
+                heroTag: 'fab-remarks',
+                onPressed: () => _openEditor(categories: bookCategories),
+                icon: const Icon(Icons.add),
+                label: const Text('新增备注'),
+              ),
+        body: Center(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: isDesktop ? 800 : 720),
+            child: Column(
+              children: [
+                Card(
+                  margin: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                  elevation: 0,
+                  color: remarksEnabled
+                      ? cs.primaryContainer.withAlpha(90)
+                      : cs.surfaceContainerLow,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    side: BorderSide(color: cs.outlineVariant.withAlpha(120)),
+                  ),
+                  child: SwitchListTile(
+                    key: const Key('remarks-feature-toggle'),
+                    secondary: Icon(
+                      Icons.comment_outlined,
+                      color: remarksEnabled ? cs.primary : cs.onSurfaceVariant,
+                    ),
+                    title: const Text(
+                      '记一笔常用备注联想与自动统计',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 14,
                       ),
                     ),
-                  ],
+                    subtitle: Text(
+                      remarksEnabled
+                          ? '已开启：记账时展示分类常用备注候选，并在保存账单时自动累计备注词频'
+                          : '已关闭（默认）：记账时不展示备注候选条，也不自动统计新备注词频',
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                    value: remarksEnabled,
+                    onChanged: _toggleBusy
+                        ? null
+                        : (enabled) =>
+                              _toggleFrequentRemarks(diyConfig, enabled),
+                  ),
                 ),
-              ),
-              Expanded(
-                child: asyncBody(remarksAsync, (rows) {
-                  final needle = _keyword.toLowerCase();
-                  final filtered = needle.isEmpty
-                      ? rows
-                      : rows
-                            .where(
-                              (r) => r.content.toLowerCase().contains(needle),
-                            )
-                            .toList();
-                  if (filtered.isEmpty) {
-                    return Center(
-                      key: const Key('remarks_empty_state'),
-                      child: Padding(
-                        padding: const EdgeInsets.all(24),
-                        child: Text(
-                          needle.isEmpty
-                              ? '暂无常用备注，点击右下角“新增备注”添加'
-                              : '未找到匹配的常用备注',
-                          style: Theme.of(context).textTheme.bodyMedium,
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Expanded(
+                        flex: 5,
+                        child: InputDecorator(
+                          decoration: const InputDecoration(
+                            labelText: '筛选分类',
+                            border: OutlineInputBorder(),
+                            contentPadding: EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 14,
+                            ),
+                          ),
+                          child: DropdownButtonHideUnderline(
+                            child: DropdownButton<int>(
+                              key: const Key('remarks_category_filter'),
+                              isExpanded: true,
+                              isDense: true,
+                              style: Theme.of(context).textTheme.bodyLarge,
+                              value: controlledFilter,
+                              items: [
+                                const DropdownMenuItem<int>(
+                                  value: _filterAll,
+                                  child: Text('全部分类'),
+                                ),
+                                const DropdownMenuItem<int>(
+                                  value: noRef,
+                                  child: Text('通用备注'),
+                                ),
+                                for (final c in bookCategories)
+                                  DropdownMenuItem<int>(
+                                    value: c.id,
+                                    child: Text(c.name),
+                                  ),
+                              ],
+                              onChanged: (v) {
+                                if (v == null) return;
+                                setState(() => _selectedFilter = v);
+                              },
+                            ),
+                          ),
                         ),
                       ),
-                    );
-                  }
-                  return ListView.separated(
-                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 88),
-                    itemCount: filtered.length,
-                    separatorBuilder: (_, _) => const Divider(height: 1),
-                    itemBuilder: (context, index) {
-                      final item = filtered[index];
-                      final catLabel = item.recordCatId == noRef
-                          ? '通用备注'
-                          : (allCatMap[item.recordCatId]?.name ??
-                                '分类 #${item.recordCatId}');
-                      return ListTile(
-                        key: Key('remark_item_${item.id}'),
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 4,
-                          vertical: 2,
-                        ),
-                        title: Text(item.content),
-                        subtitle: Text('$catLabel · 使用 ${item.usedTimes} 次'),
-                        onTap: () => _openEditor(
-                          existing: item,
-                          categories: bookCategories,
-                        ),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            IconButton(
-                              key: Key('edit_remark_${item.id}'),
-                              tooltip: '编辑',
-                              icon: const Icon(Icons.edit_outlined),
-                              onPressed: () => _openEditor(
-                                existing: item,
-                                categories: bookCategories,
-                              ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        flex: 6,
+                        child: TextField(
+                          key: const Key('remarks_search_input'),
+                          controller: _searchController,
+                          style: Theme.of(context).textTheme.bodyLarge,
+                          decoration: InputDecoration(
+                            labelText: '搜索备注',
+                            border: const OutlineInputBorder(),
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 14,
                             ),
-                            IconButton(
-                              key: Key('delete_remark_${item.id}'),
-                              tooltip: '删除',
-                              icon: const Icon(Icons.delete_outline),
-                              onPressed: () => _deleteRemark(item),
+                            prefixIcon: const Icon(Icons.search, size: 20),
+                            prefixIconConstraints: const BoxConstraints(
+                              minWidth: 40,
+                              minHeight: 0,
                             ),
-                          ],
+                            suffixIconConstraints: const BoxConstraints(
+                              minWidth: 36,
+                              minHeight: 0,
+                              maxHeight: 24,
+                            ),
+                            suffixIcon: _keyword.isEmpty
+                                ? null
+                                : IconButton(
+                                    visualDensity: VisualDensity.compact,
+                                    padding: EdgeInsets.zero,
+                                    constraints: const BoxConstraints(
+                                      minWidth: 32,
+                                      minHeight: 24,
+                                      maxHeight: 24,
+                                    ),
+                                    icon: const Icon(Icons.clear, size: 18),
+                                    onPressed: () {
+                                      _searchController.clear();
+                                      setState(() => _keyword = '');
+                                    },
+                                  ),
+                          ),
+                          onChanged: (v) => setState(() => _keyword = v.trim()),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  child: asyncBody(remarksAsync, (rows) {
+                    final needle = _keyword.toLowerCase();
+                    final filtered = needle.isEmpty
+                        ? rows
+                        : rows
+                              .where(
+                                (r) => r.content.toLowerCase().contains(needle),
+                              )
+                              .toList();
+                    if (filtered.isEmpty) {
+                      return Center(
+                        key: const Key('remarks_empty_state'),
+                        child: Padding(
+                          padding: const EdgeInsets.all(24),
+                          child: Text(
+                            needle.isEmpty
+                                ? (isDesktop
+                                      ? '暂无常用备注，点击右上角“新增备注”添加'
+                                      : '暂无常用备注，点击右下角“新增备注”添加')
+                                : '未找到匹配的常用备注',
+                            style: Theme.of(context).textTheme.bodyMedium,
+                          ),
                         ),
                       );
-                    },
-                  );
-                }),
-              ),
-            ],
+                    }
+                    return ListView.separated(
+                      padding: EdgeInsets.fromLTRB(
+                        16,
+                        8,
+                        16,
+                        isDesktop ? 24 : 88,
+                      ),
+                      itemCount: filtered.length,
+                      separatorBuilder: (_, _) => const Divider(height: 1),
+                      itemBuilder: (context, index) {
+                        final item = filtered[index];
+                        final catLabel = item.recordCatId == noRef
+                            ? '通用备注'
+                            : (allCatMap[item.recordCatId]?.name ??
+                                  '分类 #${item.recordCatId}');
+                        return ListTile(
+                          key: Key('remark_item_${item.id}'),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 4,
+                            vertical: 2,
+                          ),
+                          title: Text(item.content),
+                          subtitle: Text('$catLabel · 使用 ${item.usedTimes} 次'),
+                          onTap: () => _openEditor(
+                            existing: item,
+                            categories: bookCategories,
+                          ),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                key: Key('edit_remark_${item.id}'),
+                                tooltip: '编辑',
+                                icon: const Icon(Icons.edit_outlined),
+                                onPressed: () => _openEditor(
+                                  existing: item,
+                                  categories: bookCategories,
+                                ),
+                              ),
+                              IconButton(
+                                key: Key('delete_remark_${item.id}'),
+                                tooltip: '删除',
+                                icon: const Icon(Icons.delete_outline),
+                                onPressed: () => _deleteRemark(item),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    );
+                  }),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -543,71 +606,77 @@ class _RemarkEditDialogState extends ConsumerState<_RemarkEditDialog> {
         widget.categories.any((c) => c.id == _categoryId);
     final effectiveCatId = hasSelected ? _categoryId : noRef;
 
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    final dialogColumn = Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        TextField(
+          key: const Key('remark_dialog_content_input'),
+          controller: _contentController,
+          enabled: !_busy,
+          autofocus: true,
+          maxLength: 200,
+          decoration: const InputDecoration(
+            labelText: '备注内容',
+            border: OutlineInputBorder(),
+            contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+          ),
+        ),
+        const SizedBox(height: 12),
+        InputDecorator(
+          decoration: const InputDecoration(
+            labelText: '归属分类',
+            border: OutlineInputBorder(),
+            contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+          ),
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<int>(
+              key: const Key('remark_dialog_category_dropdown'),
+              isExpanded: true,
+              isDense: true,
+              value: effectiveCatId,
+              items: categoryItems,
+              onChanged: _busy
+                  ? null
+                  : (v) {
+                      if (v != null) setState(() => _categoryId = v);
+                    },
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          key: const Key('remark_dialog_used_times_input'),
+          controller: _usedTimesController,
+          enabled: !_busy,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(
+            labelText: '累计使用次数',
+            border: OutlineInputBorder(),
+            contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+          ),
+        ),
+        if (_error != null) ...[
+          const SizedBox(height: 8),
+          Text(
+            _error!,
+            key: const Key('remark_dialog_error'),
+            style: TextStyle(color: Theme.of(context).colorScheme.error),
+          ),
+        ],
+      ],
+    );
+
     return AlertDialog(
       title: Text(widget.existing == null ? '新增常用备注' : '编辑常用备注'),
       content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            TextField(
-              key: const Key('remark_dialog_content_input'),
-              controller: _contentController,
-              enabled: !_busy,
-              autofocus: true,
-              maxLength: 200,
-              decoration: const InputDecoration(
-                labelText: '备注内容',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 12),
-            InputDecorator(
-              decoration: const InputDecoration(
-                labelText: '归属分类',
-                border: OutlineInputBorder(),
-                isDense: true,
-                contentPadding: EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 4,
-                ),
-              ),
-              child: DropdownButtonHideUnderline(
-                child: DropdownButton<int>(
-                  key: const Key('remark_dialog_category_dropdown'),
-                  isExpanded: true,
-                  isDense: true,
-                  value: effectiveCatId,
-                  items: categoryItems,
-                  onChanged: _busy
-                      ? null
-                      : (v) {
-                          if (v != null) setState(() => _categoryId = v);
-                        },
-                ),
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              key: const Key('remark_dialog_used_times_input'),
-              controller: _usedTimesController,
-              enabled: !_busy,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                labelText: '累计使用次数',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            if (_error != null) ...[
-              const SizedBox(height: 8),
-              Text(
-                _error!,
-                key: const Key('remark_dialog_error'),
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
-              ),
-            ],
-          ],
-        ),
+        child: isDesktop
+            ? ConstrainedBox(
+                constraints: const BoxConstraints(minWidth: 360, maxWidth: 420),
+                child: dialogColumn,
+              )
+            : dialogColumn,
       ),
       actions: [
         TextButton(

@@ -2,13 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../domain/model/codes.dart';
 import '../features/assets/asset_detail_page.dart';
 import '../features/assets/asset_editor_page.dart';
 import '../features/assets/assets_page.dart';
 import '../features/attachments/bill_images_page.dart';
 import '../features/automation/auto_bill_page.dart';
 import '../features/automation/desktop_widgets_page.dart';
+import '../features/automation/mcp_settings_page.dart';
 import '../features/automation/ocr_bill_page.dart';
 import '../features/automation/url_scheme_page.dart';
 import '../features/backup/backup_page.dart';
@@ -19,9 +19,11 @@ import '../features/bank_cards/bank_cards_page.dart';
 import '../features/batch_edit/batch_edit_page.dart';
 import '../features/books/books_page.dart';
 import '../features/budget/budget_page.dart';
+import '../features/budget/budget_providers.dart' show budgetOffsetProvider;
 import '../features/calendar/calendar_page.dart';
 import '../features/categories/categories_page.dart';
 import '../features/category_transfer/category_transfer_page.dart';
+import '../features/common/desktop_modal_page.dart';
 import '../features/csv_transfer/csv_export_page.dart';
 import '../features/csv_transfer/csv_import_page.dart';
 import '../features/csv_transfer/import_batches_page.dart';
@@ -43,6 +45,7 @@ import '../features/notes/notes_page.dart';
 import '../features/periodic/periodic_editor_page.dart';
 import '../features/periodic/periodic_page.dart';
 import '../features/receipt/diy_toolbar_settings_page.dart';
+import '../features/records/desktop_record_editor_dialog.dart';
 import '../features/records/record_detail_page.dart';
 import '../features/records/record_editor_page.dart';
 import '../features/reimburse/reimburse_page.dart';
@@ -66,35 +69,106 @@ import '../features/templates/template_editor_page.dart';
 import '../features/templates/templates_page.dart';
 import '../features/wishes/wish_editor_page.dart';
 import '../features/wishes/wishes_page.dart';
+import 'adaptive.dart';
+import 'desktop_shell.dart';
 import 'providers.dart';
+
+Page<Object?> _adaptiveFormPage(
+  BuildContext context,
+  GoRouterState state,
+  Widget child,
+) => buildDesktopModalOrMaterialPage<Object?>(
+  context: context,
+  key: state.pageKey,
+  name: state.name ?? state.path,
+  arguments: <String, String>{
+    ...state.pathParameters,
+    ...state.uri.queryParameters,
+  },
+  restorationId: state.pageKey.value,
+  child: child,
+);
+
+Page<Object?> _adaptiveRecordDetailPage(
+  BuildContext context,
+  GoRouterState state,
+  Widget child,
+) {
+  final args = <String, String>{
+    ...state.pathParameters,
+    ...state.uri.queryParameters,
+  };
+  if (DesktopAdaptive.isExpandedDesktop(context)) {
+    return buildDesktopModalOrMaterialPage<Object?>(
+      context: context,
+      key: state.pageKey,
+      name: state.name ?? state.path,
+      arguments: args,
+      restorationId: state.pageKey.value,
+      maxWidth: 560,
+      maxHeight: 740,
+      child: child,
+    );
+  }
+  return NoTransitionPage<Object?>(
+    key: state.pageKey,
+    name: state.name ?? state.path,
+    arguments: args,
+    restorationId: state.pageKey.value,
+    child: child,
+  );
+}
 
 /// Semantic routes (ADR-015). Mapping to the original app's 73 routes is kept
 /// in docs/reference/ as modules are implemented.
-GoRouter buildRouter() => GoRouter(
+GoRouter buildRouter({
+  List<NavigatorObserver>? observers,
+  DesktopPopupRouteObserver? popupObserver,
+}) => GoRouter(
   initialLocation: '/',
+  observers: observers,
   routes: [
     StatefulShellRoute.indexedStack(
       builder: (context, state, shell) => _Shell(shell),
       branches: [
         StatefulShellBranch(
+          observers: popupObserver == null
+              ? null
+              : <NavigatorObserver>[popupObserver.createChildObserver()],
           routes: [GoRoute(path: '/', builder: (_, _) => const HomePage())],
         ),
         StatefulShellBranch(
+          observers: popupObserver == null
+              ? null
+              : <NavigatorObserver>[popupObserver.createChildObserver()],
           routes: [
             GoRoute(path: '/stats', builder: (_, _) => const StatsPage()),
           ],
         ),
         StatefulShellBranch(
+          observers: popupObserver == null
+              ? null
+              : <NavigatorObserver>[popupObserver.createChildObserver()],
           routes: [
             GoRoute(path: '/assets', builder: (_, _) => const AssetsPage()),
           ],
         ),
         StatefulShellBranch(
+          observers: popupObserver == null
+              ? null
+              : <NavigatorObserver>[popupObserver.createChildObserver()],
           routes: [GoRoute(path: '/me', builder: (_, _) => const MePage())],
         ),
       ],
     ),
-    GoRoute(path: '/budget', builder: (_, _) => const BudgetPage()),
+    GoRoute(
+      path: '/budget',
+      builder: (_, state) => BudgetPage(
+        initialOffset: int.tryParse(
+          state.uri.queryParameters['initialOffset'] ?? '',
+        ),
+      ),
+    ),
     GoRoute(
       path: '/stats/category',
       builder: (_, _) => const CategoryStatsPage(),
@@ -132,34 +206,112 @@ GoRouter buildRouter() => GoRouter(
     ),
     GoRoute(
       path: '/record/new',
-      builder: (_, state) {
+      pageBuilder: (context, state) {
         final q = state.uri.queryParameters;
-        return RecordEditorPage(
-          initialType: int.tryParse(q['type'] ?? ''),
-          initialCategory: int.tryParse(q['cat'] ?? q['category'] ?? ''),
-          initialTemplateId: int.tryParse(q['templateId'] ?? ''),
-          initialAsset: int.tryParse(q['asset'] ?? ''),
-          initialFrom: int.tryParse(q['from'] ?? ''),
-          initialTo: int.tryParse(q['to'] ?? ''),
-          initialAmount: q['amount'] ?? q['money'],
-          initialRemark: q['remark'] ?? q['note'],
+        final initialType = int.tryParse(q['type'] ?? '');
+        final initialCategory = int.tryParse(q['cat'] ?? q['category'] ?? '');
+        final initialTemplateId = int.tryParse(q['templateId'] ?? '');
+        final initialAsset = int.tryParse(q['asset'] ?? q['assetId'] ?? '');
+        final initialFrom = int.tryParse(q['from'] ?? '');
+        final initialTo = int.tryParse(q['to'] ?? '');
+        final initialAmount = q['amount'] ?? q['money'];
+        final initialRemark = q['remark'] ?? q['note'];
+        final initialRecordTimeMs = int.tryParse(q['time'] ?? '');
+        final args = <String, String>{...state.pathParameters, ...q};
+        if (DesktopAdaptive.isDesktop(context)) {
+          return DesktopRecordDialogPage<Object?>(
+            key: state.pageKey,
+            name: state.name ?? state.path,
+            arguments: args,
+            restorationId: state.pageKey.value,
+            initialType: initialType,
+            initialCategory: initialCategory,
+            initialTemplateId: initialTemplateId,
+            initialAssetId: initialAsset,
+            initialFrom: initialFrom,
+            initialTo: initialTo,
+            initialAmount: initialAmount,
+            initialRemark: initialRemark,
+            initialRecordTimeMs: initialRecordTimeMs,
+          );
+        }
+        return NoTransitionPage<Object?>(
+          key: state.pageKey,
+          name: state.name ?? state.path,
+          arguments: args,
+          restorationId: state.pageKey.value,
+          child: RecordEditorPage(
+            initialType: initialType,
+            initialCategory: initialCategory,
+            initialTemplateId: initialTemplateId,
+            initialAsset: initialAsset,
+            initialFrom: initialFrom,
+            initialTo: initialTo,
+            initialAmount: initialAmount,
+            initialRemark: initialRemark,
+            initialRecordTimeMs: initialRecordTimeMs,
+          ),
         );
       },
     ),
     GoRoute(
       path: '/record/:id',
-      builder: (_, state) =>
-          RecordDetailPage(recordId: state.pathParameters['id']!),
+      pageBuilder: (context, state) => _adaptiveRecordDetailPage(
+        context,
+        state,
+        RecordDetailPage(recordId: state.pathParameters['id']!),
+      ),
     ),
     GoRoute(
       path: '/record/:id/edit',
-      builder: (_, state) =>
-          RecordEditorPage(recordId: state.pathParameters['id']!),
+      pageBuilder: (context, state) {
+        final recordId = state.pathParameters['id']!;
+        final args = <String, String>{
+          ...state.pathParameters,
+          ...state.uri.queryParameters,
+        };
+        if (DesktopAdaptive.isDesktop(context)) {
+          return DesktopRecordDialogPage<Object?>(
+            key: state.pageKey,
+            name: state.name ?? state.path,
+            arguments: args,
+            restorationId: state.pageKey.value,
+            recordId: recordId,
+          );
+        }
+        return NoTransitionPage<Object?>(
+          key: state.pageKey,
+          name: state.name ?? state.path,
+          arguments: args,
+          restorationId: state.pageKey.value,
+          child: RecordEditorPage(recordId: recordId),
+        );
+      },
+    ),
+    GoRoute(
+      path: '/assets/manage',
+      pageBuilder: (context, state) => buildDesktopModalOrMaterialPage<Object?>(
+        context: context,
+        key: state.pageKey,
+        name: state.name ?? state.path,
+        arguments: <String, String>{
+          ...state.pathParameters,
+          ...state.uri.queryParameters,
+        },
+        restorationId: state.pageKey.value,
+        maxWidth: 860,
+        maxHeight: 740,
+        child: const AssetsPage(standaloneManagement: true),
+      ),
     ),
     GoRoute(
       path: '/assets/new',
-      builder: (_, state) => AssetEditorPage(
-        initialType: int.tryParse(state.uri.queryParameters['type'] ?? ''),
+      pageBuilder: (context, state) => _adaptiveFormPage(
+        context,
+        state,
+        AssetEditorPage(
+          initialType: int.tryParse(state.uri.queryParameters['type'] ?? ''),
+        ),
       ),
     ),
     GoRoute(
@@ -169,8 +321,11 @@ GoRouter buildRouter() => GoRouter(
     ),
     GoRoute(
       path: '/assets/:id/edit',
-      builder: (_, state) =>
-          AssetEditorPage(assetId: int.parse(state.pathParameters['id']!)),
+      pageBuilder: (context, state) => _adaptiveFormPage(
+        context,
+        state,
+        AssetEditorPage(assetId: int.parse(state.pathParameters['id']!)),
+      ),
     ),
     GoRoute(path: '/search', builder: (_, _) => const SearchPage()),
     GoRoute(path: '/calendar', builder: (_, _) => const CalendarPage()),
@@ -190,12 +345,16 @@ GoRouter buildRouter() => GoRouter(
     ),
     GoRoute(
       path: '/periodic/new',
-      builder: (_, _) => const PeriodicEditorPage(),
+      pageBuilder: (context, state) =>
+          _adaptiveFormPage(context, state, const PeriodicEditorPage()),
     ),
     GoRoute(
       path: '/periodic/:id/edit',
-      builder: (_, state) =>
-          PeriodicEditorPage(periodId: int.parse(state.pathParameters['id']!)),
+      pageBuilder: (context, state) => _adaptiveFormPage(
+        context,
+        state,
+        PeriodicEditorPage(periodId: int.parse(state.pathParameters['id']!)),
+      ),
     ),
     GoRoute(
       path: '/periodic/:id/history',
@@ -211,7 +370,8 @@ GoRouter buildRouter() => GoRouter(
     ),
     GoRoute(
       path: '/installments/new',
-      builder: (_, _) => const InstallmentEditorPage(),
+      pageBuilder: (context, state) =>
+          _adaptiveFormPage(context, state, const InstallmentEditorPage()),
     ),
     GoRoute(
       path: '/installments/:id',
@@ -222,16 +382,24 @@ GoRouter buildRouter() => GoRouter(
     ),
     GoRoute(
       path: '/installments/:id/edit',
-      builder: (_, state) => InstallmentEditorPage(
-        installmentId: int.parse(state.pathParameters['id']!),
+      pageBuilder: (context, state) => _adaptiveFormPage(
+        context,
+        state,
+        InstallmentEditorPage(
+          installmentId: int.parse(state.pathParameters['id']!),
+        ),
       ),
     ),
     GoRoute(path: '/debts', builder: (_, _) => const DebtPage()),
     GoRoute(
       path: '/debts/new',
-      builder: (_, state) => DebtEditorPage(
-        initialSubType: int.tryParse(
-          state.uri.queryParameters['subType'] ?? '',
+      pageBuilder: (context, state) => _adaptiveFormPage(
+        context,
+        state,
+        DebtEditorPage(
+          initialSubType: int.tryParse(
+            state.uri.queryParameters['subType'] ?? '',
+          ),
         ),
       ),
     ),
@@ -242,11 +410,18 @@ GoRouter buildRouter() => GoRouter(
     ),
     GoRoute(
       path: '/debts/:id/edit',
-      builder: (_, state) =>
-          DebtEditorPage(debtId: int.parse(state.pathParameters['id']!)),
+      pageBuilder: (context, state) => _adaptiveFormPage(
+        context,
+        state,
+        DebtEditorPage(debtId: int.parse(state.pathParameters['id']!)),
+      ),
     ),
     GoRoute(path: '/savings', builder: (_, _) => const SavingsPage()),
-    GoRoute(path: '/savings/new', builder: (_, _) => const SavingsEditorPage()),
+    GoRoute(
+      path: '/savings/new',
+      pageBuilder: (context, state) =>
+          _adaptiveFormPage(context, state, const SavingsEditorPage()),
+    ),
     GoRoute(
       path: '/savings/:id',
       builder: (_, state) =>
@@ -254,8 +429,11 @@ GoRouter buildRouter() => GoRouter(
     ),
     GoRoute(
       path: '/savings/:id/edit',
-      builder: (_, state) =>
-          SavingsEditorPage(planId: int.parse(state.pathParameters['id']!)),
+      pageBuilder: (context, state) => _adaptiveFormPage(
+        context,
+        state,
+        SavingsEditorPage(planId: int.parse(state.pathParameters['id']!)),
+      ),
     ),
     GoRoute(
       path: '/deposits',
@@ -268,26 +446,39 @@ GoRouter buildRouter() => GoRouter(
     ),
     GoRoute(
       path: '/deposits/new',
-      builder: (_, state) => FixedDepositEditorPage(
-        initialAssetId: int.tryParse(
-          state.uri.queryParameters['assetId'] ?? '',
+      pageBuilder: (context, state) => _adaptiveFormPage(
+        context,
+        state,
+        FixedDepositEditorPage(
+          initialAssetId: int.tryParse(
+            state.uri.queryParameters['assetId'] ?? '',
+          ),
         ),
       ),
     ),
     GoRoute(
       path: '/deposits/:assetId/:index/edit',
-      builder: (_, state) => FixedDepositEditorPage(
-        assetId: int.parse(state.pathParameters['assetId']!),
-        depositIndex: int.parse(state.pathParameters['index']!),
+      pageBuilder: (context, state) => _adaptiveFormPage(
+        context,
+        state,
+        FixedDepositEditorPage(
+          assetId: int.parse(state.pathParameters['assetId']!),
+          depositIndex: int.parse(state.pathParameters['index']!),
+        ),
       ),
     ),
     GoRoute(path: '/reminders', builder: (_, _) => const ReminderPage()),
     GoRoute(path: '/backup', builder: (_, _) => const BackupPage()),
     GoRoute(
       path: '/backup/webdav',
-      builder: (_, _) => const WebDavConfigPage(),
+      pageBuilder: (context, state) =>
+          _adaptiveFormPage(context, state, const WebDavConfigPage()),
     ),
-    GoRoute(path: '/backup/s3', builder: (_, _) => const S3ConfigPage()),
+    GoRoute(
+      path: '/backup/s3',
+      pageBuilder: (context, state) =>
+          _adaptiveFormPage(context, state, const S3ConfigPage()),
+    ),
     GoRoute(path: '/import/csv', builder: (_, _) => const CsvImportPage()),
     GoRoute(
       path: '/import/batches',
@@ -303,34 +494,55 @@ GoRouter buildRouter() => GoRouter(
     GoRoute(path: '/import/penny', builder: (_, _) => const MigrationPage()),
     GoRoute(path: '/migration', builder: (_, _) => const MigrationPage()),
     GoRoute(path: '/wishes', builder: (_, _) => const WishesPage()),
-    GoRoute(path: '/wishes/new', builder: (_, _) => const WishEditorPage()),
+    GoRoute(
+      path: '/wishes/new',
+      pageBuilder: (context, state) =>
+          _adaptiveFormPage(context, state, const WishEditorPage()),
+    ),
     GoRoute(
       path: '/wishes/:id/edit',
-      builder: (_, state) => WishEditorPage(wishId: state.pathParameters['id']),
+      pageBuilder: (context, state) => _adaptiveFormPage(
+        context,
+        state,
+        WishEditorPage(wishId: state.pathParameters['id']),
+      ),
     ),
     GoRoute(path: '/notes', builder: (_, _) => const NotesPage()),
-    GoRoute(path: '/notes/new', builder: (_, _) => const NoteEditorPage()),
+    GoRoute(
+      path: '/notes/new',
+      pageBuilder: (context, state) =>
+          _adaptiveFormPage(context, state, const NoteEditorPage()),
+    ),
     GoRoute(path: '/notes/trash', builder: (_, _) => const NoteTrashPage()),
     GoRoute(
       path: '/notes/:id/edit',
-      builder: (_, state) =>
-          NoteEditorPage(noteId: int.parse(state.pathParameters['id']!)),
+      pageBuilder: (context, state) => _adaptiveFormPage(
+        context,
+        state,
+        NoteEditorPage(noteId: int.parse(state.pathParameters['id']!)),
+      ),
     ),
     GoRoute(path: '/templates', builder: (_, _) => const TemplatesPage()),
     GoRoute(
       path: '/templates/new',
-      builder: (_, state) {
+      pageBuilder: (context, state) {
         final q = state.uri.queryParameters;
-        return TemplateEditorPage(
-          initialBookId: int.tryParse(q['bookId'] ?? ''),
-          initialType: int.tryParse(q['type'] ?? ''),
+        return _adaptiveFormPage(
+          context,
+          state,
+          TemplateEditorPage(
+            initialBookId: int.tryParse(q['bookId'] ?? ''),
+            initialType: int.tryParse(q['type'] ?? ''),
+          ),
         );
       },
     ),
     GoRoute(
       path: '/templates/:id/edit',
-      builder: (_, state) => TemplateEditorPage(
-        templateId: int.parse(state.pathParameters['id']!),
+      pageBuilder: (context, state) => _adaptiveFormPage(
+        context,
+        state,
+        TemplateEditorPage(templateId: int.parse(state.pathParameters['id']!)),
       ),
     ),
     GoRoute(
@@ -344,12 +556,16 @@ GoRouter buildRouter() => GoRouter(
     GoRoute(path: '/bank-cards', builder: (_, _) => const BankCardsPage()),
     GoRoute(
       path: '/bank-cards/new',
-      builder: (_, _) => const BankCardEditorPage(),
+      pageBuilder: (context, state) =>
+          _adaptiveFormPage(context, state, const BankCardEditorPage()),
     ),
     GoRoute(
       path: '/bank-cards/:id/edit',
-      builder: (_, state) =>
-          BankCardEditorPage(cardId: int.parse(state.pathParameters['id']!)),
+      pageBuilder: (context, state) => _adaptiveFormPage(
+        context,
+        state,
+        BankCardEditorPage(cardId: int.parse(state.pathParameters['id']!)),
+      ),
     ),
     GoRoute(
       path: '/categories/transfer',
@@ -396,6 +612,10 @@ GoRouter buildRouter() => GoRouter(
       builder: (_, _) => const AutoBillPage(),
     ),
     GoRoute(path: '/automation/ocr', builder: (_, _) => const OcrBillPage()),
+    GoRoute(
+      path: '/automation/mcp',
+      builder: (_, _) => const McpSettingsPage(),
+    ),
   ],
 );
 
@@ -410,10 +630,17 @@ class _Shell extends ConsumerWidget {
         (asyncVal) => asyncVal.value?.defaultRecordType,
       ),
     );
+    if (DesktopAdaptive.useSideNavigation(context)) {
+      return DesktopNavigationScaffold(shell: shell);
+    }
+
     final scheme = Theme.of(context).colorScheme;
     final selectedIndex = shell.currentIndex;
 
     void goBranch(int index) {
+      if (index == 1) {
+        ref.read(budgetOffsetProvider.notifier).reset();
+      }
       shell.goBranch(index, initialLocation: index == selectedIndex);
     }
 
@@ -459,19 +686,7 @@ class _Shell extends ConsumerWidget {
                           clipBehavior: Clip.antiAlias,
                           child: InkWell(
                             key: const Key('add-record'),
-                            onTap: () {
-                              final defaultType =
-                                  ref
-                                      .read(appSettingsProvider)
-                                      .value
-                                      ?.defaultRecordType ??
-                                  RecordType.expense;
-                              context.push(
-                                defaultType == RecordType.expense
-                                    ? '/record/new'
-                                    : '/record/new?type=$defaultType',
-                              );
-                            },
+                            onTap: () => openNewRecordEntry(context, ref),
                             child: SizedBox(
                               width: 46,
                               height: 40,

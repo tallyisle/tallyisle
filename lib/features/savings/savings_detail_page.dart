@@ -2,13 +2,16 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../app/adaptive.dart';
 import '../../core/failure.dart';
 import '../../core/money.dart';
 import '../../data/db/database.dart';
 import '../../domain/rules/savings_plan.dart';
 import '../common/common.dart';
+import '../common/desktop_modal_page.dart';
 import 'savings_editor_page.dart';
 import 'savings_page.dart' show SavingsProgressBar;
 import 'savings_providers.dart';
@@ -46,8 +49,9 @@ class _SavingsDetailPageState extends ConsumerState<SavingsDetailPage> {
   }
 
   Future<void> _openEdit(int planId) async {
-    await Navigator.of(context).push<int>(
-      MaterialPageRoute(builder: (_) => SavingsEditorPage(planId: planId)),
+    await pushDesktopModalOrMaterialRoute<int>(
+      context,
+      child: SavingsEditorPage(planId: planId),
     );
   }
 
@@ -125,7 +129,16 @@ class _SavingsDetailPageState extends ConsumerState<SavingsDetailPage> {
         planId: detail.plan.id,
         deleteLinkedTransfers: deleteLinkedTransfers,
       );
-      if (mounted) Navigator.of(context).pop();
+      if (mounted) {
+        final route = ModalRoute.of(context);
+        if (route != null && route.settings is! Page) {
+          await Navigator.of(context).maybePop();
+        } else if (GoRouter.maybeOf(context)?.canPop() ?? false) {
+          context.pop();
+        } else {
+          await Navigator.of(context).maybePop();
+        }
+      }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(
@@ -187,19 +200,60 @@ class _SavingsDetailPageState extends ConsumerState<SavingsDetailPage> {
 
   @override
   Widget build(BuildContext context) {
+    final isDesktop = DesktopAdaptive.isDesktop(context);
     final detailAsync = ref.watch(savingsDetailViewProvider(widget.planId));
 
     return detailAsync.when(
-      loading: () => const Scaffold(body: Loading()),
-      error: (e, _) => Scaffold(
-        appBar: AppBar(title: const Text('存钱详情')),
-        body: ErrorView(e),
+      loading: () => isDesktop
+          ? DesktopModalEscapeScope(
+              enabled: true,
+              child: Scaffold(
+                appBar: AppBar(
+                  leading:
+                      ModalRoute.of(context) is PopupRoute &&
+                          Navigator.of(context).canPop()
+                      ? const CloseButton()
+                      : null,
+                  scrolledUnderElevation: 0,
+                  title: const Text('存钱详情'),
+                ),
+                body: const Loading(),
+              ),
+            )
+          : const Scaffold(body: Loading()),
+      error: (e, _) => DesktopModalEscapeScope(
+        enabled: isDesktop,
+        child: Scaffold(
+          appBar: AppBar(
+            leading:
+                isDesktop &&
+                    ModalRoute.of(context) is PopupRoute &&
+                    Navigator.of(context).canPop()
+                ? const CloseButton()
+                : null,
+            scrolledUnderElevation: isDesktop ? 0 : null,
+            title: const Text('存钱详情'),
+          ),
+          body: ErrorView(e),
+        ),
       ),
       data: (detail) {
         if (detail == null) {
-          return Scaffold(
-            appBar: AppBar(title: const Text('存钱详情')),
-            body: const Center(child: Text('存钱计划已删除')),
+          return DesktopModalEscapeScope(
+            enabled: isDesktop,
+            child: Scaffold(
+              appBar: AppBar(
+                leading:
+                    isDesktop &&
+                        ModalRoute.of(context) is PopupRoute &&
+                        Navigator.of(context).canPop()
+                    ? const CloseButton()
+                    : null,
+                scrolledUnderElevation: isDesktop ? 0 : null,
+                title: const Text('存钱详情'),
+              ),
+              body: const Center(child: Text('存钱计划已删除')),
+            ),
           );
         }
         final plan = detail.plan;
@@ -220,142 +274,159 @@ class _SavingsDetailPageState extends ConsumerState<SavingsDetailPage> {
           plan.planMoneyMinor,
         );
 
-        return Scaffold(
-          key: const Key('savings_detail_page'),
-          appBar: AppBar(
-            title: Text(plan.name),
-            actions: [
-              IconButton(
-                key: const Key('edit_savings_plan_button'),
-                tooltip: '编辑计划',
-                onPressed: () => _openEdit(plan.id),
-                icon: const Icon(Icons.edit_outlined),
-              ),
-              IconButton(
-                key: const Key('toggle_archive_plan_button'),
-                tooltip: isArchived ? '恢复进行中' : '归档计划',
-                onPressed: () => _toggleArchive(plan),
-                icon: Icon(
-                  isArchived
-                      ? Icons.unarchive_outlined
-                      : Icons.archive_outlined,
-                ),
-              ),
-              IconButton(
-                key: const Key('delete_savings_plan_button'),
-                tooltip: '删除计划',
-                onPressed: () => _confirmDeletePlan(detail),
-                icon: const Icon(Icons.delete_outline),
-              ),
-            ],
-          ),
-          body: ListView(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 88),
-            children: [
-              _DetailHeaderCard(
-                detail: detail,
-                tip: tip,
-                permille: permille,
-                percentText: percentText,
-              ),
-              const SizedBox(height: 16),
-              if (plan.planType == SavingsPlanType.free) ...[
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      '存入记录',
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
+        final list = ListView(
+          padding: EdgeInsets.fromLTRB(16, 12, 16, isDesktop ? 24 : 88),
+          children: [
+            _DetailHeaderCard(
+              detail: detail,
+              tip: tip,
+              permille: permille,
+              percentText: percentText,
+            ),
+            const SizedBox(height: 16),
+            if (plan.planType == SavingsPlanType.free) ...[
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    '存入记录',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
                     ),
-                    FilledButton.tonalIcon(
-                      key: const Key('free_plan_checkin_button'),
-                      onPressed: () => _showFreePlanCheckInDialog(detail),
-                      icon: const Icon(Icons.savings_outlined, size: 18),
-                      label: const Text('打卡存钱'),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                if (detail.schedule.freePlanRows.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 32),
-                    child: Center(child: Text('暂无存入记录，点击“打卡存钱”记录第一笔吧')),
-                  )
-                else
-                  for (final row in detail.schedule.freePlanRows)
-                    _FreeRecordTile(
-                      row: row,
-                      symbol: detail.currencySymbol,
-                      hasLiveTransfer:
-                          row.record.recordId != null &&
-                          detail.liveTransferIds.contains(row.record.recordId),
-                      onCancel: () => _confirmCancelDeposit(row.record),
-                    ),
-              ] else ...[
-                Text(
-                  '存钱排期（共 ${detail.schedule.slots.length} 期）',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
                   ),
-                ),
-                const SizedBox(height: 8),
-                for (final merged in detail.schedule.slots)
-                  _ScheduleSlotTile(
-                    merged: merged,
-                    symbol: detail.currencySymbol,
-                    onCheckIn: () =>
-                        _showSlotCheckInDialog(detail, merged.slot),
-                    onCancel: merged.matchedRecord == null
-                        ? null
-                        : () => _confirmCancelDeposit(merged.matchedRecord!),
-                  ),
-                if (detail.schedule.outOfScheduleRecords.isNotEmpty) ...[
-                  const SizedBox(height: 20),
-                  Card(
-                    key: const Key('out_of_schedule_section'),
-                    child: Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            '排期外历史存入记录（${detail.schedule.outOfScheduleRecords.length} 笔）',
-                            style: Theme.of(context).textTheme.titleSmall
-                                ?.copyWith(fontWeight: FontWeight.bold),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            '修改起止日期或周期前的历史已存记录，仍计入已存总额，可随时取消存入。',
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
-                          const Divider(),
-                          for (final rec
-                              in detail.schedule.outOfScheduleRecords)
-                            ListTile(
-                              key: Key('out_of_schedule_record_${rec.id}'),
-                              contentPadding: EdgeInsets.zero,
-                              title: Text(
-                                '${detail.currencySymbol}${formatMinor(rec.recordMoneyMinor)}',
-                              ),
-                              subtitle: Text(
-                                '${formatDate(DateTime.fromMillisecondsSinceEpoch(rec.recordDate))}'
-                                '${rec.remark.isEmpty ? '' : ' · ${rec.remark}'}',
-                              ),
-                              trailing: TextButton(
-                                key: Key('cancel_out_of_schedule_${rec.id}'),
-                                onPressed: () => _confirmCancelDeposit(rec),
-                                child: const Text('取消存入'),
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
+                  FilledButton.tonalIcon(
+                    key: const Key('free_plan_checkin_button'),
+                    onPressed: () => _showFreePlanCheckInDialog(detail),
+                    icon: const Icon(Icons.savings_outlined, size: 18),
+                    label: const Text('打卡存钱'),
                   ),
                 ],
+              ),
+              const SizedBox(height: 8),
+              if (detail.schedule.freePlanRows.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 32),
+                  child: Center(child: Text('暂无存入记录，点击“打卡存钱”记录第一笔吧')),
+                )
+              else
+                for (final row in detail.schedule.freePlanRows)
+                  _FreeRecordTile(
+                    row: row,
+                    symbol: detail.currencySymbol,
+                    hasLiveTransfer:
+                        row.record.recordId != null &&
+                        detail.liveTransferIds.contains(row.record.recordId),
+                    onCancel: () => _confirmCancelDeposit(row.record),
+                  ),
+            ] else ...[
+              Text(
+                '存钱排期（共 ${detail.schedule.slots.length} 期）',
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              for (final merged in detail.schedule.slots)
+                _ScheduleSlotTile(
+                  merged: merged,
+                  symbol: detail.currencySymbol,
+                  onCheckIn: () => _showSlotCheckInDialog(detail, merged.slot),
+                  onCancel: merged.matchedRecord == null
+                      ? null
+                      : () => _confirmCancelDeposit(merged.matchedRecord!),
+                ),
+              if (detail.schedule.outOfScheduleRecords.isNotEmpty) ...[
+                const SizedBox(height: 20),
+                Card(
+                  key: const Key('out_of_schedule_section'),
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '排期外历史存入记录（${detail.schedule.outOfScheduleRecords.length} 笔）',
+                          style: Theme.of(context).textTheme.titleSmall
+                              ?.copyWith(fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          '修改起止日期或周期前的历史已存记录，仍计入已存总额，可随时取消存入。',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                        const Divider(),
+                        for (final rec in detail.schedule.outOfScheduleRecords)
+                          ListTile(
+                            key: Key('out_of_schedule_record_${rec.id}'),
+                            contentPadding: EdgeInsets.zero,
+                            title: Text(
+                              '${detail.currencySymbol}${formatMinor(rec.recordMoneyMinor)}',
+                            ),
+                            subtitle: Text(
+                              '${formatDate(DateTime.fromMillisecondsSinceEpoch(rec.recordDate))}'
+                              '${rec.remark.isEmpty ? '' : ' · ${rec.remark}'}',
+                            ),
+                            trailing: TextButton(
+                              key: Key('cancel_out_of_schedule_${rec.id}'),
+                              onPressed: () => _confirmCancelDeposit(rec),
+                              child: const Text('取消存入'),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
               ],
             ],
+          ],
+        );
+
+        return DesktopModalEscapeScope(
+          enabled: isDesktop,
+          child: Scaffold(
+            key: const Key('savings_detail_page'),
+            appBar: AppBar(
+              leading:
+                  isDesktop &&
+                      ModalRoute.of(context) is PopupRoute &&
+                      Navigator.of(context).canPop()
+                  ? const CloseButton()
+                  : null,
+              scrolledUnderElevation: isDesktop ? 0 : null,
+              title: Text(plan.name),
+              actions: [
+                IconButton(
+                  key: const Key('edit_savings_plan_button'),
+                  tooltip: '编辑计划',
+                  onPressed: () => _openEdit(plan.id),
+                  icon: const Icon(Icons.edit_outlined),
+                ),
+                IconButton(
+                  key: const Key('toggle_archive_plan_button'),
+                  tooltip: isArchived ? '恢复进行中' : '归档计划',
+                  onPressed: () => _toggleArchive(plan),
+                  icon: Icon(
+                    isArchived
+                        ? Icons.unarchive_outlined
+                        : Icons.archive_outlined,
+                  ),
+                ),
+                IconButton(
+                  key: const Key('delete_savings_plan_button'),
+                  tooltip: '删除计划',
+                  onPressed: () => _confirmDeletePlan(detail),
+                  icon: const Icon(Icons.delete_outline),
+                ),
+              ],
+            ),
+            body: isDesktop
+                ? Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 680),
+                      child: list,
+                    ),
+                  )
+                : list,
           ),
         );
       },
@@ -432,44 +503,57 @@ class _SlotCheckInDialogState extends ConsumerState<_SlotCheckInDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    final body = Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (_error != null) ...[
+          Text(
+            _error!,
+            style: TextStyle(color: Theme.of(context).colorScheme.error),
+          ),
+          const SizedBox(height: 8),
+        ],
+        TextField(
+          key: const Key('slot_checkin_amount_input'),
+          controller: _amountCtrl,
+          enabled: !_submitting,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          decoration: InputDecoration(
+            labelText: '存入金额',
+            prefixText: '${widget.detail.currencySymbol} ',
+            border: const OutlineInputBorder(),
+            contentPadding: isDesktop
+                ? const EdgeInsets.symmetric(horizontal: 12, vertical: 16)
+                : null,
+          ),
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          key: const Key('slot_checkin_remark_input'),
+          controller: _remarkCtrl,
+          enabled: !_submitting,
+          decoration: InputDecoration(
+            labelText: '备注（可选）',
+            border: const OutlineInputBorder(),
+            contentPadding: isDesktop
+                ? const EdgeInsets.symmetric(horizontal: 12, vertical: 16)
+                : null,
+          ),
+        ),
+      ],
+    );
     return AlertDialog(
       key: const Key('checkin_slot_dialog'),
       title: Text(
         '第 ${widget.slot.periodNumber} 期打卡（${widget.slot.date.dateKey}）',
       ),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (_error != null) ...[
-            Text(
-              _error!,
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
-            ),
-            const SizedBox(height: 8),
-          ],
-          TextField(
-            key: const Key('slot_checkin_amount_input'),
-            controller: _amountCtrl,
-            enabled: !_submitting,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration: InputDecoration(
-              labelText: '存入金额',
-              prefixText: '${widget.detail.currencySymbol} ',
-              border: const OutlineInputBorder(),
-            ),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            key: const Key('slot_checkin_remark_input'),
-            controller: _remarkCtrl,
-            enabled: !_submitting,
-            decoration: const InputDecoration(
-              labelText: '备注（可选）',
-              border: OutlineInputBorder(),
-            ),
-          ),
-        ],
-      ),
+      content: isDesktop
+          ? ConstrainedBox(
+              constraints: const BoxConstraints(minWidth: 380, maxWidth: 420),
+              child: SingleChildScrollView(child: body),
+            )
+          : body,
       actions: [
         TextButton(
           onPressed: _submitting
@@ -579,109 +663,125 @@ class _FreePlanCheckInDialogState
 
   @override
   Widget build(BuildContext context) {
+    final isDesktop = DesktopAdaptive.isDesktop(context);
     final delta = _previewDelta();
     final symbol = widget.detail.currencySymbol;
+    final scrollBody = SingleChildScrollView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (_error != null) ...[
+            Text(
+              _error!,
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+            const SizedBox(height: 8),
+          ],
+          Wrap(
+            spacing: 8,
+            children: [
+              ChoiceChip(
+                key: const Key('free_mode_direct'),
+                label: const Text('按本次金额'),
+                selected: !_cumulativeMode,
+                onSelected: _submitting
+                    ? null
+                    : (_) => setState(() {
+                        _cumulativeMode = false;
+                        _error = null;
+                      }),
+              ),
+              ChoiceChip(
+                key: const Key('free_mode_cumulative'),
+                label: const Text('按累计目标额'),
+                selected: _cumulativeMode,
+                onSelected: _submitting
+                    ? null
+                    : (_) => setState(() {
+                        _cumulativeMode = true;
+                        _error = null;
+                      }),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          if (!_cumulativeMode)
+            TextField(
+              key: const Key('free_amount_input'),
+              controller: _directCtrl,
+              enabled: !_submitting,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
+              decoration: InputDecoration(
+                labelText: '本次存入金额',
+                prefixText: '$symbol ',
+                border: const OutlineInputBorder(),
+                contentPadding: isDesktop
+                    ? const EdgeInsets.symmetric(horizontal: 12, vertical: 16)
+                    : null,
+              ),
+            )
+          else ...[
+            Text(
+              '当前已存：$symbol${formatMinor(widget.detail.plan.savedMoneyMinor)}',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              key: const Key('free_cumulative_input'),
+              controller: _cumulativeCtrl,
+              enabled: !_submitting,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
+              onChanged: (_) => setState(() {}),
+              decoration: InputDecoration(
+                labelText: '目标累计已存金额',
+                prefixText: '$symbol ',
+                border: const OutlineInputBorder(),
+                contentPadding: isDesktop
+                    ? const EdgeInsets.symmetric(horizontal: 12, vertical: 16)
+                    : null,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              delta == null
+                  ? '请输入大于当前已存的目标累计金额'
+                  : '本次反算存入：$symbol${formatMinor(delta)}',
+              key: const Key('free_backcalc_preview'),
+              style: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.bold),
+            ),
+          ],
+          const SizedBox(height: 12),
+          TextField(
+            key: const Key('free_remark_input'),
+            controller: _remarkCtrl,
+            enabled: !_submitting,
+            decoration: InputDecoration(
+              labelText: '备注（可选）',
+              border: const OutlineInputBorder(),
+              contentPadding: isDesktop
+                  ? const EdgeInsets.symmetric(horizontal: 12, vertical: 16)
+                  : null,
+            ),
+          ),
+        ],
+      ),
+    );
     return AlertDialog(
       key: const Key('free_checkin_dialog'),
       title: const Text('打卡存钱'),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (_error != null) ...[
-              Text(
-                _error!,
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
-              ),
-              const SizedBox(height: 8),
-            ],
-            Wrap(
-              spacing: 8,
-              children: [
-                ChoiceChip(
-                  key: const Key('free_mode_direct'),
-                  label: const Text('按本次金额'),
-                  selected: !_cumulativeMode,
-                  onSelected: _submitting
-                      ? null
-                      : (_) => setState(() {
-                          _cumulativeMode = false;
-                          _error = null;
-                        }),
-                ),
-                ChoiceChip(
-                  key: const Key('free_mode_cumulative'),
-                  label: const Text('按累计目标额'),
-                  selected: _cumulativeMode,
-                  onSelected: _submitting
-                      ? null
-                      : (_) => setState(() {
-                          _cumulativeMode = true;
-                          _error = null;
-                        }),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            if (!_cumulativeMode)
-              TextField(
-                key: const Key('free_amount_input'),
-                controller: _directCtrl,
-                enabled: !_submitting,
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
-                ),
-                decoration: InputDecoration(
-                  labelText: '本次存入金额',
-                  prefixText: '$symbol ',
-                  border: const OutlineInputBorder(),
-                ),
-              )
-            else ...[
-              Text(
-                '当前已存：$symbol${formatMinor(widget.detail.plan.savedMoneyMinor)}',
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                key: const Key('free_cumulative_input'),
-                controller: _cumulativeCtrl,
-                enabled: !_submitting,
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
-                ),
-                onChanged: (_) => setState(() {}),
-                decoration: InputDecoration(
-                  labelText: '目标累计已存金额',
-                  prefixText: '$symbol ',
-                  border: const OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                delta == null
-                    ? '请输入大于当前已存的目标累计金额'
-                    : '本次反算存入：$symbol${formatMinor(delta)}',
-                key: const Key('free_backcalc_preview'),
-                style: Theme.of(
-                  context,
-                ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.bold),
-              ),
-            ],
-            const SizedBox(height: 12),
-            TextField(
-              key: const Key('free_remark_input'),
-              controller: _remarkCtrl,
-              enabled: !_submitting,
-              decoration: const InputDecoration(
-                labelText: '备注（可选）',
-                border: OutlineInputBorder(),
-              ),
-            ),
-          ],
-        ),
-      ),
+      content: isDesktop
+          ? ConstrainedBox(
+              constraints: const BoxConstraints(minWidth: 380, maxWidth: 420),
+              child: scrollBody,
+            )
+          : scrollBody,
       actions: [
         TextButton(
           onPressed: _submitting
@@ -818,6 +918,7 @@ class _ScheduleSlotTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDesktop = DesktopAdaptive.isDesktop(context);
     final slot = merged.slot;
     final rec = merged.matchedRecord;
     final displayMinor = rec?.recordMoneyMinor ?? slot.plannedMoneyMinor;
@@ -826,7 +927,10 @@ class _ScheduleSlotTile extends StatelessWidget {
       key: Key('savings_slot_${slot.slotIndex}'),
       margin: const EdgeInsets.only(bottom: 8),
       child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+        contentPadding: EdgeInsets.symmetric(
+          horizontal: 12,
+          vertical: isDesktop ? 4 : 2,
+        ),
         horizontalTitleGap: 10,
         leading: CircleAvatar(
           radius: 16,
@@ -860,7 +964,7 @@ class _ScheduleSlotTile extends StatelessWidget {
             ? TextButton(
                 key: Key('cancel_slot_deposit_${slot.slotIndex}'),
                 style: TextButton.styleFrom(
-                  visualDensity: VisualDensity.compact,
+                  visualDensity: isDesktop ? null : VisualDensity.compact,
                   padding: const EdgeInsets.symmetric(horizontal: 8),
                 ),
                 onPressed: onCancel,
@@ -869,7 +973,7 @@ class _ScheduleSlotTile extends StatelessWidget {
             : FilledButton.tonal(
                 key: Key('checkin_slot_button_${slot.slotIndex}'),
                 style: FilledButton.styleFrom(
-                  visualDensity: VisualDensity.compact,
+                  visualDensity: isDesktop ? null : VisualDensity.compact,
                   padding: const EdgeInsets.symmetric(horizontal: 12),
                 ),
                 onPressed: onCheckIn,

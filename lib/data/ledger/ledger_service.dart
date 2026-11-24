@@ -12,9 +12,12 @@ import '../../domain/ledger/record_relations.dart';
 import '../../domain/model/codes.dart';
 import '../../domain/rules/asset_overview.dart'
     show RateTable, normalizeCurrency;
+import '../../domain/rules/currency_rates.dart' show baseCurrency, billSnapshot;
 import '../../domain/rules/debt_rules.dart'
     show DebtRecordEntry, LoanInfo, recomputeDebtPrincipal;
 import '../../domain/rules/fixed_deposit.dart' show decodeFixedDepositList;
+import '../../domain/rules/receipt_diy_rules.dart'
+    show DiyToolbarConfig, prefKeyRecordDiyToolbar;
 import '../db/database.dart';
 import '../db/failures.dart';
 
@@ -177,6 +180,132 @@ final class LedgerService {
       }
       final oldFee = old == null ? null : await _feeChild(old.recordId);
 
+      // L-01: Discount applies strictly to expense & income bills.
+      final BigInt? effectiveDiscountMinor =
+          (draft.type == RecordType.expense ||
+                  draft.type == RecordType.income) &&
+              draft.discount != null &&
+              draft.discount!.storageMinor > BigInt.zero
+          ? draft.discount!.storageMinor
+          : null;
+
+      // L-08: Guard edits to parent bills that already have linked refunds or
+      // reimbursements (type/currency lock + minimum net >= total refunds).
+      final oldRel = old == null ? null : RecordRelations.parse(old.relInfo);
+      final hasLinkedRefunds = oldRel?.refunds?.children.isNotEmpty == true;
+      final hasLinkedReimbursements =
+          oldRel?.reimbursements?.children.isNotEmpty == true;
+      if (old != null && (hasLinkedRefunds || hasLinkedReimbursements)) {
+        if (draft.type != old.type) {
+          throw const Failure(FailureCode.validation, '已关联退款或报销的账单不能修改类型');
+        }
+        final oldAc = await _recordAccountCurrency(old);
+        final nextAssetId = draft.type == RecordType.reimbursable
+            ? draft.fromAssetId
+            : draft.assetId;
+        final nextAc =
+            normalizeCurrency(draft.extra.currency?.assetCode) ??
+            await _currencyOfAsset(nextAssetId);
+        if (oldAc != nextAc) {
+          throw Failure(
+            FailureCode.validation,
+            '已关联退款或报销的账单不能切换币种（当前为 $oldAc）',
+          );
+        }
+        if (hasLinkedRefunds) {
+          var totalRefunded = BigInt.zero;
+          for (final link in oldRel!.refunds!.children) {
+            final amt =
+                (normalizeCurrency(link.assetCode) == oldAc &&
+                    link.assetAmount != null)
+                ? link.assetAmount!.abs()
+                : link.amount.abs();
+            totalRefunded += amt;
+          }
+          final newNet =
+              (draft.extra.currency != null &&
+                  draft.extra.currency!.isValid &&
+                  draft.extra.currency!.assetNet != null)
+              ? draft.extra.currency!.assetNet!
+              : draft.money.storageMinor;
+          if (newNet < totalRefunded) {
+            throw const Failure(FailureCode.validation, '账单金额不能小于已退款总额');
+          }
+        }
+      }
+
+      // L-07: Preserve historical FX `bm` when editing non-amount fields, and
+      // ensure foreign-currency bills always carry a valid CurrencySnapshot.
+      final effectiveExtra = RecordExtra(draft.extra.raw);
+      final primaryAssetId = draft.type == RecordType.transfer
+          ? draft.toAssetId
+          : (draft.type == RecordType.reimbursable
+                ? draft.fromAssetId
+                : draft.assetId);
+      final primaryAc = await _currencyOfAsset(primaryAssetId);
+
+      if (old != null && old.type == draft.type) {
+        final oldSnap = RecordExtra.parse(old.extraInfo).currency;
+        if (oldSnap != null && oldSnap.isValid) {
+          final newSnap = effectiveExtra.currency;
+          final oldDisc = old.discountMinor ?? BigInt.zero;
+          final newDisc = effectiveDiscountMinor ?? BigInt.zero;
+          if (draft.type == RecordType.transfer) {
+            if (newSnap != null &&
+                newSnap.isValid &&
+                normalizeCurrency(newSnap.sourceCode) ==
+                    normalizeCurrency(oldSnap.sourceCode) &&
+                newSnap.sourceGross == oldSnap.sourceGross &&
+                normalizeCurrency(newSnap.assetCode) ==
+                    normalizeCurrency(oldSnap.assetCode) &&
+                newSnap.assetNet == oldSnap.assetNet &&
+                draft.money.storageMinor == old.moneyMinor) {
+              effectiveExtra.currency = oldSnap;
+            }
+          } else {
+            final oldNet = oldSnap.assetNet ?? old.moneyMinor;
+            final newNet =
+                (newSnap != null && newSnap.isValid && newSnap.assetNet != null)
+                ? newSnap.assetNet!
+                : draft.money.storageMinor;
+            final sameExplicitSnap =
+                newSnap != null &&
+                newSnap.isValid &&
+                normalizeCurrency(newSnap.sourceCode) ==
+                    normalizeCurrency(oldSnap.sourceCode) &&
+                newSnap.sourceGross == oldSnap.sourceGross &&
+                normalizeCurrency(newSnap.assetCode) ==
+                    normalizeCurrency(oldSnap.assetCode) &&
+                newNet == oldNet &&
+                newDisc == oldDisc;
+            final sameImplicitForeign =
+                newSnap == null &&
+                primaryAc == normalizeCurrency(oldSnap.assetCode) &&
+                primaryAc == normalizeCurrency(oldSnap.sourceCode) &&
+                draft.money.storageMinor == oldNet &&
+                newDisc == oldDisc;
+            if (sameExplicitSnap || sameImplicitForeign) {
+              effectiveExtra.currency = oldSnap;
+            }
+          }
+        }
+      }
+      if (effectiveExtra.currency == null &&
+          draft.type != RecordType.transfer &&
+          primaryAc != baseCurrency) {
+        final rates = await _loadRates();
+        final gross =
+            draft.money.storageMinor + (effectiveDiscountMinor ?? BigInt.zero);
+        effectiveExtra.currency = billSnapshot(
+          source: primaryAc,
+          sourceMinor: gross,
+          account: primaryAc,
+          assetMinor: draft.money.storageMinor,
+          discountMinor: effectiveDiscountMinor,
+          rates: rates,
+        );
+      }
+
       var parentTime = draft.recordTime;
       int? feeTime;
       final hasFee =
@@ -198,8 +327,7 @@ final class LedgerService {
       final relations = RecordRelations(draft.relations.raw);
       if (old != null) {
         // Child links are owned by addRefund/addReimbursement, never by the form.
-        final oldRel = RecordRelations.parse(old.relInfo);
-        relations.refunds = oldRel.refunds;
+        relations.refunds = oldRel!.refunds;
         relations.reimbursements = oldRel.reimbursements;
       } else {
         relations.refunds = null;
@@ -225,8 +353,8 @@ final class LedgerService {
         accountBookId: Value(draft.bookId),
         excludeBudget: Value(draft.excludeBudget),
         excludeExIn: Value(draft.excludeExIn),
-        discountMinor: Value(draft.discount?.storageMinor),
-        extraInfo: Value(draft.extra.encode()),
+        discountMinor: Value(effectiveDiscountMinor),
+        extraInfo: Value(effectiveExtra.encode()),
         relInfo: Value(relations.encode()),
         createDate: Value(old?.createDate ?? _now()),
         platformId: Value(old?.platformId ?? noRef),
@@ -244,6 +372,29 @@ final class LedgerService {
             feeFromTarget: draft.feeFromTarget,
             parentId: id,
           );
+        // L-03: Attach FX snapshot when the fee-paying account is foreign.
+        final payerCurrency = await _currencyOfAsset(payer);
+        final feeExtra = RecordExtra();
+        if (payerCurrency != baseCurrency) {
+          final oldFeeSnap = oldFee == null
+              ? null
+              : RecordExtra.parse(oldFee.extraInfo).currency;
+          if (oldFeeSnap != null &&
+              oldFeeSnap.isValid &&
+              normalizeCurrency(oldFeeSnap.assetCode) == payerCurrency &&
+              oldFee!.moneyMinor == draft.fee!.storageMinor) {
+            feeExtra.currency = oldFeeSnap;
+          } else {
+            final rates = await _loadRates();
+            feeExtra.currency = billSnapshot(
+              source: payerCurrency,
+              sourceMinor: draft.fee!.storageMinor,
+              account: payerCurrency,
+              assetMinor: draft.fee!.storageMinor,
+              rates: rates,
+            );
+          }
+        }
         feeRow = RecordsCompanion(
           recordId: Value(feeId),
           type: const Value(RecordType.fee),
@@ -255,6 +406,7 @@ final class LedgerService {
           accountBookId: Value(draft.bookId),
           excludeBudget: Value(draft.excludeBudget),
           excludeExIn: Value(draft.excludeExIn),
+          extraInfo: Value(feeExtra.encode()),
           relInfo: Value(feeRel.encode()),
           createDate: Value(oldFee?.createDate ?? _now()),
         );
@@ -280,12 +432,24 @@ final class LedgerService {
       if (feeRow != null) {
         await _replaceTags(feeRow.recordId.value, draft.tagIds);
       }
-      if (old != null && old.accountBookId != draft.bookId) {
-        // Refund/reimbursement children follow their original bill's book.
+      if (old != null &&
+          (old.accountBookId != draft.bookId ||
+              old.recordCatId != draft.categoryId ||
+              old.excludeBudget != draft.excludeBudget ||
+              old.excludeExIn != draft.excludeExIn)) {
+        // L-08: Cascade parent book/category/stat-exclusion flags to linked
+        // refund and reimbursement children.
         for (final childId in _childIds(relations)) {
-          await (db.update(db.records)
-                ..where((t) => t.recordId.equals(childId)))
-              .write(RecordsCompanion(accountBookId: Value(draft.bookId)));
+          await (db.update(
+            db.records,
+          )..where((t) => t.recordId.equals(childId))).write(
+            RecordsCompanion(
+              accountBookId: Value(draft.bookId),
+              recordCatId: Value(draft.categoryId),
+              excludeBudget: Value(draft.excludeBudget),
+              excludeExIn: Value(draft.excludeExIn),
+            ),
+          );
         }
       }
       return id;
@@ -309,6 +473,10 @@ final class LedgerService {
     final rows = [old, ?fee, ...children];
     await _applyNet(netEffects(before: rows.map(factsOf)));
     if (_isLinkedChild(old)) await _unlinkFromOrigin(old);
+    if (old.type == RecordType.fee) {
+      await _unlinkFeeFromTransfer(old);
+    }
+    await _handleAdvanceLinksOnDelete(old);
     for (final r in rows) {
       await (db.delete(
         db.tagRecords,
@@ -340,6 +508,7 @@ final class LedgerService {
     Money? limit,
     String? creditInfo,
     String? extraInfo,
+    bool? setAsDefaultAccount,
   }) {
     final effectiveSubType = subType ?? RecordDirection.none;
     final effectiveIcon = icon ?? '';
@@ -363,6 +532,7 @@ final class LedgerService {
         limit?.toJson(),
         creditInfo,
         extraInfo,
+        if (setAsDefaultAccount != null) setAsDefaultAccount,
       ],
       () async {
         final trimmed = _assetName(name);
@@ -395,6 +565,14 @@ final class LedgerService {
                 ),
               ),
             );
+        if (setAsDefaultAccount != null) {
+          await _applyDefaultAccountPreference(
+            assetId: id,
+            type: type,
+            status: AssetStatus.active,
+            setAsDefault: setAsDefaultAccount,
+          );
+        }
         return '$id';
       },
       int.parse,
@@ -417,6 +595,7 @@ final class LedgerService {
     Money? limit,
     String? creditInfo,
     String? extraInfo,
+    bool? setAsDefaultAccount,
   }) => _command(
     commandId,
     [
@@ -433,6 +612,7 @@ final class LedgerService {
       limit?.toJson(),
       creditInfo,
       extraInfo,
+      if (setAsDefaultAccount != null) setAsDefaultAccount,
     ],
     () async {
       final asset = await _asset(assetId);
@@ -464,10 +644,124 @@ final class LedgerService {
           extraInfo: Value(extraInfo),
         ),
       );
+      if (setAsDefaultAccount != null) {
+        await _applyDefaultAccountPreference(
+          assetId: assetId,
+          type: asset.type,
+          status: asset.status,
+          setAsDefault: setAsDefaultAccount,
+        );
+      }
       return '$assetId';
     },
     (_) {},
   );
+
+  /// Reorders the positions occupied by [orderedAssetIds] within the global
+  /// `(sort ASC, id ASC)` asset list while keeping all other assets in place,
+  /// normalizing `sort` to `0..N-1`.
+  Future<void> reorderAssets({
+    required String commandId,
+    required List<int> orderedAssetIds,
+  }) => _command(commandId, ['reorder-assets-v1', orderedAssetIds], () async {
+    final seen = <int>{};
+    final deduped = <int>[
+      for (final id in orderedAssetIds)
+        if (seen.add(id)) id,
+    ];
+    final all =
+        await (db.select(db.assets)..orderBy([
+              (t) => OrderingTerm.asc(t.sort),
+              (t) => OrderingTerm.asc(t.id),
+            ]))
+            .get();
+    final byId = <int, Asset>{for (final a in all) a.id: a};
+    for (final id in deduped) {
+      if (!byId.containsKey(id)) {
+        throw const Failure(FailureCode.validation, '账户不存在');
+      }
+    }
+    var cursor = 0;
+    final reorderedIds = <int>[
+      for (final a in all)
+        if (seen.contains(a.id)) deduped[cursor++] else a.id,
+    ];
+    for (var i = 0; i < reorderedIds.length; i++) {
+      final asset = byId[reorderedIds[i]]!;
+      if (asset.sort != i) {
+        await (db.update(db.assets)..where((t) => t.id.equals(asset.id))).write(
+          AssetsCompanion(sort: Value(i)),
+        );
+      }
+    }
+    return 'ok';
+  }, (_) {});
+
+  Future<void> _applyDefaultAccountPreference({
+    required int assetId,
+    required int type,
+    required int status,
+    required bool setAsDefault,
+  }) async {
+    final row = await (db.select(
+      db.preferences,
+    )..where((t) => t.key.equals(prefKeyRecordDiyToolbar))).getSingleOrNull();
+    final current = DiyToolbarConfig.decode(row?.value);
+    final effectiveSetDefault =
+        setAsDefault && status == AssetStatus.active && type != AssetType.debt;
+    if (effectiveSetDefault) {
+      if (!current.autoSelectDefaultAccount ||
+          current.defaultAccountId != assetId) {
+        final updated = current.copyWithDefaultAccount(
+          autoSelectDefaultAccount: true,
+          defaultAccountId: assetId,
+        );
+        await db
+            .into(db.preferences)
+            .insertOnConflictUpdate(
+              PreferencesCompanion.insert(
+                key: prefKeyRecordDiyToolbar,
+                value: updated.encode(),
+              ),
+            );
+      }
+    } else if (current.defaultAccountId == assetId) {
+      final cleared = current.copyWithDefaultAccount(
+        autoSelectDefaultAccount: false,
+        defaultAccountId: noRef,
+      );
+      await db
+          .into(db.preferences)
+          .insertOnConflictUpdate(
+            PreferencesCompanion.insert(
+              key: prefKeyRecordDiyToolbar,
+              value: cleared.encode(),
+            ),
+          );
+    }
+  }
+
+  Future<void> _clearDefaultAccountIfMatches(int assetId) async {
+    final row = await (db.select(
+      db.preferences,
+    )..where((t) => t.key.equals(prefKeyRecordDiyToolbar))).getSingleOrNull();
+    if (row == null) return;
+    final current = DiyToolbarConfig.decode(row.value);
+    if (current.defaultAccountId == assetId) {
+      final cleared = current.copyWithDefaultAccount(
+        autoSelectDefaultAccount: false,
+        defaultAccountId: noRef,
+      );
+      await db
+          .into(db.preferences)
+          .insertOnConflictUpdate(
+            PreferencesCompanion.insert(
+              key: prefKeyRecordDiyToolbar,
+              value: cleared.encode(),
+            ),
+          );
+    }
+  }
 
   /// Sets `asset.status` (0 active / 1 hidden / 2 settled).
   Future<void> setAssetStatus({
@@ -486,6 +780,9 @@ final class LedgerService {
     await (db.update(db.assets)..where((t) => t.id.equals(assetId))).write(
       AssetsCompanion(status: Value(status)),
     );
+    if (status != AssetStatus.active) {
+      await _clearDefaultAccountIfMatches(assetId);
+    }
     return '$assetId';
   }, (_) {});
 
@@ -587,6 +884,7 @@ final class LedgerService {
           db.assetBooks,
         )..where((t) => t.assetId.equals(assetId))).go();
         await (db.delete(db.assets)..where((t) => t.id.equals(assetId))).go();
+        await _clearDefaultAccountIfMatches(assetId);
         return '$assetId';
       }, (_) {});
 
@@ -609,23 +907,35 @@ final class LedgerService {
     required Money target,
     required int bookId,
     String remark = '',
+    int? recordTime,
   }) => _command<String?>(
     commandId,
-    ['adjust-balance-v1', assetId, target.toJson(), bookId, remark],
+    [
+      'adjust-balance-v1',
+      assetId,
+      target.toJson(),
+      bookId,
+      remark,
+      if (recordTime != null) recordTime,
+    ],
     () async {
       final asset = await _asset(assetId);
+      if (asset.type == AssetType.debt) {
+        throw const Failure(FailureCode.validation, '借贷账户不支持直接余额变更');
+      }
       final diff = target.storageMinor - asset.balanceMinor;
       if (diff == BigInt.zero) return '';
       final id = _uuid.v4();
+      final now = _now();
       final row = RecordsCompanion(
         recordId: Value(id),
         type: const Value(RecordType.balanceAdjust),
         moneyMinor: Value(diff),
         remark: Value(remark),
-        recordTime: Value(_now()),
+        recordTime: Value(recordTime ?? now),
         fromAssetId: Value(assetId),
         accountBookId: Value(bookId),
-        createDate: Value(_now()),
+        createDate: Value(now),
       );
       await _applyNet(netEffects(after: [_factsOfCompanion(row)]));
       await db.into(db.records).insert(row);
@@ -659,7 +969,36 @@ final class LedgerService {
       if (amount.units <= BigInt.zero) {
         throw const Failure(FailureCode.validation, '退款金额须大于 0');
       }
-      if (assetId != noRef) await _fundingAsset(assetId);
+      final originCurrency = await _recordAccountCurrency(origin);
+      if (assetId != noRef) {
+        final targetAsset = await _fundingAsset(assetId);
+        final targetCurrency =
+            normalizeCurrency(targetAsset.currency) ?? baseCurrency;
+        if (targetCurrency != originCurrency) {
+          throw Failure(
+            FailureCode.validation,
+            '退款账户币种（$targetCurrency）须与原账单账户币种（$originCurrency）一致',
+          );
+        }
+      }
+
+      // L-03: Attach signed FX snapshot on foreign-currency refund child and
+      // populate LinkedBill foreign currency fields on parent.
+      CurrencySnapshot? childSnap;
+      if (originCurrency != baseCurrency) {
+        final rates = await _loadRates();
+        childSnap = billSnapshot(
+          source: originCurrency,
+          sourceMinor: -amount.storageMinor,
+          account: originCurrency,
+          assetMinor: -amount.storageMinor,
+          rates: rates,
+        );
+      }
+      final childExtra = childSnap == null
+          ? null
+          : (RecordExtra()..currency = childSnap).encode();
+
       final childId = _uuid.v4();
       final row = RecordsCompanion(
         recordId: Value(childId),
@@ -676,6 +1015,7 @@ final class LedgerService {
         accountBookId: Value(origin.accountBookId),
         excludeBudget: Value(origin.excludeBudget),
         excludeExIn: Value(origin.excludeExIn),
+        extraInfo: Value(childExtra),
         relInfo: Value(
           (RecordRelations()..refunds = BillLinks(originId: originId)).encode(),
         ),
@@ -689,7 +1029,14 @@ final class LedgerService {
       rel.refunds = BillLinks(
         children: [
           ...links.children,
-          LinkedBill(billId: childId, amount: amount.storageMinor),
+          LinkedBill(
+            billId: childId,
+            amount: amount.storageMinor,
+            assetCode: childSnap?.assetCode,
+            assetAmount: childSnap?.assetNet?.abs(),
+            baseCode: childSnap?.baseCode,
+            baseAmount: childSnap?.baseAmount?.abs(),
+          ),
         ],
         originId: links.originId,
       );
@@ -726,7 +1073,36 @@ final class LedgerService {
       if (amount.units <= BigInt.zero) {
         throw const Failure(FailureCode.validation, '报销金额须大于 0');
       }
-      if (assetId != noRef) await _fundingAsset(assetId);
+      final originCurrency = await _recordAccountCurrency(origin);
+      if (assetId != noRef) {
+        final targetAsset = await _fundingAsset(assetId);
+        final targetCurrency =
+            normalizeCurrency(targetAsset.currency) ?? baseCurrency;
+        if (targetCurrency != originCurrency) {
+          throw Failure(
+            FailureCode.validation,
+            '报销入账账户币种（$targetCurrency）须与原账单账户币种（$originCurrency）一致',
+          );
+        }
+      }
+
+      // L-03: Attach FX snapshot on foreign-currency reimbursement receipt and
+      // populate LinkedBill foreign currency fields on parent.
+      CurrencySnapshot? childSnap;
+      if (originCurrency != baseCurrency) {
+        final rates = await _loadRates();
+        childSnap = billSnapshot(
+          source: originCurrency,
+          sourceMinor: amount.storageMinor,
+          account: originCurrency,
+          assetMinor: amount.storageMinor,
+          rates: rates,
+        );
+      }
+      final childExtra = childSnap == null
+          ? null
+          : (RecordExtra()..currency = childSnap).encode();
+
       // A receipt dated before the original bill is clamped to origin + 1 ms.
       final time = recordTime <= origin.recordTime
           ? origin.recordTime + 1
@@ -739,8 +1115,12 @@ final class LedgerService {
         moneyMinor: Value(amount.storageMinor),
         remark: Value(remark),
         recordTime: Value(time),
+        recordCatId: Value(origin.recordCatId),
         assetId: Value(assetId),
         accountBookId: Value(origin.accountBookId),
+        excludeBudget: Value(origin.excludeBudget),
+        excludeExIn: Value(origin.excludeExIn),
+        extraInfo: Value(childExtra),
         relInfo: Value(
           (RecordRelations()..reimbursements = BillLinks(originId: originId))
               .encode(),
@@ -755,7 +1135,14 @@ final class LedgerService {
       rel.reimbursements = BillLinks(
         children: [
           ...links.children,
-          LinkedBill(billId: childId, amount: amount.storageMinor),
+          LinkedBill(
+            billId: childId,
+            amount: amount.storageMinor,
+            assetCode: childSnap?.assetCode,
+            assetAmount: childSnap?.assetNet,
+            baseCode: childSnap?.baseCode,
+            baseAmount: childSnap?.baseAmount,
+          ),
         ],
         originId: links.originId,
       );
@@ -799,19 +1186,88 @@ final class LedgerService {
       if (amount.units <= BigInt.zero) {
         throw const Failure(FailureCode.validation, '结算金额须大于 0');
       }
-      if (assetId != noRef) await _fundingAsset(assetId);
+      final originCurrency = await _recordAccountCurrency(origin);
+      if (assetId != noRef) {
+        final targetAsset = await _fundingAsset(assetId);
+        final targetCurrency =
+            normalizeCurrency(targetAsset.currency) ?? baseCurrency;
+        if (targetCurrency != originCurrency) {
+          throw Failure(
+            FailureCode.validation,
+            '结算账户币种（$targetCurrency）须与原预收/预支账户币种（$originCurrency）一致',
+          );
+        }
+      }
+
+      // L-03: Attach FX snapshot on foreign-currency settled bill and scale
+      // remaining FX snapshot on partial settlement.
+      CurrencySnapshot? settledSnap;
+      RateTable? rates;
+      if (originCurrency != baseCurrency || originExtra.currency != null) {
+        rates = await _loadRates();
+      }
+      if (originCurrency != baseCurrency) {
+        settledSnap = billSnapshot(
+          source: originCurrency,
+          sourceMinor: amount.storageMinor,
+          account: originCurrency,
+          assetMinor: amount.storageMinor,
+          rates: rates!,
+        );
+      }
 
       final settledType = origin.type == RecordType.advanceIncome
           ? RecordType.income
           : RecordType.expense;
       final settledId = _uuid.v4();
+      final isPartial = !finish && amount.storageMinor < origin.moneyMinor;
+
       final settledExtra = RecordExtra()
+        ..currency = settledSnap
         ..advance = AdvanceBillInfo(
           advanceDate: origin.recordTime,
           advanceMoney: origin.moneyMinor,
           advanceDiffMoney: BigInt.zero,
           partialInclude: true,
         );
+      settledExtra.raw['adbi_origin_id'] = originId;
+
+      if (isPartial) {
+        final remaining = origin.moneyMinor - amount.storageMinor;
+        settledExtra.raw['adbi_partial_deducted'] = amount.storageMinor
+            .toString();
+        final origSnap = originExtra.currency;
+        if (origSnap != null && origSnap.isValid) {
+          final origAsset = origSnap.assetNet ?? origin.moneyMinor;
+          final newSourceGross = origAsset > BigInt.zero
+              ? divideRounded(
+                  origSnap.sourceGross * remaining,
+                  origAsset,
+                  RoundingMode.halfUp,
+                )
+              : remaining;
+          final deductedSource = origSnap.sourceGross - newSourceGross;
+          final settledBase =
+              settledSnap?.baseAmount ??
+              rates!.convert(amount.storageMinor, originCurrency, baseCurrency);
+          final origBase = origSnap.baseAmount ?? BigInt.zero;
+          final newBase = origBase > settledBase
+              ? origBase - settledBase
+              : BigInt.zero;
+          final deductedBase = origBase - newBase;
+          settledExtra.raw['adbi_partial_source'] = deductedSource.toString();
+          settledExtra.raw['adbi_partial_base'] = deductedBase.toString();
+          originExtra.currency = CurrencySnapshot(
+            sourceCode: origSnap.sourceCode,
+            sourceGross: newSourceGross,
+            assetCode: origSnap.assetCode,
+            assetNet: remaining,
+            baseCode: origSnap.baseCode,
+            baseAmount: newBase,
+          );
+        }
+      }
+
       final settledRow = RecordsCompanion(
         recordId: Value(settledId),
         type: Value(settledType),
@@ -841,12 +1297,14 @@ final class LedgerService {
         );
       }
 
-      if (!finish && amount.storageMinor < origin.moneyMinor) {
+      if (isPartial) {
+        final remaining = origin.moneyMinor - amount.storageMinor;
         await (db.update(
           db.records,
         )..where((t) => t.recordId.equals(originId))).write(
           RecordsCompanion(
-            moneyMinor: Value(origin.moneyMinor - amount.storageMinor),
+            moneyMinor: Value(remaining),
+            extraInfo: Value(originExtra.encode()),
           ),
         );
       } else {
@@ -856,6 +1314,7 @@ final class LedgerService {
           advanceDiffMoney: amount.storageMinor - origin.moneyMinor,
           partialInclude: false,
         );
+        originExtra.raw['adbi_settled_id'] = settledId;
         await (db.update(db.records)..where((t) => t.recordId.equals(originId)))
             .write(RecordsCompanion(extraInfo: Value(originExtra.encode())));
       }
@@ -905,6 +1364,121 @@ final class LedgerService {
     rel.refunds = without(rel.refunds);
     rel.reimbursements = without(rel.reimbursements);
     await _writeRelations(originId, rel);
+  }
+
+  Future<void> _unlinkFeeFromTransfer(LedgerRecord feeChild) async {
+    final feeLink = RecordRelations.parse(feeChild.relInfo).transferFee;
+    final parentId = feeLink?.parentId.trim();
+    if (parentId == null || parentId.isEmpty) return;
+    final parent = await (db.select(
+      db.records,
+    )..where((t) => t.recordId.equals(parentId))).getSingleOrNull();
+    if (parent == null) return;
+    final parentRel = RecordRelations.parse(parent.relInfo);
+    if (parentRel.transferFee != null) {
+      parentRel.transferFee = null;
+      await _writeRelations(parentId, parentRel);
+    }
+  }
+
+  Future<void> _handleAdvanceLinksOnDelete(LedgerRecord deleted) async {
+    final deletedExtra = RecordExtra.parse(deleted.extraInfo);
+    // Case 1: deleting a settled income/expense bill created from settleAdvance.
+    final originId = deletedExtra.raw['adbi_origin_id'];
+    if (originId is String && originId.trim().isNotEmpty) {
+      final origin = await (db.select(
+        db.records,
+      )..where((t) => t.recordId.equals(originId.trim()))).getSingleOrNull();
+      if (origin != null &&
+          (origin.type == RecordType.advanceIncome ||
+              origin.type == RecordType.advanceExpense)) {
+        final originExtra = RecordExtra.parse(origin.extraInfo);
+        if (originExtra.advance != null &&
+            originExtra.raw['adbi_settled_id'] == deleted.recordId) {
+          // Reopen origin advance record so user can settle it again.
+          originExtra.advance = null;
+          originExtra.raw.remove('adbi_settled_id');
+          await (db.update(db.records)
+                ..where((t) => t.recordId.equals(origin.recordId)))
+              .write(RecordsCompanion(extraInfo: Value(originExtra.encode())));
+        } else if (originExtra.advance == null) {
+          final deductedRaw = deletedExtra.raw['adbi_partial_deducted'];
+          final deducted = deductedRaw == null
+              ? null
+              : BigInt.tryParse(deductedRaw.toString());
+          if (deducted != null && deducted > BigInt.zero) {
+            final restoredMoney = origin.moneyMinor + deducted;
+            final origSnap = originExtra.currency;
+            if (origSnap != null && origSnap.isValid) {
+              final deductedSource =
+                  BigInt.tryParse(
+                    deletedExtra.raw['adbi_partial_source']?.toString() ?? '',
+                  ) ??
+                  deducted;
+              final deductedBase =
+                  BigInt.tryParse(
+                    deletedExtra.raw['adbi_partial_base']?.toString() ?? '',
+                  ) ??
+                  deducted;
+              originExtra.currency = CurrencySnapshot(
+                sourceCode: origSnap.sourceCode,
+                sourceGross: origSnap.sourceGross + deductedSource,
+                assetCode: origSnap.assetCode,
+                assetNet: (origSnap.assetNet ?? origin.moneyMinor) + deducted,
+                baseCode: origSnap.baseCode,
+                baseAmount: (origSnap.baseAmount ?? BigInt.zero) + deductedBase,
+              );
+            }
+            await (db.update(
+              db.records,
+            )..where((t) => t.recordId.equals(origin.recordId))).write(
+              RecordsCompanion(
+                moneyMinor: Value(restoredMoney),
+                extraInfo: Value(originExtra.encode()),
+              ),
+            );
+          }
+        }
+      }
+    }
+
+    // Case 2: deleting an advance origin bill clears back-reference on its
+    // settled bill (if still live) while preserving settled history.
+    final settledId = deletedExtra.raw['adbi_settled_id'];
+    if (settledId is String && settledId.trim().isNotEmpty) {
+      final settled = await (db.select(
+        db.records,
+      )..where((t) => t.recordId.equals(settledId.trim()))).getSingleOrNull();
+      if (settled != null) {
+        final settledExtra = RecordExtra.parse(settled.extraInfo);
+        if (settledExtra.raw.remove('adbi_origin_id') != null) {
+          await (db.update(db.records)
+                ..where((t) => t.recordId.equals(settled.recordId)))
+              .write(RecordsCompanion(extraInfo: Value(settledExtra.encode())));
+        }
+      }
+    }
+  }
+
+  Future<RateTable> _loadRates() async {
+    final rows = await db.select(db.currencies).get();
+    return RateTable({for (final c in rows) c.code: c.rateToAnchor});
+  }
+
+  Future<String> _currencyOfAsset(int assetId) async {
+    if (assetId == noRef) return baseCurrency;
+    final asset = await (db.select(
+      db.assets,
+    )..where((t) => t.id.equals(assetId))).getSingleOrNull();
+    return normalizeCurrency(asset?.currency) ?? baseCurrency;
+  }
+
+  Future<String> _recordAccountCurrency(LedgerRecord r) async {
+    final snap = RecordExtra.parse(r.extraInfo).currency;
+    final ac = normalizeCurrency(snap?.assetCode);
+    if (ac != null) return ac;
+    final aid = r.type == RecordType.reimbursable ? r.fromAssetId : r.assetId;
+    return _currencyOfAsset(aid);
   }
 
   EntryFacts _factsOfCompanion(RecordsCompanion c) => EntryFacts(
@@ -967,8 +1541,16 @@ final class LedgerService {
         }
         // Original allows bills without an account (asset_id = -1).
         if (d.assetId != noRef) await _fundingAsset(d.assetId);
-        if (d.discount != null && d.discount!.isNegative) {
-          throw const Failure(FailureCode.validation, '优惠金额无效');
+        if (d.discount != null) {
+          if (d.discount!.isNegative) {
+            throw const Failure(FailureCode.validation, '优惠金额无效');
+          }
+          final snap = d.extra.currency;
+          if (snap != null &&
+              snap.isValid &&
+              d.discount!.storageMinor > snap.sourceGross) {
+            throw const Failure(FailureCode.validation, '优惠金额不能大于原金额');
+          }
         }
       case RecordType.advanceIncome:
       case RecordType.advanceExpense:

@@ -4,7 +4,9 @@ import 'package:crypto/crypto.dart';
 import 'package:drift/drift.dart';
 
 import '../../core/failure.dart';
+import '../../domain/model/codes.dart';
 import '../../domain/rules/penny_backup.dart';
+import '../../domain/rules/receipt_diy_rules.dart';
 import '../db/database.dart';
 import '../db/failures.dart';
 import '../reminder/reminder_service.dart';
@@ -524,6 +526,27 @@ final class PennyImportService {
             .insertOnConflictUpdate(
               PreferencesCompanion.insert(key: 'month_start_day', value: '1'),
             );
+
+        // Clear stale defaultAccountId since `db.assets` was wiped & replaced.
+        final diyRow =
+            await (db.select(db.preferences)
+                  ..where((t) => t.key.equals(prefKeyRecordDiyToolbar)))
+                .getSingleOrNull();
+        if (diyRow != null) {
+          final resetDiy = DiyToolbarConfig.decode(diyRow.value)
+              .copyWithDefaultAccount(
+                autoSelectDefaultAccount: false,
+                defaultAccountId: noRef,
+              );
+          await db
+              .into(db.preferences)
+              .insertOnConflictUpdate(
+                PreferencesCompanion.insert(
+                  key: prefKeyRecordDiyToolbar,
+                  value: resetDiy.encode(),
+                ),
+              );
+        }
 
         await db
             .into(db.writeCommands)

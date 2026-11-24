@@ -56,8 +56,37 @@ final RegExp _strictIntPattern = RegExp(r'^-?(?:0|[1-9][0-9]*)$');
 /// Computes lowercase 64-character SHA-256 hex digest of [bytes].
 String sha256Hex(List<int> bytes) => sha256.convert(bytes).toString();
 
-/// Formats a canonical `.tally` backup filename (`backup_YYYYMMDD_HHMMSS.tally`).
-String formatTallyBackupFileName(DateTime when) {
+/// Resolves a collision-free `.tally` filename against [existingFileNames]
+/// (`foo.tally` -> `foo_2.tally` -> `foo_3.tally` ...) when multiple backups
+/// or conflict snapshots are created within the same second (`S-08`).
+String resolveCollisionSafeBackupFileName(
+  String baseFileName,
+  Iterable<String> existingFileNames,
+) {
+  final trimmed = baseFileName.trim();
+  final existingLower = <String>{
+    for (final name in existingFileNames) name.trim().toLowerCase(),
+  };
+  if (existingLower.isEmpty || !existingLower.contains(trimmed.toLowerCase())) {
+    return trimmed;
+  }
+  final dotIdx = trimmed.lastIndexOf('.');
+  final stem = dotIdx > 0 ? trimmed.substring(0, dotIdx) : trimmed;
+  final ext = dotIdx > 0 ? trimmed.substring(dotIdx) : '';
+  var seq = 2;
+  while (existingLower.contains('${stem}_$seq$ext'.toLowerCase())) {
+    seq++;
+  }
+  return '${stem}_$seq$ext';
+}
+
+/// Formats a canonical `.tally` backup filename (`backup_YYYYMMDD_HHMMSS.tally`),
+/// appending a collision-safe `_2` / `_3` suffix if [existingFileNames] already
+/// contains an entry for the same second (`S-08`).
+String formatTallyBackupFileName(
+  DateTime when, {
+  Iterable<String> existingFileNames = const <String>[],
+}) {
   String pad2(int n) => n.toString().padLeft(2, '0');
   final y = when.year.toString().padLeft(4, '0');
   final m = pad2(when.month);
@@ -65,7 +94,8 @@ String formatTallyBackupFileName(DateTime when) {
   final hh = pad2(when.hour);
   final mm = pad2(when.minute);
   final ss = pad2(when.second);
-  return 'backup_${y}${m}${d}_${hh}${mm}${ss}.tally';
+  final base = 'backup_${y}${m}${d}_${hh}${mm}${ss}.tally';
+  return resolveCollisionSafeBackupFileName(base, existingFileNames);
 }
 
 /// Serializes an `int64` minor-unit [BigInt] losslessly for JSON (ADR-011, R2).

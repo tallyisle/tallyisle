@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:drift/drift.dart' show driftRuntimeOptions;
 import 'package:drift/native.dart';
+import 'package:flutter/gestures.dart' show kLongPressTimeout;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -542,24 +543,59 @@ void main() {
       );
       await settle(tester);
 
-      expect(find.text('当前启用预览（8/11）'), findsOneWidget);
+      // Old header, preview, default account, and up/down arrow buttons are absent.
+      expect(find.text('工具栏项目与顺序'), findsNothing);
+      expect(find.text('工具栏预览'), findsNothing);
+      expect(find.text('默认账户'), findsNothing);
+      expect(find.byKey(const Key('diy-toolbar-preview')), findsNothing);
+      expect(find.byKey(const Key('diy-default-account-switch')), findsNothing);
+      expect(find.byKey(const Key('diy-up-tags')), findsNothing);
+      expect(find.byKey(const Key('diy-down-tags')), findsNothing);
 
-      // Seed custom date/time picker styles in ti_preference and ensure UI setEnabled & moveItem preserve them.
+      // Two-group split headers and fixed-switches card are present.
+      expect(find.text('工具栏项目（可拖拽排序）'), findsOneWidget);
+      expect(find.text('账户与日期时间固定在工具栏最前常驻'), findsOneWidget);
+
+      Switch switchFor(String key) =>
+          tester.widget<Switch>(find.byKey(Key('diy-switch-$key')));
+
+      expect(switchFor('tags').value, isTrue);
+
+      // Seed custom date/time picker styles & default account in ti_preference and ensure UI setEnabled & moveSortableItem preserve them.
       await tester.runAsync(() async {
         final current = await attService.getDiyToolbarConfig();
         await attService.saveDiyToolbarConfig(
           commandId: 'w-diy-seed-styles',
-          config: current.copyWithStyles(
-            datePickerStyle: RecordDatePickerStyle.wheel,
-            timePickerStyle: RecordTimePickerStyle.dial,
-          ),
+          config: current
+              .copyWithStyles(
+                datePickerStyle: RecordDatePickerStyle.wheel,
+                timePickerStyle: RecordTimePickerStyle.dial,
+              )
+              .copyWithDefaultAccount(
+                autoSelectDefaultAccount: true,
+                defaultAccountId: 1,
+              ),
         );
       });
       await settle(tester);
 
+      // Mobile long-press drag reorder on the 7-item sortable pill group (move images above tags).
+      final rowImages = find.byKey(const ValueKey('diy-row-images'));
+      final rowTags = find.byKey(const ValueKey('diy-row-tags'));
+      final dragStart = tester.getCenter(rowImages);
+      final dragOffset = tester.getCenter(rowTags) - dragStart;
+      final dragGesture = await tester.startGesture(dragStart);
+      await tester.pump(kLongPressTimeout + const Duration(milliseconds: 100));
+      for (var i = 0; i < 12; i++) {
+        await dragGesture.moveBy(dragOffset / 12.0);
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      await dragGesture.up();
+      await settle(tester);
+
       await tester.tap(find.byKey(const Key('diy-switch-tags')));
       await settle(tester);
-      expect(find.text('当前启用预览（7/11）'), findsOneWidget);
+      expect(switchFor('tags').value, isFalse);
 
       await tester.scrollUntilVisible(
         find.byKey(const Key('diy-switch-frequent_remarks')),
@@ -567,14 +603,22 @@ void main() {
         scrollable: find.byType(Scrollable).last,
       );
       await settle(tester);
-      final remarkSwitchBefore = tester.widget<Switch>(
-        find.byKey(const Key('diy-switch-frequent_remarks')),
-      );
-      expect(remarkSwitchBefore.value, isFalse);
+      expect(find.text('记账辅助开关'), findsOneWidget);
+      expect(find.text('记账辅助开关（固定位置无需排序）'), findsNothing);
+      expect(find.byKey(const Key('diy-fixed-switches-card')), findsOneWidget);
+      for (final fixedKey in const <String>[
+        'templates',
+        'frequent_remarks',
+        'keypad_mul_div',
+        'auto_select_first_cat',
+      ]) {
+        expect(find.byKey(Key('diy-drag-handle-$fixedKey')), findsNothing);
+      }
+      expect(switchFor('frequent_remarks').value, isFalse);
 
       await tester.tap(find.byKey(const Key('diy-switch-frequent_remarks')));
       await settle(tester);
-      expect(find.text('当前启用预览（8/11）'), findsOneWidget);
+      expect(switchFor('frequent_remarks').value, isTrue);
 
       await tester.scrollUntilVisible(
         find.byKey(const Key('diy-switch-keypad_mul_div')),
@@ -582,14 +626,11 @@ void main() {
         scrollable: find.byType(Scrollable).last,
       );
       await settle(tester);
-      final mulDivSwitchBefore = tester.widget<Switch>(
-        find.byKey(const Key('diy-switch-keypad_mul_div')),
-      );
-      expect(mulDivSwitchBefore.value, isFalse);
+      expect(switchFor('keypad_mul_div').value, isFalse);
 
       await tester.tap(find.byKey(const Key('diy-switch-keypad_mul_div')));
       await settle(tester);
-      expect(find.text('当前启用预览（9/11）'), findsOneWidget);
+      expect(switchFor('keypad_mul_div').value, isTrue);
 
       await tester.scrollUntilVisible(
         find.byKey(const Key('diy-switch-auto_select_first_cat')),
@@ -599,19 +640,13 @@ void main() {
       await settle(tester);
       expect(find.text('默认选中首个分类'), findsOneWidget);
       expect(find.byIcon(Icons.category_outlined), findsWidgets);
-      final autoSelectCatBefore = tester.widget<Switch>(
-        find.byKey(const Key('diy-switch-auto_select_first_cat')),
-      );
-      expect(autoSelectCatBefore.value, isFalse);
+      expect(switchFor('auto_select_first_cat').value, isFalse);
 
       await tester.tap(
         find.byKey(const Key('diy-switch-auto_select_first_cat')),
       );
       await settle(tester);
-      expect(find.text('当前启用预览（10/11）'), findsOneWidget);
-
-      await tester.tap(find.byKey(const Key('diy-up-auto_select_first_cat')));
-      await settle(tester);
+      expect(switchFor('auto_select_first_cat').value, isTrue);
 
       final persistedAfterEdits = await tester.runAsync(
         attService.getDiyToolbarConfig,
@@ -623,15 +658,31 @@ void main() {
         isTrue,
       );
       expect(
-        persistedAfterEdits.items[9].action,
-        DiyToolbarAction.autoSelectFirstCategory,
+        persistedAfterEdits.sortableItems.first.action,
+        DiyToolbarAction.images,
+      );
+      expect(
+        persistedAfterEdits.fixedSwitchItems.map((e) => e.action).toList(),
+        const <DiyToolbarAction>[
+          DiyToolbarAction.templates,
+          DiyToolbarAction.frequentRemarks,
+          DiyToolbarAction.keypadMultiplyDivide,
+          DiyToolbarAction.autoSelectFirstCategory,
+        ],
       );
       expect(persistedAfterEdits.datePickerStyle, RecordDatePickerStyle.wheel);
       expect(persistedAfterEdits.timePickerStyle, RecordTimePickerStyle.dial);
+      expect(persistedAfterEdits.autoSelectDefaultAccount, isTrue);
+      expect(persistedAfterEdits.defaultAccountId, 1);
 
       await tester.tap(find.byKey(const Key('diy-toolbar-reset-btn')));
       await settle(tester);
-      expect(find.text('当前启用预览（8/11）'), findsOneWidget);
+      await tester.drag(
+        find.byKey(const Key('diy-toolbar-list')),
+        const Offset(0, 3000),
+      );
+      await settle(tester);
+      expect(switchFor('tags').value, isTrue);
 
       final persistedAfterReset = await tester.runAsync(
         attService.getDiyToolbarConfig,
@@ -642,11 +693,11 @@ void main() {
         ),
         isFalse,
       );
-      expect(
-        persistedAfterReset.datePickerStyle,
-        RecordDatePickerStyle.calendar,
-      );
-      expect(persistedAfterReset.timePickerStyle, RecordTimePickerStyle.wheel);
+      // B-09: Resetting DIY toolbar items preserves BOTH date/time picker styles AND default account!
+      expect(persistedAfterReset.datePickerStyle, RecordDatePickerStyle.wheel);
+      expect(persistedAfterReset.timePickerStyle, RecordTimePickerStyle.dial);
+      expect(persistedAfterReset.autoSelectDefaultAccount, isTrue);
+      expect(persistedAfterReset.defaultAccountId, 1);
 
       await unmountCleanly(tester);
 

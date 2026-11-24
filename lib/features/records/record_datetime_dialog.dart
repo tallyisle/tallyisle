@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -129,6 +131,10 @@ class _RecordDateTimeDialogState extends State<RecordDateTimeDialog> {
   late final FocusNode _hourInputFocus;
   late final FocusNode _minuteInputFocus;
 
+  double _calendarDragDx = 0.0;
+  double _calendarPanZoomDx = 0.0;
+  Timer? _trackpadCooldownTimer;
+
   @override
   void initState() {
     super.initState();
@@ -176,6 +182,7 @@ class _RecordDateTimeDialogState extends State<RecordDateTimeDialog> {
 
   @override
   void dispose() {
+    _trackpadCooldownTimer?.cancel();
     _yearCtrl?.dispose();
     _monthCtrl?.dispose();
     _dayCtrl?.dispose();
@@ -431,6 +438,77 @@ class _RecordDateTimeDialogState extends State<RecordDateTimeDialog> {
     });
   }
 
+  bool get _isTrackpadCoolingDown => _trackpadCooldownTimer?.isActive ?? false;
+
+  void _startTrackpadCooldown() {
+    _trackpadCooldownTimer?.cancel();
+    _trackpadCooldownTimer = Timer(
+      const Duration(milliseconds: 320),
+      () => _trackpadCooldownTimer = null,
+    );
+  }
+
+  void _handleCalendarPointerSignal(PointerSignalEvent event) {
+    if (event is! PointerScrollEvent) return;
+    if (_isTrackpadCoolingDown) return;
+    final dx = event.scrollDelta.dx;
+    final dy = event.scrollDelta.dy;
+    if (dx.abs() < 12.0 || dx.abs() <= dy.abs() * 1.2) return;
+    final deltaMonths = dx > 0 ? 1 : -1;
+    if ((deltaMonths < 0 && !_canGoPrevMonth) ||
+        (deltaMonths > 0 && !_canGoNextMonth)) {
+      return;
+    }
+    _startTrackpadCooldown();
+    _stepDisplayedMonth(deltaMonths);
+  }
+
+  void _handleCalendarPanZoomStart(PointerPanZoomStartEvent _) {
+    _calendarPanZoomDx = 0.0;
+  }
+
+  void _handleCalendarPanZoomUpdate(PointerPanZoomUpdateEvent event) {
+    if (_isTrackpadCoolingDown) return;
+    if (event.panDelta.dx.abs() <= event.panDelta.dy.abs() * 1.2) return;
+    _calendarPanZoomDx += event.panDelta.dx;
+    if (_calendarPanZoomDx.abs() < 36.0) return;
+    final deltaMonths = _calendarPanZoomDx < 0 ? 1 : -1;
+    _calendarPanZoomDx = 0.0;
+    if ((deltaMonths < 0 && !_canGoPrevMonth) ||
+        (deltaMonths > 0 && !_canGoNextMonth)) {
+      return;
+    }
+    _startTrackpadCooldown();
+    _stepDisplayedMonth(deltaMonths);
+  }
+
+  void _handleCalendarPanZoomEnd(PointerPanZoomEndEvent _) {
+    _calendarPanZoomDx = 0.0;
+  }
+
+  void _handleCalendarHorizontalDragStart(DragStartDetails _) {
+    _calendarDragDx = 0.0;
+  }
+
+  void _handleCalendarHorizontalDragUpdate(DragUpdateDetails details) {
+    _calendarDragDx += details.primaryDelta ?? details.delta.dx;
+  }
+
+  void _handleCalendarHorizontalDragEnd(DragEndDetails details) {
+    final dx = _calendarDragDx;
+    _calendarDragDx = 0.0;
+    final vx = details.primaryVelocity ?? details.velocity.pixelsPerSecond.dx;
+    if (dx > 36.0 || (vx > 280.0 && dx >= -12.0)) {
+      _stepDisplayedMonth(-1);
+    } else if (dx < -36.0 || (vx < -280.0 && dx <= 12.0)) {
+      _stepDisplayedMonth(1);
+    }
+  }
+
+  void _handleCalendarHorizontalDragCancel() {
+    _calendarDragDx = 0.0;
+  }
+
   Widget _buildCalendarView(BuildContext context, ColorScheme cs, bool isDark) {
     final selectedDate = DateTime(_year, _month, _day);
     final weekdayText = _weekdayFullLabels[selectedDate.weekday - 1];
@@ -526,30 +604,47 @@ class _RecordDateTimeDialogState extends State<RecordDateTimeDialog> {
           ],
         ),
         const SizedBox(height: 4),
-        Column(
-          key: const Key('datetime-calendar-grid'),
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            for (var row = 0; row < 6; row++)
-              SizedBox(
-                height: 36,
-                child: Row(
-                  children: [
-                    for (var col = 0; col < 7; col++)
-                      Expanded(
-                        child: _buildDayCell(
-                          cs: cs,
-                          isDark: isDark,
-                          cellIndex: row * 7 + col,
-                          leadingEmpty: leadingEmpty,
-                          daysInMonth: daysInMonth,
-                          today: today,
-                        ),
+        Listener(
+          behavior: HitTestBehavior.translucent,
+          onPointerSignal: _handleCalendarPointerSignal,
+          onPointerPanZoomStart: _handleCalendarPanZoomStart,
+          onPointerPanZoomUpdate: _handleCalendarPanZoomUpdate,
+          onPointerPanZoomEnd: _handleCalendarPanZoomEnd,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onHorizontalDragStart: _handleCalendarHorizontalDragStart,
+            onHorizontalDragUpdate: _handleCalendarHorizontalDragUpdate,
+            onHorizontalDragEnd: _handleCalendarHorizontalDragEnd,
+            onHorizontalDragCancel: _handleCalendarHorizontalDragCancel,
+            child: ColoredBox(
+              key: const Key('datetime-calendar-grid'),
+              color: Colors.transparent,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (var row = 0; row < 6; row++)
+                    SizedBox(
+                      height: 36,
+                      child: Row(
+                        children: [
+                          for (var col = 0; col < 7; col++)
+                            Expanded(
+                              child: _buildDayCell(
+                                cs: cs,
+                                isDark: isDark,
+                                cellIndex: row * 7 + col,
+                                leadingEmpty: leadingEmpty,
+                                daysInMonth: daysInMonth,
+                                today: today,
+                              ),
+                            ),
+                        ],
                       ),
-                  ],
-                ),
+                    ),
+                ],
               ),
-          ],
+            ),
+          ),
         ),
       ],
     );

@@ -304,7 +304,7 @@ void main() {
       );
       expect(
         resolveAssetVisual(name: '招行信用卡', assetType: AssetType.credit).iconKey,
-        'credit_card',
+        'builtin:bank.cmb',
       );
       expect(
         resolveAssetVisual(name: '现金', assetType: AssetType.normal).iconKey,
@@ -312,7 +312,7 @@ void main() {
       );
       expect(
         resolveAssetVisual(name: '招行储蓄卡', assetType: AssetType.normal).iconKey,
-        'bank_card',
+        'builtin:bank.cmb',
       );
 
       // Pure fallbacks when name has no specific brand keyword:
@@ -404,10 +404,44 @@ void main() {
           expect(v.customImageBytes, isNull);
         }
 
+        // Upgraded preset keys render bundled SVGs cleanly while preserving code keys:
+        for (final svgPresetKey in const <String>[
+          'wechat_pay',
+          'alipay',
+          'huabei',
+          'baitiao',
+          'paypal_intl',
+          'unionpay',
+        ]) {
+          final v = resolveAssetVisual(
+            iconKey: svgPresetKey,
+            name: '测试账户',
+            assetType: AssetType.normal,
+          );
+          expect(v.iconKey, svgPresetKey);
+          expect(
+            v.svgAssetPath,
+            isNotNull,
+            reason: '$svgPresetKey should upgrade to SVG',
+          );
+        }
+
         // Smart keyword matches for newly added account presets:
         expect(
           resolveAssetVisual(name: '云闪付', assetType: AssetType.normal).iconKey,
+          'builtin:pay.yunshanfu',
+        );
+        expect(
+          resolveAssetVisual(name: '银联', assetType: AssetType.normal).iconKey,
           'unionpay',
+        );
+        expect(
+          resolveAssetVisual(name: '保险箱', assetType: AssetType.normal).iconKey,
+          'safe_box',
+        );
+        expect(
+          resolveAssetVisual(name: '平安保险', assetType: AssetType.normal).iconKey,
+          'insurance',
         );
         expect(
           resolveAssetVisual(
@@ -482,6 +516,10 @@ void main() {
         expect(normalizeAssetCustomText('👨‍👩‍👧🏦🎉'), '👨‍👩‍👧🏦');
         expect(normalizeAssetCustomText('🇨🇳🧧✨'), '🇨🇳🧧');
         expect(normalizeAssetCustomText('   '), '');
+        // B-19: `|` and whitespace/control characters are stripped safely:
+        expect(normalizeAssetCustomText('A|B'), 'AB');
+        expect(normalizeAssetCustomText('||'), '');
+        expect(normalizeAssetCustomText('招|行|卡'), '招行');
 
         final zhaohang = resolveAssetVisual(
           iconKey: 'text:招商银行',

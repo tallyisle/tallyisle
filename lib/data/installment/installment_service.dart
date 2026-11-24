@@ -504,7 +504,9 @@ final class InstallmentService {
     final asset = await (db.select(
       db.assets,
     )..where((t) => t.id.equals(inst.assetId))).getSingleOrNull();
-    if (asset == null || asset.status != AssetStatus.active) {
+    if (asset == null ||
+        asset.status != AssetStatus.active ||
+        asset.type == AssetType.debt) {
       return (postedCount: 0, recordIds: const <String>[], skipped: true);
     }
 
@@ -887,6 +889,9 @@ final class InstallmentService {
     if (asset == null || asset.status != AssetStatus.active) {
       throw const Failure(FailureCode.validation, '关联账户不存在或不可用');
     }
+    if (asset.type == AssetType.debt) {
+      throw const Failure(FailureCode.validation, '借贷账户不支持分期入账');
+    }
     return asset;
   }
 
@@ -1022,6 +1027,7 @@ final class InstallmentService {
       final currentAsset = await (db.select(
         db.assets,
       )..where((t) => t.id.equals(entry.key))).getSingle();
+      if (currentAsset.type == AssetType.debt) continue;
       final nextBalance = Money.minor(currentAsset.balanceMinor + entry.value);
       await (db.update(db.assets)..where((t) => t.id.equals(entry.key))).write(
         AssetsCompanion(
@@ -1067,7 +1073,7 @@ final class InstallmentService {
       final asset = await (db.select(
         db.assets,
       )..where((t) => t.id.equals(entry.key))).getSingleOrNull();
-      if (asset == null) continue;
+      if (asset == null || asset.type == AssetType.debt) continue;
       final nextBalance = Money.minor(asset.balanceMinor + entry.value);
       await (db.update(db.assets)..where((t) => t.id.equals(entry.key))).write(
         AssetsCompanion(balanceMinor: Value(nextBalance.storageMinor)),

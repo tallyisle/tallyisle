@@ -1,14 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../app/adaptive.dart';
 import '../../app/providers.dart';
 import '../../core/money.dart';
 import '../../data/db/database.dart';
 import '../../domain/rules/billing_period.dart';
 import '../../domain/rules/budget_rules.dart';
 import '../common/common.dart';
+import '../common/desktop_modal_page.dart';
+import '../common/year_month_picker_dialog.dart';
+import '../records/record_detail_page.dart';
 import 'budget_providers.dart';
 import 'budget_widgets.dart';
 
@@ -16,7 +19,9 @@ const _uuid = Uuid();
 
 /// Budget management page (F-006, docs/modules/budget.md).
 class BudgetPage extends ConsumerStatefulWidget {
-  const BudgetPage({super.key});
+  const BudgetPage({super.key, this.initialOffset});
+
+  final int? initialOffset;
 
   @override
   ConsumerState<BudgetPage> createState() => _BudgetPageState();
@@ -24,6 +29,30 @@ class BudgetPage extends ConsumerStatefulWidget {
 
 class _BudgetPageState extends ConsumerState<BudgetPage> {
   final _commandIds = CommandIds();
+
+  @override
+  void initState() {
+    super.initState();
+    _scheduleInitialOffsetReset();
+  }
+
+  @override
+  void didUpdateWidget(covariant BudgetPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.initialOffset != widget.initialOffset) {
+      _scheduleInitialOffsetReset();
+    }
+  }
+
+  void _scheduleInitialOffsetReset() {
+    final targetOffset = widget.initialOffset ?? 0;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (ref.read(budgetOffsetProvider) != targetOffset) {
+        ref.read(budgetOffsetProvider.notifier).setOffset(targetOffset);
+      }
+    });
+  }
 
   Future<(int bookId, String section)> _resolveBookAndSection() async {
     final ledgerQ = await ref.read(queriesProvider.future);
@@ -71,9 +100,9 @@ class _BudgetPageState extends ConsumerState<BudgetPage> {
     showDialog<void>(
       context: context,
       builder: (dialogCtx) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: Text(existing == null ? '设置总预算' : '修改总预算'),
-          content: SingleChildScrollView(
+        builder: (context, setDialogState) {
+          final isDesktop = DesktopAdaptive.isDesktop(context);
+          final dialogContent = SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -84,10 +113,20 @@ class _BudgetPageState extends ConsumerState<BudgetPage> {
                   keyboardType: const TextInputType.numberWithOptions(
                     decimal: true,
                   ),
-                  decoration: const InputDecoration(
-                    labelText: '预算金额 (元)',
-                    prefixText: '¥ ',
-                  ),
+                  decoration: isDesktop
+                      ? const InputDecoration(
+                          labelText: '预算金额 (元)',
+                          prefixText: '¥ ',
+                          border: OutlineInputBorder(),
+                          contentPadding: EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 15,
+                          ),
+                        )
+                      : const InputDecoration(
+                          labelText: '预算金额 (元)',
+                          prefixText: '¥ ',
+                        ),
                   autofocus: true,
                 ),
                 const SizedBox(height: 16),
@@ -109,83 +148,97 @@ class _BudgetPageState extends ConsumerState<BudgetPage> {
                 ),
               ],
             ),
-          ),
-          actions: [
-            if (existing != null)
-              TextButton(
-                key: const Key('delete_total_budget_button'),
-                style: TextButton.styleFrom(
-                  foregroundColor: Theme.of(context).colorScheme.error,
+          );
+          return AlertDialog(
+            title: Text(existing == null ? '设置总预算' : '修改总预算'),
+            content: isDesktop
+                ? ConstrainedBox(
+                    constraints: const BoxConstraints(
+                      minWidth: 360,
+                      maxWidth: 420,
+                    ),
+                    child: dialogContent,
+                  )
+                : dialogContent,
+            actions: [
+              if (existing != null)
+                TextButton(
+                  key: const Key('delete_total_budget_button'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: Theme.of(context).colorScheme.error,
+                  ),
+                  onPressed: () async {
+                    Navigator.pop(dialogCtx);
+                    final confirmed = await confirm(
+                      context,
+                      title: '删除总预算',
+                      message: '确定要删除当期总预算吗？',
+                    );
+                    if (confirmed && mounted) {
+                      final service = await ref.read(
+                        budgetServiceProvider.future,
+                      );
+                      await service.deleteBudget(
+                        commandId: _commandIds.forPayload([
+                          'del',
+                          existing.id,
+                          _uuid.v4(),
+                        ]),
+                        budgetId: existing.id,
+                      );
+                    }
+                  },
+                  child: const Text('删除'),
                 ),
+              TextButton(
+                onPressed: () => Navigator.pop(dialogCtx),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                key: const Key('save_total_budget_button'),
                 onPressed: () async {
-                  Navigator.pop(dialogCtx);
-                  final confirmed = await confirm(
-                    context,
-                    title: '删除总预算',
-                    message: '确定要删除当期总预算吗？',
-                  );
-                  if (confirmed && mounted) {
+                  final text = controller.text.trim();
+                  if (text.isEmpty) return;
+                  try {
+                    final amountMinor = Money.parse(text).storageMinor;
                     final service = await ref.read(
                       budgetServiceProvider.future,
                     );
-                    await service.deleteBudget(
+                    if (!mounted) return;
+                    final (bookId, section) = await _resolveBookAndSection();
+                    if (!mounted || section.isEmpty) return;
+
+                    await service.upsertTotalBudget(
                       commandId: _commandIds.forPayload([
-                        'del',
-                        existing.id,
+                        'total',
+                        bookId,
+                        section,
+                        amountMinor.toString(),
+                        autoCopy,
+                        forward,
                         _uuid.v4(),
                       ]),
-                      budgetId: existing.id,
+                      bookId: bookId,
+                      section: section,
+                      amountMinor: amountMinor,
+                      autoCopy: autoCopy,
+                      forward: forward,
                     );
+
+                    if (dialogCtx.mounted) Navigator.pop(dialogCtx);
+                  } catch (e) {
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('保存失败: ${safeMessage(e)}')),
+                      );
+                    }
                   }
                 },
-                child: const Text('删除'),
+                child: const Text('保存'),
               ),
-            TextButton(
-              onPressed: () => Navigator.pop(dialogCtx),
-              child: const Text('取消'),
-            ),
-            FilledButton(
-              key: const Key('save_total_budget_button'),
-              onPressed: () async {
-                final text = controller.text.trim();
-                if (text.isEmpty) return;
-                try {
-                  final amountMinor = Money.parse(text).storageMinor;
-                  final service = await ref.read(budgetServiceProvider.future);
-                  if (!mounted) return;
-                  final (bookId, section) = await _resolveBookAndSection();
-                  if (!mounted || section.isEmpty) return;
-
-                  await service.upsertTotalBudget(
-                    commandId: _commandIds.forPayload([
-                      'total',
-                      bookId,
-                      section,
-                      amountMinor.toString(),
-                      autoCopy,
-                      forward,
-                      _uuid.v4(),
-                    ]),
-                    bookId: bookId,
-                    section: section,
-                    amountMinor: amountMinor,
-                    autoCopy: autoCopy,
-                    forward: forward,
-                  );
-
-                  if (dialogCtx.mounted) Navigator.pop(dialogCtx);
-                } catch (e) {
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('保存失败: ${safeMessage(e)}')),
-                    );
-                  }
-                }
-              },
-              child: const Text('保存'),
-            ),
-          ],
-        ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -220,20 +273,32 @@ class _BudgetPageState extends ConsumerState<BudgetPage> {
     showDialog<void>(
       context: context,
       builder: (dialogCtx) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: Text(title),
-          content: SingleChildScrollView(
+        builder: (context, setDialogState) {
+          final isDesktop = DesktopAdaptive.isDesktop(context);
+          final dialogContent = SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 if (existing == null) ...[
-                  const Text('选择分类', style: TextStyle(fontSize: 13)),
-                  const SizedBox(height: 6),
+                  if (!isDesktop) ...[
+                    const Text('选择分类', style: TextStyle(fontSize: 13)),
+                    const SizedBox(height: 6),
+                  ],
                   DropdownButtonFormField<int>(
                     key: const Key('category_budget_picker'),
                     isExpanded: true,
                     initialValue: selectedCatId,
+                    decoration: isDesktop
+                        ? const InputDecoration(
+                            labelText: '选择分类',
+                            border: OutlineInputBorder(),
+                            contentPadding: EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 15,
+                            ),
+                          )
+                        : const InputDecoration(),
                     items: availableCategories
                         .map(
                           (c) => DropdownMenuItem<int>(
@@ -263,6 +328,13 @@ class _BudgetPageState extends ConsumerState<BudgetPage> {
                   decoration: InputDecoration(
                     labelText: isExpense ? '预算金额 (元)' : '储蓄目标金额 (元)',
                     prefixText: '¥ ',
+                    border: isDesktop ? const OutlineInputBorder() : null,
+                    contentPadding: isDesktop
+                        ? const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 15,
+                          )
+                        : null,
                   ),
                   autofocus: true,
                 ),
@@ -283,87 +355,101 @@ class _BudgetPageState extends ConsumerState<BudgetPage> {
                 ),
               ],
             ),
-          ),
-          actions: [
-            if (existing != null)
-              TextButton(
-                key: const Key('delete_category_budget_button'),
-                style: TextButton.styleFrom(
-                  foregroundColor: Theme.of(context).colorScheme.error,
+          );
+          return AlertDialog(
+            title: Text(title),
+            content: isDesktop
+                ? ConstrainedBox(
+                    constraints: const BoxConstraints(
+                      minWidth: 360,
+                      maxWidth: 420,
+                    ),
+                    child: dialogContent,
+                  )
+                : dialogContent,
+            actions: [
+              if (existing != null)
+                TextButton(
+                  key: const Key('delete_category_budget_button'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: Theme.of(context).colorScheme.error,
+                  ),
+                  onPressed: () async {
+                    Navigator.pop(dialogCtx);
+                    final confirmed = await confirm(
+                      context,
+                      title: '删除分类预算',
+                      message: '确定要删除此分类预算吗？',
+                    );
+                    if (confirmed && mounted) {
+                      final service = await ref.read(
+                        budgetServiceProvider.future,
+                      );
+                      await service.deleteBudget(
+                        commandId: _commandIds.forPayload([
+                          'del_cat',
+                          existing.budget.id,
+                          _uuid.v4(),
+                        ]),
+                        budgetId: existing.budget.id,
+                      );
+                    }
+                  },
+                  child: const Text('删除'),
                 ),
+              TextButton(
+                onPressed: () => Navigator.pop(dialogCtx),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                key: const Key('save_category_budget_button'),
                 onPressed: () async {
-                  Navigator.pop(dialogCtx);
-                  final confirmed = await confirm(
-                    context,
-                    title: '删除分类预算',
-                    message: '确定要删除此分类预算吗？',
-                  );
-                  if (confirmed && mounted) {
+                  final text = controller.text.trim();
+                  if (text.isEmpty || selectedCatId <= 0) return;
+                  try {
+                    final amountMinor = Money.parse(text).storageMinor;
                     final service = await ref.read(
                       budgetServiceProvider.future,
                     );
-                    await service.deleteBudget(
+                    if (!mounted) return;
+                    final (bookId, section) = await _resolveBookAndSection();
+                    if (!mounted || section.isEmpty) return;
+
+                    await service.upsertCategoryBudget(
                       commandId: _commandIds.forPayload([
-                        'del_cat',
-                        existing.budget.id,
+                        'cat_bg',
+                        bookId,
+                        section,
+                        selectedCatId,
+                        budgetType,
+                        amountMinor.toString(),
+                        autoCopy,
+                        forward,
                         _uuid.v4(),
                       ]),
-                      budgetId: existing.budget.id,
+                      bookId: bookId,
+                      section: section,
+                      categoryId: selectedCatId,
+                      budgetType: budgetType,
+                      amountMinor: amountMinor,
+                      autoCopy: autoCopy,
+                      forward: forward,
                     );
+
+                    if (dialogCtx.mounted) Navigator.pop(dialogCtx);
+                  } catch (e) {
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('保存失败: ${safeMessage(e)}')),
+                      );
+                    }
                   }
                 },
-                child: const Text('删除'),
+                child: const Text('保存'),
               ),
-            TextButton(
-              onPressed: () => Navigator.pop(dialogCtx),
-              child: const Text('取消'),
-            ),
-            FilledButton(
-              key: const Key('save_category_budget_button'),
-              onPressed: () async {
-                final text = controller.text.trim();
-                if (text.isEmpty || selectedCatId <= 0) return;
-                try {
-                  final amountMinor = Money.parse(text).storageMinor;
-                  final service = await ref.read(budgetServiceProvider.future);
-                  if (!mounted) return;
-                  final (bookId, section) = await _resolveBookAndSection();
-                  if (!mounted || section.isEmpty) return;
-
-                  await service.upsertCategoryBudget(
-                    commandId: _commandIds.forPayload([
-                      'cat_bg',
-                      bookId,
-                      section,
-                      selectedCatId,
-                      budgetType,
-                      amountMinor.toString(),
-                      autoCopy,
-                      forward,
-                      _uuid.v4(),
-                    ]),
-                    bookId: bookId,
-                    section: section,
-                    categoryId: selectedCatId,
-                    budgetType: budgetType,
-                    amountMinor: amountMinor,
-                    autoCopy: autoCopy,
-                    forward: forward,
-                  );
-
-                  if (dialogCtx.mounted) Navigator.pop(dialogCtx);
-                } catch (e) {
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('保存失败: ${safeMessage(e)}')),
-                    );
-                  }
-                }
-              },
-              child: const Text('保存'),
-            ),
-          ],
-        ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -377,18 +463,60 @@ class _BudgetPageState extends ConsumerState<BudgetPage> {
     required BigInt usedMinor,
     required bool isSaving,
   }) {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => BudgetDrilldownPage(
-          title: title,
-          matchedRecordIds: matchedRecordIds,
-          periodLabel: periodLabel,
-          amountMinor: amountMinor,
-          usedMinor: usedMinor,
-          isSaving: isSaving,
-        ),
+    pushDesktopModalOrMaterialRoute<void>(
+      context,
+      maxWidth: 680,
+      maxHeight: 720,
+      barrierDismissible: true,
+      child: BudgetDrilldownPage(
+        title: title,
+        matchedRecordIds: matchedRecordIds,
+        periodLabel: periodLabel,
+        amountMinor: amountMinor,
+        usedMinor: usedMinor,
+        isSaving: isSaving,
       ),
     );
+  }
+
+  Future<void> _pickPeriod(
+    BuildContext context, {
+    required BudgetMode mode,
+    required BillingPeriod period,
+    required int startDay,
+  }) async {
+    final now = DateTime.now();
+    if (mode == BudgetMode.yearly) {
+      final currentYearPeriod = BillingPeriod.containingYear(now, startDay);
+      final pickedYear = await showYearOnlyPickerDialog(
+        context,
+        initialYear: period.year,
+        currentYear: currentYearPeriod.year,
+      );
+      if (pickedYear == null || !mounted) return;
+      final activeYear = BillingPeriod.containingYear(
+        DateTime.now(),
+        startDay,
+      ).year;
+      ref
+          .read(budgetOffsetProvider.notifier)
+          .setOffset(pickedYear - activeYear);
+    } else {
+      final currentMonthPeriod = BillingPeriod.containing(now, startDay);
+      final picked = await showYearMonthPickerDialog(
+        context,
+        initialYear: period.year,
+        initialMonth: period.month,
+        currentYear: currentMonthPeriod.year,
+        currentMonth: currentMonthPeriod.month,
+      );
+      if (picked == null || !mounted) return;
+      final nowPeriod = BillingPeriod.containing(DateTime.now(), startDay);
+      final newOffset =
+          (picked.year - nowPeriod.year) * 12 +
+          (picked.month - nowPeriod.month);
+      ref.read(budgetOffsetProvider.notifier).setOffset(newOffset);
+    }
   }
 
   @override
@@ -397,10 +525,16 @@ class _BudgetPageState extends ConsumerState<BudgetPage> {
     final periodAsync = ref.watch(budgetPeriodProvider);
     final overviewAsync = ref.watch(budgetOverviewProvider);
     final bookIdAsync = ref.watch(currentBookIdProvider);
+    final currentBook = ref.watch(currentBookProvider).value;
+    final budgetOffset = ref.watch(budgetOffsetProvider);
+    final startDay = currentBook?.startDay ?? 1;
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    final isPopupModal = isDesktop && ModalRoute.of(context) is PopupRoute;
 
     return Scaffold(
       key: const Key('budget_page'),
       appBar: AppBar(
+        leading: isPopupModal ? const CloseButton() : null,
         title: const Text('预算管理', maxLines: 1, overflow: TextOverflow.ellipsis),
         actions: [
           modeAsync.when(
@@ -469,46 +603,86 @@ class _BudgetPageState extends ConsumerState<BudgetPage> {
               final periodText = mode == BudgetMode.yearly
                   ? '${period.year} 年'
                   : '${period.year} 年 ${period.month} 月';
+              final theme = Theme.of(context);
+
+              final periodRow = Row(
+                children: [
+                  IconButton(
+                    key: const Key('budget_period_prev'),
+                    icon: const Icon(Icons.chevron_left),
+                    onPressed: () =>
+                        ref.read(budgetOffsetProvider.notifier).previous(),
+                  ),
+                  Expanded(
+                    child: Center(
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Flexible(
+                            child: InkWell(
+                              key: const Key('budget-period-picker-trigger'),
+                              borderRadius: BorderRadius.circular(8),
+                              onTap: () => _pickPeriod(
+                                context,
+                                mode: mode,
+                                period: period,
+                                startDay: startDay,
+                              ),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 6,
+                                  vertical: 4,
+                                ),
+                                child: FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  child: Text(
+                                    periodText,
+                                    key: const Key('budget_period_title'),
+                                    maxLines: 1,
+                                    style: theme.textTheme.titleMedium
+                                        ?.copyWith(fontWeight: FontWeight.bold),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          if (budgetOffset != 0) ...[
+                            const SizedBox(width: 6),
+                            PeriodResetPill(
+                              key: const Key('budget_period_reset'),
+                              label: mode == BudgetMode.yearly ? '回本年' : '回本月',
+                              onTap: () => ref
+                                  .read(budgetOffsetProvider.notifier)
+                                  .reset(),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    key: const Key('budget_period_next'),
+                    icon: const Icon(Icons.chevron_right),
+                    onPressed: () =>
+                        ref.read(budgetOffsetProvider.notifier).next(),
+                  ),
+                ],
+              );
 
               return Container(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 16,
                   vertical: 8,
                 ),
-                color: Theme.of(context).colorScheme.surfaceContainerLow,
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    IconButton(
-                      key: const Key('budget_period_prev'),
-                      icon: const Icon(Icons.chevron_left),
-                      onPressed: () =>
-                          ref.read(budgetOffsetProvider.notifier).previous(),
-                    ),
-                    Flexible(
-                      child: InkWell(
-                        onTap: () =>
-                            ref.read(budgetOffsetProvider.notifier).reset(),
-                        child: FittedBox(
-                          fit: BoxFit.scaleDown,
-                          child: Text(
-                            periodText,
-                            key: const Key('budget_period_title'),
-                            maxLines: 1,
-                            style: Theme.of(context).textTheme.titleMedium
-                                ?.copyWith(fontWeight: FontWeight.bold),
-                          ),
+                color: theme.colorScheme.surfaceContainerLow,
+                child: isDesktop
+                    ? Center(
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 880),
+                          child: periodRow,
                         ),
-                      ),
-                    ),
-                    IconButton(
-                      key: const Key('budget_period_next'),
-                      icon: const Icon(Icons.chevron_right),
-                      onPressed: () =>
-                          ref.read(budgetOffsetProvider.notifier).next(),
-                    ),
-                  ],
-                ),
+                      )
+                    : periodRow,
               );
             },
             loading: () => const LinearProgressIndicator(),
@@ -553,7 +727,7 @@ class _BudgetPageState extends ConsumerState<BudgetPage> {
                     ? '${overview.period.year}年'
                     : '${overview.period.year}年${overview.period.month}月';
 
-                return ListView(
+                final mainList = ListView(
                   padding: const EdgeInsets.symmetric(vertical: 8),
                   children: [
                     // 1. Total budget section
@@ -972,6 +1146,13 @@ class _BudgetPageState extends ConsumerState<BudgetPage> {
                     const SizedBox(height: 24),
                   ],
                 );
+                if (!isDesktop) return mainList;
+                return Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 880),
+                    child: mainList,
+                  ),
+                );
               },
             ),
           ),
@@ -1014,10 +1195,15 @@ class BudgetDrilldownPage extends ConsumerWidget {
     final colorScheme = theme.colorScheme;
     final isDark = theme.brightness == Brightness.dark;
     final semanticTeal = isDark ? Colors.teal.shade300 : Colors.teal.shade700;
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    final isPopupModal = isDesktop && ModalRoute.of(context) is PopupRoute;
 
     return Scaffold(
       key: const Key('budget_drilldown_page'),
-      appBar: AppBar(title: Text(title)),
+      appBar: AppBar(
+        leading: isPopupModal ? const CloseButton() : null,
+        title: Text(title),
+      ),
       body: Column(
         children: [
           // Header summary card
@@ -1111,9 +1297,13 @@ class BudgetDrilldownPage extends ConsumerWidget {
                         if (onRecordTap != null) {
                           onRecordTap!(r.recordId);
                         } else {
-                          try {
-                            context.push('/record/${r.recordId}');
-                          } catch (_) {}
+                          pushDesktopModalOrMaterialRoute<void>(
+                            context,
+                            maxWidth: 560,
+                            maxHeight: 740,
+                            barrierDismissible: true,
+                            child: RecordDetailPage(recordId: r.recordId),
+                          );
                         }
                       },
                       title: Row(

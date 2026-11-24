@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/adaptive.dart';
 import '../../app/providers.dart';
 import '../../core/failure.dart';
 import '../../core/money.dart';
@@ -12,6 +13,7 @@ import '../../domain/rules/asset_overview.dart' show normalizeCurrency;
 import '../../domain/rules/currency_rates.dart' show baseCurrency;
 import '../../domain/rules/periodic_records.dart';
 import '../common/common.dart';
+import '../common/desktop_modal_page.dart';
 import 'periodic_providers.dart';
 
 final _maxAmount = Money.parse('88888888888.00');
@@ -367,72 +369,100 @@ class _PeriodicEditorPageState extends ConsumerState<PeriodicEditorPage> {
       context: context,
       builder: (dialogCtx) => StatefulBuilder(
         builder: (context, setDialogState) {
+          final isDesktop = DesktopAdaptive.isDesktop(context);
           final maxDay = daysInMonth(2024, selectedMonth);
           if (selectedDay > maxDay) selectedDay = maxDay;
+          final row = Row(
+            children: [
+              Expanded(
+                child: InputDecorator(
+                  decoration: isDesktop
+                      ? const InputDecoration(
+                          labelText: '月份',
+                          border: OutlineInputBorder(),
+                          contentPadding: EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 16,
+                          ),
+                        )
+                      : const InputDecoration(labelText: '月份'),
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<int>(
+                      key: const Key('yearly_month_picker'),
+                      value: selectedMonth,
+                      isDense: true,
+                      isExpanded: true,
+                      items: [
+                        for (var m = 1; m <= 12; m++)
+                          DropdownMenuItem(value: m, child: Text('$m 月')),
+                      ],
+                      onChanged: (val) {
+                        if (val != null) {
+                          setDialogState(() {
+                            selectedMonth = val;
+                            final nextMax = daysInMonth(2024, selectedMonth);
+                            if (selectedDay > nextMax) {
+                              selectedDay = nextMax;
+                            }
+                          });
+                        }
+                      },
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: InputDecorator(
+                  decoration: isDesktop
+                      ? const InputDecoration(
+                          labelText: '日期',
+                          border: OutlineInputBorder(),
+                          contentPadding: EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 16,
+                          ),
+                        )
+                      : const InputDecoration(labelText: '日期'),
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<int>(
+                      key: const Key('yearly_day_picker'),
+                      value: selectedDay,
+                      isDense: true,
+                      isExpanded: true,
+                      items: [
+                        for (var d = 1; d <= maxDay; d++)
+                          DropdownMenuItem(
+                            value: d,
+                            child: Text(
+                              selectedMonth == 2 && d == 29
+                                  ? '29 日(闰)'
+                                  : '$d 日',
+                            ),
+                          ),
+                      ],
+                      onChanged: (val) {
+                        if (val != null) {
+                          setDialogState(() => selectedDay = val);
+                        }
+                      },
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          );
           return AlertDialog(
             title: const Text('添加每年记账月日'),
-            content: Row(
-              children: [
-                Expanded(
-                  child: InputDecorator(
-                    decoration: const InputDecoration(labelText: '月份'),
-                    child: DropdownButtonHideUnderline(
-                      child: DropdownButton<int>(
-                        key: const Key('yearly_month_picker'),
-                        value: selectedMonth,
-                        isDense: true,
-                        isExpanded: true,
-                        items: [
-                          for (var m = 1; m <= 12; m++)
-                            DropdownMenuItem(value: m, child: Text('$m 月')),
-                        ],
-                        onChanged: (val) {
-                          if (val != null) {
-                            setDialogState(() {
-                              selectedMonth = val;
-                              final nextMax = daysInMonth(2024, selectedMonth);
-                              if (selectedDay > nextMax) {
-                                selectedDay = nextMax;
-                              }
-                            });
-                          }
-                        },
-                      ),
+            content: isDesktop
+                ? ConstrainedBox(
+                    constraints: const BoxConstraints(
+                      minWidth: 380,
+                      maxWidth: 420,
                     ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: InputDecorator(
-                    decoration: const InputDecoration(labelText: '日期'),
-                    child: DropdownButtonHideUnderline(
-                      child: DropdownButton<int>(
-                        key: const Key('yearly_day_picker'),
-                        value: selectedDay,
-                        isDense: true,
-                        isExpanded: true,
-                        items: [
-                          for (var d = 1; d <= maxDay; d++)
-                            DropdownMenuItem(
-                              value: d,
-                              child: Text(
-                                selectedMonth == 2 && d == 29
-                                    ? '29 日(闰)'
-                                    : '$d 日',
-                              ),
-                            ),
-                        ],
-                        onChanged: (val) {
-                          if (val != null) {
-                            setDialogState(() => selectedDay = val);
-                          }
-                        },
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
+                    child: row,
+                  )
+                : row,
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(dialogCtx),
@@ -478,150 +508,172 @@ class _PeriodicEditorPageState extends ConsumerState<PeriodicEditorPage> {
         .where((t) => t.parent != 1)
         .toList();
 
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+
     return PopScope(
       canPop: !_busy,
-      child: Scaffold(
-        key: const Key('periodic_editor_page'),
-        appBar: AppBar(title: Text(_editing ? '编辑周期记账' : '新建周期记账')),
-        bottomNavigationBar: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-            child: FilledButton(
-              key: const Key('save_periodic_button'),
-              onPressed: _busy || _loading ? null : _submit,
-              child: Text(_busy ? '保存中…' : '保存'),
+      child: DesktopModalEscapeScope(
+        enabled: isDesktop,
+        child: Scaffold(
+          key: const Key('periodic_editor_page'),
+          appBar: AppBar(
+            leading: isDesktop ? const CloseButton() : null,
+            scrolledUnderElevation: isDesktop ? 0 : null,
+            title: Text(_editing ? '编辑周期记账' : '新建周期记账'),
+          ),
+          bottomNavigationBar: SafeArea(
+            child: Padding(
+              padding: isDesktop
+                  ? const EdgeInsets.fromLTRB(20, 8, 20, 14)
+                  : const EdgeInsets.fromLTRB(16, 8, 16, 12),
+              child: FilledButton(
+                key: const Key('save_periodic_button'),
+                onPressed: _busy || _loading ? null : _submit,
+                child: Text(_busy ? '保存中…' : '保存'),
+              ),
             ),
           ),
-        ),
-        body: _loading
-            ? const Loading()
-            : Center(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 640),
-                  child: ListView(
-                    padding: const EdgeInsets.all(16),
-                    children: [
-                      Wrap(
-                        spacing: 8,
-                        children: [
-                          for (final (val, label) in const [
-                            (RecordType.expense, '支出'),
-                            (RecordType.income, '收入'),
-                            (RecordType.transfer, '转账'),
-                          ])
-                            ChoiceChip(
-                              key: Key('periodic_type_$val'),
-                              label: Text(label),
-                              selected: _recordType == val,
-                              onSelected: _busy
-                                  ? null
-                                  : (_) => setState(() {
-                                      _recordType = val;
-                                      _categoryId = null;
-                                      _parentCatId = null;
-                                    }),
-                            ),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-                      TextField(
-                        key: const Key('periodic_amount_input'),
-                        controller: _amountCtrl,
-                        enabled: !_busy,
-                        keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true,
-                        ),
-                        inputFormatters: _amountFormatters,
-                        style: Theme.of(context).textTheme.headlineSmall,
-                        decoration: InputDecoration(
-                          labelText: '每期金额',
-                          prefixText: '${_currencyPrefix(allAssets)} ',
-                          border: const OutlineInputBorder(),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      if (_recordType == RecordType.transfer)
-                        ..._buildTransferSection(allAssets, activeAssets)
-                      else
-                        ..._buildCategoryAndAssetSection(
-                          categories,
-                          allAssets,
-                          activeAssets,
-                        ),
-                      const Divider(height: 32),
-                      ..._buildCycleSection(),
-                      const Divider(height: 32),
-                      ..._buildScheduleBoundsSection(),
-                      const Divider(height: 32),
-                      TextField(
-                        key: const Key('periodic_remark_input'),
-                        controller: _remarkCtrl,
-                        enabled: !_busy,
-                        maxLength: 200,
-                        decoration: const InputDecoration(labelText: '备注'),
-                      ),
-                      SwitchListTile(
-                        key: const Key('periodic_exclude_exin_switch'),
-                        contentPadding: EdgeInsets.zero,
-                        title: const Text('不计入收支'),
-                        value: _excludeExIn,
-                        onChanged: _busy
-                            ? null
-                            : (v) => setState(() => _excludeExIn = v),
-                      ),
-                      SwitchListTile(
-                        key: const Key('periodic_exclude_budget_switch'),
-                        contentPadding: EdgeInsets.zero,
-                        title: const Text('不计入预算'),
-                        value: _excludeBudget,
-                        onChanged: _busy
-                            ? null
-                            : (v) => setState(() => _excludeBudget = v),
-                      ),
-                      if (tags.isNotEmpty) ...[
-                        const SizedBox(height: 8),
-                        Text(
-                          '标签',
-                          style: Theme.of(context).textTheme.labelLarge,
-                        ),
-                        const SizedBox(height: 8),
+          body: _loading
+              ? const Loading()
+              : Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 640),
+                    child: ListView(
+                      padding: isDesktop
+                          ? const EdgeInsets.fromLTRB(20, 12, 20, 16)
+                          : const EdgeInsets.all(16),
+                      children: [
                         Wrap(
                           spacing: 8,
-                          runSpacing: 8,
                           children: [
-                            for (final t in tags)
-                              FilterChip(
-                                key: Key('periodic_tag_${t.name}'),
-                                label: Text(t.name),
-                                selected: _selectedTagIds.contains(t.tagId),
+                            for (final (val, label) in const [
+                              (RecordType.expense, '支出'),
+                              (RecordType.income, '收入'),
+                              (RecordType.transfer, '转账'),
+                            ])
+                              ChoiceChip(
+                                key: Key('periodic_type_$val'),
+                                label: Text(label),
+                                selected: _recordType == val,
                                 onSelected: _busy
                                     ? null
-                                    : (sel) => setState(() {
-                                        if (sel) {
-                                          _selectedTagIds.add(t.tagId);
-                                        } else {
-                                          _selectedTagIds.remove(t.tagId);
-                                        }
+                                    : (_) => setState(() {
+                                        _recordType = val;
+                                        _categoryId = null;
+                                        _parentCatId = null;
                                       }),
                               ),
                           ],
                         ),
-                      ],
-                      if (_error != null)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 12),
-                          child: Text(
-                            _error!,
-                            key: const Key('periodic_form_error'),
-                            style: TextStyle(
-                              color: Theme.of(context).colorScheme.error,
-                            ),
+                        const SizedBox(height: 16),
+                        TextField(
+                          key: const Key('periodic_amount_input'),
+                          controller: _amountCtrl,
+                          enabled: !_busy,
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                          ),
+                          inputFormatters: _amountFormatters,
+                          style: Theme.of(context).textTheme.headlineSmall,
+                          decoration: InputDecoration(
+                            labelText: '每期金额',
+                            prefixText: '${_currencyPrefix(allAssets)} ',
+                            border: const OutlineInputBorder(),
                           ),
                         ),
-                    ],
+                        const SizedBox(height: 16),
+                        if (_recordType == RecordType.transfer)
+                          ..._buildTransferSection(allAssets, activeAssets)
+                        else
+                          ..._buildCategoryAndAssetSection(
+                            categories,
+                            allAssets,
+                            activeAssets,
+                          ),
+                        const Divider(height: 32),
+                        ..._buildCycleSection(),
+                        const Divider(height: 32),
+                        ..._buildScheduleBoundsSection(),
+                        const Divider(height: 32),
+                        TextField(
+                          key: const Key('periodic_remark_input'),
+                          controller: _remarkCtrl,
+                          enabled: !_busy,
+                          maxLength: 200,
+                          decoration: isDesktop
+                              ? const InputDecoration(
+                                  labelText: '备注',
+                                  border: OutlineInputBorder(),
+                                  contentPadding: EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 16,
+                                  ),
+                                )
+                              : const InputDecoration(labelText: '备注'),
+                        ),
+                        SwitchListTile(
+                          key: const Key('periodic_exclude_exin_switch'),
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('不计入收支'),
+                          value: _excludeExIn,
+                          onChanged: _busy
+                              ? null
+                              : (v) => setState(() => _excludeExIn = v),
+                        ),
+                        SwitchListTile(
+                          key: const Key('periodic_exclude_budget_switch'),
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('不计入预算'),
+                          value: _excludeBudget,
+                          onChanged: _busy
+                              ? null
+                              : (v) => setState(() => _excludeBudget = v),
+                        ),
+                        if (tags.isNotEmpty) ...[
+                          const SizedBox(height: 8),
+                          Text(
+                            '标签',
+                            style: Theme.of(context).textTheme.labelLarge,
+                          ),
+                          const SizedBox(height: 8),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              for (final t in tags)
+                                FilterChip(
+                                  key: Key('periodic_tag_${t.name}'),
+                                  label: Text(t.name),
+                                  selected: _selectedTagIds.contains(t.tagId),
+                                  onSelected: _busy
+                                      ? null
+                                      : (sel) => setState(() {
+                                          if (sel) {
+                                            _selectedTagIds.add(t.tagId);
+                                          } else {
+                                            _selectedTagIds.remove(t.tagId);
+                                          }
+                                        }),
+                                ),
+                            ],
+                          ),
+                        ],
+                        if (_error != null)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 12),
+                            child: Text(
+                              _error!,
+                              key: const Key('periodic_form_error'),
+                              style: TextStyle(
+                                color: Theme.of(context).colorScheme.error,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
                 ),
-              ),
+        ),
       ),
     );
   }
@@ -714,7 +766,16 @@ class _PeriodicEditorPageState extends ConsumerState<PeriodicEditorPage> {
       ],
       const SizedBox(height: 16),
       InputDecorator(
-        decoration: const InputDecoration(labelText: '关联账户'),
+        decoration: DesktopAdaptive.isDesktop(context)
+            ? const InputDecoration(
+                labelText: '关联账户',
+                border: OutlineInputBorder(),
+                contentPadding: EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 16,
+                ),
+              )
+            : const InputDecoration(labelText: '关联账户'),
         child: DropdownButtonHideUnderline(
           child: DropdownButton<int>(
             key: const Key('periodic_asset_picker'),
@@ -749,6 +810,7 @@ class _PeriodicEditorPageState extends ConsumerState<PeriodicEditorPage> {
     final fromValue = _fromAssetId == noRef ? null : _fromAssetId;
     final toValue = _toAssetId == noRef ? null : _toAssetId;
 
+    final isDesktop = DesktopAdaptive.isDesktop(context);
     return [
       if (activeAssets.length < 2)
         const Padding(
@@ -756,7 +818,16 @@ class _PeriodicEditorPageState extends ConsumerState<PeriodicEditorPage> {
           child: Text('周期转账至少需要两个启用状态的账户。'),
         ),
       InputDecorator(
-        decoration: const InputDecoration(labelText: '转出账户'),
+        decoration: isDesktop
+            ? const InputDecoration(
+                labelText: '转出账户',
+                border: OutlineInputBorder(),
+                contentPadding: EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 16,
+                ),
+              )
+            : const InputDecoration(labelText: '转出账户'),
         child: DropdownButtonHideUnderline(
           child: DropdownButton<int>(
             key: const Key('periodic_from_asset_picker'),
@@ -776,7 +847,16 @@ class _PeriodicEditorPageState extends ConsumerState<PeriodicEditorPage> {
       ),
       const SizedBox(height: 12),
       InputDecorator(
-        decoration: const InputDecoration(labelText: '转入账户'),
+        decoration: isDesktop
+            ? const InputDecoration(
+                labelText: '转入账户',
+                border: OutlineInputBorder(),
+                contentPadding: EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 16,
+                ),
+              )
+            : const InputDecoration(labelText: '转入账户'),
         child: DropdownButtonHideUnderline(
           child: DropdownButton<int>(
             key: const Key('periodic_to_asset_picker'),
@@ -801,10 +881,17 @@ class _PeriodicEditorPageState extends ConsumerState<PeriodicEditorPage> {
         enabled: !_busy,
         keyboardType: const TextInputType.numberWithOptions(decimal: true),
         inputFormatters: _amountFormatters,
-        decoration: const InputDecoration(
-          labelText: '转账手续费（可选）',
-          prefixText: '¥ ',
-        ),
+        decoration: isDesktop
+            ? const InputDecoration(
+                labelText: '转账手续费（可选）',
+                prefixText: '¥ ',
+                border: OutlineInputBorder(),
+                contentPadding: EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 16,
+                ),
+              )
+            : const InputDecoration(labelText: '转账手续费（可选）', prefixText: '¥ '),
       ),
       SwitchListTile(
         key: const Key('periodic_fee_from_target_switch'),
@@ -849,7 +936,17 @@ class _PeriodicEditorPageState extends ConsumerState<PeriodicEditorPage> {
         enabled: !_busy,
         keyboardType: TextInputType.number,
         inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-        decoration: InputDecoration(labelText: '重复间隔步长', helperText: freqHint),
+        decoration: DesktopAdaptive.isDesktop(context)
+            ? InputDecoration(
+                labelText: '重复间隔步长',
+                helperText: freqHint,
+                border: const OutlineInputBorder(),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 16,
+                ),
+              )
+            : InputDecoration(labelText: '重复间隔步长', helperText: freqHint),
       ),
       const SizedBox(height: 12),
       if (_periodType == PeriodType.weekly) ...[
@@ -1008,7 +1105,16 @@ class _PeriodicEditorPageState extends ConsumerState<PeriodicEditorPage> {
           enabled: !_busy,
           keyboardType: TextInputType.number,
           inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-          decoration: const InputDecoration(labelText: '累计执行次数上限（1–366）'),
+          decoration: DesktopAdaptive.isDesktop(context)
+              ? const InputDecoration(
+                  labelText: '累计执行次数上限（1–366）',
+                  border: OutlineInputBorder(),
+                  contentPadding: EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 16,
+                  ),
+                )
+              : const InputDecoration(labelText: '累计执行次数上限（1–366）'),
         ),
       ] else if (_endMode == PeriodEndMode.date) ...[
         ListTile(

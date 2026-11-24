@@ -10,6 +10,7 @@ import 'package:tallyisle/data/db/database.dart';
 import 'package:tallyisle/data/ledger/ledger_service.dart';
 import 'package:tallyisle/data/tools/template_remark_service.dart';
 import 'package:tallyisle/domain/model/codes.dart';
+import 'package:tallyisle/features/bank_cards/bank_card_editor_page.dart';
 import 'package:tallyisle/features/bank_cards/bank_cards_page.dart';
 import 'package:tallyisle/features/receipt/diy_toolbar_settings_page.dart';
 import 'package:tallyisle/features/templates/templates_page.dart';
@@ -485,24 +486,159 @@ void main() {
       SwitchListTile remarksToggle() => tester.widget<SwitchListTile>(
         find.byKey(const Key('remarks-feature-toggle')),
       );
+      Switch diyRemarksSwitch() => tester.widget<Switch>(
+        find.byKey(const Key('diy-switch-frequent_remarks')),
+      );
 
-      // Default OFF in RemarksPage and 8/11 enabled in DiyToolbarSettingsPage.
+      await tester.scrollUntilVisible(
+        find.byKey(const Key('diy-switch-frequent_remarks')),
+        120,
+        scrollable: find.descendant(
+          of: find.byKey(const Key('diy-toolbar-list')),
+          matching: find.byType(Scrollable),
+        ),
+      );
+      await settle(tester);
+
+      // Default OFF in both RemarksPage and DiyToolbarSettingsPage.
       expect(remarksToggle().value, isFalse);
       expect(find.textContaining('已关闭（默认）'), findsOneWidget);
-      expect(find.text('当前启用预览（8/11）'), findsOneWidget);
+      expect(diyRemarksSwitch().value, isFalse);
 
-      // Toggle ON in RemarksPage -> syncs to DiyToolbarSettingsPage (9/11)!
+      // Toggle ON in RemarksPage -> syncs to DiyToolbarSettingsPage!
       await tester.tap(find.byKey(const Key('remarks-feature-toggle')));
       await settle(tester);
       expect(remarksToggle().value, isTrue);
       expect(find.textContaining('已开启'), findsOneWidget);
-      expect(find.text('当前启用预览（9/11）'), findsOneWidget);
+      expect(diyRemarksSwitch().value, isTrue);
 
       // Reset to defaults in DiyToolbarSettingsPage -> syncs back to RemarksPage (OFF)!
       await tester.tap(find.byKey(const Key('diy-toolbar-reset-btn')));
       await settle(tester);
       expect(remarksToggle().value, isFalse);
-      expect(find.text('当前启用预览（8/11）'), findsOneWidget);
+      expect(diyRemarksSwitch().value, isFalse);
+
+      await closeCleanly();
+    },
+  );
+
+  testWidgets(
+    'B-17 FAB heroTags, B-19 pipe-character preview guard + save validation, and B-20 icon+color picker preservation',
+    (tester) async {
+      final (db, closeCleanly) = openTestDb(tester);
+
+      // B-17: Unique mobile FAB heroTag on TemplatesPage, RemarksPage, BankCardsPage
+      await tester.pumpWidget(buildApp(db, const TemplatesPage()));
+      await settle(tester);
+      expect(
+        tester
+            .widget<FloatingActionButton>(
+              find.byKey(const Key('add_template_fab')),
+            )
+            .heroTag,
+        'fab-templates',
+      );
+      await tester.tap(find.byKey(const Key('open_remarks_page_button')));
+      await settle(tester);
+      expect(tester.takeException(), isNull);
+      expect(
+        tester
+            .widget<FloatingActionButton>(
+              find.byKey(const Key('add_remark_fab')),
+            )
+            .heroTag,
+        'fab-remarks',
+      );
+      await tester.pageBack();
+      await settle(tester);
+
+      await tester.pumpWidget(buildApp(db, const BankCardsPage()));
+      await settle(tester);
+      expect(
+        tester
+            .widget<FloatingActionButton>(
+              find.byKey(const Key('add_bank_card_fab')),
+            )
+            .heroTag,
+        'fab-bank-cards',
+      );
+
+      // B-19 Part 1: Direct state containing '|' in _manualIconKey must NEVER
+      // throw synchronously inside BankCardEditorPage.build() (or when reopening
+      // the picker), and must validate cleanly in _submit() via bank_card_form_error!
+      await tester.pumpWidget(
+        buildApp(db, const BankCardEditorPage(debugInitialIconKey: 'text:A|')),
+      );
+      await settle(tester);
+      expect(tester.takeException(), isNull);
+      expect(find.byType(BankCardEditorPage), findsOneWidget);
+
+      await tester.enterText(
+        find.byKey(const Key('bank_card_name_input')),
+        '自定义储蓄卡',
+      );
+      await tester.enterText(
+        find.byKey(const Key('bank_card_no_input')),
+        '4111 1111 1111 1111',
+      );
+      await tester.pump();
+
+      await tester.tap(find.byKey(const Key('save_bank_card_button')));
+      await settle(tester);
+      expect(tester.takeException(), isNull);
+      await tester.scrollUntilVisible(
+        find.byKey(const Key('bank_card_form_error')),
+        160,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await settle(tester);
+      expect(find.byKey(const Key('bank_card_form_error')), findsOneWidget);
+      expect(find.textContaining('卡片图标标识无效'), findsOneWidget);
+
+      // Reopen picker while _manualIconKey has '|' -> does not throw!
+      await tester.scrollUntilVisible(
+        find.byKey(const Key('bank_card_icon_picker_trigger')),
+        -160,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await settle(tester);
+      await tester.tap(find.byKey(const Key('bank_card_icon_picker_trigger')));
+      await settle(tester);
+      expect(tester.takeException(), isNull);
+
+      // B-19 Part 2: Entering '|' in monogram UI is sanitized safely without crashing
+      await tester.tap(find.byKey(const Key('asset-picker-mode-text')));
+      await settle(tester);
+      await tester.enterText(
+        find.byKey(const Key('asset-picker-custom-text-input')),
+        'A|',
+      );
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+
+      // B-20: Pick BOTH an icon ('builtin:bank.cmb') AND palette color ('#7E57C2')
+      // and verify both are preserved upon confirm & save!
+      await tester.tap(find.byKey(const Key('asset-picker-mode-preset')));
+      await settle(tester);
+      await tester.tap(find.byKey(const Key('visual-icon-builtin:bank.cmb')));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('visual-color-#7E57C2')));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('visual-picker-confirm')));
+      await settle(tester);
+      expect(tester.takeException(), isNull);
+
+      await tester.tap(find.byKey(const Key('save_bank_card_button')));
+      await settle(tester);
+      expect(tester.takeException(), isNull);
+
+      final cards = await tester.runAsync(() => db.select(db.bankCards).get());
+      expect(cards, hasLength(1));
+      expect(cards!.single.cardColor, '#7E57C2|icon:builtin:bank.cmb');
+      expect(
+        parseCardColorOrNull(cards.single.cardColor),
+        const Color(0xFF7E57C2),
+      );
 
       await closeCleanly();
     },

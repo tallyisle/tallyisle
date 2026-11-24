@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../app/adaptive.dart';
 import '../../app/providers.dart';
 import '../../core/money.dart';
 import '../../data/db/database.dart';
@@ -133,16 +135,21 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     final recordsAsync = ref.watch(searchRecordsProvider(filter));
     final summaryAsync = ref.watch(searchSummaryProvider(filter));
 
-    return Scaffold(
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    final scaffold = Scaffold(
       appBar: AppBar(
         titleSpacing: 0,
         title: TextField(
           key: const Key('search-keyword-field'),
           controller: _keywordController,
-          autofocus: false,
+          autofocus: isDesktop,
+          textAlignVertical: isDesktop ? TextAlignVertical.center : null,
           decoration: InputDecoration(
             hintText: '搜索备注关键词…',
             border: InputBorder.none,
+            contentPadding: isDesktop
+                ? const EdgeInsets.symmetric(horizontal: 8, vertical: 12)
+                : null,
             suffixIcon: _keywordController.text.isNotEmpty
                 ? IconButton(
                     icon: const Icon(Icons.clear),
@@ -175,47 +182,85 @@ class _SearchPageState extends ConsumerState<SearchPage> {
           ),
         ],
       ),
-      body: Column(
-        children: [
-          if (_filterExpanded)
-            _buildFilterPanel(context, categories, assets, allTags),
-          _buildSummaryBar(context, summaryAsync),
-          Expanded(
-            child: recordsAsync.when(
-              data: (records) {
-                if (records.isEmpty) {
-                  return const Center(child: Text('未找到符合条件的账单'));
-                }
-                return ListView(
-                  children: [
-                    ..._buildGroupedRecords(
-                      context,
-                      records,
-                      categories,
-                      assets,
-                    ),
-                    if (records.length >= _limit)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(
-                          vertical: 16,
-                          horizontal: 32,
-                        ),
-                        child: OutlinedButton(
-                          key: const Key('search-load-more'),
-                          onPressed: () => setState(() => _limit += 50),
-                          child: const Text('加载更多'),
-                        ),
+      body: () {
+        final column = Column(
+          children: [
+            if (_filterExpanded)
+              _buildFilterPanel(context, categories, assets, allTags),
+            _buildSummaryBar(context, summaryAsync),
+            Expanded(
+              child: recordsAsync.when(
+                data: (records) {
+                  if (records.isEmpty) {
+                    return const Center(child: Text('未找到符合条件的账单'));
+                  }
+                  return ListView(
+                    children: [
+                      ..._buildGroupedRecords(
+                        context,
+                        records,
+                        categories,
+                        assets,
                       ),
-                    const SizedBox(height: 32),
-                  ],
-                );
-              },
-              loading: () => const Loading(),
-              error: (err, _) => ErrorView(err),
+                      if (records.length >= _limit)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(
+                            vertical: 16,
+                            horizontal: 32,
+                          ),
+                          child: OutlinedButton(
+                            key: const Key('search-load-more'),
+                            onPressed: () => setState(() => _limit += 50),
+                            child: const Text('加载更多'),
+                          ),
+                        ),
+                      const SizedBox(height: 32),
+                    ],
+                  );
+                },
+                loading: () => const Loading(),
+                error: (err, _) => ErrorView(err),
+              ),
             ),
+          ],
+        );
+        if (!isDesktop) {
+          return column;
+        }
+        return Align(
+          alignment: Alignment.topCenter,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 920),
+            child: column,
           ),
-        ],
-      ),
+        );
+      }(),
+    );
+    if (!isDesktop) {
+      return scaffold;
+    }
+    return Focus(
+      canRequestFocus: false,
+      onKeyEvent: (_, event) {
+        if (event is! KeyDownEvent ||
+            event.logicalKey != LogicalKeyboardKey.escape) {
+          return KeyEventResult.ignored;
+        }
+        if (!(ModalRoute.of(context)?.isCurrent ?? true)) {
+          return KeyEventResult.ignored;
+        }
+        if (_keywordController.text.isNotEmpty) {
+          _keywordController.clear();
+          setState(() {});
+          return KeyEventResult.handled;
+        }
+        if (context.canPop()) {
+          context.pop();
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: scaffold,
     );
   }
 
@@ -226,11 +271,12 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     List<Tag> allTags,
   ) {
     final theme = Theme.of(context);
+    final isDesktop = DesktopAdaptive.isDesktop(context);
     return Material(
       elevation: 2,
       color: theme.colorScheme.surfaceContainerHighest,
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxHeight: 280),
+        constraints: BoxConstraints(maxHeight: isDesktop ? 340 : 280),
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(12),
           child: Column(
@@ -353,14 +399,23 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                     child: DropdownButtonFormField<int?>(
                       isExpanded: true,
                       initialValue: _selectedAssetId,
-                      decoration: const InputDecoration(
-                        labelText: '账户',
-                        isDense: true,
-                        contentPadding: EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 8,
-                        ),
-                      ),
+                      decoration: isDesktop
+                          ? const InputDecoration(
+                              labelText: '账户',
+                              border: OutlineInputBorder(),
+                              contentPadding: EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 12,
+                              ),
+                            )
+                          : const InputDecoration(
+                              labelText: '账户',
+                              isDense: true,
+                              contentPadding: EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 8,
+                              ),
+                            ),
                       items: [
                         const DropdownMenuItem(
                           value: null,
@@ -391,14 +446,23 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                       initialValue: _selectedCategoryIds.length == 1
                           ? _selectedCategoryIds.first
                           : null,
-                      decoration: const InputDecoration(
-                        labelText: '分类',
-                        isDense: true,
-                        contentPadding: EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 8,
-                        ),
-                      ),
+                      decoration: isDesktop
+                          ? const InputDecoration(
+                              labelText: '分类',
+                              border: OutlineInputBorder(),
+                              contentPadding: EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 12,
+                              ),
+                            )
+                          : const InputDecoration(
+                              labelText: '分类',
+                              isDense: true,
+                              contentPadding: EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 8,
+                              ),
+                            ),
                       items: [
                         const DropdownMenuItem(
                           value: null,
@@ -492,16 +556,26 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                       keyboardType: const TextInputType.numberWithOptions(
                         decimal: true,
                       ),
-                      decoration: const InputDecoration(
-                        hintText: '最低金额',
-                        isDense: true,
-                        prefixText: '¥ ',
-                        contentPadding: EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 8,
-                        ),
-                        border: OutlineInputBorder(),
-                      ),
+                      decoration: isDesktop
+                          ? const InputDecoration(
+                              hintText: '最低金额',
+                              prefixText: '¥ ',
+                              contentPadding: EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 12,
+                              ),
+                              border: OutlineInputBorder(),
+                            )
+                          : const InputDecoration(
+                              hintText: '最低金额',
+                              isDense: true,
+                              prefixText: '¥ ',
+                              contentPadding: EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 8,
+                              ),
+                              border: OutlineInputBorder(),
+                            ),
                       onChanged: (_) => setState(() {}),
                     ),
                   ),
@@ -515,16 +589,26 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                       keyboardType: const TextInputType.numberWithOptions(
                         decimal: true,
                       ),
-                      decoration: const InputDecoration(
-                        hintText: '最高金额',
-                        isDense: true,
-                        prefixText: '¥ ',
-                        contentPadding: EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 8,
-                        ),
-                        border: OutlineInputBorder(),
-                      ),
+                      decoration: isDesktop
+                          ? const InputDecoration(
+                              hintText: '最高金额',
+                              prefixText: '¥ ',
+                              contentPadding: EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 12,
+                              ),
+                              border: OutlineInputBorder(),
+                            )
+                          : const InputDecoration(
+                              hintText: '最高金额',
+                              isDense: true,
+                              prefixText: '¥ ',
+                              contentPadding: EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 8,
+                              ),
+                              border: OutlineInputBorder(),
+                            ),
                       onChanged: (_) => setState(() {}),
                     ),
                   ),

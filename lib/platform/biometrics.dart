@@ -1,7 +1,35 @@
+import 'dart:ui' show Locale, PlatformDispatcher;
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import 'files.dart';
+
+bool _isChineseLocale([Locale? locale]) {
+  final effective = locale ?? PlatformDispatcher.instance.locale;
+  return effective.languageCode.toLowerCase() == 'zh';
+}
+
+/// Locale-aware default biometric prompt title (`BRAND-001`).
+String defaultBiometricPromptTitle([Locale? locale]) => _isChineseLocale(locale)
+    ? '验证身份以解锁帐屿'
+    : 'Verify identity to unlock TallyIsle';
+
+/// Locale-aware default biometric prompt subtitle (`BRAND-001`).
+String defaultBiometricPromptSubtitle([Locale? locale]) =>
+    _isChineseLocale(locale)
+    ? '请验证指纹或面容，或使用数字密码解锁'
+    : 'Verify with fingerprint or face, or unlock with PIN';
+
+/// Locale-aware default biometric negative button text (`BRAND-001`).
+String defaultBiometricNegativeButtonText([Locale? locale]) =>
+    _isChineseLocale(locale) ? '使用数字密码' : 'Use PIN';
+
+/// Locale-aware default unsupported-platform biometric reason (`BRAND-001`).
+String defaultBiometricUnsupportedReason([Locale? locale]) =>
+    _isChineseLocale(locale)
+    ? '当前平台暂不支持系统生物识别，请使用数字密码解锁'
+    : 'Biometric authentication is not supported on this platform; please unlock with PIN';
 
 /// Availability status of OS biometric authentication (`F-024`, `ADR-008`).
 enum BiometricAvailabilityStatus {
@@ -81,9 +109,9 @@ abstract interface class BiometricAuthenticator {
   Future<BiometricAvailability> checkAvailability();
 
   Future<BiometricAuthResult> authenticate({
-    String title = '验证身份以解锁帐屿',
-    String subtitle = '请验证指纹或面容，或使用数字密码解锁',
-    String negativeButtonText = '使用数字密码',
+    String? title,
+    String? subtitle,
+    String? negativeButtonText,
   });
 
   Future<void> cancelAuthentication();
@@ -105,11 +133,11 @@ BiometricAuthenticator createBiometricAuthenticator({bool? isOhosOverride}) {
 /// Explicit fallback for Linux, Web, and non-Android hosts (`ADR-008`).
 final class UnsupportedBiometricAuthenticator
     implements BiometricAuthenticator {
-  const UnsupportedBiometricAuthenticator({
-    this.reason = '当前平台暂不支持系统生物识别，请使用数字密码解锁',
-  });
+  const UnsupportedBiometricAuthenticator({String? reason}) : _reason = reason;
 
-  final String reason;
+  final String? _reason;
+
+  String get reason => _reason ?? defaultBiometricUnsupportedReason();
 
   @override
   Capability get capability => Capability(CapabilityState.unsupported, reason);
@@ -124,9 +152,9 @@ final class UnsupportedBiometricAuthenticator
 
   @override
   Future<BiometricAuthResult> authenticate({
-    String title = '验证身份以解锁帐屿',
-    String subtitle = '请验证指纹或面容，或使用数字密码解锁',
-    String negativeButtonText = '使用数字密码',
+    String? title,
+    String? subtitle,
+    String? negativeButtonText,
   }) async => BiometricAuthResult(
     outcome: BiometricAuthOutcome.unsupportedPlatform,
     message: reason,
@@ -195,16 +223,26 @@ final class MethodChannelBiometricAuthenticator
 
   @override
   Future<BiometricAuthResult> authenticate({
-    String title = '验证身份以解锁帐屿',
-    String subtitle = '请验证指纹或面容，或使用数字密码解锁',
-    String negativeButtonText = '使用数字密码',
+    String? title,
+    String? subtitle,
+    String? negativeButtonText,
   }) async {
+    final effectiveTitle = (title != null && title.trim().isNotEmpty)
+        ? title
+        : defaultBiometricPromptTitle();
+    final effectiveSubtitle = (subtitle != null && subtitle.trim().isNotEmpty)
+        ? subtitle
+        : defaultBiometricPromptSubtitle();
+    final effectiveNegative =
+        (negativeButtonText != null && negativeButtonText.trim().isNotEmpty)
+        ? negativeButtonText
+        : defaultBiometricNegativeButtonText();
     try {
       final raw = await _channel
           .invokeMapMethod<String, Object?>('authenticate', <String, Object>{
-            'title': title,
-            'subtitle': subtitle,
-            'negativeButtonText': negativeButtonText,
+            'title': effectiveTitle,
+            'subtitle': effectiveSubtitle,
+            'negativeButtonText': effectiveNegative,
           });
       if (raw == null) {
         return const BiometricAuthResult(
@@ -295,9 +333,9 @@ final class InMemoryBiometricAuthenticator implements BiometricAuthenticator {
 
   @override
   Future<BiometricAuthResult> authenticate({
-    String title = '验证身份以解锁帐屿',
-    String subtitle = '请验证指纹或面容，或使用数字密码解锁',
-    String negativeButtonText = '使用数字密码',
+    String? title,
+    String? subtitle,
+    String? negativeButtonText,
   }) async {
     authenticateCount++;
     if (!availability.canAuthenticate) {

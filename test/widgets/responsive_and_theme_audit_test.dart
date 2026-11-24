@@ -27,6 +27,7 @@ import 'package:tallyisle/domain/rules/periodic_records.dart';
 import 'package:tallyisle/domain/rules/template_card_rules.dart';
 import 'package:tallyisle/features/automation/automation_providers.dart';
 import 'package:tallyisle/features/automation/desktop_widgets_page.dart';
+import 'package:tallyisle/features/automation/mcp_settings_page.dart';
 import 'package:tallyisle/features/backup/backup_page.dart';
 import 'package:tallyisle/features/backup/backup_providers.dart';
 import 'package:tallyisle/features/bank_cards/bank_cards_page.dart';
@@ -975,6 +976,37 @@ void main() {
             expect(
               find.byKey(const Key('about_licenses_tile')),
               findsOneWidget,
+            );
+          },
+        );
+      } finally {
+        await harness.dispose(tester);
+      }
+    },
+  );
+
+  testWidgets(
+    'McpSettingsPage: zero overflow & single-line SegmentedButton across 360x640, 390x844, 960x800 in Light & Dark @ 1.2x',
+    (tester) async {
+      final harness = await _AuditHarness.create(tester);
+      try {
+        await _runPageAuditMatrix(
+          tester,
+          pageName: 'McpSettingsPage',
+          harness: harness,
+          pageBuilder: () => const McpSettingsPage(),
+          expectedMinSegmentedButtons: 1,
+          onViewportReady: (tester, viewport, brightness, theme, ctx) async {
+            expect(
+              find.byKey(const Key('mcp_permission_tier_segmented')),
+              findsOneWidget,
+              reason:
+                  'McpSettingsPage permission tier SegmentedButton must be rendered ($ctx)',
+            );
+            expect(
+              find.byKey(const Key('mcp_enable_switch')),
+              findsOneWidget,
+              reason: 'McpSettingsPage enable switch must be rendered ($ctx)',
             );
           },
         );

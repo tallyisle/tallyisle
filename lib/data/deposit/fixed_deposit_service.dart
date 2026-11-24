@@ -831,6 +831,7 @@ final class FixedDepositService {
     for (final entry in net.entries) {
       if (entry.value == BigInt.zero) continue;
       final asset = await _asset(entry.key);
+      if (asset.type == AssetType.debt) continue;
       final balance = Money.minor(asset.balanceMinor + entry.value);
       await (db.update(db.assets)..where((t) => t.id.equals(entry.key))).write(
         AssetsCompanion(balanceMinor: Value(balance.storageMinor)),

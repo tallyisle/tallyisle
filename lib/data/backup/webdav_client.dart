@@ -52,6 +52,13 @@ abstract interface class BackupTarget {
   Future<void> deleteBackup(String fileName);
 }
 
+/// Metadata returned by a lightweight remote object existence check (`HEAD` / list).
+final class CloudSyncObjectHead {
+  const CloudSyncObjectHead({this.sizeBytes});
+
+  final int? sizeBytes;
+}
+
 /// Unified relative-path object operations used by multi-device snapshot sync
 /// across both WebDAV and S3 backends.
 abstract interface class CloudSyncObjectStore {
@@ -77,6 +84,26 @@ abstract interface class CloudSyncObjectStore {
   Future<void> deleteObject(String relativePath);
 
   Future<Set<String>> listRelativeFileNames(String relativeDir);
+}
+
+/// Lightweight existence / metadata check for [CloudSyncObjectStore] without
+/// downloading full snapshot payloads.
+extension CloudSyncObjectStoreHeadExtension on CloudSyncObjectStore {
+  Future<CloudSyncObjectHead?> headObject(String relativePath) async {
+    final self = this;
+    if (self is WebDavBackupTarget) {
+      return self.headObject(relativePath);
+    }
+    final segments = validateCloudRelativeSegments(relativePath);
+    final parentDir = segments.length > 1
+        ? segments.sublist(0, segments.length - 1).join('/')
+        : '';
+    final names = await listRelativeFileNames(parentDir);
+    if (!names.contains(segments.last)) {
+      return null;
+    }
+    return const CloudSyncObjectHead();
+  }
 }
 
 /// User-configured WebDAV endpoint and backup policy settings (§1.1, §1.5, §6.2, §6.3).
@@ -127,11 +154,22 @@ final class WebDavConfig {
       60 *
       1000;
 
-  String get targetFingerprint => sha256Hex(
-    utf8.encode(
-      'webdav|${serverUrl.trim().toLowerCase()}|${remoteDirectory.trim()}',
-    ),
-  );
+  String get targetFingerprint {
+    var cleanUrl = serverUrl.trim().toLowerCase();
+    while (cleanUrl.length > 1 && cleanUrl.endsWith('/')) {
+      cleanUrl = cleanUrl.substring(0, cleanUrl.length - 1);
+    }
+    final cleanDirSegments = <String>[
+      for (final seg in remoteDirectory.trim().split('/'))
+        if (seg.isNotEmpty && seg != '.' && seg != '..') seg,
+    ];
+    final cleanDir = '/${cleanDirSegments.join('/')}';
+    return sha256Hex(
+      utf8.encode(
+        'webdav|$cleanUrl|$cleanDir|${username.trim().toLowerCase()}',
+      ),
+    );
+  }
 
   WebDavConfig copyWith({
     String? serverUrl,
@@ -183,20 +221,29 @@ final class WebDavConfig {
 
 /// Pure `dart:io` [HttpClient] WebDAV client supporting Basic Auth,
 /// `PROPFIND`, recursive `MKCOL`, two-phase `.tmp -> MOVE` atomic upload (with
-/// `PUT + HEAD Content-Length` fallback when `MOVE` returns `405`/`501`),
-/// `GET`, and `DELETE` (R4, R6, ADR-017).
+/// direct in-place `PUT + HEAD Content-Length` fallback when `MOVE` returns
+/// `409`/`412`/`405`/`501`/`502`/`400`), `GET`, and `DELETE` (R4, R6, ADR-017).
 final class WebDavClient {
   WebDavClient(
     this.config, {
     HttpClient Function()? httpClientFactory,
     this.nowMs,
+    this.controlTimeout = const Duration(seconds: 25),
+    this.transferTimeout = const Duration(seconds: 90),
+    this.staleHeadRetryDelay = const Duration(milliseconds: 80),
   }) : _httpClientFactory = httpClientFactory ?? _defaultHttpClient;
 
   final WebDavConfig config;
   final HttpClient Function() _httpClientFactory;
   final int Function()? nowMs;
+  final Duration controlTimeout;
+  final Duration transferTimeout;
+  final Duration staleHeadRetryDelay;
+
+  final Set<String> _verifiedCollectionPaths = <String>{};
 
   static const int _uploadChunkSize = 32 * 1024;
+  static const int _smallPayloadVerifyMaxBytes = 256 * 1024;
   static const String _probeFileName = '.tallyisle_write_probe.tmp';
   static const String _propfindBody =
       '<?xml version="1.0" encoding="utf-8"?>'
@@ -210,7 +257,9 @@ final class WebDavClient {
       '</d:propfind>';
 
   static HttpClient _defaultHttpClient() => Zone.root.run(
-    () => HttpClient()..connectionTimeout = const Duration(seconds: 20),
+    () => HttpClient()
+      ..connectionTimeout = const Duration(seconds: 15)
+      ..idleTimeout = const Duration(seconds: 15),
   );
 
   Uri _validatedBaseUri() {
@@ -342,7 +391,7 @@ final class WebDavClient {
     if (statusCode == 507) {
       throw const Failure(FailureCode.storageFull, 'WebDAV 远端存储空间不足');
     }
-    if (statusCode >= 500 && statusCode != 501) {
+    if (statusCode >= 500 && statusCode != 501 && statusCode != 502) {
       throw Failure(
         FailureCode.remoteUnavailable,
         '$action失败（远端服务器状态码 $statusCode）',
@@ -350,17 +399,13 @@ final class WebDavClient {
     }
   }
 
-  /// Ensures the configured remote WebDAV folder hierarchy exists (`PROPFIND` + `MKCOL`).
-  Future<void> ensureRemoteDirectory() =>
-      _withClient((client) => _ensureCollectionHierarchyOn(client, const []));
-
-  Future<void> _ensureCollectionHierarchyOn(
+  Future<int> _propfindCollectionDepth0StatusOn(
     HttpClient client,
-    List<String> extraSegments,
+    Uri dirUri,
   ) async {
-    final fullSegments = <String>[..._remoteDirSegments(), ...extraSegments];
-    final dirUri = _directoryUri(fullSegments);
-    final checkReq = await client.openUrl('PROPFIND', dirUri);
+    final checkReq = await client
+        .openUrl('PROPFIND', dirUri)
+        .timeout(controlTimeout);
     checkReq.headers.set(HttpHeaders.authorizationHeader, _basicAuthHeader);
     checkReq.headers.set('Depth', '0');
     checkReq.headers.set(
@@ -370,33 +415,80 @@ final class WebDavClient {
     final bodyBytes = utf8.encode(_propfindBody);
     checkReq.contentLength = bodyBytes.length;
     checkReq.add(bodyBytes);
-    final checkRes = await checkReq.close();
-    await checkRes.drain<void>();
-    _checkAuthAndStorageStatus(checkRes.statusCode, action: '检查远端目录');
-    if (checkRes.statusCode == 200 || checkRes.statusCode == 207) {
+    final checkRes = await checkReq.close().timeout(controlTimeout);
+    await checkRes.drain<void>().timeout(controlTimeout);
+    return checkRes.statusCode;
+  }
+
+  /// Ensures the configured remote WebDAV folder hierarchy exists (`PROPFIND` + `MKCOL`).
+  Future<void> ensureRemoteDirectory() =>
+      _withClient((client) => _ensureCollectionHierarchyOn(client, const []));
+
+  Future<void> _ensureCollectionHierarchyOn(
+    HttpClient client,
+    List<String> extraSegments, {
+    bool forceCheck = false,
+  }) async {
+    final fullSegments = <String>[..._remoteDirSegments(), ...extraSegments];
+    final fullKey = '/${fullSegments.join('/')}';
+    if (!forceCheck && _verifiedCollectionPaths.contains(fullKey)) {
+      return;
+    }
+
+    final dirUri = _directoryUri(fullSegments);
+    final checkStatus = await _propfindCollectionDepth0StatusOn(client, dirUri);
+    _checkAuthAndStorageStatus(checkStatus, action: '检查远端目录');
+    if (checkStatus == 200 || checkStatus == 207) {
+      final acc = <String>[];
+      for (final seg in fullSegments) {
+        acc.add(seg);
+        _verifiedCollectionPaths.add('/${acc.join('/')}');
+      }
+      if (fullSegments.isEmpty) {
+        _verifiedCollectionPaths.add('/');
+      }
       return;
     }
 
     final current = <String>[];
     for (final seg in fullSegments) {
       current.add(seg);
+      final prefixKey = '/${current.join('/')}';
+      if (!forceCheck && _verifiedCollectionPaths.contains(prefixKey)) {
+        continue;
+      }
       final colUri = _directoryUri(current);
-      final mkReq = await client.openUrl('MKCOL', colUri);
+      final mkReq = await client
+          .openUrl('MKCOL', colUri)
+          .timeout(controlTimeout);
       mkReq.headers.set(HttpHeaders.authorizationHeader, _basicAuthHeader);
       mkReq.contentLength = 0;
-      final mkRes = await mkReq.close();
-      await mkRes.drain<void>();
+      final mkRes = await mkReq.close().timeout(controlTimeout);
+      await mkRes.drain<void>().timeout(controlTimeout);
       _checkAuthAndStorageStatus(mkRes.statusCode, action: '创建远端目录');
-      if (mkRes.statusCode != 201 &&
-          mkRes.statusCode != 200 &&
-          mkRes.statusCode != 204 &&
-          mkRes.statusCode != 301 &&
-          mkRes.statusCode != 405) {
-        throw Failure(
-          FailureCode.remoteUnavailable,
-          '创建 WebDAV 远端目录失败（状态码 ${mkRes.statusCode}）',
-        );
+      if (mkRes.statusCode == 201 ||
+          mkRes.statusCode == 200 ||
+          mkRes.statusCode == 204 ||
+          mkRes.statusCode == 405) {
+        _verifiedCollectionPaths.add(prefixKey);
+        continue;
       }
+      if (mkRes.statusCode == 409) {
+        // Some WebDAV gateways (e.g. Alist / cloud-drive bridges) return 409
+        // instead of 405 when MKCOL targets an already-existing folder.
+        final verifyStatus = await _propfindCollectionDepth0StatusOn(
+          client,
+          colUri,
+        );
+        if (verifyStatus == 200 || verifyStatus == 207) {
+          _verifiedCollectionPaths.add(prefixKey);
+          continue;
+        }
+      }
+      throw Failure(
+        FailureCode.remoteUnavailable,
+        '创建 WebDAV 远端目录失败（状态码 ${mkRes.statusCode}）',
+      );
     }
   }
 
@@ -414,7 +506,9 @@ final class WebDavClient {
   /// `PROPFIND` (`Depth: 1`), excluding temporary `.tmp` uploads (§1.6, R4).
   Future<List<BackupFileMetadata>> listBackups() => _withClient((client) async {
     final dirUri = _directoryUri();
-    final req = await client.openUrl('PROPFIND', dirUri);
+    final req = await client
+        .openUrl('PROPFIND', dirUri)
+        .timeout(controlTimeout);
     req.headers.set(HttpHeaders.authorizationHeader, _basicAuthHeader);
     req.headers.set('Depth', '1');
     req.headers.set(
@@ -425,8 +519,10 @@ final class WebDavClient {
     req.contentLength = reqBytes.length;
     req.add(reqBytes);
 
-    final res = await req.close();
-    final xmlBody = await utf8.decoder.bind(res).join();
+    final res = await req.close().timeout(controlTimeout);
+    final xmlBody = await utf8.decoder
+        .bind(res.timeout(transferTimeout))
+        .join();
     if (res.statusCode == 404) {
       return const <BackupFileMetadata>[];
     }
@@ -558,6 +654,7 @@ final class WebDavClient {
       tmpUri: _relativePathUri(tmpSegments),
       finalUri: _relativePathUri(segments),
       bytes: bytes,
+      parentExtraSegments: parentSegments,
       contentType: contentType,
       onProgress: onProgress,
     );
@@ -585,7 +682,9 @@ final class WebDavClient {
           ..._remoteDirSegments(),
           ...subSegments,
         ]);
-        final req = await client.openUrl('PROPFIND', dirUri);
+        final req = await client
+            .openUrl('PROPFIND', dirUri)
+            .timeout(controlTimeout);
         req.headers.set(HttpHeaders.authorizationHeader, _basicAuthHeader);
         req.headers.set('Depth', '1');
         req.headers.set(
@@ -596,8 +695,10 @@ final class WebDavClient {
         req.contentLength = reqBytes.length;
         req.add(reqBytes);
 
-        final res = await req.close();
-        final xmlBody = await utf8.decoder.bind(res).join();
+        final res = await req.close().timeout(controlTimeout);
+        final xmlBody = await utf8.decoder
+            .bind(res.timeout(transferTimeout))
+            .join();
         if (res.statusCode == 404) {
           return const <String>{};
         }
@@ -611,11 +712,29 @@ final class WebDavClient {
         return parsePropfindFileNames(xmlBody, collectionPath: dirUri.path);
       });
 
+  Future<int> _sendMoveOn(
+    HttpClient client, {
+    required Uri tmpUri,
+    required Uri finalUri,
+  }) async {
+    final moveReq = await client
+        .openUrl('MOVE', tmpUri)
+        .timeout(controlTimeout);
+    moveReq.headers.set(HttpHeaders.authorizationHeader, _basicAuthHeader);
+    moveReq.headers.set('Destination', finalUri.toString());
+    moveReq.headers.set('Overwrite', 'T');
+    moveReq.contentLength = 0;
+    final moveRes = await moveReq.close().timeout(controlTimeout);
+    await moveRes.drain<void>().timeout(controlTimeout);
+    return moveRes.statusCode;
+  }
+
   Future<void> _atomicPutWithMoveFallbackOn(
     HttpClient client, {
     required Uri tmpUri,
     required Uri finalUri,
     required Uint8List bytes,
+    List<String> parentExtraSegments = const <String>[],
     String contentType = 'application/octet-stream',
     BackupProgressCallback? onProgress,
   }) async {
@@ -623,42 +742,55 @@ final class WebDavClient {
       client,
       tmpUri,
       bytes,
+      parentExtraSegments: parentExtraSegments,
       contentType: contentType,
       onProgress: onProgress,
     );
 
-    final moveReq = await client.openUrl('MOVE', tmpUri);
-    moveReq.headers.set(HttpHeaders.authorizationHeader, _basicAuthHeader);
-    moveReq.headers.set('Destination', finalUri.toString());
-    moveReq.headers.set('Overwrite', 'T');
-    moveReq.contentLength = 0;
-    final moveRes = await moveReq.close();
-    await moveRes.drain<void>();
+    final moveStatus = await _sendMoveOn(
+      client,
+      tmpUri: tmpUri,
+      finalUri: finalUri,
+    );
 
-    if (moveRes.statusCode == 200 ||
-        moveRes.statusCode == 201 ||
-        moveRes.statusCode == 204) {
+    if (moveStatus == 200 || moveStatus == 201 || moveStatus == 204) {
       return;
     }
 
-    if (moveRes.statusCode == 405 || moveRes.statusCode == 501) {
-      await _deleteUriOn(client, tmpUri, ignoreNotFound: true);
+    // Never pre-DELETE `finalUri` before a confirmed overwrite! When `MOVE`
+    // (with `Overwrite: T`) returns 409/412/405/501/502/400, clean up `tmpUri`
+    // first (freeing server quota without touching live `finalUri`), then fall
+    // back directly to standard in-place HTTP `PUT finalUri` + `HEAD` check.
+    if (moveStatus == 409 ||
+        moveStatus == 412 ||
+        moveStatus == 405 ||
+        moveStatus == 501 ||
+        moveStatus == 502 ||
+        moveStatus == 400) {
+      try {
+        await _deleteUriOn(client, tmpUri, ignoreNotFound: true);
+      } catch (_) {
+        // Best-effort cleanup of .tmp before direct PUT fallback.
+      }
       await _putBytesOn(
         client,
         finalUri,
         bytes,
+        parentExtraSegments: parentExtraSegments,
         contentType: contentType,
         onProgress: onProgress,
       );
-      await _verifyHeadContentLengthOn(client, finalUri, bytes.length);
+      await _verifyHeadContentLengthOn(client, finalUri, bytes);
       return;
     }
 
-    await _deleteUriOn(client, tmpUri, ignoreNotFound: true);
-    _checkAuthAndStorageStatus(moveRes.statusCode, action: '原子重命名远端文件');
+    try {
+      await _deleteUriOn(client, tmpUri, ignoreNotFound: true);
+    } catch (_) {}
+    _checkAuthAndStorageStatus(moveStatus, action: '原子重命名远端文件');
     throw Failure(
       FailureCode.remoteUnavailable,
-      'WebDAV 两阶段提交 MOVE 失败（状态码 ${moveRes.statusCode}）',
+      'WebDAV 两阶段提交 MOVE 失败（状态码 $moveStatus）',
     );
   }
 
@@ -666,17 +798,22 @@ final class WebDavClient {
     HttpClient client,
     Uri uri, {
     BackupProgressCallback? onProgress,
+    bool noCache = true,
   }) async {
-    final req = await client.getUrl(uri);
+    final req = await client.getUrl(uri).timeout(controlTimeout);
     req.headers.set(HttpHeaders.authorizationHeader, _basicAuthHeader);
-    final res = await req.close();
-    if (res.statusCode == 404) {
-      await res.drain<void>();
+    req.headers.set(HttpHeaders.acceptEncodingHeader, 'identity');
+    if (noCache) {
+      req.headers.set(HttpHeaders.cacheControlHeader, 'no-cache');
+    }
+    final res = await req.close().timeout(transferTimeout);
+    if (res.statusCode == 404 || res.statusCode == 410) {
+      await res.drain<void>().timeout(controlTimeout);
       return null;
     }
     _checkAuthAndStorageStatus(res.statusCode, action: '下载远端文件');
     if (res.statusCode != 200) {
-      await res.drain<void>();
+      await res.drain<void>().timeout(controlTimeout);
       throw Failure(
         FailureCode.remoteUnavailable,
         '下载 WebDAV 文件失败（状态码 ${res.statusCode}）',
@@ -686,14 +823,17 @@ final class WebDavClient {
     final expectedLength = res.contentLength;
     final builder = BytesBuilder(copy: false);
     var received = 0;
-    await for (final chunk in res) {
+    await for (final chunk in res.timeout(transferTimeout)) {
       builder.add(chunk);
       received += chunk.length;
       if (expectedLength > 0) {
         onProgress?.call(received, expectedLength);
       }
     }
-    if (expectedLength >= 0 && received != expectedLength) {
+    if (expectedLength >= 0 &&
+        res.compressionState !=
+            HttpClientResponseCompressionState.decompressed &&
+        received != expectedLength) {
       throw const Failure(FailureCode.remoteUnavailable, '下载中断：远端字节长度与响应头不一致');
     }
     return builder.takeBytes();
@@ -703,10 +843,12 @@ final class WebDavClient {
     HttpClient client,
     Uri uri,
     Uint8List bytes, {
+    List<String> parentExtraSegments = const <String>[],
     String contentType = 'application/octet-stream',
     BackupProgressCallback? onProgress,
+    bool retryMissingParent = true,
   }) async {
-    final req = await client.putUrl(uri);
+    final req = await client.putUrl(uri).timeout(controlTimeout);
     req.headers.set(HttpHeaders.authorizationHeader, _basicAuthHeader);
     req.headers.set(HttpHeaders.contentTypeHeader, contentType);
     req.contentLength = bytes.length;
@@ -720,13 +862,35 @@ final class WebDavClient {
             ? offset + _uploadChunkSize
             : bytes.length;
         req.add(Uint8List.sublistView(bytes, offset, end));
+        await req.flush().timeout(transferTimeout);
         offset = end;
         onProgress?.call(offset, bytes.length);
       }
     }
 
-    final res = await req.close();
-    await res.drain<void>();
+    final res = await req.close().timeout(transferTimeout);
+    await res.drain<void>().timeout(controlTimeout);
+    if (res.statusCode == 409 && retryMissingParent) {
+      // RFC 4918 §9.7.1: 409 on PUT indicates a missing ancestor collection
+      // (e.g. cached folder removed externally). Re-verify parent folders and
+      // retry PUT once WITHOUT ever deleting the live target URI!
+      _verifiedCollectionPaths.clear();
+      await _ensureCollectionHierarchyOn(
+        client,
+        parentExtraSegments,
+        forceCheck: true,
+      );
+      await _putBytesOn(
+        client,
+        uri,
+        bytes,
+        parentExtraSegments: parentExtraSegments,
+        contentType: contentType,
+        onProgress: onProgress,
+        retryMissingParent: false,
+      );
+      return;
+    }
     _checkAuthAndStorageStatus(res.statusCode, action: '上传备份文件');
     if (res.statusCode < 200 || res.statusCode >= 300) {
       throw Failure(
@@ -739,12 +903,68 @@ final class WebDavClient {
   Future<void> _verifyHeadContentLengthOn(
     HttpClient client,
     Uri uri,
-    int expectedLength,
+    Uint8List uploadedBytes,
   ) async {
-    final req = await client.openUrl('HEAD', uri);
+    final expectedLength = uploadedBytes.length;
+    final initialCheck = await _probeHeadLengthOn(client, uri, noCache: false);
+    if (initialCheck.skipLengthVerification ||
+        initialCheck.remoteLength == null ||
+        initialCheck.remoteLength == expectedLength) {
+      return;
+    }
+
+    // Overwriting an existing WebDAV object (such as `sync/head.json`) via
+    // fallback `PUT` can hit a short-lived stale `HEAD` metadata cache on
+    // Nutstore / Alist / CDN gateways right at 0ms. Wait briefly and perform a
+    // cache-busted verification before declaring a mismatch.
+    if (staleHeadRetryDelay > Duration.zero) {
+      await Future<void>.delayed(staleHeadRetryDelay);
+    }
+
+    if (expectedLength <= _smallPayloadVerifyMaxBytes) {
+      final verified = await _verifySmallPayloadViaNoCacheGetOn(
+        client,
+        uri,
+        uploadedBytes,
+      );
+      if (verified) {
+        return;
+      }
+      throw const Failure(
+        FailureCode.remoteUnavailable,
+        'WebDAV 远端文件 Content-Length 校验不一致，已拒绝确认上传',
+      );
+    }
+
+    final retryCheck = await _probeHeadLengthOn(client, uri, noCache: true);
+    if (retryCheck.skipLengthVerification ||
+        retryCheck.remoteLength == expectedLength) {
+      return;
+    }
+    throw const Failure(
+      FailureCode.remoteUnavailable,
+      'WebDAV 远端文件 Content-Length 校验不一致，已拒绝确认上传',
+    );
+  }
+
+  Future<({bool skipLengthVerification, int? remoteLength})> _probeHeadLengthOn(
+    HttpClient client,
+    Uri uri, {
+    required bool noCache,
+  }) async {
+    final req = await client.openUrl('HEAD', uri).timeout(controlTimeout);
     req.headers.set(HttpHeaders.authorizationHeader, _basicAuthHeader);
-    final res = await req.close();
-    await res.drain<void>();
+    req.headers.set(HttpHeaders.acceptEncodingHeader, 'identity');
+    if (noCache) {
+      req.headers.set(HttpHeaders.cacheControlHeader, 'no-cache');
+      req.headers.set(HttpHeaders.pragmaHeader, 'no-cache');
+    }
+    final res = await req.close().timeout(controlTimeout);
+    await res.drain<void>().timeout(controlTimeout);
+    if (res.statusCode == 405 || res.statusCode == 501) {
+      // Lightweight WebDAV server does not implement HEAD; direct PUT succeeded.
+      return (skipLengthVerification: true, remoteLength: null);
+    }
     _checkAuthAndStorageStatus(res.statusCode, action: '校验远端备份长度');
     if (res.statusCode < 200 || res.statusCode >= 300) {
       throw Failure(
@@ -752,30 +972,111 @@ final class WebDavClient {
         'WebDAV HEAD 校验失败（状态码 ${res.statusCode}）',
       );
     }
+    final contentEncoding = res.headers
+        .value(HttpHeaders.contentEncodingHeader)
+        ?.trim()
+        .toLowerCase();
+    if (res.compressionState ==
+            HttpClientResponseCompressionState.decompressed ||
+        (contentEncoding != null &&
+            contentEncoding.isNotEmpty &&
+            contentEncoding != 'identity')) {
+      return (skipLengthVerification: true, remoteLength: null);
+    }
     final contentLengthHeader = res.headers.value(
       HttpHeaders.contentLengthHeader,
     );
     final remoteLength = contentLengthHeader != null
         ? int.tryParse(contentLengthHeader.trim())
         : (res.contentLength >= 0 ? res.contentLength : null);
-    if (remoteLength == null || remoteLength != expectedLength) {
-      throw const Failure(
+    return (skipLengthVerification: false, remoteLength: remoteLength);
+  }
+
+  Future<bool> _verifySmallPayloadViaNoCacheGetOn(
+    HttpClient client,
+    Uri uri,
+    Uint8List uploadedBytes,
+  ) async {
+    final req = await client.getUrl(uri).timeout(controlTimeout);
+    req.headers.set(HttpHeaders.authorizationHeader, _basicAuthHeader);
+    req.headers.set(HttpHeaders.acceptEncodingHeader, 'identity');
+    req.headers.set(HttpHeaders.cacheControlHeader, 'no-cache');
+    req.headers.set(HttpHeaders.pragmaHeader, 'no-cache');
+    final res = await req.close().timeout(transferTimeout);
+    if (res.statusCode == 404 || res.statusCode == 410) {
+      await res.drain<void>().timeout(controlTimeout);
+      return false;
+    }
+    _checkAuthAndStorageStatus(res.statusCode, action: '回读校验远端文件');
+    if (res.statusCode != 200) {
+      await res.drain<void>().timeout(controlTimeout);
+      throw Failure(
         FailureCode.remoteUnavailable,
-        'WebDAV 远端文件 Content-Length 校验不一致，已拒绝确认上传',
+        '下载 WebDAV 文件失败（状态码 ${res.statusCode}）',
       );
     }
+    final builder = BytesBuilder(copy: false);
+    await for (final chunk in res.timeout(transferTimeout)) {
+      builder.add(chunk);
+    }
+    final fetched = builder.takeBytes();
+    if (fetched.length != uploadedBytes.length) {
+      return false;
+    }
+    return sha256Hex(fetched) == sha256Hex(uploadedBytes);
   }
+
+  /// Checks whether an arbitrary relative object exists under `remoteDirectory`
+  /// via `HEAD` (falling back to `PROPFIND` listing when `HEAD` returns `405`/`501`),
+  /// returning `null` on `404`.
+  Future<CloudSyncObjectHead?> headRelativeFileOrNull(String relativePath) =>
+      _withClient((client) async {
+        final segments = validateCloudRelativeSegments(relativePath);
+        final uri = _relativePathUri(segments);
+        final req = await client.openUrl('HEAD', uri).timeout(controlTimeout);
+        req.headers.set(HttpHeaders.authorizationHeader, _basicAuthHeader);
+        req.headers.set(HttpHeaders.acceptEncodingHeader, 'identity');
+        req.headers.set(HttpHeaders.cacheControlHeader, 'no-cache');
+        final res = await req.close().timeout(controlTimeout);
+        await res.drain<void>().timeout(controlTimeout);
+        if (res.statusCode == 404 || res.statusCode == 410) {
+          return null;
+        }
+        if (res.statusCode == 405 || res.statusCode == 501) {
+          final parentDir = segments.length > 1
+              ? segments.sublist(0, segments.length - 1).join('/')
+              : '';
+          final names = await listRelativeFileNames(parentDir);
+          return names.contains(segments.last)
+              ? const CloudSyncObjectHead()
+              : null;
+        }
+        _checkAuthAndStorageStatus(res.statusCode, action: '检查远端同步对象');
+        if (res.statusCode < 200 || res.statusCode >= 300) {
+          throw Failure(
+            FailureCode.remoteUnavailable,
+            'WebDAV HEAD 校验失败（状态码 ${res.statusCode}）',
+          );
+        }
+        final contentLengthHeader = res.headers.value(
+          HttpHeaders.contentLengthHeader,
+        );
+        final len = contentLengthHeader != null
+            ? int.tryParse(contentLengthHeader.trim())
+            : (res.contentLength >= 0 ? res.contentLength : null);
+        return CloudSyncObjectHead(sizeBytes: len);
+      });
 
   Future<void> _deleteUriOn(
     HttpClient client,
     Uri uri, {
     required bool ignoreNotFound,
   }) async {
-    final req = await client.deleteUrl(uri);
+    final req = await client.deleteUrl(uri).timeout(controlTimeout);
     req.headers.set(HttpHeaders.authorizationHeader, _basicAuthHeader);
-    final res = await req.close();
-    await res.drain<void>();
-    if (ignoreNotFound && res.statusCode == 404) {
+    final res = await req.close().timeout(controlTimeout);
+    await res.drain<void>().timeout(controlTimeout);
+    if (ignoreNotFound && (res.statusCode == 404 || res.statusCode == 410)) {
       return;
     }
     _checkAuthAndStorageStatus(res.statusCode, action: '删除远端文件');
@@ -789,7 +1090,8 @@ final class WebDavClient {
     }
   }
 
-  /// Parses WebDAV `207 Multi-Status` XML responses namespace-agnostically.
+  /// Parses WebDAV `207 Multi-Status` XML responses namespace-agnostically,
+  /// extracting properties strictly from `2xx` `<d:propstat>` blocks (`S-08`).
   static List<BackupFileMetadata> parsePropfindBackups(
     String xml, {
     required String collectionPath,
@@ -799,25 +1101,24 @@ final class WebDavClient {
       caseSensitive: false,
     ).allMatches(xml);
 
-    final normalizedCollection = _stripTrailingSlash(
-      Uri.decodeFull(collectionPath),
-    );
+    final normalizedCollection = _decodeWebDavPath(collectionPath);
     final items = <BackupFileMetadata>[];
     final seenNames = <String>{};
 
     for (final match in responseBlocks) {
       final block = match.group(1) ?? '';
+      final okPropsXml = _extract2xxPropsXml(block);
+      if (okPropsXml == null) continue;
       if (RegExp(
         r'<(?:[A-Za-z0-9_-]+:)?collection\b',
         caseSensitive: false,
-      ).hasMatch(block)) {
+      ).hasMatch(okPropsXml)) {
         continue;
       }
 
       final rawHref = _extractTagText(block, 'href');
       if (rawHref == null || rawHref.isEmpty) continue;
-      final hrefPath = Uri.tryParse(rawHref)?.path ?? rawHref;
-      final decodedPath = _stripTrailingSlash(Uri.decodeFull(hrefPath));
+      final decodedPath = _decodeHrefToPath(rawHref);
       if (decodedPath.isEmpty || decodedPath == normalizedCollection) {
         continue;
       }
@@ -829,10 +1130,10 @@ final class WebDavClient {
       if (!isSupportedBackupFileName(fileName)) continue;
       if (!seenNames.add(fileName)) continue;
 
-      final sizeText = _extractTagText(block, 'getcontentlength');
+      final sizeText = _extractTagText(okPropsXml, 'getcontentlength');
       final sizeBytes = int.tryParse(sizeText?.trim() ?? '') ?? 0;
 
-      final lastModText = _extractTagText(block, 'getlastmodified');
+      final lastModText = _extractTagText(okPropsXml, 'getlastmodified');
       final modifiedAtMs =
           _parseHttpOrIsoTimestamp(lastModText) ??
           parseTimestampFromFileName(fileName) ??
@@ -865,23 +1166,22 @@ final class WebDavClient {
       caseSensitive: false,
     ).allMatches(xml);
 
-    final normalizedCollection = _stripTrailingSlash(
-      Uri.decodeFull(collectionPath),
-    );
+    final normalizedCollection = _decodeWebDavPath(collectionPath);
     final names = <String>{};
 
     for (final match in responseBlocks) {
       final block = match.group(1) ?? '';
+      final okPropsXml = _extract2xxPropsXml(block);
+      if (okPropsXml == null) continue;
       if (RegExp(
         r'<(?:[A-Za-z0-9_-]+:)?collection\b',
         caseSensitive: false,
-      ).hasMatch(block)) {
+      ).hasMatch(okPropsXml)) {
         continue;
       }
       final rawHref = _extractTagText(block, 'href');
       if (rawHref == null || rawHref.isEmpty) continue;
-      final hrefPath = Uri.tryParse(rawHref)?.path ?? rawHref;
-      final decodedPath = _stripTrailingSlash(Uri.decodeFull(hrefPath));
+      final decodedPath = _decodeHrefToPath(rawHref);
       if (decodedPath.isEmpty || decodedPath == normalizedCollection) {
         continue;
       }
@@ -893,6 +1193,86 @@ final class WebDavClient {
       names.add(fileName);
     }
     return names;
+  }
+
+  static String? _extract2xxPropsXml(String responseBlock) {
+    final propstats = RegExp(
+      r'<(?:[A-Za-z0-9_-]+:)?propstat\b[^>]*>([\s\S]*?)</(?:[A-Za-z0-9_-]+:)?propstat>',
+      caseSensitive: false,
+    ).allMatches(responseBlock).toList();
+    if (propstats.isEmpty) {
+      final respStatus = _extractTagText(responseBlock, 'status');
+      if (respStatus != null && !_is2xxHttpStatusLine(respStatus)) {
+        return null;
+      }
+      return responseBlock;
+    }
+
+    final okBuf = StringBuffer();
+    var has2xx = false;
+    for (final ps in propstats) {
+      final psBody = ps.group(1) ?? '';
+      final statusText = _extractTagText(psBody, 'status');
+      if (statusText != null && !_is2xxHttpStatusLine(statusText)) {
+        continue;
+      }
+      has2xx = true;
+      final propMatches = RegExp(
+        r'<(?:[A-Za-z0-9_-]+:)?prop\b[^>]*>([\s\S]*?)</(?:[A-Za-z0-9_-]+:)?prop>',
+        caseSensitive: false,
+      ).allMatches(psBody);
+      if (propMatches.isEmpty) {
+        okBuf.write(psBody);
+      } else {
+        for (final pm in propMatches) {
+          okBuf.write(pm.group(1) ?? '');
+        }
+      }
+    }
+    return has2xx ? okBuf.toString() : null;
+  }
+
+  static bool _is2xxHttpStatusLine(String statusText) =>
+      RegExp(r'\b2\d\d\b').hasMatch(statusText);
+
+  static String _decodeHrefToPath(String rawHref) {
+    var trimmed = rawHref.trim();
+    final authorityMatch = RegExp(
+      r'^https?://[^/]*',
+      caseSensitive: false,
+    ).firstMatch(trimmed);
+    if (authorityMatch != null) {
+      trimmed = trimmed.substring(authorityMatch.end);
+      if (trimmed.isEmpty) trimmed = '/';
+    }
+    final qIdx = trimmed.indexOf('?');
+    if (qIdx >= 0) trimmed = trimmed.substring(0, qIdx);
+    final fIdx = trimmed.indexOf('#');
+    if (fIdx >= 0) trimmed = trimmed.substring(0, fIdx);
+    return _decodeWebDavPath(trimmed);
+  }
+
+  static String _decodeWebDavPath(String rawPath) {
+    final decoded = <String>[
+      for (final seg in rawPath.split('/')) _safeDecodeUriSegment(seg),
+    ].join('/');
+    return _stripTrailingSlash(decoded);
+  }
+
+  static String _safeDecodeUriSegment(String segment) {
+    if (!segment.contains('%')) return segment;
+    try {
+      return Uri.decodeComponent(segment);
+    } on Object {
+      return segment.replaceAllMapped(RegExp(r'(?:%[0-9a-fA-F]{2})+'), (match) {
+        final encodedRun = match.group(0)!;
+        try {
+          return Uri.decodeComponent(encodedRun);
+        } on Object {
+          return encodedRun;
+        }
+      });
+    }
   }
 
   static bool isSupportedBackupFileName(String fileName) {
@@ -913,12 +1293,39 @@ final class WebDavClient {
     );
     final raw = pattern.firstMatch(xmlBlock)?.group(1)?.trim();
     if (raw == null) return null;
-    return raw
-        .replaceAll('&amp;', '&')
-        .replaceAll('&lt;', '<')
-        .replaceAll('&gt;', '>')
-        .replaceAll('&quot;', '"')
-        .replaceAll('&apos;', "'");
+    return unescapeWebDavXml(raw);
+  }
+
+  static String unescapeWebDavXml(String input) {
+    return input.replaceAllMapped(
+      RegExp(r'&(?:#x([0-9a-fA-F]+)|#([0-9]+)|quot|apos|lt|gt|amp);'),
+      (m) {
+        final hex = m.group(1);
+        if (hex != null) {
+          final code = int.tryParse(hex, radix: 16);
+          if (code != null && code >= 0 && code <= 0x10FFFF) {
+            return String.fromCharCode(code);
+          }
+          return m.group(0)!;
+        }
+        final dec = m.group(2);
+        if (dec != null) {
+          final code = int.tryParse(dec);
+          if (code != null && code >= 0 && code <= 0x10FFFF) {
+            return String.fromCharCode(code);
+          }
+          return m.group(0)!;
+        }
+        return switch (m.group(0)) {
+          '&quot;' => '"',
+          '&apos;' => "'",
+          '&lt;' => '<',
+          '&gt;' => '>',
+          '&amp;' => '&',
+          _ => m.group(0)!,
+        };
+      },
+    );
   }
 
   static int? _parseHttpOrIsoTimestamp(String? text) {
@@ -1069,5 +1476,11 @@ final class WebDavBackupTarget implements BackupTarget, CloudSyncObjectStore {
   Future<Set<String>> listRelativeFileNames(String relativeDir) async {
     _requireConfigured();
     return _client.listRelativeFileNames(relativeDir);
+  }
+
+  /// Checks whether [relativePath] exists on WebDAV without downloading its body.
+  Future<CloudSyncObjectHead?> headObject(String relativePath) async {
+    _requireConfigured();
+    return _client.headRelativeFileOrNull(relativePath);
   }
 }

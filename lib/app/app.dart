@@ -5,28 +5,63 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../core/app_version.dart';
+import '../data/automation/mcp_server_service.dart';
 import '../data/backup/backup_sync_scheduler.dart';
 import '../data/backup/tally_backup_service.dart';
 import '../domain/rules/app_settings_rules.dart';
 import '../domain/rules/cloud_sync_rules.dart';
 import '../features/automation/automation_providers.dart';
 import '../features/backup/backup_providers.dart';
+import '../features/backup/post_restore_refresh.dart';
 import '../features/currencies/currency_rate_providers.dart';
 import '../features/deposit/fixed_deposit_providers.dart';
 import '../features/installment/installment_providers.dart';
-import '../features/migration/migration_providers.dart';
 import '../features/periodic/periodic_providers.dart';
 import '../features/reminder/reminder_providers.dart';
 import '../features/savings/savings_providers.dart';
 import '../features/security/app_lock_gate.dart';
 import '../platform/auto_bill_bridge.dart';
+import 'adaptive.dart';
+import 'desktop_shell.dart';
 import 'providers.dart';
 import 'router.dart';
 
-const String appDisplayVersion = '0.1.0.rc';
+/// User-facing version shown in 「更多」 and 「帮助与关于」 (ADR-019).
+const String appDisplayVersion = appVersionName;
+
+const List<String> _desktopCjkFontFallback = <String>[
+  'PingFang SC',
+  'Hiragino Sans GB',
+  'Microsoft YaHei UI',
+  'Microsoft YaHei',
+  'Noto Sans CJK SC',
+  'Source Han Sans SC',
+  'sans-serif',
+];
+
+ThemeData _buildDesktopTheme(ThemeData base) => base.copyWith(
+  textTheme: base.textTheme.apply(fontFamilyFallback: _desktopCjkFontFallback),
+  primaryTextTheme: base.primaryTextTheme.apply(
+    fontFamilyFallback: _desktopCjkFontFallback,
+  ),
+  inputDecorationTheme: base.inputDecorationTheme.copyWith(
+    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+  ),
+  segmentedButtonTheme: const SegmentedButtonThemeData(
+    style: ButtonStyle(
+      visualDensity: VisualDensity.standard,
+      minimumSize: WidgetStatePropertyAll(Size(0, 36)),
+      padding: WidgetStatePropertyAll(
+        EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      ),
+      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    ),
+  ),
+);
 
 String brandName(Locale locale) =>
-    locale.languageCode == 'zh' ? '帐屿' : 'TallyIsle';
+    locale.languageCode.toLowerCase() == 'zh' ? '帐屿' : 'TallyIsle';
 
 /// Subclasses [AppLifecycleListener] to wire [onExitRequested] for desktop
 /// window-close requests while delegating lifecycle state transitions to
@@ -58,10 +93,15 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
         },
       );
 
-  late final router = buildRouter();
+  final DesktopPopupRouteObserver _popupObserver = DesktopPopupRouteObserver();
+  late final router = buildRouter(
+    observers: <NavigatorObserver>[_popupObserver],
+    popupObserver: _popupObserver,
+  );
   AppLifecycleListener? _lifecycleListener;
   BackupSyncScheduler? _backupSyncScheduler;
   TallyBackupService? _schedulerService;
+  McpServerService? _mcpServerService;
   Future<BackupSyncScheduler?>? _schedulerInitFuture;
   StreamSubscription<String>? _launchRouteSub;
   StreamSubscription<String>? _deepLinkSub;
@@ -119,15 +159,21 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
         service: service,
         onCloudSyncOutcome: (outcome) {
           if (_disposed || !mounted) return;
-          _applyCloudSyncOutcome(outcome);
-          if (outcome.status == CloudSyncStatus.pulled) {
-            unawaited(_syncWidgetSnapshotSafely());
-          }
+          unawaited(_applyCloudSyncOutcome(outcome));
         },
         onLocalBackupCreated: (_) {
           if (!_disposed && mounted) {
             ref
               ..invalidate(localBackupsProvider)
+              ..invalidate(lastBackupAtMsProvider);
+          }
+        },
+        onCloudBackupUploaded: (_) {
+          if (!_disposed && mounted) {
+            ref
+              ..invalidate(webDavBackupsProvider)
+              ..invalidate(s3BackupsProvider)
+              ..invalidate(activeCloudBackupsProvider)
               ..invalidate(lastBackupAtMsProvider);
           }
         },
@@ -137,20 +183,6 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
     await scheduler.start();
     if (_disposed || !mounted) return null;
     return scheduler;
-  }
-
-  Future<void> _syncWidgetSnapshotSafely() async {
-    if (_disposed || !mounted) return;
-    try {
-      final widgetService = await ref.read(
-        widgetSnapshotServiceProvider.future,
-      );
-      if (!_disposed && mounted) {
-        await widgetService.syncToPlatform();
-      }
-    } catch (_) {
-      // Non-blocking widget snapshot sync.
-    }
   }
 
   Future<AppExitResponse> _handleExitRequested() async {
@@ -171,7 +203,7 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
     return AppExitResponse.exit;
   }
 
-  void _applyCloudSyncOutcome(CloudSyncOutcome outcome) {
+  Future<void> _applyCloudSyncOutcome(CloudSyncOutcome outcome) async {
     if (_disposed || !mounted) return;
     ref
       ..invalidate(localBackupsProvider)
@@ -181,18 +213,45 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
       ..invalidate(cloudSyncCursorProvider)
       ..invalidate(lastBackupAtMsProvider);
     if (outcome.status == CloudSyncStatus.pulled) {
-      ref.read(periodOffsetProvider.notifier).reset();
-      ref.read(calendarMonthOffsetProvider.notifier).reset();
-      ref
-        ..invalidate(currentBookIdProvider)
-        ..invalidate(booksProvider)
-        ..invalidate(assetsProvider)
-        ..invalidate(assetBooksProvider)
-        ..invalidate(currenciesProvider)
-        ..invalidate(tagsProvider)
-        ..invalidate(remindersProvider)
-        ..invalidate(reminderCountProvider)
-        ..invalidate(migrationLocalSummaryProvider);
+      await invalidateAllAfterDatabaseReplace(ref);
+      return;
+    }
+    if (outcome.status == CloudSyncStatus.conflict) {
+      _notifyBackgroundSyncConflictSafely(outcome);
+    }
+  }
+
+  void _notifyBackgroundSyncConflictSafely(CloudSyncOutcome outcome) {
+    if (_disposed || !mounted) return;
+    try {
+      final currentUri = router.routeInformationProvider.value.uri.toString();
+      if (currentUri.startsWith('/backup')) {
+        return;
+      }
+      final navContext = router.routerDelegate.navigatorKey.currentContext;
+      final messenger = navContext == null
+          ? null
+          : ScaffoldMessenger.maybeOf(navContext);
+      if (messenger == null) return;
+      final backupLabel = outcome.conflictBackupFileName ?? 'conflict_*.tally';
+      messenger
+        ..clearSnackBars()
+        ..showSnackBar(
+          SnackBar(
+            key: const Key('background_sync_conflict_snackbar'),
+            content: Text('检测到多端云同步冲突，本机快照已保护存为 $backupLabel'),
+            action: SnackBarAction(
+              label: '去处理',
+              onPressed: () {
+                if (!_disposed && mounted) {
+                  _handleLaunchRoute('/backup');
+                }
+              },
+            ),
+          ),
+        );
+    } catch (_) {
+      // Never allow background conflict notification to crash UI.
     }
   }
 
@@ -228,7 +287,8 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
         route == '/stats' ||
         route.startsWith('/stats?') ||
         route == '/assets' ||
-        route == '/me') {
+        route == '/me' ||
+        route.startsWith('/me?')) {
       router.go(route);
       return;
     }
@@ -318,6 +378,14 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
         if (_disposed || !mounted) return;
         await service.ingestCapturedEvents();
       });
+      // Run cloud sync / 24h silent cloud backup BEFORE local auto-plan
+      // catch-ups so a fresh remote snapshot is pulled first instead of
+      // generating local due bills that trigger spurious conflicts (`S-05`).
+      await safeStep(() async {
+        final scheduler = await _ensureBackupSyncScheduler();
+        if (_disposed || !mounted || scheduler == null) return;
+        await scheduler.onAppResumedOrFocused(isInitialStartup: isInitial);
+      });
       await safeStep(() async {
         final service = await ref.read(periodicServiceProvider.future);
         if (_disposed || !mounted) return;
@@ -364,15 +432,18 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
         }
       });
       await safeStep(() async {
-        final scheduler = await _ensureBackupSyncScheduler();
-        if (_disposed || !mounted || scheduler == null) return;
-        await scheduler.onAppResumedOrFocused(isInitialStartup: isInitial);
-      });
-      await safeStep(() async {
         final service = await ref.read(widgetSnapshotServiceProvider.future);
         if (_disposed || !mounted) return;
         await service.syncToPlatform();
       });
+      if (isInitial) {
+        await safeStep(() async {
+          final service = await ref.read(mcpServerServiceProvider.future);
+          if (_disposed || !mounted) return;
+          _mcpServerService = service;
+          await service.syncWithStoredConfig();
+        });
+      }
     } finally {
       _syncRunning = false;
     }
@@ -384,6 +455,9 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
     WidgetsBinding.instance.removeObserver(this);
     _lifecycleListener?.dispose();
     _lifecycleListener = null;
+    final mcpService = _mcpServerService;
+    _mcpServerService = null;
+    unawaited(mcpService?.stop());
     final scheduler = _backupSyncScheduler;
     _backupSyncScheduler = null;
     _schedulerService = null;
@@ -402,6 +476,7 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
   Widget build(BuildContext context) {
     final settings =
         ref.watch(appSettingsProvider).value ?? AppSettings.defaults;
+    final desktopOverride = ref.watch(desktopModeOverrideProvider);
     final seedColor = Color(settings.themeSeedArgb32);
     final themeMode = switch (settings.themeMode) {
       AppThemeModePreference.system => ThemeMode.system,
@@ -425,7 +500,10 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
       scrollBehavior: _appScrollBehavior,
       localizationsDelegates: GlobalMaterialLocalizations.delegates,
       supportedLocales: const [Locale('zh'), Locale('en')],
-      locale: const Locale('zh'),
+      localeResolutionCallback: (locale, supportedLocales) =>
+          locale?.languageCode.toLowerCase() == 'zh'
+          ? const Locale('zh')
+          : const Locale('en'),
       themeMode: themeMode,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
@@ -444,11 +522,14 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
         useMaterial3: true,
       ),
       builder: (context, child) {
+        final baseTheme = Theme.of(context);
+        final isDesktop =
+            desktopOverride ?? isDesktopTargetPlatform(baseTheme.platform);
         Widget content = child ?? const SizedBox.shrink();
-        if (MediaQuery.sizeOf(context).width > 960) {
+        if (!isDesktop && MediaQuery.sizeOf(context).width > 960) {
           content = ColoredBox(
             key: const Key('desktop_widescreen_shell'),
-            color: Theme.of(context).colorScheme.surfaceContainerLowest,
+            color: baseTheme.colorScheme.surfaceContainerLowest,
             child: Align(
               alignment: Alignment.topCenter,
               child: ConstrainedBox(
@@ -459,7 +540,20 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
             ),
           );
         }
-        return AppLockGate(child: content);
+        final scoped = DesktopAdaptiveScope(
+          isDesktop: isDesktop,
+          child: AppLockGate(
+            child: DesktopGlobalShortcuts(
+              router: router,
+              popupObserver: _popupObserver,
+              child: content,
+            ),
+          ),
+        );
+        if (!isDesktop) {
+          return scoped;
+        }
+        return Theme(data: _buildDesktopTheme(baseTheme), child: scoped);
       },
       routerConfig: router,
     );

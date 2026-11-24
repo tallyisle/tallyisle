@@ -5,8 +5,8 @@ import '../model/codes.dart';
 /// Maximum single bill amount accepted by URL Scheme (`88,888,888,888.00`).
 final BigInt maxUrlSchemeAmountMinor = BigInt.parse('8888888888800');
 
-/// Supported URL schemes (`BRAND-001` primary + original compatibility).
-const Set<String> supportedUrlSchemes = {'tallyisle', 'yyjz'};
+/// Supported URL scheme (`BRAND-001`).
+const Set<String> supportedUrlSchemes = {'tallyisle'};
 
 /// Semantic actions resolved from an incoming deep-link URI (`F-033`).
 enum UrlSchemeAction {
@@ -70,7 +70,7 @@ final class UrlAddBillParams {
   }
 }
 
-/// Result of parsing a `tallyisle://` or `yyjz://` URI (`F-033` R1).
+/// Result of parsing a `tallyisle://` URI (`F-033` R1).
 final class ParsedUrlSchemeCommand {
   const ParsedUrlSchemeCommand({
     required this.rawUri,
@@ -106,13 +106,11 @@ final class UrlSchemeTemplate {
     required this.title,
     required this.description,
     required this.tallyIsleUri,
-    required this.legacyUri,
   });
 
   final String title;
   final String description;
   final String tallyIsleUri;
-  final String legacyUri;
 }
 
 const List<UrlSchemeTemplate> urlSchemeTemplates = [
@@ -120,40 +118,33 @@ const List<UrlSchemeTemplate> urlSchemeTemplates = [
     title: '打开首页明细',
     description: '直接拉起帐屿并定位至首页明细列表。',
     tallyIsleUri: 'tallyisle://home',
-    legacyUri: 'yyjz://home',
   ),
   UrlSchemeTemplate(
     title: '打开日历视图',
     description: '直接进入月度收支日历页。',
     tallyIsleUri: 'tallyisle://calendar',
-    legacyUri: 'yyjz://calendar',
   ),
   UrlSchemeTemplate(
     title: '打开统计总览（可指定年月）',
     description: '进入统计页，支持可选 year 与 month 参数。',
     tallyIsleUri: 'tallyisle://stat?year=2026&month=11',
-    legacyUri: 'yyjz://stat?year=2026&month=11',
   ),
   UrlSchemeTemplate(
     title: '拉起新建记账页（预填参数）',
     description: '打开“记一笔”表单并预填金额与备注，确认后保存。',
     tallyIsleUri: 'tallyisle://newbill?type=0&money=25.50&remark=工作午餐',
-    legacyUri: 'yyjz://newbill?type=0&money=25.50&remark=工作午餐',
   ),
   UrlSchemeTemplate(
     title: '直接记一笔支出（静默入账）',
     description: '按分类名/账户名或 ID 解析并通过账务引擎直接幂等入账。',
     tallyIsleUri:
         'tallyisle://addbill?type=0&money=18.50&category=餐饮&remark=瑞幸咖啡',
-    legacyUri: 'yyjz://addbill?type=0&money=18.50&category=餐饮&remark=瑞幸咖啡',
   ),
   UrlSchemeTemplate(
     title: '直接记一笔转账（含手续费）',
     description: '在两个资金账户间记一笔转账，可选附带手续费。',
     tallyIsleUri:
         'tallyisle://addbill?type=2&money=1000.00&fee=1.00&asset1=储蓄卡&asset2=信用卡&remark=信用卡还款',
-    legacyUri:
-        'yyjz://addbill?type=2&money=1000.00&fee=1.00&asset1=储蓄卡&asset2=信用卡&remark=信用卡还款',
   ),
 ];
 
@@ -371,7 +362,7 @@ String? _firstNonBlank(Map<String, String> q, List<String> keys) {
   return null;
 }
 
-/// Parses and validates a `tallyisle://` or `yyjz://` URI (`F-033`).
+/// Parses and validates a `tallyisle://` URI (`F-033`).
 ParsedUrlSchemeCommand parseUrlScheme(String rawUri) {
   final trimmed = rawUri.trim();
   if (trimmed.isEmpty) {
@@ -388,7 +379,7 @@ ParsedUrlSchemeCommand parseUrlScheme(String rawUri) {
   if (!supportedUrlSchemes.contains(scheme)) {
     throw Failure(
       FailureCode.validation,
-      '不支持的协议头：${uri.scheme.isEmpty ? trimmed : uri.scheme}（仅支持 tallyisle:// 与 yyjz://）',
+      '不支持的协议头：${uri.scheme.isEmpty ? trimmed : uri.scheme}（仅支持 tallyisle://）',
     );
   }
 

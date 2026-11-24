@@ -1,12 +1,14 @@
-import 'package:drift/drift.dart' show OrderingTerm;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../app/adaptive.dart';
 import '../../app/providers.dart';
 import '../../data/db/database.dart';
 import '../../domain/rules/category_stats.dart';
 import '../../domain/rules/tag_stats.dart';
+import '../books/book_switcher_modal.dart';
+import '../budget/budget_providers.dart' show budgetOffsetProvider;
 import '../budget/budget_widgets.dart';
 import '../common/common.dart';
 import 'annual_report_page.dart';
@@ -14,7 +16,8 @@ import 'asset_trend_page.dart';
 import 'category_stats_page.dart';
 import 'category_stats_providers.dart';
 import 'tag_stats_page.dart' show TagColorDot, parseTagColor;
-import 'tag_stats_providers.dart' show statsHubTagRankingsProvider;
+import 'tag_stats_providers.dart'
+    show statsHubTagRankingsProvider, tagRankingsOffsetProvider;
 
 /// Unified bottom "统计" Tab (mirrors original `AnalyzeFragment`, F-006 / F-008 / F-030).
 ///
@@ -33,37 +36,187 @@ class StatsPage extends ConsumerStatefulWidget {
 
 class _StatsPageState extends ConsumerState<StatsPage> {
   bool _pickingBook = false;
+  bool? _lastStatsBranchSelected;
+  bool _leftStatsBranch = false;
+
+  void _scheduleBudgetReset() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !TickerMode.valuesOf(context).enabled) return;
+      if (ref.read(budgetOffsetProvider) != 0) {
+        ref.read(budgetOffsetProvider.notifier).reset();
+      }
+    });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final tickerEnabled = TickerMode.valuesOf(context).enabled;
+    final shellState = StatefulNavigationShell.maybeOf(context);
+    final bool isStatsBranchSelected;
+    if (shellState != null) {
+      isStatsBranchSelected = shellState.currentIndex == 1;
+    } else {
+      final router = GoRouter.maybeOf(context);
+      if (router != null) {
+        final matches = router.routerDelegate.currentConfiguration.matches;
+        isStatsBranchSelected =
+            matches.isEmpty || matches.first.matchedLocation == '/stats';
+      } else {
+        isStatsBranchSelected = tickerEnabled;
+      }
+    }
+
+    if (_lastStatsBranchSelected == null) {
+      _lastStatsBranchSelected = isStatsBranchSelected;
+      if (isStatsBranchSelected && tickerEnabled) {
+        _scheduleBudgetReset();
+      }
+      return;
+    }
+
+    if (!isStatsBranchSelected) {
+      _leftStatsBranch = true;
+    } else if (_leftStatsBranch && tickerEnabled) {
+      _leftStatsBranch = false;
+      _scheduleBudgetReset();
+    }
+    _lastStatsBranchSelected = isStatsBranchSelected;
+  }
+
+  Future<void> _openBudgetPage({required int initialOffset}) async {
+    ref.read(budgetOffsetProvider.notifier).setOffset(initialOffset);
+    await context.push(
+      initialOffset == 0 ? '/budget' : '/budget?initialOffset=$initialOffset',
+    );
+    if (mounted && ref.read(budgetOffsetProvider) != 0) {
+      ref.read(budgetOffsetProvider.notifier).reset();
+    }
+  }
+
+  void _openCategoryStatsDetail() {
+    if (ref.read(categoryStatsRangeKindProvider) == StatRangeKind.custom) {
+      ref
+          .read(categoryStatsRangeKindProvider.notifier)
+          .setRangeKind(StatRangeKind.month);
+    }
+    if (ref.read(categoryStatsOffsetProvider) != 0) {
+      ref.read(categoryStatsOffsetProvider.notifier).reset();
+    }
+    context.push('/stats/category');
+  }
+
+  void _openCategoryDrilldownFromHub(CategoryRowItem row) {
+    if (ref.read(categoryStatsRangeKindProvider) != StatRangeKind.month) {
+      ref
+          .read(categoryStatsRangeKindProvider.notifier)
+          .setRangeKind(StatRangeKind.month);
+    }
+    if (ref.read(categoryStatsOffsetProvider) != 0) {
+      ref.read(categoryStatsOffsetProvider.notifier).reset();
+    }
+    ref.read(categoryStatsFilterConfigProvider.notifier).reset();
+    context.push('/stats/category/${row.categoryId}');
+  }
+
+  void _openTagRankings() {
+    if (ref.read(tagRankingsOffsetProvider) != 0) {
+      ref.read(tagRankingsOffsetProvider.notifier).reset();
+    }
+    context.push('/stats/tags');
+  }
 
   @override
   Widget build(BuildContext context) {
     final book = ref.watch(currentBookProvider);
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    final isExpandedDesktop = DesktopAdaptive.isExpandedDesktop(context);
+
+    final annualCard = AnnualReportOverviewCard(
+      onTap: () => context.push('/stats/annual'),
+    );
+    final categoryCard = CategoryStatsOverviewCard(
+      key: const Key('stats-category-overview-card'),
+      onOpenDetail: _openCategoryStatsDetail,
+      onTapCategory: _openCategoryDrilldownFromHub,
+    );
+    final tagCard = _TagStatsOverviewCard(
+      key: const Key('stats-tag-overview-card'),
+      onOpenAll: _openTagRankings,
+      onTapTag: (item) {
+        if (ref.read(tagRankingsOffsetProvider) != 0) {
+          ref.read(tagRankingsOffsetProvider.notifier).reset();
+        }
+        context.push('/stats/tag/${item.tagId}');
+      },
+    );
+    final budgetCard = BudgetSummaryCard(
+      enablePeriodControls: true,
+      onTap: () =>
+          _openBudgetPage(initialOffset: ref.read(budgetOffsetProvider)),
+    );
+    final trendCard = AssetTrendOverviewCard(
+      onTap: () => context.push('/stats/trend'),
+    );
+
+    final stackedList = ListView(
+      key: const Key('stats-hub-list'),
+      padding: const EdgeInsets.only(top: 6, bottom: 32),
+      children: [
+        annualCard,
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+          child: categoryCard,
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+          child: tagCard,
+        ),
+        budgetCard,
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+          child: trendCard,
+        ),
+      ],
+    );
+
+    final bookTitleRow = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Flexible(
+          child: Text(
+            book.value?.name ?? '统计',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        const Icon(Icons.arrow_drop_down),
+      ],
+    );
 
     return Scaffold(
       key: const Key('stats-hub-page'),
       appBar: AppBar(
         title: InkWell(
           key: const Key('stats-book-switcher'),
+          borderRadius: isDesktop ? BorderRadius.circular(8) : null,
           onTap: _pickBook,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Flexible(
-                child: Text(
-                  book.value?.name ?? '统计',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              const Icon(Icons.arrow_drop_down),
-            ],
-          ),
+          child: isDesktop
+              ? Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 4,
+                  ),
+                  child: bookTitleRow,
+                )
+              : bookTitleRow,
         ),
         actions: [
           IconButton(
             key: const Key('stats-budget-action'),
             tooltip: '预算管理',
             icon: const Icon(Icons.savings_outlined),
-            onPressed: () => context.push('/budget'),
+            onPressed: () => _openBudgetPage(initialOffset: 0),
           ),
           IconButton(
             key: const Key('stats-annual-action'),
@@ -79,40 +232,69 @@ class _StatsPageState extends ConsumerState<StatsPage> {
           ),
         ],
       ),
-      body: ListView(
-        key: const Key('stats-hub-list'),
-        padding: const EdgeInsets.only(top: 6, bottom: 32),
-        children: [
-          AnnualReportOverviewCard(onTap: () => context.push('/stats/annual')),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-            child: CategoryStatsOverviewCard(
-              key: const Key('stats-category-overview-card'),
-              onOpenDetail: () => context.push('/stats/category'),
-              onTapCategory: (row) =>
-                  context.push('/stats/category/${row.categoryId}'),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-            child: _TagStatsOverviewCard(
-              key: const Key('stats-tag-overview-card'),
-              onOpenAll: () => context.push('/stats/tags'),
-              onTapTag: (item) => context.push('/stats/tag/${item.tagId}'),
-            ),
-          ),
-          BudgetSummaryCard(
-            enablePeriodControls: true,
-            onTap: () => context.push('/budget'),
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-            child: AssetTrendOverviewCard(
-              onTap: () => context.push('/stats/trend'),
-            ),
-          ),
-        ],
-      ),
+      body: isExpandedDesktop
+          ? SingleChildScrollView(
+              key: const Key('stats-hub-list'),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+              child: Center(
+                child: ConstrainedBox(
+                  key: const Key('stats-desktop-grid'),
+                  constraints: const BoxConstraints(maxWidth: 1360),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(child: annualCard),
+                          Expanded(child: budgetCard),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 6,
+                              ),
+                              child: categoryCard,
+                            ),
+                          ),
+                          Expanded(
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 6,
+                              ),
+                              child: tagCard,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 6,
+                        ),
+                        child: trendCard,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            )
+          : (isDesktop
+                ? Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 760),
+                      child: stackedList,
+                    ),
+                  )
+                : stackedList),
     );
   }
 
@@ -120,56 +302,7 @@ class _StatsPageState extends ConsumerState<StatsPage> {
     if (_pickingBook) return;
     _pickingBook = true;
     try {
-      final db = await ref.read(databaseProvider.future);
-      final books =
-          await (db.select(db.accountBooks)..orderBy([
-                (t) => OrderingTerm.asc(t.sort),
-                (t) => OrderingTerm.asc(t.id),
-              ]))
-              .get();
-      final pref = await (db.select(
-        db.preferences,
-      )..where((t) => t.key.equals('current_book_id'))).getSingleOrNull();
-      final current =
-          int.tryParse(pref?.value ?? '') ??
-          (books.isNotEmpty ? books.first.id : 1);
-
-      if (!mounted || !(ModalRoute.of(context)?.isCurrent ?? true)) return;
-
-      final picked = await showModalBottomSheet<int>(
-        context: context,
-        builder: (sheetCtx) => SafeArea(
-          child: ListView(
-            shrinkWrap: true,
-            children: [
-              for (final b in books)
-                ListTile(
-                  title: Text(b.name),
-                  trailing: b.id == current ? const Icon(Icons.check) : null,
-                  onTap: () => Navigator.pop(sheetCtx, b.id),
-                ),
-              const Divider(height: 1),
-              ListTile(
-                leading: const Icon(Icons.settings_outlined),
-                title: const Text('管理账本…'),
-                onTap: () {
-                  Navigator.pop(sheetCtx);
-                  context.push('/books');
-                },
-              ),
-            ],
-          ),
-        ),
-      );
-      if (picked == null || !mounted) return;
-      await db
-          .into(db.preferences)
-          .insertOnConflictUpdate(
-            PreferencesCompanion.insert(
-              key: 'current_book_id',
-              value: '$picked',
-            ),
-          );
+      await showBookSwitcher(context, ref, mobileManageLabel: '管理账本…');
     } finally {
       _pickingBook = false;
     }
@@ -377,6 +510,7 @@ class CategoryRouteDrilldownPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final resultAsync = ref.watch(categoryStatsResultProvider);
+    final isFlatten = ref.watch(categoryStatsFlattenProvider);
     final bookId = ref.watch(currentBookIdProvider).value ?? 1;
     final categories =
         ref.watch(categoriesProvider(bookId)).value ?? const <RecordCategory>[];
@@ -402,23 +536,29 @@ class CategoryRouteDrilldownPage extends ConsumerWidget {
           );
         }
 
-        CategoryRowItem? matched;
-        for (final r in result.firstLevelRows) {
-          if (r.categoryId == categoryId) {
-            matched = r;
-            break;
-          }
-          for (final child in r.children) {
-            if (child.categoryId == categoryId) {
-              matched = child;
-              break;
+        CategoryRowItem? findInFirstLevel() {
+          for (final r in result.firstLevelRows) {
+            if (r.categoryId == categoryId) {
+              return r;
+            }
+            for (final child in r.children) {
+              if (child.categoryId == categoryId) {
+                return child;
+              }
             }
           }
-          if (matched != null) break;
+          return null;
         }
-        matched ??= result.flattenRows
-            .where((r) => r.categoryId == categoryId)
-            .firstOrNull;
+
+        final matched = isFlatten
+            ? (result.flattenRows
+                      .where((r) => r.categoryId == categoryId)
+                      .firstOrNull ??
+                  findInFirstLevel())
+            : (findInFirstLevel() ??
+                  result.flattenRows
+                      .where((r) => r.categoryId == categoryId)
+                      .firstOrNull);
 
         return CategoryDrilldownPage(
           categoryId: categoryId,

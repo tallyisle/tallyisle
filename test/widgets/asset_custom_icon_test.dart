@@ -15,6 +15,7 @@ import 'package:tallyisle/features/assets/asset_detail_page.dart';
 import 'package:tallyisle/features/assets/asset_editor_page.dart';
 import 'package:tallyisle/features/assets/assets_page.dart';
 import 'package:tallyisle/features/common/catalog_icons.dart';
+import 'package:tallyisle/features/common/svg_vector_icon.dart';
 
 Future<Uint8List> _createSyntheticPng({
   int width = 140,
@@ -214,14 +215,14 @@ void main() {
           findsOneWidget,
         );
 
-        // 6. Corrupt base64 falls back cleanly to keyword preset ('wechat_pay')
-        final fallbackIcon = tester.widget<Icon>(
+        // 6. Corrupt base64 falls back cleanly to keyword vector preset ('wechat_pay' -> wechat.svg)
+        final fallbackSvg = tester.widget<SvgVectorIcon>(
           find.descendant(
             of: find.byKey(const Key('avatar-corrupt-image')),
-            matching: find.byType(Icon),
+            matching: find.byType(SvgVectorIcon),
           ),
         );
-        expect(fallbackIcon.icon, Icons.chat_bubble_rounded);
+        expect(fallbackSvg.assetPath, 'assets/icons/wechat.svg');
         expect(tester.takeException(), isNull);
       },
     );

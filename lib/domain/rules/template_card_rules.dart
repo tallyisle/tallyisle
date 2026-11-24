@@ -666,16 +666,149 @@ CardLuhnStatus inspectCardLuhn(String raw) {
   );
 }
 
-/// Validates and normalizes an optional hex card color (`#RRGGBB` or `#AARRGGBB`).
-String? normalizeCardColorHex(String? raw) {
-  if (raw == null) return null;
-  final trimmed = raw.trim();
-  if (trimmed.isEmpty) return null;
-  final withHash = trimmed.startsWith('#') ? trimmed : '#$trimmed';
+/// Delimiter encoding an optional manual bank-card icon override inside
+/// `bank_card.card_color` (`[#RRGGBB]|icon:<iconKey>`) with zero DB schema
+/// migration and 100% `.tally` / cloud-sync compatibility.
+const String bankCardIconMetaDelimiter = '|icon:';
+
+/// Parsed `(colorHex, iconKey)` pair from `bank_card.card_color`.
+final class BankCardVisualMeta {
+  const BankCardVisualMeta({this.colorHex, this.iconKey});
+
+  final String? colorHex;
+  final String? iconKey;
+}
+
+String _validatePureHexColor(String raw) {
+  final withHash = raw.startsWith('#') ? raw : '#$raw';
   if (!RegExp(r'^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$').hasMatch(withHash)) {
     throw const Failure(FailureCode.validation, '卡片颜色格式无效');
   }
   return withHash.toUpperCase();
+}
+
+String _validateBankCardIconKey(String raw) {
+  final trimmed = raw.trim();
+  if (trimmed.isEmpty ||
+      trimmed.length > 96 ||
+      trimmed.contains('|') ||
+      RegExp(r'[\s\x00-\x1F]').hasMatch(trimmed)) {
+    throw const Failure(FailureCode.validation, '卡片图标标识无效');
+  }
+  return trimmed;
+}
+
+/// Strictly parses `bank_card.card_color` into [BankCardVisualMeta].
+BankCardVisualMeta parseBankCardVisualMeta(String? raw) {
+  if (raw == null) return const BankCardVisualMeta();
+  final trimmed = raw.trim();
+  if (trimmed.isEmpty) return const BankCardVisualMeta();
+
+  final delimIdx = trimmed.indexOf(bankCardIconMetaDelimiter);
+  if (delimIdx < 0) {
+    return BankCardVisualMeta(colorHex: _validatePureHexColor(trimmed));
+  }
+
+  final colorPart = trimmed.substring(0, delimIdx).trim();
+  final iconPart = trimmed
+      .substring(delimIdx + bankCardIconMetaDelimiter.length)
+      .trim();
+  final normalizedColor = colorPart.isEmpty
+      ? null
+      : _validatePureHexColor(colorPart);
+  final normalizedIcon = _validateBankCardIconKey(iconPart);
+  return BankCardVisualMeta(colorHex: normalizedColor, iconKey: normalizedIcon);
+}
+
+/// Tolerantly extracts [BankCardVisualMeta] without throwing on legacy or
+/// malformed input.
+BankCardVisualMeta tryParseBankCardVisualMeta(String? raw) {
+  if (raw == null) return const BankCardVisualMeta();
+  final trimmed = raw.trim();
+  if (trimmed.isEmpty) return const BankCardVisualMeta();
+
+  final delimIdx = trimmed.indexOf(bankCardIconMetaDelimiter);
+  final colorPart = delimIdx < 0
+      ? trimmed
+      : trimmed.substring(0, delimIdx).trim();
+  final iconPart = delimIdx < 0
+      ? ''
+      : trimmed.substring(delimIdx + bankCardIconMetaDelimiter.length).trim();
+
+  String? validColor;
+  if (colorPart.isNotEmpty) {
+    try {
+      validColor = _validatePureHexColor(colorPart);
+    } on Failure {
+      validColor = null;
+    }
+  }
+  String? validIcon;
+  if (iconPart.isNotEmpty) {
+    try {
+      validIcon = _validateBankCardIconKey(iconPart);
+    } on Failure {
+      validIcon = null;
+    }
+  }
+  return BankCardVisualMeta(colorHex: validColor, iconKey: validIcon);
+}
+
+String? _sanitizeBankCardIconKeyForPreview(String? raw) {
+  if (raw == null) return null;
+  final trimmed = raw.trim();
+  if (trimmed.isEmpty) return null;
+  if (trimmed.startsWith('text:')) {
+    final cleanText = trimmed
+        .substring(5)
+        .replaceAll(RegExp(r'[|\s\x00-\x1F]'), '');
+    if (cleanText.isEmpty) return null;
+    final candidate = 'text:$cleanText';
+    return candidate.length <= 96 ? candidate : null;
+  }
+  final withoutPipesOrWs = trimmed.replaceAll(RegExp(r'[|\s\x00-\x1F]'), '');
+  if (withoutPipesOrWs.isEmpty || withoutPipesOrWs.length > 96) {
+    return null;
+  }
+  return withoutPipesOrWs;
+}
+
+/// Encodes an optional hex color and optional manual icon override back into
+/// `bank_card.card_color` (`null`, `#RRGGBB`, or `[#RRGGBB]|icon:<iconKey>`).
+///
+/// Safely strips any `|` or control/whitespace characters from [iconKey] so
+/// live UI previews never crash even if raw user badge text contained `|`.
+String? encodeBankCardVisualMeta({String? colorHex, String? iconKey}) {
+  final normColor = (colorHex == null || colorHex.trim().isEmpty)
+      ? null
+      : _validatePureHexColor(colorHex.trim());
+  final normIcon = _sanitizeBankCardIconKeyForPreview(iconKey);
+  if (normIcon == null) return normColor;
+  return '${normColor ?? ''}$bankCardIconMetaDelimiter$normIcon';
+}
+
+/// Non-throwing preview variant of [encodeBankCardVisualMeta] that also
+/// tolerates malformed [colorHex].
+String? tryEncodeBankCardVisualMeta({String? colorHex, String? iconKey}) {
+  String? normColor;
+  if (colorHex != null && colorHex.trim().isNotEmpty) {
+    try {
+      normColor = _validatePureHexColor(colorHex.trim());
+    } on Failure {
+      normColor = null;
+    }
+  }
+  final normIcon = _sanitizeBankCardIconKeyForPreview(iconKey);
+  if (normIcon == null) return normColor;
+  return '${normColor ?? ''}$bankCardIconMetaDelimiter$normIcon';
+}
+
+/// Validates and normalizes `bank_card.card_color` (`#RRGGBB`, `#AARRGGBB`, or
+/// `[#RRGGBB]|icon:<iconKey>`).
+String? normalizeCardColorHex(String? raw) {
+  final meta = parseBankCardVisualMeta(raw);
+  if (meta.iconKey == null) return meta.colorHex;
+  return '${meta.colorHex ?? ''}$bankCardIconMetaDelimiter${meta.iconKey}';
 }
 
 /// Validates and trims `bank_card.card_name`.

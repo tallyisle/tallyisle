@@ -9,6 +9,7 @@ import 'package:tallyisle/platform/files.dart';
 
 class _FakeFileSelectorPlatform extends FileSelectorPlatform {
   List<XTypeGroup>? lastOpenTypeGroups;
+  List<XTypeGroup>? lastSaveTypeGroups;
   SaveDialogOptions? lastSaveOptions;
 
   Future<XFile?> Function(List<XTypeGroup>? groups)? onOpenFile;
@@ -33,6 +34,7 @@ class _FakeFileSelectorPlatform extends FileSelectorPlatform {
     List<XTypeGroup>? acceptedTypeGroups,
     SaveDialogOptions options = const SaveDialogOptions(),
   }) async {
+    lastSaveTypeGroups = acceptedTypeGroups;
     lastSaveOptions = options;
     if (onGetSaveLocation != null) {
       return onGetSaveLocation!(options);
@@ -314,6 +316,24 @@ void main() {
 
           await access.saveBytes('exported.ya2i', payload);
           expect(await File(destPath).readAsBytes(), payload);
+          expect(fakeFileSelector.lastSaveTypeGroups, hasLength(1));
+          expect(
+            fakeFileSelector.lastSaveTypeGroups!.single.extensions,
+            const <String>['ya2i'],
+          );
+
+          // Save auto-extension completion & .yi2a label
+          final bareSavePath = '${tempDir.path}/backup_without_ext';
+          fakeFileSelector.onGetSaveLocation = (options) async {
+            expect(options.suggestedName, 'backup_without_ext.yi2a');
+            return FileSaveLocation(bareSavePath);
+          };
+          await access.saveBytes('backup_without_ext.yi2a', payload);
+          expect(await File('$bareSavePath.yi2a').readAsBytes(), payload);
+          expect(
+            fakeFileSelector.lastSaveTypeGroups!.single.label,
+            '一羽记账备份文件 (*.yi2a)',
+          );
 
           // User cancels save dialog -> FailureCode.cancelled
           fakeFileSelector.onGetSaveLocation = (_) async => null;
@@ -670,7 +690,7 @@ void main() {
         expect(fakeFileSelector.lastOpenTypeGroups, isEmpty);
 
         // saveBytes, shareBytes, openExternalUrl succeed over dev.tallyisle/files
-        await access.saveBytes('ohos_backup.tally', sampleBytes);
+        await access.saveBytes('ohos_backup.yi2a', sampleBytes);
         await access.shareBytes(
           'ohos_backup.zip',
           sampleBytes,
@@ -680,6 +700,9 @@ void main() {
 
         expect(recordedCalls, hasLength(3));
         expect(recordedCalls[0].method, 'saveBytes');
+        final ohosSaveArgs =
+            recordedCalls[0].arguments as Map<Object?, Object?>;
+        expect(ohosSaveArgs['mimeType'], 'application/json');
         expect(recordedCalls[1].method, 'shareBytes');
         expect(recordedCalls[2].method, 'openExternalUrl');
 

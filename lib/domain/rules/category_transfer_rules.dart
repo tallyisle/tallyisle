@@ -761,19 +761,17 @@ List<int> validateIntraBookMigration({
   return affectedIds;
 }
 
-/// Formats a safe export filename (`categories_<book>_YYYYMMDD_HHMMSS.json`).
+/// Formats a pure-ASCII export filename (`TallyIsle_categories_YYYYMMDD_HHMMSS.json`).
+///
+/// [bookName] is kept in the signature for caller compatibility; exported
+/// filenames remain pure English ASCII across all platforms (`BRAND-001`).
 String formatCategoryPackFileName(String bookName, DateTime when) {
   String pad2(int n) => n.toString().padLeft(2, '0');
-  final safeBook = bookName
-      .trim()
-      .replaceAll(RegExp(r'[\\/:*?"<>|\s]+'), '_')
-      .replaceAll(RegExp(r'_+'), '_');
-  final label = safeBook.isEmpty ? 'book' : safeBook;
   final y = when.year.toString().padLeft(4, '0');
   final m = pad2(when.month);
   final d = pad2(when.day);
   final hh = pad2(when.hour);
   final mm = pad2(when.minute);
   final ss = pad2(when.second);
-  return 'categories_${label}_${y}${m}${d}_$hh$mm$ss.json';
+  return 'TallyIsle_categories_$y$m${d}_$hh$mm$ss.json';
 }

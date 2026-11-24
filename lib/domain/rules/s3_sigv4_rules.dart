@@ -185,17 +185,22 @@ S3ResolvedTarget resolveS3RequestTarget({
     }
   }
 
+  final isIpv6Host = baseUri.host.contains(':');
+  final bracketedBaseHost = isIpv6Host && !baseUri.host.startsWith('[')
+      ? '[${baseUri.host}]'
+      : baseUri.host;
+
   final String effectiveHost;
   final List<String> allSegments;
-  if (forcePathStyle) {
-    effectiveHost = baseUri.host;
+  if (forcePathStyle || isIpv6Host) {
+    effectiveHost = bracketedBaseHost;
     allSegments = <String>[...baseSegments, cleanBucket, ...keySegments];
   } else {
-    final lowerHost = baseUri.host.toLowerCase();
+    final lowerHost = bracketedBaseHost.toLowerCase();
     final lowerPrefix = '${cleanBucket.toLowerCase()}.';
     effectiveHost = lowerHost.startsWith(lowerPrefix)
-        ? baseUri.host
-        : '$cleanBucket.${baseUri.host}';
+        ? bracketedBaseHost
+        : '$cleanBucket.$bracketedBaseHost';
     allSegments = <String>[...baseSegments, ...keySegments];
   }
 
@@ -444,18 +449,33 @@ String? _extractXmlTag(String xmlBlock, String localName) {
 }
 
 String _unescapeXml(String input) {
-  return input
-      .replaceAllMapped(RegExp(r'&#x([0-9a-fA-F]+);'), (m) {
-        final code = int.tryParse(m.group(1)!, radix: 16);
-        return code == null ? m.group(0)! : String.fromCharCode(code);
-      })
-      .replaceAllMapped(RegExp(r'&#([0-9]+);'), (m) {
-        final code = int.tryParse(m.group(1)!);
-        return code == null ? m.group(0)! : String.fromCharCode(code);
-      })
-      .replaceAll('&quot;', '"')
-      .replaceAll('&apos;', "'")
-      .replaceAll('&lt;', '<')
-      .replaceAll('&gt;', '>')
-      .replaceAll('&amp;', '&');
+  return input.replaceAllMapped(
+    RegExp(r'&(?:#x([0-9a-fA-F]+)|#([0-9]+)|quot|apos|lt|gt|amp);'),
+    (m) {
+      final hex = m.group(1);
+      if (hex != null) {
+        final code = int.tryParse(hex, radix: 16);
+        if (code != null && code >= 0 && code <= 0x10FFFF) {
+          return String.fromCharCode(code);
+        }
+        return m.group(0)!;
+      }
+      final dec = m.group(2);
+      if (dec != null) {
+        final code = int.tryParse(dec);
+        if (code != null && code >= 0 && code <= 0x10FFFF) {
+          return String.fromCharCode(code);
+        }
+        return m.group(0)!;
+      }
+      return switch (m.group(0)) {
+        '&quot;' => '"',
+        '&apos;' => "'",
+        '&lt;' => '<',
+        '&gt;' => '>',
+        '&amp;' => '&',
+        _ => m.group(0)!,
+      };
+    },
+  );
 }

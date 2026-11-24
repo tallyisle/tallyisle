@@ -8,6 +8,7 @@ import 'package:go_router/go_router.dart';
 import 'package:tallyisle/app/providers.dart';
 import 'package:tallyisle/core/money.dart';
 import 'package:tallyisle/data/catalog/catalog_service.dart';
+import 'package:tallyisle/data/catalog/currency_service.dart';
 import 'package:tallyisle/data/db/database.dart';
 import 'package:tallyisle/data/ledger/ledger_service.dart';
 import 'package:tallyisle/domain/model/codes.dart';
@@ -596,6 +597,145 @@ void main() {
             .widget<Text>(find.byKey(const Key('reimburse-pending-total')))
             .data,
         '¥88.00',
+      );
+
+      await tester.pumpWidget(const SizedBox());
+      await settle(tester, 4);
+    },
+  );
+
+  testWidgets(
+    'L-04: deducts refunds, converts foreign totals to CNY, blocks mixed-currency batch and settles same-currency USD',
+    (tester) async {
+      final db = AppDatabase(NativeDatabase.memory());
+      addTearDown(db.close);
+
+      await CurrencyService(db).saveCurrency(
+        commandId: 'seed-usd-reim',
+        code: 'USD',
+        name: '美元',
+        symbol: r'$',
+        price: '7.20',
+      );
+
+      final ledger = LedgerService(db);
+      final cnyId = await ledger.createAsset(
+        commandId: 'l4-cny',
+        name: '人民币储蓄卡',
+        initial: Money.parse('1000.00'),
+      );
+      final usdId = await ledger.createAsset(
+        commandId: 'l4-usd',
+        name: '美元卡',
+        initial: Money.parse('500.00'),
+        currency: 'USD',
+      );
+      final catId = await firstExpenseCategoryId(db, 1);
+
+      // CNY bill: ¥100 origin, ¥30 refunded -> ¥70 pending
+      final cnyBillId = await ledger.saveRecord(
+        commandId: 'l4-bill-cny',
+        draft: RecordDraft(
+          type: RecordType.reimbursable,
+          money: Money.parse('100.00'),
+          bookId: 1,
+          recordTime: DateTime(2026, 11, 15, 10).millisecondsSinceEpoch,
+          categoryId: catId,
+          fromAssetId: cnyId,
+          remark: '国内差旅',
+        ),
+      );
+      await ledger.addRefund(
+        commandId: 'l4-ref-cny',
+        originId: cnyBillId,
+        amount: Money.parse('30.00'),
+        assetId: cnyId,
+        recordTime: DateTime(2026, 11, 15, 11).millisecondsSinceEpoch,
+      );
+
+      // USD bill: $10 origin -> $10 pending (¥72.00 in CNY)
+      final usdBillId = await ledger.saveRecord(
+        commandId: 'l4-bill-usd',
+        draft: RecordDraft(
+          type: RecordType.reimbursable,
+          money: Money.parse('10.00'),
+          bookId: 1,
+          recordTime: DateTime(2026, 11, 16, 10).millisecondsSinceEpoch,
+          categoryId: catId,
+          fromAssetId: usdId,
+          remark: '海外酒店',
+        ),
+      );
+
+      await tester.pumpWidget(
+        ProviderScope(
+          retry: (_, _) => null,
+          overrides: [databaseProvider.overrideWith((ref) async => db)],
+          child: const MaterialApp(home: ReimbursePage()),
+        ),
+      );
+      await settle(tester);
+
+      // Pending rows reflect refunded CNY (¥70.00) and USD ($10.00)
+      expect(find.text('待报 ¥70.00'), findsOneWidget);
+      expect(find.text(r'待报 $10.00'), findsOneWidget);
+
+      // Top overview total converts both to CNY: ¥70 + ¥72 = ¥142.00
+      expect(
+        tester
+            .widget<Text>(find.byKey(const Key('reimburse-pending-total')))
+            .data,
+        '¥142.00',
+      );
+
+      // Enter batch mode, select BOTH CNY and USD -> submit shows mixed-currency warning
+      await tester.tap(find.byKey(const Key('reimburse-batch-toggle')));
+      await settle(tester, 6);
+      await tester.tap(find.byKey(Key('reimburse-select-$cnyBillId')));
+      await tester.tap(find.byKey(Key('reimburse-select-$usdBillId')));
+      await settle(tester, 6);
+
+      expect(find.textContaining('含多币种'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('reimburse-batch-submit')));
+      await settle(tester, 6);
+      expect(find.textContaining('请按单一币种分别合并报销'), findsOneWidget);
+
+      // Dismiss SnackBar so bottom action bar is unobscured
+      ScaffoldMessenger.of(
+        tester.element(find.byType(ReimbursePage)),
+      ).clearSnackBars();
+      await settle(tester, 4);
+
+      // Deselect CNY bill, batch reimburse USD bill -> only USD accounts offered
+      await tester.tap(find.byKey(Key('reimburse-select-$cnyBillId')));
+      await settle(tester, 6);
+      await tester.tap(find.byKey(const Key('reimburse-batch-submit')));
+      await settle(tester, 6);
+
+      await tester.tap(find.byKey(const Key('reimburse-batch-account')));
+      await settle(tester, 6);
+      expect(find.text('美元卡'), findsWidgets);
+      expect(find.text('人民币储蓄卡'), findsNothing);
+      await tester.tap(find.text('美元卡').last);
+      await settle(tester, 6);
+
+      await tester.tap(find.byKey(const Key('reimburse-batch-confirm')));
+      await settle(tester, 10);
+
+      // Only CNY bill remains pending (¥70.00); USD bill is settled!
+      expect(find.text('待报销 (1)'), findsOneWidget);
+      expect(find.text('已报销 (1)'), findsOneWidget);
+      expect(
+        tester
+            .widget<Text>(find.byKey(const Key('reimburse-pending-total')))
+            .data,
+        '¥70.00',
+      );
+      expect(
+        tester
+            .widget<Text>(find.byKey(const Key('reimburse-settled-total')))
+            .data,
+        '¥72.00',
       );
 
       await tester.pumpWidget(const SizedBox());

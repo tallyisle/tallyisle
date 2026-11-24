@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/adaptive.dart';
 import '../../domain/rules/app_lock_rules.dart';
 import '../../platform/biometrics.dart';
 import '../common/common.dart';
+import '../common/desktop_modal_page.dart';
 import 'app_lock_providers.dart';
 
 /// Settings page for configuring App Lock (`F-024`):
@@ -180,167 +182,196 @@ class _AppLockSettingsPageState extends ConsumerState<AppLockSettingsPage> {
     final bioAsync = ref.watch(biometricAvailabilityProvider);
     final theme = Theme.of(context);
 
-    return Scaffold(
-      key: const Key('app_lock_settings_page'),
-      appBar: AppBar(title: const Text('应用安全锁')),
-      body: asyncBody(configAsync, (config) {
-        final bio =
-            bioAsync.value ??
-            const BiometricAvailability(
-              status: BiometricAvailabilityStatus.unsupportedPlatform,
-              reason: '正在检测设备生物识别支持状态…',
-            );
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    final isPopupModal = isDesktop && ModalRoute.of(context) is PopupRoute;
 
-        return ListView(
-          padding: const EdgeInsets.symmetric(vertical: 12),
-          children: [
-            Card(
-              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-              child: Column(
-                children: [
-                  SwitchListTile(
-                    key: const Key('app_lock_enable_switch'),
-                    secondary: Icon(
-                      config.isConfigured ? Icons.lock : Icons.lock_open,
-                    ),
-                    title: const Text('启用数字密码安全锁'),
-                    subtitle: Text(
-                      config.isConfigured
-                          ? '已启用 ${config.pinLength} 位加盐哈希密码保护'
-                          : '开启后冷启动或从后台切回时需验证身份',
-                    ),
-                    value: config.isConfigured,
-                    onChanged: _busy
-                        ? null
-                        : (next) => next
-                              ? _openEnableDialog()
-                              : _openDisableDialog(config),
-                  ),
-                  if (config.isConfigured) ...[
-                    const Divider(height: 1),
-                    ListTile(
-                      key: const Key('app_lock_change_pin_tile'),
-                      leading: const Icon(Icons.password_outlined),
-                      title: const Text('修改数字密码'),
-                      subtitle: Text(
-                        '当前为 ${config.pinLength} 位数字密码（支持切换 4/6 位）',
+    return DesktopModalEscapeScope(
+      enabled: isPopupModal,
+      child: Scaffold(
+        key: const Key('app_lock_settings_page'),
+        appBar: AppBar(
+          leading: isPopupModal ? const CloseButton() : null,
+          scrolledUnderElevation: isDesktop ? 0 : null,
+          title: const Text('应用安全锁'),
+        ),
+        body: asyncBody(configAsync, (config) {
+          final bio =
+              bioAsync.value ??
+              const BiometricAvailability(
+                status: BiometricAvailabilityStatus.unsupportedPlatform,
+                reason: '正在检测设备生物识别支持状态…',
+              );
+
+          final listView = ListView(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            children: [
+              Card(
+                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                child: Column(
+                  children: [
+                    SwitchListTile(
+                      key: const Key('app_lock_enable_switch'),
+                      secondary: Icon(
+                        config.isConfigured ? Icons.lock : Icons.lock_open,
                       ),
-                      trailing: const Icon(Icons.chevron_right),
-                      enabled: !_busy,
-                      onTap: () => _openChangePinDialog(config),
+                      title: const Text('启用数字密码安全锁'),
+                      subtitle: Text(
+                        config.isConfigured
+                            ? '已启用 ${config.pinLength} 位加盐哈希密码保护'
+                            : '开启后冷启动或从后台切回时需验证身份',
+                      ),
+                      value: config.isConfigured,
+                      onChanged: _busy
+                          ? null
+                          : (next) => next
+                                ? _openEnableDialog()
+                                : _openDisableDialog(config),
                     ),
-                    const Divider(height: 1),
-                    ListTile(
-                      key: const Key('app_lock_lock_now_button'),
-                      leading: const Icon(Icons.phonelink_lock_outlined),
-                      title: const Text('立即锁定'),
-                      subtitle: const Text('立刻遮蔽账本界面并进入锁屏状态'),
-                      enabled: !_busy,
-                      onTap: () {
-                        ref.read(appLockSessionProvider.notifier).lockNow();
-                        _toast('应用已锁定');
-                      },
-                    ),
+                    if (config.isConfigured) ...[
+                      const Divider(height: 1),
+                      ListTile(
+                        key: const Key('app_lock_change_pin_tile'),
+                        leading: const Icon(Icons.password_outlined),
+                        title: const Text('修改数字密码'),
+                        subtitle: Text(
+                          '当前为 ${config.pinLength} 位数字密码（支持切换 4/6 位）',
+                        ),
+                        trailing: const Icon(Icons.chevron_right),
+                        enabled: !_busy,
+                        onTap: () => _openChangePinDialog(config),
+                      ),
+                      const Divider(height: 1),
+                      ListTile(
+                        key: const Key('app_lock_lock_now_button'),
+                        leading: const Icon(Icons.phonelink_lock_outlined),
+                        title: const Text('立即锁定'),
+                        subtitle: const Text('立刻遮蔽账本界面并进入锁屏状态'),
+                        enabled: !_busy,
+                        onTap: () {
+                          ref.read(appLockSessionProvider.notifier).lockNow();
+                          _toast('应用已锁定');
+                        },
+                      ),
+                    ],
                   ],
-                ],
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 6),
-              child: Text(
-                '生物识别与自动锁定',
-                style: theme.textTheme.labelMedium?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 0.3,
                 ),
               ),
-            ),
-            Card(
-              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  SwitchListTile(
-                    key: const Key('app_lock_biometric_switch'),
-                    secondary: const Icon(Icons.fingerprint),
-                    title: const Text('使用系统生物识别解锁'),
-                    subtitle: Text(bio.reason),
-                    value: config.isConfigured && config.biometricEnabled,
-                    onChanged:
-                        (!_busy && config.isConfigured && bio.canAuthenticate)
-                        ? (v) => _toggleBiometric(config, bio, v)
-                        : null,
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 6),
+                child: Text(
+                  isDesktop ? '自动锁定策略' : '生物识别与自动锁定',
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.3,
                   ),
-                  const Divider(height: 1),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-                    child: Text('后台切回锁定延迟', style: theme.textTheme.titleSmall),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
-                    child: Column(
-                      children: [
-                        for (
-                          var rowStart = 0;
-                          rowStart < allowedLockTimeouts.length;
-                          rowStart += 2
-                        ) ...[
-                          if (rowStart > 0) const SizedBox(height: 8),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: _TimeoutChoiceChip(
-                                  seconds: allowedLockTimeouts[rowStart],
-                                  selected:
-                                      config.timeoutSeconds ==
+                ),
+              ),
+              Card(
+                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (!isDesktop) ...[
+                      SwitchListTile(
+                        key: const Key('app_lock_biometric_switch'),
+                        secondary: const Icon(Icons.fingerprint),
+                        title: const Text('使用系统生物识别解锁'),
+                        subtitle: Text(bio.reason),
+                        value: config.isConfigured && config.biometricEnabled,
+                        onChanged:
+                            (!_busy &&
+                                config.isConfigured &&
+                                bio.canAuthenticate)
+                            ? (v) => _toggleBiometric(config, bio, v)
+                            : null,
+                      ),
+                      const Divider(height: 1),
+                    ],
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                      child: Text(
+                        '后台切回锁定延迟',
+                        style: theme.textTheme.titleSmall,
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+                      child: Column(
+                        children: [
+                          for (
+                            var rowStart = 0;
+                            rowStart < allowedLockTimeouts.length;
+                            rowStart += 2
+                          ) ...[
+                            if (rowStart > 0) const SizedBox(height: 8),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: _TimeoutChoiceChip(
+                                    seconds: allowedLockTimeouts[rowStart],
+                                    selected:
+                                        config.timeoutSeconds ==
+                                        allowedLockTimeouts[rowStart],
+                                    enabled: !_busy && config.isConfigured,
+                                    onSelected: () => _selectTimeout(
+                                      config,
                                       allowedLockTimeouts[rowStart],
-                                  enabled: !_busy && config.isConfigured,
-                                  onSelected: () => _selectTimeout(
-                                    config,
-                                    allowedLockTimeouts[rowStart],
+                                    ),
                                   ),
                                 ),
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: rowStart + 1 < allowedLockTimeouts.length
-                                    ? _TimeoutChoiceChip(
-                                        seconds:
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child:
+                                      rowStart + 1 < allowedLockTimeouts.length
+                                      ? _TimeoutChoiceChip(
+                                          seconds:
+                                              allowedLockTimeouts[rowStart + 1],
+                                          selected:
+                                              config.timeoutSeconds ==
+                                              allowedLockTimeouts[rowStart + 1],
+                                          enabled:
+                                              !_busy && config.isConfigured,
+                                          onSelected: () => _selectTimeout(
+                                            config,
                                             allowedLockTimeouts[rowStart + 1],
-                                        selected:
-                                            config.timeoutSeconds ==
-                                            allowedLockTimeouts[rowStart + 1],
-                                        enabled: !_busy && config.isConfigured,
-                                        onSelected: () => _selectTimeout(
-                                          config,
-                                          allowedLockTimeouts[rowStart + 1],
-                                        ),
-                                      )
-                                    : const SizedBox.shrink(),
-                              ),
-                            ],
-                          ),
+                                          ),
+                                        )
+                                      : const SizedBox.shrink(),
+                                ),
+                              ],
+                            ),
+                          ],
                         ],
-                      ],
+                      ),
                     ),
-                  ),
-                ],
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-              child: Text(
-                '安全说明：数字密码采用 16 字节随机盐与至少 10,000 轮 PBKDF2-HMAC-SHA256 单向派生存储，'
-                '不保存明文密码；连续输错 5 次将锁定冷却 30 秒。请定期通过「备份与恢复」导出 .tally 备份。',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
+                  ],
                 ),
               ),
-            ),
-          ],
-        );
-      }),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+                child: Text(
+                  '安全说明：数字密码采用 16 字节随机盐与至少 10,000 轮 PBKDF2-HMAC-SHA256 单向派生存储，'
+                  '不保存明文密码；连续输错 5 次将锁定冷却 30 秒。请定期通过「备份与恢复」导出 .tally 备份。',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+            ],
+          );
+
+          if (isDesktop) {
+            return Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 800),
+                child: listView,
+              ),
+            );
+          }
+          return listView;
+        }),
+      ),
     );
   }
 }
@@ -359,26 +390,32 @@ class _TimeoutChoiceChip extends StatelessWidget {
   final VoidCallback onSelected;
 
   @override
-  Widget build(BuildContext context) => ChoiceChip(
-    key: Key('app_lock_timeout_$seconds'),
-    showCheckmark: false,
-    visualDensity: VisualDensity.compact,
-    labelPadding: const EdgeInsets.symmetric(horizontal: 4),
-    label: SizedBox(
-      width: double.infinity,
-      child: FittedBox(
-        fit: BoxFit.scaleDown,
-        child: Text(
-          lockTimeoutLabel(seconds),
-          maxLines: 1,
-          softWrap: false,
-          textAlign: TextAlign.center,
+  Widget build(BuildContext context) {
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    return ChoiceChip(
+      key: Key('app_lock_timeout_$seconds'),
+      showCheckmark: false,
+      visualDensity: isDesktop ? null : VisualDensity.compact,
+      padding: isDesktop
+          ? const EdgeInsets.symmetric(horizontal: 8, vertical: 6)
+          : null,
+      labelPadding: const EdgeInsets.symmetric(horizontal: 4),
+      label: SizedBox(
+        width: double.infinity,
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(
+            lockTimeoutLabel(seconds),
+            maxLines: 1,
+            softWrap: false,
+            textAlign: TextAlign.center,
+          ),
         ),
       ),
-    ),
-    selected: selected,
-    onSelected: enabled ? (_) => onSelected() : null,
-  );
+      selected: selected,
+      onSelected: enabled ? (_) => onSelected() : null,
+    );
+  }
 }
 
 class _SetNewPinDialog extends StatefulWidget {
@@ -419,80 +456,103 @@ class _SetNewPinDialogState extends State<_SetNewPinDialog> {
   }
 
   @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: const Text('设置安全锁密码'),
-    content: SingleChildScrollView(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          SizedBox(
-            width: double.infinity,
-            child: SegmentedButton<int>(
-              key: const Key('set_pin_length_selector'),
-              showSelectedIcon: false,
-              segments: const [
-                ButtonSegment<int>(
-                  value: 4,
-                  label: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: Text('4 位密码', maxLines: 1, softWrap: false),
-                  ),
+  Widget build(BuildContext context) {
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    final dialogColumn = Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SizedBox(
+          width: double.infinity,
+          child: SegmentedButton<int>(
+            key: const Key('set_pin_length_selector'),
+            showSelectedIcon: false,
+            segments: const [
+              ButtonSegment<int>(
+                value: 4,
+                label: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text('4 位密码', maxLines: 1, softWrap: false),
                 ),
-                ButtonSegment<int>(
-                  value: 6,
-                  label: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: Text('6 位密码', maxLines: 1, softWrap: false),
-                  ),
+              ),
+              ButtonSegment<int>(
+                value: 6,
+                label: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text('6 位密码', maxLines: 1, softWrap: false),
                 ),
-              ],
-              selected: <int>{_pinLength},
-              onSelectionChanged: (s) => setState(() {
-                _pinLength = s.first;
-                _pinController.clear();
-                _confirmController.clear();
-                _error = null;
-              }),
+              ),
+            ],
+            selected: <int>{_pinLength},
+            onSelectionChanged: (s) => setState(() {
+              _pinLength = s.first;
+              _pinController.clear();
+              _confirmController.clear();
+              _error = null;
+            }),
+          ),
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          key: const Key('new_pin_input'),
+          controller: _pinController,
+          keyboardType: TextInputType.number,
+          obscureText: true,
+          maxLength: _pinLength,
+          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+          decoration: InputDecoration(
+            labelText: '输入 $_pinLength 位数字密码',
+            border: const OutlineInputBorder(),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 12,
+              vertical: 14,
             ),
           ),
-          const SizedBox(height: 12),
-          TextField(
-            key: const Key('new_pin_input'),
-            controller: _pinController,
-            keyboardType: TextInputType.number,
-            obscureText: true,
-            maxLength: _pinLength,
-            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-            decoration: InputDecoration(labelText: '输入 $_pinLength 位数字密码'),
-          ),
-          TextField(
-            key: const Key('confirm_pin_input'),
-            controller: _confirmController,
-            keyboardType: TextInputType.number,
-            obscureText: true,
-            maxLength: _pinLength,
-            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-            decoration: InputDecoration(
-              labelText: '再次确认 $_pinLength 位数字密码',
-              errorText: _error,
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          key: const Key('confirm_pin_input'),
+          controller: _confirmController,
+          keyboardType: TextInputType.number,
+          obscureText: true,
+          maxLength: _pinLength,
+          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+          decoration: InputDecoration(
+            labelText: '再次确认 $_pinLength 位数字密码',
+            border: const OutlineInputBorder(),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 12,
+              vertical: 14,
             ),
+            errorText: _error,
           ),
-        ],
+        ),
+      ],
+    );
+
+    return AlertDialog(
+      title: const Text('设置安全锁密码'),
+      content: SingleChildScrollView(
+        child: isDesktop
+            ? ConstrainedBox(
+                constraints: const BoxConstraints(minWidth: 340, maxWidth: 380),
+                child: dialogColumn,
+              )
+            : dialogColumn,
       ),
-    ),
-    actions: [
-      TextButton(
-        onPressed: () => Navigator.of(context).pop(),
-        child: const Text('取消'),
-      ),
-      FilledButton(
-        key: const Key('confirm_set_pin_button'),
-        onPressed: _submit,
-        child: const Text('保存'),
-      ),
-    ],
-  );
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          key: const Key('confirm_set_pin_button'),
+          onPressed: _submit,
+          child: const Text('保存'),
+        ),
+      ],
+    );
+  }
 }
 
 class _ChangePinDialog extends StatefulWidget {
@@ -537,91 +597,119 @@ class _ChangePinDialogState extends State<_ChangePinDialog> {
   }
 
   @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: const Text('修改数字密码'),
-    content: SingleChildScrollView(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          TextField(
-            key: const Key('change_current_pin_input'),
-            controller: _currentController,
-            keyboardType: TextInputType.number,
-            obscureText: true,
-            maxLength: widget.currentPinLength,
-            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-            decoration: InputDecoration(
-              labelText: '当前 ${widget.currentPinLength} 位密码',
+  Widget build(BuildContext context) {
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    final dialogColumn = Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        TextField(
+          key: const Key('change_current_pin_input'),
+          controller: _currentController,
+          keyboardType: TextInputType.number,
+          obscureText: true,
+          maxLength: widget.currentPinLength,
+          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+          decoration: InputDecoration(
+            labelText: '当前 ${widget.currentPinLength} 位密码',
+            border: const OutlineInputBorder(),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 12,
+              vertical: 14,
             ),
           ),
-          const SizedBox(height: 8),
-          SizedBox(
-            width: double.infinity,
-            child: SegmentedButton<int>(
-              showSelectedIcon: false,
-              segments: const [
-                ButtonSegment<int>(
-                  value: 4,
-                  label: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: Text('新 4 位', maxLines: 1, softWrap: false),
-                  ),
+        ),
+        const SizedBox(height: 12),
+        SizedBox(
+          width: double.infinity,
+          child: SegmentedButton<int>(
+            showSelectedIcon: false,
+            segments: const [
+              ButtonSegment<int>(
+                value: 4,
+                label: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text('新 4 位', maxLines: 1, softWrap: false),
                 ),
-                ButtonSegment<int>(
-                  value: 6,
-                  label: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: Text('新 6 位', maxLines: 1, softWrap: false),
-                  ),
+              ),
+              ButtonSegment<int>(
+                value: 6,
+                label: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text('新 6 位', maxLines: 1, softWrap: false),
                 ),
-              ],
-              selected: <int>{_newLength},
-              onSelectionChanged: (s) => setState(() {
-                _newLength = s.first;
-                _newController.clear();
-                _confirmController.clear();
-                _error = null;
-              }),
+              ),
+            ],
+            selected: <int>{_newLength},
+            onSelectionChanged: (s) => setState(() {
+              _newLength = s.first;
+              _newController.clear();
+              _confirmController.clear();
+              _error = null;
+            }),
+          ),
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          key: const Key('change_new_pin_input'),
+          controller: _newController,
+          keyboardType: TextInputType.number,
+          obscureText: true,
+          maxLength: _newLength,
+          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+          decoration: InputDecoration(
+            labelText: '输入新 $_newLength 位密码',
+            border: const OutlineInputBorder(),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 12,
+              vertical: 14,
             ),
           ),
-          const SizedBox(height: 8),
-          TextField(
-            key: const Key('change_new_pin_input'),
-            controller: _newController,
-            keyboardType: TextInputType.number,
-            obscureText: true,
-            maxLength: _newLength,
-            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-            decoration: InputDecoration(labelText: '输入新 $_newLength 位密码'),
-          ),
-          TextField(
-            key: const Key('change_confirm_pin_input'),
-            controller: _confirmController,
-            keyboardType: TextInputType.number,
-            obscureText: true,
-            maxLength: _newLength,
-            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-            decoration: InputDecoration(
-              labelText: '确认新 $_newLength 位密码',
-              errorText: _error,
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          key: const Key('change_confirm_pin_input'),
+          controller: _confirmController,
+          keyboardType: TextInputType.number,
+          obscureText: true,
+          maxLength: _newLength,
+          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+          decoration: InputDecoration(
+            labelText: '确认新 $_newLength 位密码',
+            border: const OutlineInputBorder(),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 12,
+              vertical: 14,
             ),
+            errorText: _error,
           ),
-        ],
+        ),
+      ],
+    );
+
+    return AlertDialog(
+      title: const Text('修改数字密码'),
+      content: SingleChildScrollView(
+        child: isDesktop
+            ? ConstrainedBox(
+                constraints: const BoxConstraints(minWidth: 340, maxWidth: 380),
+                child: dialogColumn,
+              )
+            : dialogColumn,
       ),
-    ),
-    actions: [
-      TextButton(
-        onPressed: () => Navigator.of(context).pop(),
-        child: const Text('取消'),
-      ),
-      FilledButton(
-        key: const Key('confirm_change_pin_button'),
-        onPressed: _submit,
-        child: const Text('确认修改'),
-      ),
-    ],
-  );
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          key: const Key('confirm_change_pin_button'),
+          onPressed: _submit,
+          child: const Text('确认修改'),
+        ),
+      ],
+    );
+  }
 }
 
 class _VerifyCurrentPinDialog extends StatefulWidget {
@@ -656,9 +744,9 @@ class _VerifyCurrentPinDialogState extends State<_VerifyCurrentPinDialog> {
   }
 
   @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: Text(widget.title),
-    content: TextField(
+  Widget build(BuildContext context) {
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    final field = TextField(
       key: const Key('verify_current_pin_input'),
       controller: _pinController,
       keyboardType: TextInputType.number,
@@ -667,19 +755,35 @@ class _VerifyCurrentPinDialogState extends State<_VerifyCurrentPinDialog> {
       inputFormatters: [FilteringTextInputFormatter.digitsOnly],
       decoration: InputDecoration(
         labelText: '请输入当前 ${widget.pinLength} 位密码确认',
+        border: const OutlineInputBorder(),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 12,
+          vertical: 14,
+        ),
         errorText: _error,
       ),
-    ),
-    actions: [
-      TextButton(
-        onPressed: () => Navigator.of(context).pop(),
-        child: const Text('取消'),
+    );
+    return AlertDialog(
+      title: Text(widget.title),
+      content: SingleChildScrollView(
+        child: isDesktop
+            ? ConstrainedBox(
+                constraints: const BoxConstraints(minWidth: 340, maxWidth: 380),
+                child: field,
+              )
+            : field,
       ),
-      FilledButton(
-        key: const Key('confirm_verify_pin_button'),
-        onPressed: _submit,
-        child: const Text('确认'),
-      ),
-    ],
-  );
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          key: const Key('confirm_verify_pin_button'),
+          onPressed: _submit,
+          child: const Text('确认'),
+        ),
+      ],
+    );
+  }
 }

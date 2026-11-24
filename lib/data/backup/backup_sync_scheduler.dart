@@ -22,6 +22,7 @@ final class BackupSyncScheduler {
     int Function()? nowMs,
     this.onCloudSyncOutcome,
     this.onLocalBackupCreated,
+    this.onCloudBackupUploaded,
     this.onError,
     Duration Function(int minutes)? idleTimerDurationBuilder,
     Duration Function(int minutes)? scheduleTimerDurationBuilder,
@@ -44,6 +45,7 @@ final class BackupSyncScheduler {
   final int Function() _nowMs;
   final void Function(CloudSyncOutcome outcome)? onCloudSyncOutcome;
   final void Function(BackupFileMetadata metadata)? onLocalBackupCreated;
+  final void Function(BackupFileMetadata metadata)? onCloudBackupUploaded;
   final void Function(Object error, StackTrace stackTrace)? onError;
   final Duration Function(int minutes) _idleDurationForMinutes;
   final Duration Function(int minutes) _scheduleDurationForMinutes;
@@ -71,6 +73,8 @@ final class BackupSyncScheduler {
 
   Future<void>? _startFuture;
   bool _initialized = false;
+  bool _receivedLocalPolicyFromStream = false;
+  bool _receivedCloudSettingsFromStream = false;
   bool _registeredWithService = false;
   bool _disposed = false;
 
@@ -105,8 +109,12 @@ final class BackupSyncScheduler {
       final loadedLocal = await service.getLocalAutoBackupPolicy();
       final loadedCloud = await service.getCloudSyncSettings();
       if (_disposed) return;
-      _localPolicy = loadedLocal;
-      _cloudSettings = loadedCloud;
+      if (!_receivedLocalPolicyFromStream) {
+        _localPolicy = loadedLocal;
+      }
+      if (!_receivedCloudSettingsFromStream) {
+        _cloudSettings = loadedCloud;
+      }
       _initialized = true;
       _reconfigureLocalScheduleTimer();
       _reconfigureCloudScheduleTimer();
@@ -207,6 +215,7 @@ final class BackupSyncScheduler {
 
   void _onLocalPolicyChanged(LocalAutoBackupPolicy nextPolicy) {
     if (_disposed) return;
+    _receivedLocalPolicyFromStream = true;
     final prevIdleMinutes = _localPolicy.idleMinutes;
     _localPolicy = nextPolicy;
 
@@ -230,6 +239,7 @@ final class BackupSyncScheduler {
 
   void _onCloudSettingsChanged(CloudSyncSettings nextSettings) {
     if (_disposed) return;
+    _receivedCloudSettingsFromStream = true;
     final prevIdleMinutes = _cloudSettings.idleMinutes;
     _cloudSettings = nextSettings;
 
@@ -382,10 +392,16 @@ final class BackupSyncScheduler {
         _cancelCloudIdle();
       }
     }
+
+    // 3. Run 24h silent cloud auto-backup if enabled on active backend (`S-06`).
+    if (!_disposed && _cloudSettings.backend != CloudBackendType.none) {
+      await _triggerSilentCloudAutoBackup();
+    }
   }
 
-  /// Executes enabled exit backup/sync on desktop window close, bounded by
-  /// [timeout] (default 5s) so offline or hung servers NEVER block window exit.
+  /// Executes enabled exit backup/sync sequentially (local backup -> cloud sync,
+  /// `S-07`) on desktop window close, bounded by [timeout] (default 5s) so
+  /// offline or hung servers NEVER block window exit.
   Future<void> onDesktopExitRequested({
     Duration timeout = const Duration(seconds: 5),
   }) async {
@@ -404,17 +420,32 @@ final class BackupSyncScheduler {
       return;
     }
 
-    final tasks = <Future<void>>[
-      if (shouldLocal) _triggerLocalBackup(AutoTriggerSource.exit).then((_) {}),
-      if (shouldCloud) _triggerCloudSync(AutoTriggerSource.exit).then((_) {}),
-    ];
+    Future<void> runExitSequence() async {
+      if (shouldLocal) {
+        await _triggerLocalBackup(AutoTriggerSource.exit);
+      }
+      if (!_disposed && shouldCloud) {
+        await _triggerCloudSync(AutoTriggerSource.exit);
+      }
+    }
 
     try {
-      await Future.wait(
-        tasks,
-      ).timeout(timeout, onTimeout: () => const <void>[]);
+      await runExitSequence().timeout(timeout, onTimeout: () {});
     } catch (_) {
       // Never allow exit backup/sync failures to block desktop window close.
+    }
+  }
+
+  Future<BackupFileMetadata?> _triggerSilentCloudAutoBackup() async {
+    try {
+      final uploaded = await service.runSilentAutoBackupIfNeeded();
+      if (uploaded != null && !_disposed) {
+        onCloudBackupUploaded?.call(uploaded);
+      }
+      return uploaded;
+    } catch (e, st) {
+      onError?.call(e, st);
+      return null;
     }
   }
 

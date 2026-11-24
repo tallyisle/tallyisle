@@ -35,7 +35,7 @@ final class BankCardDraft {
     stripCardSeparators(cardNo),
     cardOwner.trim(),
     remark.trim(),
-    cardColor?.trim().toUpperCase(),
+    cardColor?.trim(),
     cardAssetId,
   ];
 }

@@ -609,5 +609,112 @@ void main() {
         );
       },
     );
+
+    test(
+      'L-02: Non-FX discounted expense is NOT double-discounted in backward walk',
+      () {
+        // Account started at 1000.00, spent 100.00 gross with 20.00 discount ->
+        // net booked moneyMinor = 80.00, current balance = 920.00.
+        final accounts = [acc(101, '招行卡', 920)];
+        final records = [
+          TrendRecord(
+            id: 'R_INIT',
+            type: RecordType.income,
+            moneyMinor: y(1000),
+            recordTime: DateTime(2026, 1, 5).millisecondsSinceEpoch,
+            assetId: 101,
+          ),
+          TrendRecord(
+            id: 'R_DISC',
+            type: RecordType.expense,
+            moneyMinor: y(80), // already net!
+            discountMinor: y(20),
+            recordTime: DateTime(2026, 2, 10).millisecondsSinceEpoch,
+            assetId: 101,
+          ),
+        ];
+
+        final res = computeAssetTrend(
+          accounts: accounts,
+          records: records,
+          rates: rates,
+          filter: const AssetTrendFilter.singleAsset(101),
+          selectedYear: 2026,
+          referenceDate: DateTime(2026, 2, 28),
+        );
+
+        // Feb outflow must be 80.00 (NOT 60.00!), Jan balance must be 1000.00!
+        expect(res.chartPoints[1].outflowMinor, y(80));
+        expect(res.chartPoints[1].balanceMinor, y(920));
+        expect(res.chartPoints[0].balanceMinor, y(1000));
+      },
+    );
+
+    test(
+      'L-02: Foreign-currency discounted expense matches effects in both original and base currency',
+      () {
+        // USD card started at $200.00, spent $100 gross with $20 discount ->
+        // net $80.00 booked (bm = $80 / 0.14 = ¥571.43), current balance = $120.00.
+        final accounts = [acc(103, '美元卡', 120, currency: 'USD')];
+        final usdSnap = CurrencySnapshot(
+          sourceCode: 'USD',
+          sourceGross: y(100),
+          assetCode: 'USD',
+          assetNet: y(80),
+          baseCode: 'CNY',
+          baseAmount: y(571.43),
+        );
+        final records = [
+          TrendRecord(
+            id: 'R_USD_INIT',
+            type: RecordType.income,
+            moneyMinor: y(200),
+            recordTime: DateTime(2026, 1, 5).millisecondsSinceEpoch,
+            assetId: 103,
+            currency: CurrencySnapshot(
+              sourceCode: 'USD',
+              sourceGross: y(200),
+              assetCode: 'USD',
+              assetNet: y(200),
+              baseCode: 'CNY',
+              baseAmount: y(1428.57),
+            ),
+          ),
+          TrendRecord(
+            id: 'R_USD_DISC',
+            type: RecordType.expense,
+            moneyMinor: y(80),
+            discountMinor: y(20),
+            recordTime: DateTime(2026, 2, 12).millisecondsSinceEpoch,
+            assetId: 103,
+            currency: usdSnap,
+          ),
+        ];
+
+        final origRes = computeAssetTrend(
+          accounts: accounts,
+          records: records,
+          rates: rates,
+          filter: const AssetTrendFilter.singleAsset(103),
+          useOriginalCurrency: true,
+          selectedYear: 2026,
+          referenceDate: DateTime(2026, 2, 28),
+        );
+        expect(origRes.chartPoints[1].outflowMinor, y(80));
+        expect(origRes.chartPoints[1].balanceMinor, y(120));
+        expect(origRes.chartPoints[0].balanceMinor, y(200));
+
+        final baseRes = computeAssetTrend(
+          accounts: accounts,
+          records: records,
+          rates: rates,
+          filter: const AssetTrendFilter.singleAsset(103),
+          useOriginalCurrency: false,
+          selectedYear: 2026,
+          referenceDate: DateTime(2026, 2, 28),
+        );
+        expect(baseRes.chartPoints[1].outflowMinor, y(571.43));
+      },
+    );
   });
 }

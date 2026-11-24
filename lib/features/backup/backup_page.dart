@@ -3,17 +3,19 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../app/providers.dart';
+import '../../app/adaptive.dart';
 import '../../core/failure.dart';
 import '../../data/backup/s3_client.dart';
+import '../../data/backup/tally_backup_service.dart';
 import '../../data/backup/webdav_client.dart';
 import '../../domain/rules/cloud_sync_rules.dart';
 import '../../domain/rules/tally_backup.dart';
 import '../../platform/files.dart';
 import '../common/common.dart';
-import '../migration/migration_providers.dart';
-import '../reminder/reminder_providers.dart';
+import '../common/desktop_modal_page.dart';
+import 'backup_history_sheet.dart';
 import 'backup_providers.dart';
+import 'post_restore_refresh.dart';
 import 's3_config_page.dart';
 import 'webdav_config_page.dart';
 
@@ -31,6 +33,28 @@ class _BackupPageState extends ConsumerState<BackupPage>
   int _transferredBytes = 0;
   int _totalBytes = 0;
   CloudSyncOutcome? _pendingConflict;
+  String? _pendingConflictTargetFingerprint;
+
+  void _clearPendingConflict() {
+    _pendingConflict = null;
+    _pendingConflictTargetFingerprint = null;
+  }
+
+  Future<String> _resolveActiveTargetFingerprint(
+    TallyBackupService service,
+  ) async {
+    final settings = await service.getCloudSyncSettings();
+    switch (settings.backend) {
+      case CloudBackendType.webdav:
+        final dav = await service.getWebDavConfig();
+        return dav.isConfigured ? dav.targetFingerprint : '';
+      case CloudBackendType.s3:
+        final s3 = await service.getS3Config();
+        return s3.isConfigured ? s3.targetFingerprint : '';
+      case CloudBackendType.none:
+        return '';
+    }
+  }
 
   @override
   void initState() {
@@ -54,15 +78,22 @@ class _BackupPageState extends ConsumerState<BackupPage>
   Future<void> _checkSilentTasksOnResume() async {
     try {
       final service = await ref.read(tallyBackupServiceProvider.future);
+      if (service.isSyncInProgress || _busy || !mounted) return;
       if (!service.hasAttachedScheduler) {
         final syncOutcome = await service.runCloudAutoSyncForTrigger(
           AutoTriggerSource.windowFocus,
         );
         if (syncOutcome != null && mounted) {
           if (syncOutcome.status == CloudSyncStatus.pulled) {
-            _refreshAfterRestore();
+            setState(_clearPendingConflict);
+            await _refreshAfterRestore();
           } else if (syncOutcome.isConflict) {
-            setState(() => _pendingConflict = syncOutcome);
+            final fp = await _resolveActiveTargetFingerprint(service);
+            if (!mounted) return;
+            setState(() {
+              _pendingConflict = syncOutcome;
+              _pendingConflictTargetFingerprint = fp;
+            });
             _refreshAfterBackupChange();
           } else {
             _refreshAfterBackupChange();
@@ -74,10 +105,10 @@ class _BackupPageState extends ConsumerState<BackupPage>
         if (localSaved != null && mounted) {
           _refreshAfterBackupChange();
         }
-      }
-      final uploaded = await service.runSilentAutoBackupIfNeeded();
-      if (uploaded != null && mounted) {
-        _refreshAfterBackupChange();
+        final uploaded = await service.runSilentAutoBackupIfNeeded();
+        if (uploaded != null && mounted) {
+          _refreshAfterBackupChange();
+        }
       }
     } catch (_) {
       // Silent background check never interrupts foreground workflow.
@@ -94,20 +125,8 @@ class _BackupPageState extends ConsumerState<BackupPage>
       ..invalidate(lastBackupAtMsProvider);
   }
 
-  void _refreshAfterRestore() {
-    _refreshAfterBackupChange();
-    ref.read(periodOffsetProvider.notifier).reset();
-    ref.read(calendarMonthOffsetProvider.notifier).reset();
-    ref
-      ..invalidate(currentBookIdProvider)
-      ..invalidate(booksProvider)
-      ..invalidate(assetsProvider)
-      ..invalidate(assetBooksProvider)
-      ..invalidate(currenciesProvider)
-      ..invalidate(tagsProvider)
-      ..invalidate(remindersProvider)
-      ..invalidate(reminderCountProvider)
-      ..invalidate(migrationLocalSummaryProvider);
+  Future<void> _refreshAfterRestore() async {
+    await invalidateAllAfterDatabaseReplace(ref);
   }
 
   void _showMessage(String text) {
@@ -133,7 +152,8 @@ class _BackupPageState extends ConsumerState<BackupPage>
     try {
       final service = await ref.read(tallyBackupServiceProvider.future);
       await service.setCloudBackend(backend);
-      setState(() => _pendingConflict = null);
+      if (!mounted) return;
+      setState(_clearPendingConflict);
       ref
         ..invalidate(cloudSyncSettingsProvider)
         ..invalidate(activeCloudBackupsProvider)
@@ -177,6 +197,22 @@ class _BackupPageState extends ConsumerState<BackupPage>
     }
   }
 
+  Future<void> _updateQuickEntryVisibility({
+    bool? showHome,
+    bool? showMe,
+  }) async {
+    try {
+      final service = await ref.read(tallyBackupServiceProvider.future);
+      await service.updateQuickEntryVisibility(
+        showHomeQuickEntry: showHome,
+        showMeQuickEntry: showMe,
+      );
+      ref.invalidate(cloudSyncSettingsProvider);
+    } catch (e) {
+      _showMessage(safeMessage(e));
+    }
+  }
+
   Future<void> _updateLocalAutoBackupPolicy(
     LocalAutoBackupPolicy nextPolicy,
   ) async {
@@ -202,27 +238,31 @@ class _BackupPageState extends ConsumerState<BackupPage>
   }
 
   Future<void> _openWebDavConfig(WebDavConfig current) async {
-    final changed = await Navigator.of(context).push<bool>(
-      MaterialPageRoute<bool>(
-        builder: (_) => WebDavConfigPage(initialConfig: current),
-      ),
+    final changed = await pushDesktopModalOrMaterialRoute<bool>(
+      context,
+      child: WebDavConfigPage(initialConfig: current),
     );
     if (changed == true && mounted) {
+      setState(_clearPendingConflict);
       _refreshAfterBackupChange();
-      ref.invalidate(cloudSyncSettingsProvider);
+      ref
+        ..invalidate(cloudSyncSettingsProvider)
+        ..invalidate(cloudSyncCursorProvider);
       _showMessage('WebDAV 配置已更新');
     }
   }
 
   Future<void> _openS3Config(S3Config current) async {
-    final changed = await Navigator.of(context).push<bool>(
-      MaterialPageRoute<bool>(
-        builder: (_) => S3ConfigPage(initialConfig: current),
-      ),
+    final changed = await pushDesktopModalOrMaterialRoute<bool>(
+      context,
+      child: S3ConfigPage(initialConfig: current),
     );
     if (changed == true && mounted) {
+      setState(_clearPendingConflict);
       _refreshAfterBackupChange();
-      ref.invalidate(cloudSyncSettingsProvider);
+      ref
+        ..invalidate(cloudSyncSettingsProvider)
+        ..invalidate(cloudSyncCursorProvider);
       _showMessage('S3 对象存储配置已更新');
     }
   }
@@ -254,19 +294,24 @@ class _BackupPageState extends ConsumerState<BackupPage>
       if (!mounted) return;
       switch (outcome.status) {
         case CloudSyncStatus.alreadyUpToDate:
-          setState(() => _pendingConflict = null);
+          setState(_clearPendingConflict);
           _refreshAfterBackupChange();
           _showMessage('多端数据已是最新（版本 r${outcome.revision}）');
         case CloudSyncStatus.pushed:
-          setState(() => _pendingConflict = null);
+          setState(_clearPendingConflict);
           _refreshAfterBackupChange();
           _showMessage('已推送最新快照至云端（版本 r${outcome.revision}）');
         case CloudSyncStatus.pulled:
-          setState(() => _pendingConflict = null);
-          _refreshAfterRestore();
+          setState(_clearPendingConflict);
+          await _refreshAfterRestore();
           _showMessage('已从云端同步最新数据（版本 r${outcome.revision}）');
         case CloudSyncStatus.conflict:
-          setState(() => _pendingConflict = outcome);
+          final fp = await _resolveActiveTargetFingerprint(service);
+          if (!mounted) return;
+          setState(() {
+            _pendingConflict = outcome;
+            _pendingConflictTargetFingerprint = fp;
+          });
           _refreshAfterBackupChange();
           conflictToPrompt = outcome;
       }
@@ -286,12 +331,18 @@ class _BackupPageState extends ConsumerState<BackupPage>
     }
   }
 
-  Future<void> _showConflictResolutionDialog(CloudSyncOutcome conflict) async {
-    final head = conflict.remoteHead;
+  Future<void> _showConflictResolutionDialog(
+    CloudSyncOutcome? conflict, {
+    String? fallbackBackupFileName,
+  }) async {
+    final head = conflict?.remoteHead;
     final remoteDesc = head == null
         ? '云端新版本'
         : '设备「${head.deviceName}」于 ${formatDateTime(DateTime.fromMillisecondsSinceEpoch(head.updatedAtMs))} 推送的版本 r${head.revision}（账单 ${head.recordCount} 条）';
-    final backupName = conflict.conflictBackupFileName ?? 'conflict_*.tally';
+    final backupName =
+        conflict?.conflictBackupFileName ??
+        fallbackBackupFileName ??
+        'conflict_*.tally';
 
     final choice = await showDialog<SyncConflictResolution?>(
       context: context,
@@ -448,7 +499,9 @@ class _BackupPageState extends ConsumerState<BackupPage>
     try {
       final service = await ref.read(tallyBackupServiceProvider.future);
       final manifest = await service.restoreFromBytes(selected.bytes);
-      _refreshAfterRestore();
+      if (!mounted) return;
+      setState(_clearPendingConflict);
+      await _refreshAfterRestore();
       _showMessage('恢复完成：共导入 ${manifest.totalRows} 条数据');
     } catch (e) {
       _showMessage(safeMessage(e));
@@ -480,7 +533,9 @@ class _BackupPageState extends ConsumerState<BackupPage>
     try {
       final service = await ref.read(tallyBackupServiceProvider.future);
       final manifest = await service.restoreLocalBackup(item.fileName);
-      _refreshAfterRestore();
+      if (!mounted) return;
+      setState(_clearPendingConflict);
+      await _refreshAfterRestore();
       _showMessage('恢复完成：共导入 ${manifest.totalRows} 条数据');
     } catch (e) {
       _showMessage(safeMessage(e));
@@ -506,10 +561,50 @@ class _BackupPageState extends ConsumerState<BackupPage>
     try {
       final service = await ref.read(tallyBackupServiceProvider.future);
       await service.deleteLocalBackup(item.fileName);
-      ref.invalidate(localBackupsProvider);
+      if (!mounted) return;
+      if (_pendingConflict?.conflictBackupFileName == item.fileName) {
+        setState(_clearPendingConflict);
+      }
+      _refreshAfterBackupChange();
       _showMessage('已删除本地备份：${item.fileName}');
     } catch (e) {
       _showMessage(safeMessage(e));
+    }
+  }
+
+  Future<void> _openLocalBackupHistoryDialog() async {
+    final outcome = await showBackupHistoryManagementDialog(
+      context,
+      source: BackupHistorySource.local,
+    );
+    if (!mounted || outcome == null) return;
+    if (outcome.didRestore) {
+      setState(_clearPendingConflict);
+      _showMessage('恢复完成：共导入 ${outcome.restoredTotalRows} 条数据');
+      return;
+    }
+    if (outcome.deletedLocalFileNames.isNotEmpty) {
+      final pendingName = _pendingConflict?.conflictBackupFileName;
+      if (pendingName != null &&
+          outcome.deletedLocalFileNames.contains(pendingName)) {
+        setState(_clearPendingConflict);
+      }
+      _refreshAfterBackupChange();
+    }
+  }
+
+  Future<void> _openCloudBackupHistoryDialog(
+    CloudBackendType activeBackend,
+  ) async {
+    final outcome = await showBackupHistoryManagementDialog(
+      context,
+      source: BackupHistorySource.cloud,
+      cloudBackend: activeBackend,
+    );
+    if (!mounted || outcome == null) return;
+    if (outcome.didRestore) {
+      setState(_clearPendingConflict);
+      _showMessage('云端恢复完成：共导入 ${outcome.restoredTotalRows} 条数据');
     }
   }
 
@@ -578,7 +673,9 @@ class _BackupPageState extends ConsumerState<BackupPage>
           });
         },
       );
-      _refreshAfterRestore();
+      if (!mounted) return;
+      setState(_clearPendingConflict);
+      await _refreshAfterRestore();
       _showMessage('云端恢复完成：共导入 ${manifest.totalRows} 条数据');
     } catch (e) {
       _showMessage(safeMessage(e));
@@ -629,6 +726,8 @@ class _BackupPageState extends ConsumerState<BackupPage>
       }
     }
   }
+
+  static const int _maxInlineBackupItems = 3;
 
   static const ButtonStyle _compactButtonStyle = ButtonStyle(
     padding: WidgetStatePropertyAll(
@@ -686,11 +785,15 @@ class _BackupPageState extends ConsumerState<BackupPage>
 
   @override
   Widget build(BuildContext context) {
+    final isDesktop = DesktopAdaptive.isDesktop(context);
     final davConfigAsync = ref.watch(webDavConfigProvider);
     final s3ConfigAsync = ref.watch(s3ConfigProvider);
     final syncSettingsAsync = ref.watch(cloudSyncSettingsProvider);
     final localPolicyAsync = ref.watch(localAutoBackupPolicyProvider);
     final syncCursorAsync = ref.watch(cloudSyncCursorProvider);
+    final serviceSyncing =
+        ref.watch(cloudSyncInProgressProvider).value ?? false;
+    final effectiveBusy = _busy || serviceSyncing;
     final localListAsync = ref.watch(localBackupsProvider);
     final lastBackupAsync = ref.watch(lastBackupAtMsProvider);
     final fileAccess = ref.watch(backupFileAccessProvider);
@@ -703,15 +806,14 @@ class _BackupPageState extends ConsumerState<BackupPage>
       data: (c) => c,
       orElse: S3Config.unconfigured,
     );
-    final syncSettings = syncSettingsAsync.maybeWhen(
-      data: (s) => s,
-      orElse: () => CloudSyncSettings(
-        backend: davConfig.isConfigured
-            ? CloudBackendType.webdav
-            : CloudBackendType.none,
-        deviceId: 'pending',
-      ),
-    );
+    final syncSettings =
+        syncSettingsAsync.value ??
+        CloudSyncSettings(
+          backend: davConfig.isConfigured
+              ? CloudBackendType.webdav
+              : CloudBackendType.none,
+          deviceId: 'pending',
+        );
     final localPolicy = localPolicyAsync.maybeWhen(
       data: (p) => p,
       orElse: () => LocalAutoBackupPolicy.defaults,
@@ -748,6 +850,34 @@ class _BackupPageState extends ConsumerState<BackupPage>
       CloudBackendType.s3 => s3Config.isConfigured,
       CloudBackendType.none => false,
     };
+    final activeTargetFingerprint = switch (activeBackend) {
+      CloudBackendType.webdav when davConfig.isConfigured =>
+        davConfig.targetFingerprint,
+      CloudBackendType.s3 when s3Config.isConfigured =>
+        s3Config.targetFingerprint,
+      _ => '',
+    };
+    final scopedCursor = activeTargetFingerprint.isEmpty
+        ? const LocalSyncCursor.initial()
+        : syncCursor.scopedToTarget(activeTargetFingerprint);
+    final effectiveIncludeAttachments = switch (activeBackend) {
+      CloudBackendType.s3 => s3Config.includeAttachments,
+      CloudBackendType.webdav ||
+      CloudBackendType.none => davConfig.includeAttachments,
+    };
+    final effectivePendingConflict =
+        activeTargetFingerprint.isNotEmpty &&
+            _pendingConflictTargetFingerprint == activeTargetFingerprint
+        ? _pendingConflict
+        : null;
+    final activeConflictFileName =
+        effectivePendingConflict?.conflictBackupFileName ??
+        scopedCursor.lastConflictFileName;
+    final hasPersistentConflict =
+        isActiveCloudReady &&
+        ((activeConflictFileName != null &&
+                activeConflictFileName.isNotEmpty) ||
+            effectivePendingConflict != null);
     final AsyncValue<List<BackupFileMetadata>> remoteListAsync =
         isActiveCloudReady
         ? ref.watch(activeCloudBackupsProvider)
@@ -789,7 +919,7 @@ class _BackupPageState extends ConsumerState<BackupPage>
       appBar: AppBar(title: const Text('云同步与备份')),
       body: Column(
         children: [
-          if (_busy)
+          if (effectiveBusy)
             Material(
               key: const Key('webdav_transfer_progress'),
               elevation: 1,
@@ -802,7 +932,10 @@ class _BackupPageState extends ConsumerState<BackupPage>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(_progressLabel ?? '正在处理…'),
+                    Text(
+                      _progressLabel ??
+                          (serviceSyncing ? '正在执行多端云同步…' : '正在处理…'),
+                    ),
                     const SizedBox(height: 6),
                     LinearProgressIndicator(
                       value: _totalBytes > 0
@@ -823,818 +956,1204 @@ class _BackupPageState extends ConsumerState<BackupPage>
           Expanded(
             child: SingleChildScrollView(
               padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Card(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        ListTile(
-                          dense: true,
-                          leading: const Icon(Icons.shield_outlined),
-                          title: const Text('备份导出模式'),
-                          subtitle: Text(lastBackupText),
-                        ),
-                        SwitchListTile(
-                          key: const Key('include_attachments_switch'),
-                          dense: true,
-                          title: const Text('完整备份（包含账单图片附件）'),
-                          subtitle: Text(
-                            davConfig.includeAttachments
-                                ? '打包全部 22 张业务表及原图附件并写入 SHA-256 校验清单'
-                                : '纯数据轻量备份（仅打包 22 张业务表，不含图片附件）',
-                          ),
-                          value: davConfig.includeAttachments,
-                          onChanged: _busy ? null : _toggleIncludeAttachments,
-                        ),
-                      ],
-                    ),
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxWidth: isDesktop ? 780 : double.infinity,
                   ),
-                  const SizedBox(height: 12),
-                  Card(
-                    key: const Key('cloud_sync_card'),
-                    child: Padding(
-                      padding: const EdgeInsets.all(14),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            '多端云同步（WebDAV / S3）',
-                            style: Theme.of(context).textTheme.titleMedium,
-                          ),
-                          const SizedBox(height: 8),
-                          SizedBox(
-                            width: double.infinity,
-                            child: SegmentedButton<CloudBackendType>(
-                              key: const Key('cloud_backend_selector'),
-                              showSelectedIcon: false,
-                              style: const ButtonStyle(
-                                visualDensity: VisualDensity.compact,
-                                padding: WidgetStatePropertyAll(
-                                  EdgeInsets.symmetric(horizontal: 10),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Card(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            ListTile(
+                              dense: isDesktop ? null : true,
+                              leading: const Icon(Icons.shield_outlined),
+                              title: const Text('备份导出模式'),
+                              subtitle: Text(lastBackupText),
+                            ),
+                            SwitchListTile(
+                              key: const Key('include_attachments_switch'),
+                              dense: isDesktop ? null : true,
+                              title: const Text('完整备份（包含账单图片附件）'),
+                              subtitle: Text(
+                                effectiveIncludeAttachments
+                                    ? '打包全部 22 张业务表及原图附件并写入 SHA-256 校验清单'
+                                    : '纯数据轻量备份（仅打包 22 张业务表，不含图片附件）',
+                              ),
+                              value: effectiveIncludeAttachments,
+                              onChanged: effectiveBusy
+                                  ? null
+                                  : _toggleIncludeAttachments,
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Card(
+                        key: const Key('cloud_sync_card'),
+                        child: Padding(
+                          padding: const EdgeInsets.all(14),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '多端云同步（WebDAV / S3）',
+                                style: Theme.of(context).textTheme.titleMedium,
+                              ),
+                              const SizedBox(height: 8),
+                              Builder(
+                                builder: (context) {
+                                  final theme = Theme.of(context);
+                                  final scheme = theme.colorScheme;
+                                  final isDark =
+                                      theme.brightness == Brightness.dark;
+                                  return Container(
+                                    key: const Key(
+                                      'cloud_sync_single_device_notice',
+                                    ),
+                                    padding: const EdgeInsets.all(12),
+                                    decoration: BoxDecoration(
+                                      color: isDark
+                                          ? scheme.tertiaryContainer.withValues(
+                                              alpha: 0.34,
+                                            )
+                                          : scheme.tertiaryContainer.withValues(
+                                              alpha: 0.62,
+                                            ),
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: Border.all(
+                                        color: scheme.tertiary.withValues(
+                                          alpha: isDark ? 0.45 : 0.3,
+                                        ),
+                                      ),
+                                    ),
+                                    child: Row(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Icon(
+                                          Icons.warning_amber_rounded,
+                                          size: 20,
+                                          color: scheme.onTertiaryContainer,
+                                        ),
+                                        const SizedBox(width: 10),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                '使用前提：单设备主力记账 · 换设备前同步接力',
+                                                style: theme
+                                                    .textTheme
+                                                    .labelLarge
+                                                    ?.copyWith(
+                                                      fontWeight:
+                                                          FontWeight.w700,
+                                                      color: scheme
+                                                          .onTertiaryContainer,
+                                                    ),
+                                              ),
+                                              const SizedBox(height: 4),
+                                              Text(
+                                                '当前云同步采用整库快照接力机制（非逐笔实时合并），适用于同一时段固定在一台主力设备记账、换用另一台设备前先同步接力。请勿在多台设备离线或未同步状态下同时记账，以免产生快照冲突（若触发冲突，系统会自动归档 conflict_*.tally 保护本机数据零丢失）。',
+                                                style: theme.textTheme.bodySmall
+                                                    ?.copyWith(
+                                                      height: 1.38,
+                                                      color: scheme
+                                                          .onTertiaryContainer,
+                                                    ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                },
+                              ),
+                              const SizedBox(height: 10),
+                              SizedBox(
+                                width: double.infinity,
+                                child: SegmentedButton<CloudBackendType>(
+                                  key: const Key('cloud_backend_selector'),
+                                  showSelectedIcon: false,
+                                  style: isDesktop
+                                      ? const ButtonStyle(
+                                          padding: WidgetStatePropertyAll(
+                                            EdgeInsets.symmetric(
+                                              horizontal: 12,
+                                              vertical: 6,
+                                            ),
+                                          ),
+                                        )
+                                      : const ButtonStyle(
+                                          visualDensity: VisualDensity.compact,
+                                          padding: WidgetStatePropertyAll(
+                                            EdgeInsets.symmetric(
+                                              horizontal: 10,
+                                            ),
+                                          ),
+                                        ),
+                                  segments: <ButtonSegment<CloudBackendType>>[
+                                    ButtonSegment<CloudBackendType>(
+                                      value: CloudBackendType.none,
+                                      label: _singleLineText('未启用'),
+                                    ),
+                                    ButtonSegment<CloudBackendType>(
+                                      value: CloudBackendType.webdav,
+                                      label: _singleLineText('WebDAV'),
+                                    ),
+                                    ButtonSegment<CloudBackendType>(
+                                      value: CloudBackendType.s3,
+                                      label: _singleLineText('S3 存储'),
+                                    ),
+                                  ],
+                                  selected: <CloudBackendType>{activeBackend},
+                                  onSelectionChanged: effectiveBusy
+                                      ? null
+                                      : (selected) =>
+                                            _selectCloudBackend(selected.first),
                                 ),
                               ),
-                              segments: <ButtonSegment<CloudBackendType>>[
-                                ButtonSegment<CloudBackendType>(
-                                  value: CloudBackendType.none,
-                                  label: _singleLineText('未启用'),
+                              const SizedBox(height: 8),
+                              Text(
+                                _buildSyncStatusSummary(
+                                  settings: syncSettings,
+                                  cursor: scopedCursor,
+                                  isActiveReady: isActiveCloudReady,
                                 ),
-                                ButtonSegment<CloudBackendType>(
-                                  value: CloudBackendType.webdav,
-                                  label: _singleLineText('WebDAV'),
+                                key: const Key('cloud_sync_status_summary'),
+                                style: Theme.of(context).textTheme.bodySmall,
+                              ),
+                              const SizedBox(height: 10),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: OutlinedButton.icon(
+                                      key: const Key(
+                                        'open_webdav_config_button',
+                                      ),
+                                      style: _compactButtonStyle,
+                                      onPressed: effectiveBusy
+                                          ? null
+                                          : () => _openWebDavConfig(davConfig),
+                                      icon: const Icon(
+                                        Icons.settings_outlined,
+                                        size: 18,
+                                      ),
+                                      label: _singleLineText(
+                                        davConfig.isConfigured
+                                            ? 'WebDAV 配置'
+                                            : '配置 WebDAV',
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: OutlinedButton.icon(
+                                      key: const Key('open_s3_config_button'),
+                                      style: _compactButtonStyle,
+                                      onPressed: effectiveBusy
+                                          ? null
+                                          : () => _openS3Config(s3Config),
+                                      icon: const Icon(
+                                        Icons.cloud_outlined,
+                                        size: 18,
+                                      ),
+                                      label: _singleLineText(
+                                        s3Config.isConfigured
+                                            ? 'S3 配置'
+                                            : '配置 S3',
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              SizedBox(
+                                width: double.infinity,
+                                child: FilledButton.icon(
+                                  key: const Key('cloud_sync_now_button'),
+                                  onPressed:
+                                      !effectiveBusy && isActiveCloudReady
+                                      ? _handleSyncNow
+                                      : null,
+                                  icon: effectiveBusy
+                                      ? const SizedBox(
+                                          width: 16,
+                                          height: 16,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                          ),
+                                        )
+                                      : const Icon(Icons.sync, size: 18),
+                                  label: _singleLineText(
+                                    effectiveBusy ? '正在多端同步…' : '立即多端同步',
+                                  ),
                                 ),
-                                ButtonSegment<CloudBackendType>(
-                                  value: CloudBackendType.s3,
-                                  label: _singleLineText('S3 存储'),
+                              ),
+                              const Divider(height: 20),
+                              SwitchListTile(
+                                key: const Key('auto_cloud_sync_switch'),
+                                contentPadding: EdgeInsets.zero,
+                                dense: isDesktop ? null : true,
+                                title: const Text('自动多端同步策略'),
+                                subtitle: const Text(
+                                  '按需独立开启各自动同步时机（默认全部关闭，零静默联网）',
+                                ),
+                                value: syncSettings.autoSyncEnabled,
+                                onChanged: !effectiveBusy && isActiveCloudReady
+                                    ? _toggleAutoSync
+                                    : null,
+                              ),
+                              SwitchListTile(
+                                key: const Key('cloud_sync_trigger_startup'),
+                                contentPadding: EdgeInsets.zero,
+                                dense: isDesktop ? null : true,
+                                title: const Text('启动 / 窗口激活时自动同步'),
+                                subtitle: const Text(
+                                  '桌面获焦或回到前台时自动拉取或推送，预防多端陈旧冲突',
+                                ),
+                                value: syncSettings.syncOnStartup,
+                                onChanged: !effectiveBusy && isActiveCloudReady
+                                    ? (v) => _updateCloudSyncTriggers(
+                                        syncOnStartup: v,
+                                      )
+                                    : null,
+                              ),
+                              SwitchListTile(
+                                key: const Key('cloud_sync_trigger_exit'),
+                                contentPadding: EdgeInsets.zero,
+                                dense: isDesktop ? null : true,
+                                title: const Text('退出 / 切入后台时自动同步'),
+                                subtitle: const Text(
+                                  '切入后台或桌面关窗时自动同步（含 5 秒超时保护，离线绝不卡死）',
+                                ),
+                                value: syncSettings.syncOnExit,
+                                onChanged: !effectiveBusy && isActiveCloudReady
+                                    ? (v) => _updateCloudSyncTriggers(
+                                        syncOnExit: v,
+                                      )
+                                    : null,
+                              ),
+                              SwitchListTile(
+                                key: const Key('cloud_sync_trigger_idle'),
+                                contentPadding: EdgeInsets.zero,
+                                dense: isDesktop ? null : true,
+                                title: const Text('记账变更静置后自动同步'),
+                                subtitle: const Text('连续记账结束后静置指定时长合并推送一次'),
+                                value: syncSettings.syncOnIdle,
+                                onChanged: !effectiveBusy && isActiveCloudReady
+                                    ? (v) => _updateCloudSyncTriggers(
+                                        syncOnIdle: v,
+                                      )
+                                    : null,
+                              ),
+                              Padding(
+                                padding: EdgeInsets.only(
+                                  top: isDesktop ? 6 : 0,
+                                  bottom: 8,
+                                ),
+                                child: InputDecorator(
+                                  decoration: isDesktop
+                                      ? const InputDecoration(
+                                          labelText: '记账静置同步等待时长',
+                                          border: OutlineInputBorder(),
+                                          contentPadding: EdgeInsets.symmetric(
+                                            horizontal: 12,
+                                            vertical: 16,
+                                          ),
+                                        )
+                                      : const InputDecoration(
+                                          labelText: '记账静置同步等待时长',
+                                          border: OutlineInputBorder(),
+                                          isDense: true,
+                                        ),
+                                  child: DropdownButtonHideUnderline(
+                                    child: DropdownButton<int>(
+                                      key: const Key(
+                                        'cloud_sync_idle_minutes_selector',
+                                      ),
+                                      isExpanded: true,
+                                      isDense: true,
+                                      value: syncSettings.idleMinutes,
+                                      items: [
+                                        for (final m in cloudIdleOptions)
+                                          DropdownMenuItem<int>(
+                                            value: m,
+                                            child: Text('$m 分钟'),
+                                          ),
+                                      ],
+                                      onChanged: effectiveBusy
+                                          ? null
+                                          : (val) {
+                                              if (val != null) {
+                                                _updateCloudSyncTriggers(
+                                                  idleMinutes: val,
+                                                );
+                                              }
+                                            },
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              SwitchListTile(
+                                key: const Key('cloud_sync_trigger_schedule'),
+                                contentPadding: EdgeInsets.zero,
+                                dense: isDesktop ? null : true,
+                                title: const Text('定时周期自动同步'),
+                                subtitle: const Text('应用运行期间按固定间隔自动检查同步'),
+                                value: syncSettings.syncOnSchedule,
+                                onChanged: !effectiveBusy && isActiveCloudReady
+                                    ? (v) => _updateCloudSyncTriggers(
+                                        syncOnSchedule: v,
+                                      )
+                                    : null,
+                              ),
+                              Padding(
+                                padding: EdgeInsets.only(
+                                  top: isDesktop ? 6 : 0,
+                                  bottom: 4,
+                                ),
+                                child: InputDecorator(
+                                  decoration: isDesktop
+                                      ? const InputDecoration(
+                                          labelText: '定时自动同步周期',
+                                          border: OutlineInputBorder(),
+                                          contentPadding: EdgeInsets.symmetric(
+                                            horizontal: 12,
+                                            vertical: 16,
+                                          ),
+                                        )
+                                      : const InputDecoration(
+                                          labelText: '定时自动同步周期',
+                                          border: OutlineInputBorder(),
+                                          isDense: true,
+                                        ),
+                                  child: DropdownButtonHideUnderline(
+                                    child: DropdownButton<int>(
+                                      key: const Key(
+                                        'cloud_sync_schedule_interval_selector',
+                                      ),
+                                      isExpanded: true,
+                                      isDense: true,
+                                      value:
+                                          syncSettings.scheduleIntervalMinutes,
+                                      items: [
+                                        for (final m in cloudScheduleOptions)
+                                          DropdownMenuItem<int>(
+                                            value: m,
+                                            child: Text(
+                                              _formatIntervalMinutes(m),
+                                            ),
+                                          ),
+                                      ],
+                                      onChanged: effectiveBusy
+                                          ? null
+                                          : (val) {
+                                              if (val != null) {
+                                                _updateCloudSyncTriggers(
+                                                  scheduleIntervalMinutes: val,
+                                                );
+                                              }
+                                            },
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              if (hasPersistentConflict) ...[
+                                const SizedBox(height: 8),
+                                Container(
+                                  key: const Key('cloud_sync_conflict_banner'),
+                                  padding: const EdgeInsets.all(10),
+                                  decoration: BoxDecoration(
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.errorContainer,
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          '检测到同步冲突，本机快照已保护存为 ${activeConflictFileName ?? ''}',
+                                          style: TextStyle(
+                                            color: Theme.of(
+                                              context,
+                                            ).colorScheme.onErrorContainer,
+                                          ),
+                                        ),
+                                      ),
+                                      TextButton(
+                                        key: const Key(
+                                          'reopen_conflict_dialog_button',
+                                        ),
+                                        onPressed: effectiveBusy
+                                            ? null
+                                            : () =>
+                                                  _showConflictResolutionDialog(
+                                                    effectivePendingConflict,
+                                                    fallbackBackupFileName:
+                                                        activeConflictFileName,
+                                                  ),
+                                        child: const Text('处理冲突'),
+                                      ),
+                                    ],
+                                  ),
                                 ),
                               ],
-                              selected: <CloudBackendType>{activeBackend},
-                              onSelectionChanged: _busy
-                                  ? null
-                                  : (selected) =>
-                                        _selectCloudBackend(selected.first),
-                            ),
+                            ],
                           ),
-                          const SizedBox(height: 8),
-                          Text(
-                            _buildSyncStatusSummary(
-                              settings: syncSettings,
-                              cursor: syncCursor,
-                              isActiveReady: isActiveCloudReady,
-                            ),
-                            key: const Key('cloud_sync_status_summary'),
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
-                          const SizedBox(height: 10),
-                          Row(
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Card(
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Expanded(
-                                child: OutlinedButton.icon(
-                                  key: const Key('open_webdav_config_button'),
-                                  style: _compactButtonStyle,
-                                  onPressed: _busy
-                                      ? null
-                                      : () => _openWebDavConfig(davConfig),
-                                  icon: const Icon(
-                                    Icons.settings_outlined,
-                                    size: 18,
+                              Text(
+                                '本地备份（.tally）',
+                                style: Theme.of(context).textTheme.titleMedium,
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                '离线单机可用，采用开放标准 ZIP 容器与三阶段原子校验恢复。',
+                                style: Theme.of(context).textTheme.bodySmall,
+                              ),
+                              const SizedBox(height: 12),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: FilledButton.icon(
+                                      key: const Key(
+                                        'local_backup_create_button',
+                                      ),
+                                      style: _compactButtonStyle,
+                                      onPressed: effectiveBusy
+                                          ? null
+                                          : _handleCreateLocalBackup,
+                                      icon: const Icon(
+                                        Icons.archive_outlined,
+                                        size: 18,
+                                      ),
+                                      label: _singleLineText('生成本地备份'),
+                                    ),
                                   ),
-                                  label: _singleLineText(
-                                    davConfig.isConfigured
-                                        ? 'WebDAV 配置'
-                                        : '配置 WebDAV',
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: OutlinedButton.icon(
+                                      key: const Key(
+                                        'local_backup_import_button',
+                                      ),
+                                      style: _compactButtonStyle,
+                                      onPressed: effectiveBusy
+                                          ? null
+                                          : _handleImportAndRestore,
+                                      icon: const Icon(
+                                        Icons.folder_open_outlined,
+                                        size: 18,
+                                      ),
+                                      label: _singleLineText('从文件恢复'),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: OutlinedButton.icon(
+                                      key: const Key(
+                                        'local_backup_export_button',
+                                      ),
+                                      style: _compactButtonStyle,
+                                      onPressed:
+                                          !effectiveBusy && canSaveExternal
+                                          ? _handleExportSaveAs
+                                          : null,
+                                      icon: const Icon(
+                                        Icons.save_alt,
+                                        size: 18,
+                                      ),
+                                      label: _singleLineText('另存为文件'),
+                                    ),
+                                  ),
+                                  if (!isDesktop || canShareExternal) ...[
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: OutlinedButton.icon(
+                                        key: const Key(
+                                          'local_backup_share_button',
+                                        ),
+                                        style: _compactButtonStyle,
+                                        onPressed:
+                                            !effectiveBusy && canShareExternal
+                                            ? _handleShareBackup
+                                            : null,
+                                        icon: const Icon(
+                                          Icons.share_outlined,
+                                          size: 18,
+                                        ),
+                                        label: _singleLineText('系统分享'),
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                              const Divider(height: 24),
+                              Text(
+                                '本地自动备份策略',
+                                style: Theme.of(context).textTheme.titleSmall,
+                              ),
+                              const SizedBox(height: 8),
+                              InputDecorator(
+                                decoration: isDesktop
+                                    ? const InputDecoration(
+                                        labelText: '本地备份保留份数',
+                                        border: OutlineInputBorder(),
+                                        contentPadding: EdgeInsets.symmetric(
+                                          horizontal: 12,
+                                          vertical: 16,
+                                        ),
+                                      )
+                                    : const InputDecoration(
+                                        labelText: '本地备份保留份数',
+                                        border: OutlineInputBorder(),
+                                        isDense: true,
+                                      ),
+                                child: DropdownButtonHideUnderline(
+                                  child: DropdownButton<int>(
+                                    key: const Key(
+                                      'local_backup_keep_count_selector',
+                                    ),
+                                    isExpanded: true,
+                                    isDense: true,
+                                    value: localPolicy.keepCount,
+                                    items: [
+                                      for (final n in localKeepOptions)
+                                        DropdownMenuItem<int>(
+                                          value: n,
+                                          child: Text('$n 份'),
+                                        ),
+                                    ],
+                                    onChanged: effectiveBusy
+                                        ? null
+                                        : (val) {
+                                            if (val != null) {
+                                              _updateLocalAutoBackupPolicy(
+                                                localPolicy.copyWith(
+                                                  keepCount: val,
+                                                ),
+                                              );
+                                            }
+                                          },
                                   ),
                                 ),
                               ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: OutlinedButton.icon(
-                                  key: const Key('open_s3_config_button'),
-                                  style: _compactButtonStyle,
-                                  onPressed: _busy
-                                      ? null
-                                      : () => _openS3Config(s3Config),
-                                  icon: const Icon(
-                                    Icons.cloud_outlined,
-                                    size: 18,
-                                  ),
-                                  label: _singleLineText(
-                                    s3Config.isConfigured ? 'S3 配置' : '配置 S3',
+                              const SizedBox(height: 4),
+                              SwitchListTile(
+                                key: const Key('local_backup_trigger_startup'),
+                                contentPadding: EdgeInsets.zero,
+                                dense: isDesktop ? null : true,
+                                title: const Text('启动 App 时自动备份'),
+                                subtitle: const Text('仅在本地账务数据有变更时生成新快照'),
+                                value: localPolicy.backupOnStartup,
+                                onChanged: effectiveBusy
+                                    ? null
+                                    : (v) => _updateLocalAutoBackupPolicy(
+                                        localPolicy.copyWith(
+                                          backupOnStartup: v,
+                                        ),
+                                      ),
+                              ),
+                              SwitchListTile(
+                                key: const Key('local_backup_trigger_exit'),
+                                contentPadding: EdgeInsets.zero,
+                                dense: isDesktop ? null : true,
+                                title: const Text('退出 / 切入后台时自动备份'),
+                                subtitle: const Text('切入后台或关闭桌面窗口时保存变更快照'),
+                                value: localPolicy.backupOnExit,
+                                onChanged: effectiveBusy
+                                    ? null
+                                    : (v) => _updateLocalAutoBackupPolicy(
+                                        localPolicy.copyWith(backupOnExit: v),
+                                      ),
+                              ),
+                              SwitchListTile(
+                                key: const Key('local_backup_trigger_idle'),
+                                contentPadding: EdgeInsets.zero,
+                                dense: isDesktop ? null : true,
+                                title: const Text('记账变更静置后自动备份'),
+                                subtitle: const Text('连续记账结束后静置指定分钟数自动打包备份'),
+                                value: localPolicy.backupOnIdle,
+                                onChanged: effectiveBusy
+                                    ? null
+                                    : (v) => _updateLocalAutoBackupPolicy(
+                                        localPolicy.copyWith(backupOnIdle: v),
+                                      ),
+                              ),
+                              Padding(
+                                padding: EdgeInsets.only(
+                                  top: isDesktop ? 6 : 0,
+                                  bottom: 8,
+                                ),
+                                child: InputDecorator(
+                                  decoration: isDesktop
+                                      ? const InputDecoration(
+                                          labelText: '本地静置备份等待时长',
+                                          border: OutlineInputBorder(),
+                                          contentPadding: EdgeInsets.symmetric(
+                                            horizontal: 12,
+                                            vertical: 16,
+                                          ),
+                                        )
+                                      : const InputDecoration(
+                                          labelText: '本地静置备份等待时长',
+                                          border: OutlineInputBorder(),
+                                          isDense: true,
+                                        ),
+                                  child: DropdownButtonHideUnderline(
+                                    child: DropdownButton<int>(
+                                      key: const Key(
+                                        'local_backup_idle_minutes_selector',
+                                      ),
+                                      isExpanded: true,
+                                      isDense: true,
+                                      value: localPolicy.idleMinutes,
+                                      items: [
+                                        for (final m in localIdleOptions)
+                                          DropdownMenuItem<int>(
+                                            value: m,
+                                            child: Text('$m 分钟'),
+                                          ),
+                                      ],
+                                      onChanged: effectiveBusy
+                                          ? null
+                                          : (val) {
+                                              if (val != null) {
+                                                _updateLocalAutoBackupPolicy(
+                                                  localPolicy.copyWith(
+                                                    idleMinutes: val,
+                                                  ),
+                                                );
+                                              }
+                                            },
+                                    ),
                                   ),
                                 ),
+                              ),
+                              SwitchListTile(
+                                key: const Key('local_backup_trigger_schedule'),
+                                contentPadding: EdgeInsets.zero,
+                                dense: isDesktop ? null : true,
+                                title: const Text('定时周期自动备份'),
+                                subtitle: const Text('距上次本地备份满设定周期且有数据变更时生成'),
+                                value: localPolicy.backupOnSchedule,
+                                onChanged: effectiveBusy
+                                    ? null
+                                    : (v) => _updateLocalAutoBackupPolicy(
+                                        localPolicy.copyWith(
+                                          backupOnSchedule: v,
+                                        ),
+                                      ),
+                              ),
+                              Padding(
+                                padding: EdgeInsets.only(
+                                  top: isDesktop ? 6 : 0,
+                                  bottom: 4,
+                                ),
+                                child: InputDecorator(
+                                  decoration: isDesktop
+                                      ? const InputDecoration(
+                                          labelText: '本地定时备份周期',
+                                          border: OutlineInputBorder(),
+                                          contentPadding: EdgeInsets.symmetric(
+                                            horizontal: 12,
+                                            vertical: 16,
+                                          ),
+                                        )
+                                      : const InputDecoration(
+                                          labelText: '本地定时备份周期',
+                                          border: OutlineInputBorder(),
+                                          isDense: true,
+                                        ),
+                                  child: DropdownButtonHideUnderline(
+                                    child: DropdownButton<int>(
+                                      key: const Key(
+                                        'local_backup_schedule_interval_selector',
+                                      ),
+                                      isExpanded: true,
+                                      isDense: true,
+                                      value:
+                                          localPolicy.scheduleIntervalMinutes,
+                                      items: [
+                                        for (final m in localScheduleOptions)
+                                          DropdownMenuItem<int>(
+                                            value: m,
+                                            child: Text(
+                                              _formatIntervalMinutes(m),
+                                            ),
+                                          ),
+                                      ],
+                                      onChanged: effectiveBusy
+                                          ? null
+                                          : (val) {
+                                              if (val != null) {
+                                                _updateLocalAutoBackupPolicy(
+                                                  localPolicy.copyWith(
+                                                    scheduleIntervalMinutes:
+                                                        val,
+                                                  ),
+                                                );
+                                              }
+                                            },
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const Divider(height: 24),
+                              localListAsync.when(
+                                loading: () => const Padding(
+                                  padding: EdgeInsets.all(12),
+                                  child: Center(
+                                    child: CircularProgressIndicator(),
+                                  ),
+                                ),
+                                error: (e, _) => Text(safeMessage(e)),
+                                data: (items) {
+                                  if (items.isEmpty) {
+                                    return const Padding(
+                                      key: Key('local_backups_empty'),
+                                      padding: EdgeInsets.symmetric(
+                                        vertical: 8,
+                                      ),
+                                      child: Text('暂无应用内本地备份'),
+                                    );
+                                  }
+                                  final inlineItems = items
+                                      .take(_maxInlineBackupItems)
+                                      .toList();
+                                  return Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.stretch,
+                                    children: [
+                                      for (final item in inlineItems)
+                                        ListTile(
+                                          key: Key(
+                                            'local_backup_item_${item.fileName}',
+                                          ),
+                                          dense: true,
+                                          contentPadding: EdgeInsets.zero,
+                                          title: Row(
+                                            children: [
+                                              if (isConflictBackupFileName(
+                                                item.fileName,
+                                              )) ...[
+                                                const ConflictBackupBadge(),
+                                                const SizedBox(width: 6),
+                                              ],
+                                              Expanded(
+                                                child: Text(
+                                                  item.fileName,
+                                                  maxLines: 1,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                          subtitle: Text(
+                                            <String>[
+                                              '${formatDateTime(DateTime.fromMillisecondsSinceEpoch(item.modifiedAtMs))} · ${_formatSize(item.sizeBytes)}',
+                                              if (item.manifest != null)
+                                                _formatManifestSummary(
+                                                  item.manifest,
+                                                ),
+                                            ].join('\n'),
+                                          ),
+                                          isThreeLine: item.manifest != null,
+                                          trailing: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              TextButton(
+                                                key: Key(
+                                                  'local_restore_${item.fileName}',
+                                                ),
+                                                style: TextButton.styleFrom(
+                                                  visualDensity:
+                                                      VisualDensity.compact,
+                                                  padding:
+                                                      const EdgeInsets.symmetric(
+                                                        horizontal: 8,
+                                                      ),
+                                                ),
+                                                onPressed: effectiveBusy
+                                                    ? null
+                                                    : () =>
+                                                          _handleRestoreLocalItem(
+                                                            item,
+                                                          ),
+                                                child: const Text('恢复'),
+                                              ),
+                                              IconButton(
+                                                key: Key(
+                                                  'local_delete_${item.fileName}',
+                                                ),
+                                                visualDensity:
+                                                    VisualDensity.compact,
+                                                tooltip: '删除',
+                                                onPressed: effectiveBusy
+                                                    ? null
+                                                    : () =>
+                                                          _handleDeleteLocalItem(
+                                                            item,
+                                                          ),
+                                                icon: const Icon(
+                                                  Icons.delete_outline,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      const SizedBox(height: 6),
+                                      SizedBox(
+                                        width: double.infinity,
+                                        child: OutlinedButton.icon(
+                                          key: const Key(
+                                            'open_all_local_backups_button',
+                                          ),
+                                          style: _compactButtonStyle,
+                                          onPressed: effectiveBusy
+                                              ? null
+                                              : _openLocalBackupHistoryDialog,
+                                          icon: const Icon(
+                                            Icons.manage_search_rounded,
+                                            size: 18,
+                                          ),
+                                          label: _singleLineText(
+                                            '查看全部（共 ${items.length} 份）/ 批量管理',
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  );
+                                },
                               ),
                             ],
                           ),
-                          const SizedBox(height: 8),
-                          SizedBox(
-                            width: double.infinity,
-                            child: FilledButton.icon(
-                              key: const Key('cloud_sync_now_button'),
-                              onPressed: !_busy && isActiveCloudReady
-                                  ? _handleSyncNow
-                                  : null,
-                              icon: const Icon(Icons.sync, size: 18),
-                              label: _singleLineText('立即多端同步'),
-                            ),
-                          ),
-                          const Divider(height: 20),
-                          SwitchListTile(
-                            key: const Key('auto_cloud_sync_switch'),
-                            contentPadding: EdgeInsets.zero,
-                            dense: true,
-                            title: const Text('自动多端同步策略'),
-                            subtitle: const Text('按需独立开启各自动同步时机（默认全部关闭，零静默联网）'),
-                            value: syncSettings.autoSyncEnabled,
-                            onChanged: !_busy && isActiveCloudReady
-                                ? _toggleAutoSync
-                                : null,
-                          ),
-                          SwitchListTile(
-                            key: const Key('cloud_sync_trigger_startup'),
-                            contentPadding: EdgeInsets.zero,
-                            dense: true,
-                            title: const Text('启动 / 窗口激活时自动同步'),
-                            subtitle: const Text('桌面获焦或回到前台时自动拉取或推送，预防多端陈旧冲突'),
-                            value: syncSettings.syncOnStartup,
-                            onChanged: !_busy && isActiveCloudReady
-                                ? (v) =>
-                                      _updateCloudSyncTriggers(syncOnStartup: v)
-                                : null,
-                          ),
-                          SwitchListTile(
-                            key: const Key('cloud_sync_trigger_exit'),
-                            contentPadding: EdgeInsets.zero,
-                            dense: true,
-                            title: const Text('退出 / 切入后台时自动同步'),
-                            subtitle: const Text(
-                              '切入后台或桌面关窗时自动同步（含 5 秒超时保护，离线绝不卡死）',
-                            ),
-                            value: syncSettings.syncOnExit,
-                            onChanged: !_busy && isActiveCloudReady
-                                ? (v) => _updateCloudSyncTriggers(syncOnExit: v)
-                                : null,
-                          ),
-                          SwitchListTile(
-                            key: const Key('cloud_sync_trigger_idle'),
-                            contentPadding: EdgeInsets.zero,
-                            dense: true,
-                            title: const Text('记账变更静置后自动同步'),
-                            subtitle: const Text('连续记账结束后静置指定时长合并推送一次'),
-                            value: syncSettings.syncOnIdle,
-                            onChanged: !_busy && isActiveCloudReady
-                                ? (v) => _updateCloudSyncTriggers(syncOnIdle: v)
-                                : null,
-                          ),
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 8),
-                            child: InputDecorator(
-                              decoration: const InputDecoration(
-                                labelText: '记账静置同步等待时长',
-                                border: OutlineInputBorder(),
-                                isDense: true,
-                              ),
-                              child: DropdownButtonHideUnderline(
-                                child: DropdownButton<int>(
-                                  key: const Key(
-                                    'cloud_sync_idle_minutes_selector',
-                                  ),
-                                  isExpanded: true,
-                                  isDense: true,
-                                  value: syncSettings.idleMinutes,
-                                  items: [
-                                    for (final m in cloudIdleOptions)
-                                      DropdownMenuItem<int>(
-                                        value: m,
-                                        child: Text('$m 分钟'),
-                                      ),
-                                  ],
-                                  onChanged: _busy
-                                      ? null
-                                      : (val) {
-                                          if (val != null) {
-                                            _updateCloudSyncTriggers(
-                                              idleMinutes: val,
-                                            );
-                                          }
-                                        },
-                                ),
-                              ),
-                            ),
-                          ),
-                          SwitchListTile(
-                            key: const Key('cloud_sync_trigger_schedule'),
-                            contentPadding: EdgeInsets.zero,
-                            dense: true,
-                            title: const Text('定时周期自动同步'),
-                            subtitle: const Text('应用运行期间按固定间隔自动检查同步'),
-                            value: syncSettings.syncOnSchedule,
-                            onChanged: !_busy && isActiveCloudReady
-                                ? (v) => _updateCloudSyncTriggers(
-                                    syncOnSchedule: v,
-                                  )
-                                : null,
-                          ),
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 4),
-                            child: InputDecorator(
-                              decoration: const InputDecoration(
-                                labelText: '定时自动同步周期',
-                                border: OutlineInputBorder(),
-                                isDense: true,
-                              ),
-                              child: DropdownButtonHideUnderline(
-                                child: DropdownButton<int>(
-                                  key: const Key(
-                                    'cloud_sync_schedule_interval_selector',
-                                  ),
-                                  isExpanded: true,
-                                  isDense: true,
-                                  value: syncSettings.scheduleIntervalMinutes,
-                                  items: [
-                                    for (final m in cloudScheduleOptions)
-                                      DropdownMenuItem<int>(
-                                        value: m,
-                                        child: Text(_formatIntervalMinutes(m)),
-                                      ),
-                                  ],
-                                  onChanged: _busy
-                                      ? null
-                                      : (val) {
-                                          if (val != null) {
-                                            _updateCloudSyncTriggers(
-                                              scheduleIntervalMinutes: val,
-                                            );
-                                          }
-                                        },
-                                ),
-                              ),
-                            ),
-                          ),
-                          if (_pendingConflict != null) ...[
-                            const SizedBox(height: 8),
-                            Container(
-                              key: const Key('cloud_sync_conflict_banner'),
-                              padding: const EdgeInsets.all(10),
-                              decoration: BoxDecoration(
-                                color: Theme.of(
-                                  context,
-                                ).colorScheme.errorContainer,
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: Row(
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Card(
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
                                 children: [
                                   Expanded(
                                     child: Text(
-                                      '检测到同步冲突，本机快照已保护存为 ${_pendingConflict!.conflictBackupFileName ?? ''}',
-                                      style: TextStyle(
-                                        color: Theme.of(
-                                          context,
-                                        ).colorScheme.onErrorContainer,
-                                      ),
+                                      '云端历史版本备份',
+                                      style: Theme.of(
+                                        context,
+                                      ).textTheme.titleMedium,
                                     ),
                                   ),
-                                  TextButton(
-                                    key: const Key(
-                                      'reopen_conflict_dialog_button',
-                                    ),
-                                    onPressed: _busy
+                                  const SizedBox(width: 8),
+                                  Chip(
+                                    key: const Key('webdav_status_badge'),
+                                    label: Text(activeBadgeText),
+                                    visualDensity: isDesktop
                                         ? null
-                                        : () => _showConflictResolutionDialog(
-                                            _pendingConflict!,
-                                          ),
-                                    child: const Text('处理冲突'),
+                                        : VisualDensity.compact,
                                   ),
                                 ],
                               ),
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            '本地备份（.tally）',
-                            style: Theme.of(context).textTheme.titleMedium,
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            '离线单机可用，采用开放标准 ZIP 容器与三阶段原子校验恢复。',
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
-                          const SizedBox(height: 12),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: FilledButton.icon(
-                                  key: const Key('local_backup_create_button'),
-                                  style: _compactButtonStyle,
-                                  onPressed: _busy
-                                      ? null
-                                      : _handleCreateLocalBackup,
-                                  icon: const Icon(
-                                    Icons.archive_outlined,
-                                    size: 18,
-                                  ),
-                                  label: _singleLineText('生成本地备份'),
-                                ),
+                              const SizedBox(height: 4),
+                              Text(
+                                activeCloudSubtitle,
+                                style: Theme.of(context).textTheme.bodySmall,
                               ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: OutlinedButton.icon(
-                                  key: const Key('local_backup_import_button'),
-                                  style: _compactButtonStyle,
-                                  onPressed: _busy
-                                      ? null
-                                      : _handleImportAndRestore,
-                                  icon: const Icon(
-                                    Icons.folder_open_outlined,
-                                    size: 18,
-                                  ),
-                                  label: _singleLineText('从文件恢复'),
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: OutlinedButton.icon(
-                                  key: const Key('local_backup_export_button'),
-                                  style: _compactButtonStyle,
-                                  onPressed: !_busy && canSaveExternal
-                                      ? _handleExportSaveAs
-                                      : null,
-                                  icon: const Icon(Icons.save_alt, size: 18),
-                                  label: _singleLineText('另存为文件'),
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: OutlinedButton.icon(
-                                  key: const Key('local_backup_share_button'),
-                                  style: _compactButtonStyle,
-                                  onPressed: !_busy && canShareExternal
-                                      ? _handleShareBackup
-                                      : null,
-                                  icon: const Icon(
-                                    Icons.share_outlined,
-                                    size: 18,
-                                  ),
-                                  label: _singleLineText('系统分享'),
-                                ),
-                              ),
-                            ],
-                          ),
-                          const Divider(height: 24),
-                          Text(
-                            '本地自动备份策略',
-                            style: Theme.of(context).textTheme.titleSmall,
-                          ),
-                          const SizedBox(height: 8),
-                          InputDecorator(
-                            decoration: const InputDecoration(
-                              labelText: '本地备份保留份数',
-                              border: OutlineInputBorder(),
-                              isDense: true,
-                            ),
-                            child: DropdownButtonHideUnderline(
-                              child: DropdownButton<int>(
-                                key: const Key(
-                                  'local_backup_keep_count_selector',
-                                ),
-                                isExpanded: true,
-                                isDense: true,
-                                value: localPolicy.keepCount,
-                                items: [
-                                  for (final n in localKeepOptions)
-                                    DropdownMenuItem<int>(
-                                      value: n,
-                                      child: Text('$n 份'),
-                                    ),
-                                ],
-                                onChanged: _busy
-                                    ? null
-                                    : (val) {
-                                        if (val != null) {
-                                          _updateLocalAutoBackupPolicy(
-                                            localPolicy.copyWith(
-                                              keepCount: val,
-                                            ),
-                                          );
-                                        }
-                                      },
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          SwitchListTile(
-                            key: const Key('local_backup_trigger_startup'),
-                            contentPadding: EdgeInsets.zero,
-                            dense: true,
-                            title: const Text('启动 App 时自动备份'),
-                            subtitle: const Text('仅在本地账务数据有变更时生成新快照'),
-                            value: localPolicy.backupOnStartup,
-                            onChanged: _busy
-                                ? null
-                                : (v) => _updateLocalAutoBackupPolicy(
-                                    localPolicy.copyWith(backupOnStartup: v),
-                                  ),
-                          ),
-                          SwitchListTile(
-                            key: const Key('local_backup_trigger_exit'),
-                            contentPadding: EdgeInsets.zero,
-                            dense: true,
-                            title: const Text('退出 / 切入后台时自动备份'),
-                            subtitle: const Text('切入后台或关闭桌面窗口时保存变更快照'),
-                            value: localPolicy.backupOnExit,
-                            onChanged: _busy
-                                ? null
-                                : (v) => _updateLocalAutoBackupPolicy(
-                                    localPolicy.copyWith(backupOnExit: v),
-                                  ),
-                          ),
-                          SwitchListTile(
-                            key: const Key('local_backup_trigger_idle'),
-                            contentPadding: EdgeInsets.zero,
-                            dense: true,
-                            title: const Text('记账变更静置后自动备份'),
-                            subtitle: const Text('连续记账结束后静置指定分钟数自动打包备份'),
-                            value: localPolicy.backupOnIdle,
-                            onChanged: _busy
-                                ? null
-                                : (v) => _updateLocalAutoBackupPolicy(
-                                    localPolicy.copyWith(backupOnIdle: v),
-                                  ),
-                          ),
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 8),
-                            child: InputDecorator(
-                              decoration: const InputDecoration(
-                                labelText: '本地静置备份等待时长',
-                                border: OutlineInputBorder(),
-                                isDense: true,
-                              ),
-                              child: DropdownButtonHideUnderline(
-                                child: DropdownButton<int>(
-                                  key: const Key(
-                                    'local_backup_idle_minutes_selector',
-                                  ),
-                                  isExpanded: true,
-                                  isDense: true,
-                                  value: localPolicy.idleMinutes,
-                                  items: [
-                                    for (final m in localIdleOptions)
-                                      DropdownMenuItem<int>(
-                                        value: m,
-                                        child: Text('$m 分钟'),
-                                      ),
-                                  ],
-                                  onChanged: _busy
-                                      ? null
-                                      : (val) {
-                                          if (val != null) {
-                                            _updateLocalAutoBackupPolicy(
-                                              localPolicy.copyWith(
-                                                idleMinutes: val,
-                                              ),
-                                            );
-                                          }
-                                        },
-                                ),
-                              ),
-                            ),
-                          ),
-                          SwitchListTile(
-                            key: const Key('local_backup_trigger_schedule'),
-                            contentPadding: EdgeInsets.zero,
-                            dense: true,
-                            title: const Text('定时周期自动备份'),
-                            subtitle: const Text('距上次本地备份满设定周期且有数据变更时生成'),
-                            value: localPolicy.backupOnSchedule,
-                            onChanged: _busy
-                                ? null
-                                : (v) => _updateLocalAutoBackupPolicy(
-                                    localPolicy.copyWith(backupOnSchedule: v),
-                                  ),
-                          ),
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 4),
-                            child: InputDecorator(
-                              decoration: const InputDecoration(
-                                labelText: '本地定时备份周期',
-                                border: OutlineInputBorder(),
-                                isDense: true,
-                              ),
-                              child: DropdownButtonHideUnderline(
-                                child: DropdownButton<int>(
-                                  key: const Key(
-                                    'local_backup_schedule_interval_selector',
-                                  ),
-                                  isExpanded: true,
-                                  isDense: true,
-                                  value: localPolicy.scheduleIntervalMinutes,
-                                  items: [
-                                    for (final m in localScheduleOptions)
-                                      DropdownMenuItem<int>(
-                                        value: m,
-                                        child: Text(_formatIntervalMinutes(m)),
-                                      ),
-                                  ],
-                                  onChanged: _busy
-                                      ? null
-                                      : (val) {
-                                          if (val != null) {
-                                            _updateLocalAutoBackupPolicy(
-                                              localPolicy.copyWith(
-                                                scheduleIntervalMinutes: val,
-                                              ),
-                                            );
-                                          }
-                                        },
-                                ),
-                              ),
-                            ),
-                          ),
-                          const Divider(height: 24),
-                          localListAsync.when(
-                            loading: () => const Padding(
-                              padding: EdgeInsets.all(12),
-                              child: Center(child: CircularProgressIndicator()),
-                            ),
-                            error: (e, _) => Text(safeMessage(e)),
-                            data: (items) {
-                              if (items.isEmpty) {
-                                return const Padding(
-                                  key: Key('local_backups_empty'),
-                                  padding: EdgeInsets.symmetric(vertical: 8),
-                                  child: Text('暂无应用内本地备份'),
-                                );
-                              }
-                              return Column(
-                                children: [
-                                  for (final item in items)
-                                    ListTile(
-                                      key: Key(
-                                        'local_backup_item_${item.fileName}',
-                                      ),
-                                      contentPadding: EdgeInsets.zero,
-                                      title: Text(item.fileName),
-                                      subtitle: Text(
-                                        <String>[
-                                          '${formatDateTime(DateTime.fromMillisecondsSinceEpoch(item.modifiedAtMs))} · ${_formatSize(item.sizeBytes)}',
-                                          if (item.manifest != null)
-                                            _formatManifestSummary(
-                                              item.manifest,
-                                            ),
-                                        ].join('\n'),
-                                      ),
-                                      isThreeLine: item.manifest != null,
-                                      trailing: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          TextButton(
-                                            key: Key(
-                                              'local_restore_${item.fileName}',
-                                            ),
-                                            onPressed: _busy
-                                                ? null
-                                                : () => _handleRestoreLocalItem(
-                                                    item,
-                                                  ),
-                                            child: const Text('恢复'),
-                                          ),
-                                          IconButton(
-                                            key: Key(
-                                              'local_delete_${item.fileName}',
-                                            ),
-                                            tooltip: '删除',
-                                            onPressed: _busy
-                                                ? null
-                                                : () => _handleDeleteLocalItem(
-                                                    item,
-                                                  ),
-                                            icon: const Icon(
-                                              Icons.delete_outline,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                ],
-                              );
-                            },
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  '云端历史版本备份',
-                                  style: Theme.of(
-                                    context,
-                                  ).textTheme.titleMedium,
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Chip(
-                                key: const Key('webdav_status_badge'),
-                                label: Text(activeBadgeText),
-                                visualDensity: VisualDensity.compact,
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            activeCloudSubtitle,
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
-                          const SizedBox(height: 12),
-                          if (!isActiveCloudReady)
-                            SizedBox(
-                              width: double.infinity,
-                              child: FilledButton.icon(
-                                key: const Key('webdav_backup_now_button'),
-                                onPressed: null,
-                                icon: const Icon(
-                                  Icons.cloud_upload_outlined,
-                                  size: 18,
-                                ),
-                                label: _singleLineText('立即云端备份'),
-                              ),
-                            )
-                          else
-                            Row(
-                              children: [
-                                Expanded(
+                              const SizedBox(height: 12),
+                              if (!isActiveCloudReady)
+                                SizedBox(
+                                  width: double.infinity,
                                   child: FilledButton.icon(
                                     key: const Key('webdav_backup_now_button'),
-                                    style: _compactButtonStyle,
-                                    onPressed: _busy
-                                        ? null
-                                        : () => _handleCloudBackupUpload(
-                                            activeBackend,
-                                          ),
+                                    onPressed: null,
                                     icon: const Icon(
                                       Icons.cloud_upload_outlined,
                                       size: 18,
                                     ),
                                     label: _singleLineText('立即云端备份'),
                                   ),
+                                )
+                              else
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: FilledButton.icon(
+                                        key: const Key(
+                                          'webdav_backup_now_button',
+                                        ),
+                                        style: _compactButtonStyle,
+                                        onPressed: effectiveBusy
+                                            ? null
+                                            : () => _handleCloudBackupUpload(
+                                                activeBackend,
+                                              ),
+                                        icon: const Icon(
+                                          Icons.cloud_upload_outlined,
+                                          size: 18,
+                                        ),
+                                        label: _singleLineText('立即云端备份'),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: OutlinedButton.icon(
+                                        key: const Key('webdav_refresh_button'),
+                                        style: _compactButtonStyle,
+                                        onPressed: effectiveBusy
+                                            ? null
+                                            : _refreshAfterBackupChange,
+                                        icon: const Icon(
+                                          Icons.refresh,
+                                          size: 18,
+                                        ),
+                                        label: _singleLineText('刷新列表'),
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  child: OutlinedButton.icon(
-                                    key: const Key('webdav_refresh_button'),
-                                    style: _compactButtonStyle,
-                                    onPressed: _busy
-                                        ? null
-                                        : _refreshAfterBackupChange,
-                                    icon: const Icon(Icons.refresh, size: 18),
-                                    label: _singleLineText('刷新列表'),
+                              if (isActiveCloudReady) ...[
+                                const SizedBox(height: 8),
+                                SwitchListTile(
+                                  key: const Key('auto_backup_switch'),
+                                  contentPadding: EdgeInsets.zero,
+                                  title: const Text('自动静默云备份'),
+                                  subtitle: const Text(
+                                    '距上次备份满 24 小时且本地有新账单变动时自动上传',
                                   ),
+                                  value: activeAutoBackupEnabled,
+                                  onChanged: effectiveBusy
+                                      ? null
+                                      : _toggleAutoBackup,
+                                ),
+                              ],
+                              const Divider(height: 24),
+                              if (!isActiveCloudReady)
+                                Padding(
+                                  key: const Key('webdav_unconfigured_hint'),
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 8,
+                                  ),
+                                  child: Text(
+                                    activeBackend == CloudBackendType.s3
+                                        ? 'S3 对象存储尚未完成配置，请点击上方「配置 S3」。'
+                                        : '云备份尚未启用或配置，请在上方配置 WebDAV 或 S3 对象存储。',
+                                  ),
+                                )
+                              else
+                                remoteListAsync.when(
+                                  loading: () => const Padding(
+                                    padding: EdgeInsets.all(12),
+                                    child: Center(
+                                      child: CircularProgressIndicator(),
+                                    ),
+                                  ),
+                                  error: (e, _) => Text(safeMessage(e)),
+                                  data: (items) {
+                                    if (items.isEmpty) {
+                                      return const Padding(
+                                        key: Key('webdav_backups_empty'),
+                                        padding: EdgeInsets.symmetric(
+                                          vertical: 8,
+                                        ),
+                                        child: Text('远端目录暂无备份文件'),
+                                      );
+                                    }
+                                    final inlineItems = items
+                                        .take(_maxInlineBackupItems)
+                                        .toList();
+                                    return Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.stretch,
+                                      children: [
+                                        for (final item in inlineItems)
+                                          ListTile(
+                                            key: Key(
+                                              'webdav_backup_item_${item.fileName}',
+                                            ),
+                                            dense: true,
+                                            contentPadding: EdgeInsets.zero,
+                                            title: Row(
+                                              children: [
+                                                if (isConflictBackupFileName(
+                                                  item.fileName,
+                                                )) ...[
+                                                  const ConflictBackupBadge(),
+                                                  const SizedBox(width: 6),
+                                                ],
+                                                Expanded(
+                                                  child: Text(
+                                                    item.fileName,
+                                                    maxLines: 1,
+                                                    overflow:
+                                                        TextOverflow.ellipsis,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                            subtitle: Text(
+                                              isConflictBackupFileName(
+                                                    item.fileName,
+                                                  )
+                                                  ? '${formatDateTime(DateTime.fromMillisecondsSinceEpoch(item.modifiedAtMs))} · ${_formatSize(item.sizeBytes)} · 冲突保护快照'
+                                                  : '${formatDateTime(DateTime.fromMillisecondsSinceEpoch(item.modifiedAtMs))} · ${_formatSize(item.sizeBytes)}',
+                                            ),
+                                            trailing: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                TextButton(
+                                                  key: Key(
+                                                    'webdav_restore_${item.fileName}',
+                                                  ),
+                                                  style: TextButton.styleFrom(
+                                                    visualDensity:
+                                                        VisualDensity.compact,
+                                                    padding:
+                                                        const EdgeInsets.symmetric(
+                                                          horizontal: 8,
+                                                        ),
+                                                  ),
+                                                  onPressed: effectiveBusy
+                                                      ? null
+                                                      : () =>
+                                                            _handleRestoreCloudItem(
+                                                              item,
+                                                              activeBackend,
+                                                            ),
+                                                  child: const Text('恢复'),
+                                                ),
+                                                IconButton(
+                                                  key: Key(
+                                                    'webdav_delete_${item.fileName}',
+                                                  ),
+                                                  visualDensity:
+                                                      VisualDensity.compact,
+                                                  tooltip: '删除',
+                                                  onPressed: effectiveBusy
+                                                      ? null
+                                                      : () =>
+                                                            _handleDeleteCloudItem(
+                                                              item,
+                                                              activeBackend,
+                                                            ),
+                                                  icon: const Icon(
+                                                    Icons.delete_outline,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        const SizedBox(height: 6),
+                                        SizedBox(
+                                          width: double.infinity,
+                                          child: OutlinedButton.icon(
+                                            key: const Key(
+                                              'open_all_cloud_backups_button',
+                                            ),
+                                            style: _compactButtonStyle,
+                                            onPressed: effectiveBusy
+                                                ? null
+                                                : () =>
+                                                      _openCloudBackupHistoryDialog(
+                                                        activeBackend,
+                                                      ),
+                                            icon: const Icon(
+                                              Icons.manage_search_rounded,
+                                              size: 18,
+                                            ),
+                                            label: _singleLineText(
+                                              '查看全部（共 ${items.length} 份）/ 批量管理',
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    );
+                                  },
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      if (!isDesktop) ...[
+                        const SizedBox(height: 12),
+                        Card(
+                          key: const Key('quick_entry_visibility_card'),
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  '快捷入口显示',
+                                  style: Theme.of(
+                                    context,
+                                  ).textTheme.titleMedium,
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  '开启后在移动端对应页面顶部显示一键同步与本地备份入口（默认关闭）。',
+                                  style: Theme.of(context).textTheme.bodySmall,
+                                ),
+                                const SizedBox(height: 8),
+                                SwitchListTile(
+                                  key: const Key(
+                                    'backup_show_home_quick_entry_switch',
+                                  ),
+                                  contentPadding: EdgeInsets.zero,
+                                  dense: true,
+                                  title: const Text('明细页顶栏快捷按钮'),
+                                  subtitle: const Text('在明细页右上角显示同步与备份图标按钮'),
+                                  value: syncSettings.showHomeQuickEntry,
+                                  onChanged: effectiveBusy
+                                      ? null
+                                      : (v) => _updateQuickEntryVisibility(
+                                          showHome: v,
+                                        ),
+                                ),
+                                SwitchListTile(
+                                  key: const Key(
+                                    'backup_show_me_quick_entry_switch',
+                                  ),
+                                  contentPadding: EdgeInsets.zero,
+                                  dense: true,
+                                  title: const Text('更多页顶部快捷卡片'),
+                                  subtitle: const Text('在更多页顶部常驻一键同步与备份卡片'),
+                                  value: syncSettings.showMeQuickEntry,
+                                  onChanged: effectiveBusy
+                                      ? null
+                                      : (v) => _updateQuickEntryVisibility(
+                                          showMe: v,
+                                        ),
                                 ),
                               ],
                             ),
-                          if (isActiveCloudReady) ...[
-                            const SizedBox(height: 8),
-                            SwitchListTile(
-                              key: const Key('auto_backup_switch'),
-                              contentPadding: EdgeInsets.zero,
-                              title: const Text('自动静默云备份'),
-                              subtitle: const Text(
-                                '距上次备份满 24 小时且本地有新账单变动时自动上传',
-                              ),
-                              value: activeAutoBackupEnabled,
-                              onChanged: _busy ? null : _toggleAutoBackup,
-                            ),
-                          ],
-                          const Divider(height: 24),
-                          if (!isActiveCloudReady)
-                            Padding(
-                              key: const Key('webdav_unconfigured_hint'),
-                              padding: const EdgeInsets.symmetric(vertical: 8),
-                              child: Text(
-                                activeBackend == CloudBackendType.s3
-                                    ? 'S3 对象存储尚未完成配置，请点击上方「配置 S3」。'
-                                    : '云备份尚未启用或配置，请在上方配置 WebDAV 或 S3 对象存储。',
-                              ),
-                            )
-                          else
-                            remoteListAsync.when(
-                              loading: () => const Padding(
-                                padding: EdgeInsets.all(12),
-                                child: Center(
-                                  child: CircularProgressIndicator(),
-                                ),
-                              ),
-                              error: (e, _) => Text(safeMessage(e)),
-                              data: (items) {
-                                if (items.isEmpty) {
-                                  return const Padding(
-                                    key: Key('webdav_backups_empty'),
-                                    padding: EdgeInsets.symmetric(vertical: 8),
-                                    child: Text('远端目录暂无备份文件'),
-                                  );
-                                }
-                                return Column(
-                                  children: [
-                                    for (final item in items)
-                                      ListTile(
-                                        key: Key(
-                                          'webdav_backup_item_${item.fileName}',
-                                        ),
-                                        contentPadding: EdgeInsets.zero,
-                                        title: Text(item.fileName),
-                                        subtitle: Text(
-                                          isConflictBackupFileName(
-                                                item.fileName,
-                                              )
-                                              ? '${formatDateTime(DateTime.fromMillisecondsSinceEpoch(item.modifiedAtMs))} · ${_formatSize(item.sizeBytes)} · 冲突保护快照'
-                                              : '${formatDateTime(DateTime.fromMillisecondsSinceEpoch(item.modifiedAtMs))} · ${_formatSize(item.sizeBytes)}',
-                                        ),
-                                        trailing: Row(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            TextButton(
-                                              key: Key(
-                                                'webdav_restore_${item.fileName}',
-                                              ),
-                                              onPressed: _busy
-                                                  ? null
-                                                  : () =>
-                                                        _handleRestoreCloudItem(
-                                                          item,
-                                                          activeBackend,
-                                                        ),
-                                              child: const Text('恢复'),
-                                            ),
-                                            IconButton(
-                                              key: Key(
-                                                'webdav_delete_${item.fileName}',
-                                              ),
-                                              tooltip: '删除',
-                                              onPressed: _busy
-                                                  ? null
-                                                  : () =>
-                                                        _handleDeleteCloudItem(
-                                                          item,
-                                                          activeBackend,
-                                                        ),
-                                              icon: const Icon(
-                                                Icons.delete_outline,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                  ],
-                                );
-                              },
-                            ),
-                        ],
-                      ),
-                    ),
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
-                ],
+                ),
               ),
             ),
           ),

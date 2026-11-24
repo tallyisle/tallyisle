@@ -8,20 +8,17 @@ import 'package:tallyisle/domain/rules/url_scheme_rules.dart';
 
 void main() {
   group('F-033 url_scheme_rules', () {
-    test('parses tallyisle:// and yyjz:// navigation actions identically', () {
-      final home1 = parseUrlScheme('tallyisle://home');
-      final home2 = parseUrlScheme('yyjz://home');
-      expect(home1.action, UrlSchemeAction.home);
-      expect(home2.action, UrlSchemeAction.home);
-      expect(home1.targetRoute, '/');
-      expect(home2.targetRoute, '/');
-      expect(home1.writesDirectly, isFalse);
+    test('parses tallyisle:// navigation actions', () {
+      final home = parseUrlScheme('tallyisle://home');
+      expect(home.action, UrlSchemeAction.home);
+      expect(home.targetRoute, '/');
+      expect(home.writesDirectly, isFalse);
 
       final cal = parseUrlScheme('tallyisle://calendar');
       expect(cal.action, UrlSchemeAction.calendar);
       expect(cal.targetRoute, '/calendar');
 
-      final statMonth = parseUrlScheme('yyjz://stat?year=2026&month=11');
+      final statMonth = parseUrlScheme('tallyisle://stat?year=2026&month=11');
       expect(statMonth.action, UrlSchemeAction.stat);
       expect(statMonth.targetRoute, '/stats?year=2026&month=11');
 
@@ -44,7 +41,7 @@ void main() {
       });
 
       final sheetAdd = parseUrlScheme(
-        'yyjz://addbill?type=2&money=500&asset1=1&asset2=2&showsheet=true',
+        'tallyisle://addbill?type=2&money=500&asset1=1&asset2=2&showsheet=true',
       );
       expect(sheetAdd.writesDirectly, isFalse);
       expect(Uri.parse(sheetAdd.targetRoute!).queryParameters, {
@@ -110,11 +107,43 @@ void main() {
     );
 
     test(
-      'rejects unsupported scheme, discount > money, transfer missing asset2, and invalid dates',
+      'rejects unsupported scheme (including legacy yyjz://), discount > money, transfer missing asset2, and invalid dates',
       () {
         expect(
           () => parseUrlScheme('https://tallyisle.dev/addbill?money=10'),
-          throwsA(isA<Failure>()),
+          throwsA(
+            isA<Failure>()
+                .having((f) => f.code, 'code', FailureCode.validation)
+                .having(
+                  (f) => f.message,
+                  'message',
+                  contains('仅支持 tallyisle://'),
+                ),
+          ),
+        );
+        expect(
+          () => parseUrlScheme('yyjz://home'),
+          throwsA(
+            isA<Failure>()
+                .having((f) => f.code, 'code', FailureCode.validation)
+                .having(
+                  (f) => f.message,
+                  'message',
+                  contains('仅支持 tallyisle://'),
+                ),
+          ),
+        );
+        expect(
+          () => parseUrlScheme('yyjz://addbill?type=0&money=18.50'),
+          throwsA(
+            isA<Failure>()
+                .having((f) => f.code, 'code', FailureCode.validation)
+                .having(
+                  (f) => f.message,
+                  'message',
+                  contains('仅支持 tallyisle://'),
+                ),
+          ),
         );
         expect(
           () => parseUrlScheme('tallyisle://addbill?money=10&discount=10.01'),

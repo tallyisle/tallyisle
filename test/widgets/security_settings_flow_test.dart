@@ -254,11 +254,15 @@ void main() {
       expect(persisted.themeSeedHex, '6A1B9A');
 
       // Navigate to AboutHelpPage
+      final aboutTile = find.byKey(const Key('nav_about_help_tile'));
       await tester.scrollUntilVisible(
-        find.byKey(const Key('nav_about_help_tile')),
+        aboutTile,
         200,
+        scrollable: find.byType(Scrollable).first,
       );
-      await tester.tap(find.byKey(const Key('nav_about_help_tile')));
+      await tester.ensureVisible(aboutTile);
+      await settle(tester);
+      await tester.tap(aboutTile);
       await settle(tester);
 
       expect(find.text('帐屿 · TallyIsle'), findsOneWidget);
@@ -315,7 +319,9 @@ void main() {
 
       expect(find.text('本地优先、精确到分的开源个人记账与资产管理工具'), findsOneWidget);
       expect(
-        find.text('基于 Flutter 构建 · 支持 Android / iOS / Windows / Linux / macOS'),
+        find.text(
+          '基于 Flutter 构建 · 支持 Android / iOS / HarmonyOS / Windows / Linux / macOS 六端',
+        ),
         findsOneWidget,
       );
       expect(find.text('项目与开源'), findsOneWidget);

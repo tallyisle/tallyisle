@@ -1,0 +1,2384 @@
+{
+  "schemaVersion": 1,
+  "sourceRepository": "https://github.com/icongo/bank-logos",
+  "sourceRevision": "ffca539a043900fbf2a4fd6a5d32f1706ae5dfd1",
+  "retrievedAt": "2026-08-25",
+  "notes": {
+    "reviewed": "可作为内置关联对象的默认图标。",
+    "source_label_only": "仅按上游名称进入可选图片库；不得自动写入 relatedEntityCode，发布前需逐项复核名称、机构状态和商标规范。"
+  },
+  "icons": [
+    {
+      "ref": "builtin:bank-icon.pbc",
+      "relatedEntityCode": null,
+      "displayName": "中国人民银行",
+      "aliases": [
+        "pbc"
+      ],
+      "assetPath": "assets/icons/banks/library/pbc.svg",
+      "sourceFile": "logos/pbc-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank.boc",
+      "relatedEntityCode": "bank.boc",
+      "displayName": "中国银行",
+      "aliases": [
+        "中行",
+        "BOC"
+      ],
+      "assetPath": "assets/icons/banks/boc.svg",
+      "sourceFile": "logos/boc-rect.svg",
+      "reviewStatus": "reviewed"
+    },
+    {
+      "ref": "builtin:bank.icbc",
+      "relatedEntityCode": "bank.icbc",
+      "displayName": "中国工商银行",
+      "aliases": [
+        "工商银行",
+        "工行",
+        "ICBC"
+      ],
+      "assetPath": "assets/icons/banks/icbc.svg",
+      "sourceFile": "logos/icbc-rect.svg",
+      "reviewStatus": "reviewed"
+    },
+    {
+      "ref": "builtin:bank.abc",
+      "relatedEntityCode": "bank.abc",
+      "displayName": "中国农业银行",
+      "aliases": [
+        "农业银行",
+        "农行",
+        "ABC"
+      ],
+      "assetPath": "assets/icons/banks/abc.svg",
+      "sourceFile": "logos/abchina-rect.svg",
+      "reviewStatus": "reviewed"
+    },
+    {
+      "ref": "builtin:bank.ccb",
+      "relatedEntityCode": "bank.ccb",
+      "displayName": "中国建设银行",
+      "aliases": [
+        "建设银行",
+        "建行",
+        "CCB"
+      ],
+      "assetPath": "assets/icons/banks/ccb.svg",
+      "sourceFile": "logos/ccb-rect.svg",
+      "reviewStatus": "reviewed"
+    },
+    {
+      "ref": "builtin:bank.bocom",
+      "relatedEntityCode": "bank.bocom",
+      "displayName": "交通银行",
+      "aliases": [
+        "交行",
+        "BOCOM"
+      ],
+      "assetPath": "assets/icons/banks/bocom.svg",
+      "sourceFile": "logos/bankcomm-rect.svg",
+      "reviewStatus": "reviewed"
+    },
+    {
+      "ref": "builtin:bank-icon.bosc",
+      "relatedEntityCode": null,
+      "displayName": "上海银行",
+      "aliases": [
+        "bosc"
+      ],
+      "assetPath": "assets/icons/banks/library/bosc.svg",
+      "sourceFile": "logos/bosc-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.cdb",
+      "relatedEntityCode": null,
+      "displayName": "国家开发银行",
+      "aliases": [
+        "cdb"
+      ],
+      "assetPath": "assets/icons/banks/library/cdb.svg",
+      "sourceFile": "logos/cdb-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank.citic",
+      "relatedEntityCode": "bank.citic",
+      "displayName": "中信银行",
+      "aliases": [
+        "中信",
+        "CITIC"
+      ],
+      "assetPath": "assets/icons/banks/citic.svg",
+      "sourceFile": "logos/citicbank-rect.svg",
+      "reviewStatus": "reviewed"
+    },
+    {
+      "ref": "builtin:bank.cmb",
+      "relatedEntityCode": "bank.cmb",
+      "displayName": "招商银行",
+      "aliases": [
+        "招行",
+        "CMB"
+      ],
+      "assetPath": "assets/icons/banks/cmb.svg",
+      "sourceFile": "logos/cmbchina-rect.svg",
+      "reviewStatus": "reviewed"
+    },
+    {
+      "ref": "builtin:bank-icon.jsbchina",
+      "relatedEntityCode": null,
+      "displayName": "江苏银行",
+      "aliases": [
+        "jsbchina"
+      ],
+      "assetPath": "assets/icons/banks/library/jsbchina.svg",
+      "sourceFile": "logos/jsbchina-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank.psbc",
+      "relatedEntityCode": "bank.psbc",
+      "displayName": "中国邮政储蓄银行",
+      "aliases": [
+        "邮储银行",
+        "邮储",
+        "PSBC"
+      ],
+      "assetPath": "assets/icons/banks/psbc.svg",
+      "sourceFile": "logos/psbc-rect.svg",
+      "reviewStatus": "reviewed"
+    },
+    {
+      "ref": "builtin:bank-icon.bankofbeijing",
+      "relatedEntityCode": null,
+      "displayName": "北京银行",
+      "aliases": [
+        "bankofbeijing"
+      ],
+      "assetPath": "assets/icons/banks/library/bankofbeijing.svg",
+      "sourceFile": "logos/bankofbeijing-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank.cgb",
+      "relatedEntityCode": "bank.cgb",
+      "displayName": "广发银行",
+      "aliases": [
+        "广发",
+        "CGB"
+      ],
+      "assetPath": "assets/icons/banks/cgb.svg",
+      "sourceFile": "logos/cgbchina-rect.svg",
+      "reviewStatus": "reviewed"
+    },
+    {
+      "ref": "builtin:bank.ceb",
+      "relatedEntityCode": "bank.ceb",
+      "displayName": "中国光大银行",
+      "aliases": [
+        "光大银行",
+        "光大",
+        "CEB"
+      ],
+      "assetPath": "assets/icons/banks/ceb.svg",
+      "sourceFile": "logos/cebbank-rect.svg",
+      "reviewStatus": "reviewed"
+    },
+    {
+      "ref": "builtin:bank-icon.eximbank",
+      "relatedEntityCode": null,
+      "displayName": "中国进出口银行",
+      "aliases": [
+        "eximbank"
+      ],
+      "assetPath": "assets/icons/banks/library/eximbank.svg",
+      "sourceFile": "logos/eximbank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank.cmbc",
+      "relatedEntityCode": "bank.cmbc",
+      "displayName": "中国民生银行",
+      "aliases": [
+        "民生银行",
+        "民生",
+        "CMBC"
+      ],
+      "assetPath": "assets/icons/banks/cmbc.svg",
+      "sourceFile": "logos/cmbc-rect.svg",
+      "reviewStatus": "reviewed"
+    },
+    {
+      "ref": "builtin:bank.pingan",
+      "relatedEntityCode": "bank.pingan",
+      "displayName": "平安银行",
+      "aliases": [
+        "平安",
+        "PAB"
+      ],
+      "assetPath": "assets/icons/banks/pingan.svg",
+      "sourceFile": "logos/pingan-rect.svg",
+      "reviewStatus": "reviewed"
+    },
+    {
+      "ref": "builtin:bank.hxb",
+      "relatedEntityCode": "bank.hxb",
+      "displayName": "华夏银行",
+      "aliases": [
+        "华夏",
+        "HXB"
+      ],
+      "assetPath": "assets/icons/banks/hxb.svg",
+      "sourceFile": "logos/hxb-rect.svg",
+      "reviewStatus": "reviewed"
+    },
+    {
+      "ref": "builtin:bank.spdb",
+      "relatedEntityCode": "bank.spdb",
+      "displayName": "上海浦东发展银行",
+      "aliases": [
+        "浦发银行",
+        "浦发",
+        "SPDB"
+      ],
+      "assetPath": "assets/icons/banks/spdb.svg",
+      "sourceFile": "logos/spdb-rect.svg",
+      "reviewStatus": "reviewed"
+    },
+    {
+      "ref": "builtin:bank.cib",
+      "relatedEntityCode": "bank.cib",
+      "displayName": "兴业银行",
+      "aliases": [
+        "兴业",
+        "CIB"
+      ],
+      "assetPath": "assets/icons/banks/cib.svg",
+      "sourceFile": "logos/cib-rect.svg",
+      "reviewStatus": "reviewed"
+    },
+    {
+      "ref": "builtin:bank.bohai",
+      "relatedEntityCode": "bank.bohai",
+      "displayName": "渤海银行",
+      "aliases": [
+        "渤海",
+        "CBHB"
+      ],
+      "assetPath": "assets/icons/banks/bohai.svg",
+      "sourceFile": "logos/cbhb-rect.svg",
+      "reviewStatus": "reviewed"
+    },
+    {
+      "ref": "builtin:bank.hengfeng",
+      "relatedEntityCode": "bank.hengfeng",
+      "displayName": "恒丰银行",
+      "aliases": [
+        "恒丰",
+        "HFBANK"
+      ],
+      "assetPath": "assets/icons/banks/hengfeng.svg",
+      "sourceFile": "logos/hfbank-rect.svg",
+      "reviewStatus": "reviewed"
+    },
+    {
+      "ref": "builtin:bank-icon.njcb",
+      "relatedEntityCode": null,
+      "displayName": "南京银行",
+      "aliases": [
+        "njcb"
+      ],
+      "assetPath": "assets/icons/banks/library/njcb.svg",
+      "sourceFile": "logos/njcb-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.gzcb",
+      "relatedEntityCode": null,
+      "displayName": "广州银行",
+      "aliases": [
+        "gzcb"
+      ],
+      "assetPath": "assets/icons/banks/library/gzcb.svg",
+      "sourceFile": "logos/gzcb-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.z-bank",
+      "relatedEntityCode": null,
+      "displayName": "武汉众邦银行",
+      "aliases": [
+        "z-bank"
+      ],
+      "assetPath": "assets/icons/banks/library/z-bank.svg",
+      "sourceFile": "logos/z-bank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank.czbank",
+      "relatedEntityCode": "bank.czbank",
+      "displayName": "浙商银行",
+      "aliases": [
+        "浙商",
+        "CZBANK"
+      ],
+      "assetPath": "assets/icons/banks/czbank.svg",
+      "sourceFile": "logos/czbank-rect.svg",
+      "reviewStatus": "reviewed"
+    },
+    {
+      "ref": "builtin:bank.zabank",
+      "relatedEntityCode": "bank.zabank",
+      "displayName": "众安银行",
+      "aliases": [
+        "众安",
+        "ZA Bank",
+        "ZABank"
+      ],
+      "assetPath": "assets/icons/banks/zabank.svg",
+      "sourceFile": "zabank.svg",
+      "reviewStatus": "reviewed"
+    },
+    {
+      "ref": "builtin:bank-icon.bankcz",
+      "relatedEntityCode": null,
+      "displayName": "沧州银行",
+      "aliases": [
+        "bankcz"
+      ],
+      "assetPath": "assets/icons/banks/library/bankcz.svg",
+      "sourceFile": "logos/bankcz-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.lccb",
+      "relatedEntityCode": null,
+      "displayName": "廊坊银行",
+      "aliases": [
+        "lccb"
+      ],
+      "assetPath": "assets/icons/banks/library/lccb.svg",
+      "sourceFile": "logos/lccb-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.chengdebank",
+      "relatedEntityCode": null,
+      "displayName": "承德银行",
+      "aliases": [
+        "chengdebank"
+      ],
+      "assetPath": "assets/icons/banks/library/chengdebank.svg",
+      "sourceFile": "logos/chengdebank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.scnhh",
+      "relatedEntityCode": null,
+      "displayName": "安徽舒城农村商业银行",
+      "aliases": [
+        "scnhh"
+      ],
+      "assetPath": "assets/icons/banks/library/scnhh.svg",
+      "sourceFile": "logos/scnhh-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.bankofas",
+      "relatedEntityCode": null,
+      "displayName": "鞍山银行",
+      "aliases": [
+        "bankofas"
+      ],
+      "assetPath": "assets/icons/banks/library/bankofas.svg",
+      "sourceFile": "logos/bankofas-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.zgbank",
+      "relatedEntityCode": null,
+      "displayName": "自贡银行",
+      "aliases": [
+        "zgbank"
+      ],
+      "assetPath": "assets/icons/banks/library/zgbank.svg",
+      "sourceFile": "logos/zgbank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.zhnsb",
+      "relatedEntityCode": null,
+      "displayName": "珠海农商银行",
+      "aliases": [
+        "zhnsb"
+      ],
+      "assetPath": "assets/icons/banks/library/zhnsb.svg",
+      "sourceFile": "logos/zhnsb-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.zybank",
+      "relatedEntityCode": null,
+      "displayName": "中原银行",
+      "aliases": [
+        "zybank"
+      ],
+      "assetPath": "assets/icons/banks/library/zybank.svg",
+      "sourceFile": "logos/zybank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.zsebank",
+      "relatedEntityCode": null,
+      "displayName": "中山农商",
+      "aliases": [
+        "zsebank"
+      ],
+      "assetPath": "assets/icons/banks/library/zsebank.svg",
+      "sourceFile": "logos/zsebank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.china-cba",
+      "relatedEntityCode": null,
+      "displayName": "中国银行业协会",
+      "aliases": [
+        "china-cba"
+      ],
+      "assetPath": "assets/icons/banks/library/china-cba.svg",
+      "sourceFile": "logos/china-cba-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.norincogroup",
+      "relatedEntityCode": null,
+      "displayName": "兵器财务",
+      "aliases": [
+        "norincogroup"
+      ],
+      "assetPath": "assets/icons/banks/library/norincogroup.svg",
+      "sourceFile": "logos/norincogroup-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.sgb",
+      "relatedEntityCode": null,
+      "displayName": "中德住房储蓄银行",
+      "aliases": [
+        "sgb"
+      ],
+      "assetPath": "assets/icons/banks/library/sgb.svg",
+      "sourceFile": "logos/sgb-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.zzbank",
+      "relatedEntityCode": null,
+      "displayName": "郑州银行",
+      "aliases": [
+        "zzbank"
+      ],
+      "assetPath": "assets/icons/banks/library/zzbank.svg",
+      "sourceFile": "logos/zzbank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.cscb",
+      "relatedEntityCode": null,
+      "displayName": "长沙银行",
+      "aliases": [
+        "cscb"
+      ],
+      "assetPath": "assets/icons/banks/library/cscb.svg",
+      "sourceFile": "logos/cscb-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.megabank",
+      "relatedEntityCode": null,
+      "displayName": "兆丰国际商业银行",
+      "aliases": [
+        "megabank"
+      ],
+      "assetPath": "assets/icons/banks/library/megabank.svg",
+      "sourceFile": "logos/megabank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.czcb",
+      "relatedEntityCode": null,
+      "displayName": "浙江稠州商业银行",
+      "aliases": [
+        "czcb"
+      ],
+      "assetPath": "assets/icons/banks/library/czcb.svg",
+      "sourceFile": "logos/czcb-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.mintaibank",
+      "relatedEntityCode": null,
+      "displayName": "浙江民泰商行",
+      "aliases": [
+        "mintaibank"
+      ],
+      "assetPath": "assets/icons/banks/library/mintaibank.svg",
+      "sourceFile": "logos/mintaibank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.zj96596",
+      "relatedEntityCode": null,
+      "displayName": "浙江农村信用社联合社",
+      "aliases": [
+        "zj96596"
+      ],
+      "assetPath": "assets/icons/banks/library/zj96596.svg",
+      "sourceFile": "logos/zj96596-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.xmbankonline",
+      "relatedEntityCode": null,
+      "displayName": "厦门银行",
+      "aliases": [
+        "xmbankonline"
+      ],
+      "assetPath": "assets/icons/banks/library/xmbankonline.svg",
+      "sourceFile": "logos/xmbankonline-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.trcbank",
+      "relatedEntityCode": null,
+      "displayName": "天津农商",
+      "aliases": [
+        "trcbank"
+      ],
+      "assetPath": "assets/icons/banks/library/trcbank.svg",
+      "sourceFile": "logos/trcbank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.bankoftianjin",
+      "relatedEntityCode": null,
+      "displayName": "天津银行",
+      "aliases": [
+        "bankoftianjin"
+      ],
+      "assetPath": "assets/icons/banks/library/bankoftianjin.svg",
+      "sourceFile": "logos/bankoftianjin-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.wzcb",
+      "relatedEntityCode": null,
+      "displayName": "温州银行",
+      "aliases": [
+        "wzcb"
+      ],
+      "assetPath": "assets/icons/banks/library/wzcb.svg",
+      "sourceFile": "logos/wzcb-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.bankwf",
+      "relatedEntityCode": null,
+      "displayName": "潍坊银行",
+      "aliases": [
+        "bankwf"
+      ],
+      "assetPath": "assets/icons/banks/library/bankwf.svg",
+      "sourceFile": "logos/bankwf-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.wrcb",
+      "relatedEntityCode": null,
+      "displayName": "无锡农商",
+      "aliases": [
+        "wrcb"
+      ],
+      "assetPath": "assets/icons/banks/library/wrcb.svg",
+      "sourceFile": "logos/wrcb-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.jx-bank",
+      "relatedEntityCode": null,
+      "displayName": "江西银行",
+      "aliases": [
+        "jx-bank"
+      ],
+      "assetPath": "assets/icons/banks/library/jx-bank.svg",
+      "sourceFile": "logos/jx-bank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.jinzhoubank",
+      "relatedEntityCode": null,
+      "displayName": "锦州银行",
+      "aliases": [
+        "jinzhoubank"
+      ],
+      "assetPath": "assets/icons/banks/library/jinzhoubank.svg",
+      "sourceFile": "logos/jinzhoubank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.lzbank",
+      "relatedEntityCode": null,
+      "displayName": "兰州银行",
+      "aliases": [
+        "lzbank"
+      ],
+      "assetPath": "assets/icons/banks/library/lzbank.svg",
+      "sourceFile": "logos/lzbank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.lzccb",
+      "relatedEntityCode": null,
+      "displayName": "泸州银行",
+      "aliases": [
+        "lzccb"
+      ],
+      "assetPath": "assets/icons/banks/library/lzccb.svg",
+      "sourceFile": "logos/lzccb-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.lsbankchina",
+      "relatedEntityCode": null,
+      "displayName": "莱商银行",
+      "aliases": [
+        "lsbankchina"
+      ],
+      "assetPath": "assets/icons/banks/library/lsbankchina.svg",
+      "sourceFile": "logos/lsbankchina-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.lsccb",
+      "relatedEntityCode": null,
+      "displayName": "乐山市商业银行",
+      "aliases": [
+        "lsccb"
+      ],
+      "assetPath": "assets/icons/banks/library/lsccb.svg",
+      "sourceFile": "logos/lsccb-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.klb",
+      "relatedEntityCode": null,
+      "displayName": "昆仑银行",
+      "aliases": [
+        "klb"
+      ],
+      "assetPath": "assets/icons/banks/library/klb.svg",
+      "sourceFile": "logos/klb-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.ksrcb",
+      "relatedEntityCode": null,
+      "displayName": "昆山农商",
+      "aliases": [
+        "ksrcb"
+      ],
+      "assetPath": "assets/icons/banks/library/ksrcb.svg",
+      "sourceFile": "logos/ksrcb-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.jjccb",
+      "relatedEntityCode": null,
+      "displayName": "九江银行",
+      "aliases": [
+        "jjccb"
+      ],
+      "assetPath": "assets/icons/banks/library/jjccb.svg",
+      "sourceFile": "logos/jjccb-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.nbcb",
+      "relatedEntityCode": null,
+      "displayName": "宁波银行",
+      "aliases": [
+        "nbcb"
+      ],
+      "assetPath": "assets/icons/banks/library/nbcb.svg",
+      "sourceFile": "logos/nbcb-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.bankofnx",
+      "relatedEntityCode": null,
+      "displayName": "宁夏银行",
+      "aliases": [
+        "bankofnx"
+      ],
+      "assetPath": "assets/icons/banks/library/bankofnx.svg",
+      "sourceFile": "logos/bankofnx-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.bankgy",
+      "relatedEntityCode": null,
+      "displayName": "贵阳银行",
+      "aliases": [
+        "bankgy"
+      ],
+      "assetPath": "assets/icons/banks/library/bankgy.svg",
+      "sourceFile": "logos/bankgy-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.bgzchina",
+      "relatedEntityCode": null,
+      "displayName": "贵州银行",
+      "aliases": [
+        "bgzchina"
+      ],
+      "assetPath": "assets/icons/banks/library/bgzchina.svg",
+      "sourceFile": "logos/bgzchina-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.bankofdl",
+      "relatedEntityCode": null,
+      "displayName": "大连银行",
+      "aliases": [
+        "bankofdl"
+      ],
+      "assetPath": "assets/icons/banks/library/bankofdl.svg",
+      "sourceFile": "logos/bankofdl-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.bjrcb",
+      "relatedEntityCode": null,
+      "displayName": "北京农商银行",
+      "aliases": [
+        "bjrcb"
+      ],
+      "assetPath": "assets/icons/banks/library/bjrcb.svg",
+      "sourceFile": "logos/bjrcb-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.bd-bank",
+      "relatedEntityCode": null,
+      "displayName": "保定银行",
+      "aliases": [
+        "bd-bank"
+      ],
+      "assetPath": "assets/icons/banks/library/bd-bank.svg",
+      "sourceFile": "logos/bd-bank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.cqrcb",
+      "relatedEntityCode": null,
+      "displayName": "重庆农商",
+      "aliases": [
+        "cqrcb"
+      ],
+      "assetPath": "assets/icons/banks/library/cqrcb.svg",
+      "sourceFile": "logos/cqrcb-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.csrcbank",
+      "relatedEntityCode": null,
+      "displayName": "常熟农商",
+      "aliases": [
+        "csrcbank"
+      ],
+      "assetPath": "assets/icons/banks/library/csrcbank.svg",
+      "sourceFile": "logos/csrcbank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.cycb",
+      "relatedEntityCode": null,
+      "displayName": "朝阳银行",
+      "aliases": [
+        "cycb"
+      ],
+      "assetPath": "assets/icons/banks/library/cycb.svg",
+      "sourceFile": "logos/cycb-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.bocd",
+      "relatedEntityCode": null,
+      "displayName": "成都银行",
+      "aliases": [
+        "bocd"
+      ],
+      "assetPath": "assets/icons/banks/library/bocd.svg",
+      "sourceFile": "logos/bocd-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.cqcbank",
+      "relatedEntityCode": null,
+      "displayName": "重庆银行",
+      "aliases": [
+        "cqcbank"
+      ],
+      "assetPath": "assets/icons/banks/library/cqcbank.svg",
+      "sourceFile": "logos/cqcbank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.qdccb",
+      "relatedEntityCode": null,
+      "displayName": "青岛银行",
+      "aliases": [
+        "qdccb"
+      ],
+      "assetPath": "assets/icons/banks/library/qdccb.svg",
+      "sourceFile": "logos/qdccb-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.bankqh",
+      "relatedEntityCode": null,
+      "displayName": "青海银行",
+      "aliases": [
+        "bankqh"
+      ],
+      "assetPath": "assets/icons/banks/library/bankqh.svg",
+      "sourceFile": "logos/bankqh-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.uccb",
+      "relatedEntityCode": null,
+      "displayName": "乌鲁木齐商业银行",
+      "aliases": [
+        "uccb"
+      ],
+      "assetPath": "assets/icons/banks/library/uccb.svg",
+      "sourceFile": "logos/uccb-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.bankoftieling",
+      "relatedEntityCode": null,
+      "displayName": "铁岭银行",
+      "aliases": [
+        "bankoftieling"
+      ],
+      "assetPath": "assets/icons/banks/library/bankoftieling.svg",
+      "sourceFile": "logos/bankoftieling-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.whrcbank",
+      "relatedEntityCode": null,
+      "displayName": "武汉农商",
+      "aliases": [
+        "whrcbank"
+      ],
+      "assetPath": "assets/icons/banks/library/whrcbank.svg",
+      "sourceFile": "logos/whrcbank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.xacbank",
+      "relatedEntityCode": null,
+      "displayName": "西安银行",
+      "aliases": [
+        "xacbank"
+      ],
+      "assetPath": "assets/icons/banks/library/xacbank.svg",
+      "sourceFile": "logos/xacbank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.ncbank",
+      "relatedEntityCode": null,
+      "displayName": "宁波通商银行",
+      "aliases": [
+        "ncbank"
+      ],
+      "assetPath": "assets/icons/banks/library/ncbank.svg",
+      "sourceFile": "logos/ncbank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.ncbchina",
+      "relatedEntityCode": null,
+      "displayName": "南洋商业银行",
+      "aliases": [
+        "ncbchina"
+      ],
+      "assetPath": "assets/icons/banks/library/ncbchina.svg",
+      "sourceFile": "logos/ncbchina-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.bankofpj",
+      "relatedEntityCode": null,
+      "displayName": "盘锦银行",
+      "aliases": [
+        "bankofpj"
+      ],
+      "assetPath": "assets/icons/banks/library/bankofpj.svg",
+      "sourceFile": "logos/bankofpj-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.srbank",
+      "relatedEntityCode": null,
+      "displayName": "上饶银行",
+      "aliases": [
+        "srbank"
+      ],
+      "assetPath": "assets/icons/banks/library/srbank.svg",
+      "sourceFile": "logos/srbank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.sxccb",
+      "relatedEntityCode": null,
+      "displayName": "绍兴银行",
+      "aliases": [
+        "sxccb"
+      ],
+      "assetPath": "assets/icons/banks/library/sxccb.svg",
+      "sourceFile": "logos/sxccb-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.dzccb",
+      "relatedEntityCode": null,
+      "displayName": "达州银行",
+      "aliases": [
+        "dzccb"
+      ],
+      "assetPath": "assets/icons/banks/library/dzccb.svg",
+      "sourceFile": "logos/dzccb-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.uobchina",
+      "relatedEntityCode": null,
+      "displayName": "大华银行",
+      "aliases": [
+        "uobchina"
+      ],
+      "assetPath": "assets/icons/banks/library/uobchina.svg",
+      "sourceFile": "logos/uobchina-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.dahsing",
+      "relatedEntityCode": null,
+      "displayName": "大新银行",
+      "aliases": [
+        "dahsing"
+      ],
+      "assetPath": "assets/icons/banks/library/dahsing.svg",
+      "sourceFile": "logos/dahsing-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.ordosbank",
+      "relatedEntityCode": null,
+      "displayName": "鄂尔多斯银行",
+      "aliases": [
+        "ordosbank"
+      ],
+      "assetPath": "assets/icons/banks/library/ordosbank.svg",
+      "sourceFile": "logos/ordosbank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.gzccb",
+      "relatedEntityCode": null,
+      "displayName": "赣州银行",
+      "aliases": [
+        "gzccb"
+      ],
+      "assetPath": "assets/icons/banks/library/gzccb.svg",
+      "sourceFile": "logos/gzccb-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.fuxinbank",
+      "relatedEntityCode": null,
+      "displayName": "阜新银行",
+      "aliases": [
+        "fuxinbank"
+      ],
+      "assetPath": "assets/icons/banks/library/fuxinbank.svg",
+      "sourceFile": "logos/fuxinbank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.bankoffs",
+      "relatedEntityCode": null,
+      "displayName": "抚顺银行",
+      "aliases": [
+        "bankoffs"
+      ],
+      "assetPath": "assets/icons/banks/library/bankoffs.svg",
+      "sourceFile": "logos/bankoffs-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.hkbea",
+      "relatedEntityCode": null,
+      "displayName": "东亚银行",
+      "aliases": [
+        "hkbea"
+      ],
+      "assetPath": "assets/icons/banks/library/hkbea.svg",
+      "sourceFile": "logos/hkbea-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.dyccb",
+      "relatedEntityCode": null,
+      "displayName": "东营银行",
+      "aliases": [
+        "dyccb"
+      ],
+      "assetPath": "assets/icons/banks/library/dyccb.svg",
+      "sourceFile": "logos/dyccb-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.drcbank",
+      "relatedEntityCode": null,
+      "displayName": "东莞农商",
+      "aliases": [
+        "drcbank"
+      ],
+      "assetPath": "assets/icons/banks/library/drcbank.svg",
+      "sourceFile": "logos/drcbank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.dongguanbank",
+      "relatedEntityCode": null,
+      "displayName": "东莞银行",
+      "aliases": [
+        "dongguanbank"
+      ],
+      "assetPath": "assets/icons/banks/library/dongguanbank.svg",
+      "sourceFile": "logos/dongguanbank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.dzbchina",
+      "relatedEntityCode": null,
+      "displayName": "德州银行",
+      "aliases": [
+        "dzbchina"
+      ],
+      "assetPath": "assets/icons/banks/library/dzbchina.svg",
+      "sourceFile": "logos/dzbchina-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.hanabank",
+      "relatedEntityCode": null,
+      "displayName": "韩亚银行",
+      "aliases": [
+        "hanabank"
+      ],
+      "assetPath": "assets/icons/banks/library/hanabank.svg",
+      "sourceFile": "logos/hanabank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.hkbchina",
+      "relatedEntityCode": null,
+      "displayName": "汉口银行",
+      "aliases": [
+        "hkbchina"
+      ],
+      "assetPath": "assets/icons/banks/library/hkbchina.svg",
+      "sourceFile": "logos/hkbchina-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.hebbank",
+      "relatedEntityCode": null,
+      "displayName": "河北银行",
+      "aliases": [
+        "hebbank"
+      ],
+      "assetPath": "assets/icons/banks/library/hebbank.svg",
+      "sourceFile": "logos/hebbank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.boy",
+      "relatedEntityCode": null,
+      "displayName": "横滨银行",
+      "aliases": [
+        "boy"
+      ],
+      "assetPath": "assets/icons/banks/library/boy.svg",
+      "sourceFile": "logos/boy-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.hzbank",
+      "relatedEntityCode": null,
+      "displayName": "杭州银行",
+      "aliases": [
+        "hzbank"
+      ],
+      "assetPath": "assets/icons/banks/library/hzbank.svg",
+      "sourceFile": "logos/hzbank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.hzccb",
+      "relatedEntityCode": null,
+      "displayName": "湖州银行",
+      "aliases": [
+        "hzccb"
+      ],
+      "assetPath": "assets/icons/banks/library/hzccb.svg",
+      "sourceFile": "logos/hzccb-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.hubeibank",
+      "relatedEntityCode": null,
+      "displayName": "湖北银行",
+      "aliases": [
+        "hubeibank"
+      ],
+      "assetPath": "assets/icons/banks/library/hubeibank.svg",
+      "sourceFile": "logos/hubeibank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.hangseng",
+      "relatedEntityCode": null,
+      "displayName": "恒生银行",
+      "aliases": [
+        "hangseng"
+      ],
+      "assetPath": "assets/icons/banks/library/hangseng.svg",
+      "sourceFile": "logos/hangseng-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.hsbc",
+      "relatedEntityCode": null,
+      "displayName": "汇丰银行",
+      "aliases": [
+        "hsbc"
+      ],
+      "assetPath": "assets/icons/banks/library/hsbc.svg",
+      "sourceFile": "logos/hsbc-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.ocbc",
+      "relatedEntityCode": null,
+      "displayName": "华侨银行",
+      "aliases": [
+        "ocbc"
+      ],
+      "assetPath": "assets/icons/banks/library/ocbc.svg",
+      "sourceFile": "logos/ocbc-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.jlbank",
+      "relatedEntityCode": null,
+      "displayName": "吉林银行",
+      "aliases": [
+        "jlbank"
+      ],
+      "assetPath": "assets/icons/banks/library/jlbank.svg",
+      "sourceFile": "logos/jlbank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.jn-bank",
+      "relatedEntityCode": null,
+      "displayName": "济宁银行",
+      "aliases": [
+        "jn-bank"
+      ],
+      "assetPath": "assets/icons/banks/library/jn-bank.svg",
+      "sourceFile": "logos/jn-bank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.jmrcb",
+      "relatedEntityCode": null,
+      "displayName": "江门农商",
+      "aliases": [
+        "jmrcb"
+      ],
+      "assetPath": "assets/icons/banks/library/jmrcb.svg",
+      "sourceFile": "logos/jmrcb-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.hsbank",
+      "relatedEntityCode": null,
+      "displayName": "徽商银行",
+      "aliases": [
+        "hsbank"
+      ],
+      "assetPath": "assets/icons/banks/library/hsbank.svg",
+      "sourceFile": "logos/hsbank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.bohuihe",
+      "relatedEntityCode": null,
+      "displayName": "汇和银行",
+      "aliases": [
+        "bohuihe"
+      ],
+      "assetPath": "assets/icons/banks/library/bohuihe.svg",
+      "sourceFile": "logos/bohuihe-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.jybank",
+      "relatedEntityCode": null,
+      "displayName": "江阴农商",
+      "aliases": [
+        "jybank"
+      ],
+      "assetPath": "assets/icons/banks/library/jybank.svg",
+      "sourceFile": "logos/jybank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.jshbank",
+      "relatedEntityCode": null,
+      "displayName": "晋商银行",
+      "aliases": [
+        "jshbank"
+      ],
+      "assetPath": "assets/icons/banks/library/jshbank.svg",
+      "sourceFile": "logos/jshbank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.bankyellowriver",
+      "relatedEntityCode": null,
+      "displayName": "黄河农商",
+      "aliases": [
+        "bankyellowriver"
+      ],
+      "assetPath": "assets/icons/banks/library/bankyellowriver.svg",
+      "sourceFile": "logos/bankyellowriver-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.crbank",
+      "relatedEntityCode": null,
+      "displayName": "华润银行",
+      "aliases": [
+        "crbank"
+      ],
+      "assetPath": "assets/icons/banks/library/crbank.svg",
+      "sourceFile": "logos/crbank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.citibank",
+      "relatedEntityCode": null,
+      "displayName": "花旗银行",
+      "aliases": [
+        "citibank"
+      ],
+      "assetPath": "assets/icons/banks/library/citibank.svg",
+      "sourceFile": "logos/citibank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.eastwestbank",
+      "relatedEntityCode": null,
+      "displayName": "华美银行",
+      "aliases": [
+        "eastwestbank"
+      ],
+      "assetPath": "assets/icons/banks/library/eastwestbank.svg",
+      "sourceFile": "logos/eastwestbank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.grcbank",
+      "relatedEntityCode": null,
+      "displayName": "广东农商",
+      "aliases": [
+        "grcbank"
+      ],
+      "assetPath": "assets/icons/banks/library/grcbank.svg",
+      "sourceFile": "logos/grcbank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.gsbankchina",
+      "relatedEntityCode": null,
+      "displayName": "甘肃银行",
+      "aliases": [
+        "gsbankchina"
+      ],
+      "assetPath": "assets/icons/banks/library/gsbankchina.svg",
+      "sourceFile": "logos/gsbankchina-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.foshanbank",
+      "relatedEntityCode": null,
+      "displayName": "佛山农商",
+      "aliases": [
+        "foshanbank"
+      ],
+      "assetPath": "assets/icons/banks/library/foshanbank.svg",
+      "sourceFile": "logos/foshanbank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.ccqtgb",
+      "relatedEntityCode": null,
+      "displayName": "重庆三峡银行",
+      "aliases": [
+        "ccqtgb"
+      ],
+      "assetPath": "assets/icons/banks/library/ccqtgb.svg",
+      "sourceFile": "logos/ccqtgb-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.urcb",
+      "relatedEntityCode": null,
+      "displayName": "杭州联合银行",
+      "aliases": [
+        "urcb"
+      ],
+      "assetPath": "assets/icons/banks/library/urcb.svg",
+      "sourceFile": "logos/urcb-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.hznsyh",
+      "relatedEntityCode": null,
+      "displayName": "惠州农商",
+      "aliases": [
+        "hznsyh"
+      ],
+      "assetPath": "assets/icons/banks/library/hznsyh.svg",
+      "sourceFile": "logos/hznsyh-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.bankofhld",
+      "relatedEntityCode": null,
+      "displayName": "葫芦岛银行",
+      "aliases": [
+        "bankofhld"
+      ],
+      "assetPath": "assets/icons/banks/library/bankofhld.svg",
+      "sourceFile": "logos/bankofhld-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.cmbcn",
+      "relatedEntityCode": null,
+      "displayName": "华商银行",
+      "aliases": [
+        "cmbcn"
+      ],
+      "assetPath": "assets/icons/banks/library/cmbcn.svg",
+      "sourceFile": "logos/cmbcn-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.hrxjbank",
+      "relatedEntityCode": null,
+      "displayName": "华融湘江银行",
+      "aliases": [
+        "hrxjbank"
+      ],
+      "assetPath": "assets/icons/banks/library/hrxjbank.svg",
+      "sourceFile": "logos/hrxjbank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.jhccb",
+      "relatedEntityCode": null,
+      "displayName": "金华银行",
+      "aliases": [
+        "jhccb"
+      ],
+      "assetPath": "assets/icons/banks/library/jhccb.svg",
+      "sourceFile": "logos/jhccb-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.syrcb",
+      "relatedEntityCode": null,
+      "displayName": "江苏射阳农商银行",
+      "aliases": [
+        "syrcb"
+      ],
+      "assetPath": "assets/icons/banks/library/syrcb.svg",
+      "sourceFile": "logos/syrcb-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.fudian",
+      "relatedEntityCode": null,
+      "displayName": "富滇银行",
+      "aliases": [
+        "fudian"
+      ],
+      "assetPath": "assets/icons/banks/library/fudian.svg",
+      "sourceFile": "logos/fudian-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.ghbank",
+      "relatedEntityCode": null,
+      "displayName": "广东华兴银行",
+      "aliases": [
+        "ghbank"
+      ],
+      "assetPath": "assets/icons/banks/library/ghbank.svg",
+      "sourceFile": "logos/ghbank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.bankofbbg",
+      "relatedEntityCode": null,
+      "displayName": "广西北部湾银行",
+      "aliases": [
+        "bankofbbg"
+      ],
+      "assetPath": "assets/icons/banks/library/bankofbbg.svg",
+      "sourceFile": "logos/bankofbbg-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.gdnybank",
+      "relatedEntityCode": null,
+      "displayName": "广东南粤银行",
+      "aliases": [
+        "gdnybank"
+      ],
+      "assetPath": "assets/icons/banks/library/gdnybank.svg",
+      "sourceFile": "logos/gdnybank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.fubonchina",
+      "relatedEntityCode": null,
+      "displayName": "富邦华一银行",
+      "aliases": [
+        "fubonchina"
+      ],
+      "assetPath": "assets/icons/banks/library/fubonchina.svg",
+      "sourceFile": "logos/fubonchina-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.societegenerale",
+      "relatedEntityCode": null,
+      "displayName": "法兴银行",
+      "aliases": [
+        "societegenerale"
+      ],
+      "assetPath": "assets/icons/banks/library/societegenerale.svg",
+      "sourceFile": "logos/societegenerale-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.firstbank",
+      "relatedEntityCode": null,
+      "displayName": "第一银行",
+      "aliases": [
+        "firstbank"
+      ],
+      "assetPath": "assets/icons/banks/library/firstbank.svg",
+      "sourceFile": "logos/firstbank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.fjhxbank",
+      "relatedEntityCode": null,
+      "displayName": "福建海峡银行",
+      "aliases": [
+        "fjhxbank"
+      ],
+      "assetPath": "assets/icons/banks/library/fjhxbank.svg",
+      "sourceFile": "logos/fjhxbank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.chinadb",
+      "relatedEntityCode": null,
+      "displayName": "德意志银行",
+      "aliases": [
+        "chinadb"
+      ],
+      "assetPath": "assets/icons/banks/library/chinadb.svg",
+      "sourceFile": "logos/chinadb-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.jhrcbank",
+      "relatedEntityCode": null,
+      "displayName": "建湖农商",
+      "aliases": [
+        "jhrcbank"
+      ],
+      "assetPath": "assets/icons/banks/library/jhrcbank.svg",
+      "sourceFile": "logos/jhrcbank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.scotiabank",
+      "relatedEntityCode": null,
+      "displayName": "加拿大丰业银行",
+      "aliases": [
+        "scotiabank"
+      ],
+      "assetPath": "assets/icons/banks/library/scotiabank.svg",
+      "sourceFile": "logos/scotiabank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.hnnxs",
+      "relatedEntityCode": null,
+      "displayName": "湖南省农村信用社",
+      "aliases": [
+        "hnnxs"
+      ],
+      "assetPath": "assets/icons/banks/library/hnnxs.svg",
+      "sourceFile": "logos/hnnxs-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.tcb-bank",
+      "relatedEntityCode": null,
+      "displayName": "合作金库银行",
+      "aliases": [
+        "tcb-bank"
+      ],
+      "assetPath": "assets/icons/banks/library/tcb-bank.svg",
+      "sourceFile": "logos/tcb-bank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.cathaybk",
+      "relatedEntityCode": null,
+      "displayName": "国泰世华银行",
+      "aliases": [
+        "cathaybk"
+      ],
+      "assetPath": "assets/icons/banks/library/cathaybk.svg",
+      "sourceFile": "logos/cathaybk-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.bankofamerica",
+      "relatedEntityCode": null,
+      "displayName": "美国银行",
+      "aliases": [
+        "bankofamerica"
+      ],
+      "assetPath": "assets/icons/banks/library/bankofamerica.svg",
+      "sourceFile": "logos/bankofamerica-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.bmo",
+      "relatedEntityCode": null,
+      "displayName": "蒙特利尔银行",
+      "aliases": [
+        "bmo"
+      ],
+      "assetPath": "assets/icons/banks/library/bmo.svg",
+      "sourceFile": "logos/bmo-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.bangkokbank",
+      "relatedEntityCode": null,
+      "displayName": "盘谷银行",
+      "aliases": [
+        "bangkokbank"
+      ],
+      "assetPath": "assets/icons/banks/library/bangkokbank.svg",
+      "sourceFile": "logos/bangkokbank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.qhdbank",
+      "relatedEntityCode": null,
+      "displayName": "秦皇岛银行",
+      "aliases": [
+        "qhdbank"
+      ],
+      "assetPath": "assets/icons/banks/library/qhdbank.svg",
+      "sourceFile": "logos/qhdbank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.qsbank",
+      "relatedEntityCode": null,
+      "displayName": "齐商银行",
+      "aliases": [
+        "qsbank"
+      ],
+      "assetPath": "assets/icons/banks/library/qsbank.svg",
+      "sourceFile": "logos/qsbank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.qingbank",
+      "relatedEntityCode": null,
+      "displayName": "清远农商",
+      "aliases": [
+        "qingbank"
+      ],
+      "assetPath": "assets/icons/banks/library/qingbank.svg",
+      "sourceFile": "logos/qingbank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.nanhaibank",
+      "relatedEntityCode": null,
+      "displayName": "南海农商",
+      "aliases": [
+        "nanhaibank"
+      ],
+      "assetPath": "assets/icons/banks/library/nanhaibank.svg",
+      "sourceFile": "logos/nanhaibank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.jpmorganchina",
+      "relatedEntityCode": null,
+      "displayName": "摩根大通银行",
+      "aliases": [
+        "jpmorganchina"
+      ],
+      "assetPath": "assets/icons/banks/library/jpmorganchina.svg",
+      "sourceFile": "logos/jpmorganchina-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.lsbchina",
+      "relatedEntityCode": null,
+      "displayName": "临商银行",
+      "aliases": [
+        "lsbchina"
+      ],
+      "assetPath": "assets/icons/banks/library/lsbchina.svg",
+      "sourceFile": "logos/lsbchina-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.o-bank",
+      "relatedEntityCode": null,
+      "displayName": "王道银行",
+      "aliases": [
+        "o-bank"
+      ],
+      "assetPath": "assets/icons/banks/library/o-bank.svg",
+      "sourceFile": "logos/o-bank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.tjbhb",
+      "relatedEntityCode": null,
+      "displayName": "天津滨海农商",
+      "aliases": [
+        "tjbhb"
+      ],
+      "assetPath": "assets/icons/banks/library/tjbhb.svg",
+      "sourceFile": "logos/tjbhb-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.ts-bank",
+      "relatedEntityCode": null,
+      "displayName": "唐山银行",
+      "aliases": [
+        "ts-bank"
+      ],
+      "assetPath": "assets/icons/banks/library/ts-bank.svg",
+      "sourceFile": "logos/ts-bank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.taccb",
+      "relatedEntityCode": null,
+      "displayName": "泰安银行",
+      "aliases": [
+        "taccb"
+      ],
+      "assetPath": "assets/icons/banks/library/taccb.svg",
+      "sourceFile": "logos/taccb-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.zjtlcb",
+      "relatedEntityCode": null,
+      "displayName": "泰隆银行",
+      "aliases": [
+        "zjtlcb"
+      ],
+      "assetPath": "assets/icons/banks/library/zjtlcb.svg",
+      "sourceFile": "logos/zjtlcb-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.wuhaicb",
+      "relatedEntityCode": null,
+      "displayName": "乌海银行",
+      "aliases": [
+        "wuhaicb"
+      ],
+      "assetPath": "assets/icons/banks/library/wuhaicb.svg",
+      "sourceFile": "logos/wuhaicb-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.xynsh",
+      "relatedEntityCode": null,
+      "displayName": "新沂农商",
+      "aliases": [
+        "xynsh"
+      ],
+      "assetPath": "assets/icons/banks/library/xynsh.svg",
+      "sourceFile": "logos/xynsh-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.dbs",
+      "relatedEntityCode": null,
+      "displayName": "星展银行",
+      "aliases": [
+        "dbs"
+      ],
+      "assetPath": "assets/icons/banks/library/dbs.svg",
+      "sourceFile": "logos/dbs-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.bcm",
+      "relatedEntityCode": null,
+      "displayName": "澳门商业银行",
+      "aliases": [
+        "bcm"
+      ],
+      "assetPath": "assets/icons/banks/library/bcm.svg",
+      "sourceFile": "logos/bcm-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.gx966888",
+      "relatedEntityCode": null,
+      "displayName": "广西农村信用社",
+      "aliases": [
+        "gx966888"
+      ],
+      "assetPath": "assets/icons/banks/library/gx966888.svg",
+      "sourceFile": "logos/gx966888-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.guilinbank",
+      "relatedEntityCode": null,
+      "displayName": "桂林银行",
+      "aliases": [
+        "guilinbank"
+      ],
+      "assetPath": "assets/icons/banks/library/guilinbank.svg",
+      "sourceFile": "logos/guilinbank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.hrbb",
+      "relatedEntityCode": null,
+      "displayName": "哈尔滨银行",
+      "aliases": [
+        "hrbb"
+      ],
+      "assetPath": "assets/icons/banks/library/hrbb.svg",
+      "sourceFile": "logos/hrbb-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.hdcb",
+      "relatedEntityCode": null,
+      "displayName": "邯郸银行",
+      "aliases": [
+        "hdcb"
+      ],
+      "assetPath": "assets/icons/banks/library/hdcb.svg",
+      "sourceFile": "logos/hdcb-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.kbstarchina",
+      "relatedEntityCode": null,
+      "displayName": "韩国国民银行",
+      "aliases": [
+        "kbstarchina"
+      ],
+      "assetPath": "assets/icons/banks/library/kbstarchina.svg",
+      "sourceFile": "logos/kbstarchina-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.ibk",
+      "relatedEntityCode": null,
+      "displayName": "韩国企业银行",
+      "aliases": [
+        "ibk"
+      ],
+      "assetPath": "assets/icons/banks/library/ibk.svg",
+      "sourceFile": "logos/ibk-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.hfrcbc",
+      "relatedEntityCode": null,
+      "displayName": "合肥科技农商",
+      "aliases": [
+        "hfrcbc"
+      ],
+      "assetPath": "assets/icons/banks/library/hfrcbc.svg",
+      "sourceFile": "logos/hfrcbc-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.jnbank",
+      "relatedEntityCode": null,
+      "displayName": "济宁银行",
+      "aliases": [
+        "jnbank"
+      ],
+      "assetPath": "assets/icons/banks/library/jnbank.svg",
+      "sourceFile": "logos/jnbank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.jjbank",
+      "relatedEntityCode": null,
+      "displayName": "江苏靖江农商",
+      "aliases": [
+        "jjbank"
+      ],
+      "assetPath": "assets/icons/banks/library/jjbank.svg",
+      "sourceFile": "logos/jjbank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.jrnsh",
+      "relatedEntityCode": null,
+      "displayName": "江苏句容农商",
+      "aliases": [
+        "jrnsh"
+      ],
+      "assetPath": "assets/icons/banks/library/jrnsh.svg",
+      "sourceFile": "logos/jrnsh-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.jsyxrcb",
+      "relatedEntityCode": null,
+      "displayName": "江苏宜兴农商",
+      "aliases": [
+        "jsyxrcb"
+      ],
+      "assetPath": "assets/icons/banks/library/jsyxrcb.svg",
+      "sourceFile": "logos/jsyxrcb-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.cjccb",
+      "relatedEntityCode": null,
+      "displayName": "江苏长江商业银行",
+      "aliases": [
+        "cjccb"
+      ],
+      "assetPath": "assets/icons/banks/library/cjccb.svg",
+      "sourceFile": "logos/cjccb-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.bolz",
+      "relatedEntityCode": null,
+      "displayName": "柳州银行",
+      "aliases": [
+        "bolz"
+      ],
+      "assetPath": "assets/icons/banks/library/bolz.svg",
+      "sourceFile": "logos/bolz-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.lj-bank",
+      "relatedEntityCode": null,
+      "displayName": "龙江银行",
+      "aliases": [
+        "lj-bank"
+      ],
+      "assetPath": "assets/icons/banks/library/lj-bank.svg",
+      "sourceFile": "logos/lj-bank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.lqrcb",
+      "relatedEntityCode": null,
+      "displayName": "路桥农村合作银行",
+      "aliases": [
+        "lqrcb"
+      ],
+      "assetPath": "assets/icons/banks/library/lqrcb.svg",
+      "sourceFile": "logos/lqrcb-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.qlbchina",
+      "relatedEntityCode": null,
+      "displayName": "齐鲁银行",
+      "aliases": [
+        "qlbchina"
+      ],
+      "assetPath": "assets/icons/banks/library/qlbchina.svg",
+      "sourceFile": "logos/qlbchina-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.qjccb",
+      "relatedEntityCode": null,
+      "displayName": "曲靖市商业银行",
+      "aliases": [
+        "qjccb"
+      ],
+      "assetPath": "assets/icons/banks/library/qjccb.svg",
+      "sourceFile": "logos/qjccb-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.qzccbank",
+      "relatedEntityCode": null,
+      "displayName": "泉州银行",
+      "aliases": [
+        "qzccbank"
+      ],
+      "assetPath": "assets/icons/banks/library/qzccbank.svg",
+      "sourceFile": "logos/qzccbank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.bankofrizhao",
+      "relatedEntityCode": null,
+      "displayName": "日照银行",
+      "aliases": [
+        "bankofrizhao"
+      ],
+      "assetPath": "assets/icons/banks/library/bankofrizhao.svg",
+      "sourceFile": "logos/bankofrizhao-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.ubs",
+      "relatedEntityCode": null,
+      "displayName": "瑞士银行",
+      "aliases": [
+        "ubs"
+      ],
+      "assetPath": "assets/icons/banks/library/ubs.svg",
+      "sourceFile": "logos/ubs-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.tf",
+      "relatedEntityCode": null,
+      "displayName": "四川天府银行",
+      "aliases": [
+        "tf"
+      ],
+      "assetPath": "assets/icons/banks/library/tf.svg",
+      "sourceFile": "logos/tf-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.srcb",
+      "relatedEntityCode": null,
+      "displayName": "上海农商",
+      "aliases": [
+        "srcb"
+      ],
+      "assetPath": "assets/icons/banks/library/srcb.svg",
+      "sourceFile": "logos/srcb-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.csxbank",
+      "relatedEntityCode": null,
+      "displayName": "三湘银行",
+      "aliases": [
+        "csxbank"
+      ],
+      "assetPath": "assets/icons/banks/library/csxbank.svg",
+      "sourceFile": "logos/csxbank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.xib",
+      "relatedEntityCode": null,
+      "displayName": "厦门国际银行",
+      "aliases": [
+        "xib"
+      ],
+      "assetPath": "assets/icons/banks/library/xib.svg",
+      "sourceFile": "logos/xib-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.sdnxs",
+      "relatedEntityCode": null,
+      "displayName": "山东省农村信用社",
+      "aliases": [
+        "sdnxs"
+      ],
+      "assetPath": "assets/icons/banks/library/sdnxs.svg",
+      "sourceFile": "logos/sdnxs-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.yamaguchibank",
+      "relatedEntityCode": null,
+      "displayName": "山口银行",
+      "aliases": [
+        "yamaguchibank"
+      ],
+      "assetPath": "assets/icons/banks/library/yamaguchibank.svg",
+      "sourceFile": "logos/yamaguchibank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.szsccb",
+      "relatedEntityCode": null,
+      "displayName": "石嘴山银行",
+      "aliases": [
+        "szsccb"
+      ],
+      "assetPath": "assets/icons/banks/library/szsccb.svg",
+      "sourceFile": "logos/szsccb-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.sdebank",
+      "relatedEntityCode": null,
+      "displayName": "顺德农商",
+      "aliases": [
+        "sdebank"
+      ],
+      "assetPath": "assets/icons/banks/library/sdebank.svg",
+      "sourceFile": "logos/sdebank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.snccb",
+      "relatedEntityCode": null,
+      "displayName": "遂宁银行",
+      "aliases": [
+        "snccb"
+      ],
+      "assetPath": "assets/icons/banks/library/snccb.svg",
+      "sourceFile": "logos/snccb-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.shengjingbank",
+      "relatedEntityCode": null,
+      "displayName": "盛京银行",
+      "aliases": [
+        "shengjingbank"
+      ],
+      "assetPath": "assets/icons/banks/library/shengjingbank.svg",
+      "sourceFile": "logos/shengjingbank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.suzhoubank",
+      "relatedEntityCode": null,
+      "displayName": "苏州银行",
+      "aliases": [
+        "suzhoubank"
+      ],
+      "assetPath": "assets/icons/banks/library/suzhoubank.svg",
+      "sourceFile": "logos/suzhoubank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.yantaibank",
+      "relatedEntityCode": null,
+      "displayName": "烟台银行",
+      "aliases": [
+        "yantaibank"
+      ],
+      "assetPath": "assets/icons/banks/library/yantaibank.svg",
+      "sourceFile": "logos/yantaibank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.bankofyk",
+      "relatedEntityCode": null,
+      "displayName": "营口银行",
+      "aliases": [
+        "bankofyk"
+      ],
+      "assetPath": "assets/icons/banks/library/bankofyk.svg",
+      "sourceFile": "logos/bankofyk-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.sinopac",
+      "relatedEntityCode": null,
+      "displayName": "永丰银行",
+      "aliases": [
+        "sinopac"
+      ],
+      "assetPath": "assets/icons/banks/library/sinopac.svg",
+      "sourceFile": "logos/sinopac-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.csrc",
+      "relatedEntityCode": null,
+      "displayName": "证监会",
+      "aliases": [
+        "csrc"
+      ],
+      "assetPath": "assets/icons/banks/library/csrc.svg",
+      "sourceFile": "logos/csrc-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.zaozhuangbank",
+      "relatedEntityCode": null,
+      "displayName": "枣庄银行",
+      "aliases": [
+        "zaozhuangbank"
+      ],
+      "assetPath": "assets/icons/banks/library/zaozhuangbank.svg",
+      "sourceFile": "logos/zaozhuangbank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.sc",
+      "relatedEntityCode": null,
+      "displayName": "渣打银行",
+      "aliases": [
+        "sc",
+        "渣打",
+        "Standard Chartered"
+      ],
+      "assetPath": "assets/icons/banks/library/sc.svg",
+      "sourceFile": "logos/sc-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.zxbk",
+      "relatedEntityCode": null,
+      "displayName": "正信银行",
+      "aliases": [
+        "zxbk"
+      ],
+      "assetPath": "assets/icons/banks/library/zxbk.svg",
+      "sourceFile": "logos/zxbk-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.ccabchina",
+      "relatedEntityCode": null,
+      "displayName": "长安银行",
+      "aliases": [
+        "ccabchina"
+      ],
+      "assetPath": "assets/icons/banks/library/ccabchina.svg",
+      "sourceFile": "logos/ccabchina-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.lygdfrcb",
+      "relatedEntityCode": null,
+      "displayName": "连云港东方农商",
+      "aliases": [
+        "lygdfrcb"
+      ],
+      "assetPath": "assets/icons/banks/library/lygdfrcb.svg",
+      "sourceFile": "logos/lygdfrcb-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.maybank",
+      "relatedEntityCode": null,
+      "displayName": "马来亚银行",
+      "aliases": [
+        "maybank"
+      ],
+      "assetPath": "assets/icons/banks/library/maybank.svg",
+      "sourceFile": "logos/maybank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.meigin",
+      "relatedEntityCode": null,
+      "displayName": "名古屋银行",
+      "aliases": [
+        "meigin"
+      ],
+      "assetPath": "assets/icons/banks/library/meigin.svg",
+      "sourceFile": "logos/meigin-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.rbcroyalbank",
+      "relatedEntityCode": null,
+      "displayName": "加拿大皇家银行",
+      "aliases": [
+        "rbcroyalbank"
+      ],
+      "assetPath": "assets/icons/banks/library/rbcroyalbank.svg",
+      "sourceFile": "logos/rbcroyalbank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.abnamro",
+      "relatedEntityCode": null,
+      "displayName": "荷兰银行",
+      "aliases": [
+        "abnamro"
+      ],
+      "assetPath": "assets/icons/banks/library/abnamro.svg",
+      "sourceFile": "logos/abnamro-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.barclays",
+      "relatedEntityCode": null,
+      "displayName": "巴克莱银行",
+      "aliases": [
+        "barclays"
+      ],
+      "assetPath": "assets/icons/banks/library/barclays.svg",
+      "sourceFile": "logos/barclays-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.anz",
+      "relatedEntityCode": null,
+      "displayName": "澳新银行",
+      "aliases": [
+        "anz"
+      ],
+      "assetPath": "assets/icons/banks/library/anz.svg",
+      "sourceFile": "logos/anz-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.dandongbank",
+      "relatedEntityCode": null,
+      "displayName": "丹东银行",
+      "aliases": [
+        "dandongbank"
+      ],
+      "assetPath": "assets/icons/banks/library/dandongbank.svg",
+      "sourceFile": "logos/dandongbank-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.xjkccb",
+      "relatedEntityCode": null,
+      "displayName": "库尔勒市商业银行",
+      "aliases": [
+        "xjkccb"
+      ],
+      "assetPath": "assets/icons/banks/library/xjkccb.svg",
+      "sourceFile": "logos/xjkccb-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.jtnsh",
+      "relatedEntityCode": null,
+      "displayName": "九台农商",
+      "aliases": [
+        "jtnsh"
+      ],
+      "assetPath": "assets/icons/banks/library/jtnsh.svg",
+      "sourceFile": "logos/jtnsh-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.luoyang-szgold",
+      "relatedEntityCode": null,
+      "displayName": "洛阳银行",
+      "aliases": [
+        "luoyang-szgold"
+      ],
+      "assetPath": "assets/icons/banks/library/luoyang-szgold.svg",
+      "sourceFile": "logos/luoyang-szgold-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.mycc",
+      "relatedEntityCode": null,
+      "displayName": "绵阳商业银行",
+      "aliases": [
+        "mycc"
+      ],
+      "assetPath": "assets/icons/banks/library/mycc.svg",
+      "sourceFile": "logos/mycc-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.masrcb",
+      "relatedEntityCode": null,
+      "displayName": "马鞍山农商",
+      "aliases": [
+        "masrcb"
+      ],
+      "assetPath": "assets/icons/banks/library/masrcb.svg",
+      "sourceFile": "logos/masrcb-rect.svg",
+      "reviewStatus": "source_label_only"
+    },
+    {
+      "ref": "builtin:bank-icon.mufg",
+      "relatedEntityCode": null,
+      "displayName": "东京三菱银行",
+      "aliases": [
+        "mufg"
+      ],
+      "assetPath": "assets/icons/banks/library/mufg.svg",
+      "sourceFile": "logos/mufg-rect.svg",
+      "reviewStatus": "source_label_only"
+    }
+  ]
+}

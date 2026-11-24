@@ -564,7 +564,7 @@ final class BatchRecordService {
             }
           }
 
-          // Sync linked reimbursement receipt children (book + timestamp floor).
+          // Sync linked reimbursement receipt children (book, category, exclusion flags + timestamp floor).
           for (final reimbLink
               in rel.reimbursements?.children ?? const <LinkedBill>[]) {
             final childRow =
@@ -575,13 +575,21 @@ final class BatchRecordService {
             final clampedTime = childRow.recordTime <= nextTime
                 ? nextTime + 1
                 : childRow.recordTime;
-            if (childRow.accountBookId != nextBookId ||
-                childRow.recordTime != clampedTime) {
+            final childChanged =
+                childRow.accountBookId != nextBookId ||
+                childRow.recordCatId != nextCatId ||
+                childRow.excludeBudget != nextExcludeBudget ||
+                childRow.excludeExIn != nextExcludeExIn ||
+                childRow.recordTime != clampedTime;
+            if (childChanged) {
               await (db.update(
                 db.records,
               )..where((t) => t.recordId.equals(childRow.recordId))).write(
                 RecordsCompanion(
                   accountBookId: Value(nextBookId),
+                  recordCatId: Value(nextCatId),
+                  excludeBudget: Value(nextExcludeBudget),
+                  excludeExIn: Value(nextExcludeExIn),
                   recordTime: Value(clampedTime),
                 ),
               );

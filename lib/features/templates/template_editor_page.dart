@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/adaptive.dart';
 import '../../app/providers.dart';
 import '../../data/db/database.dart';
 import '../../data/tools/template_remark_service.dart';
@@ -10,6 +11,7 @@ import '../../domain/rules/asset_overview.dart' show normalizeCurrency;
 import '../../domain/rules/currency_rates.dart' show baseCurrency;
 import '../../domain/rules/template_card_rules.dart';
 import '../common/common.dart';
+import '../common/desktop_modal_page.dart';
 import 'remarks_page.dart';
 import 'template_providers.dart';
 
@@ -251,239 +253,258 @@ class _TemplateEditorPageState extends ConsumerState<TemplateEditorPage> {
         ? accountCurr
         : (_sourceCurrency ?? accountCurr);
 
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+
     return PopScope(
       canPop: !_busy,
-      child: Scaffold(
-        key: const Key('template_editor_page'),
-        appBar: AppBar(title: Text(_editing ? '编辑模板' : '新建模板')),
-        bottomNavigationBar: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-            child: FilledButton(
-              key: const Key('save_template_button'),
-              onPressed: _busy || _loading ? null : _submit,
-              child: Text(_busy ? '保存中…' : '保存模板'),
+      child: DesktopModalEscapeScope(
+        enabled: isDesktop,
+        child: Scaffold(
+          key: const Key('template_editor_page'),
+          appBar: AppBar(
+            leading: isDesktop ? const CloseButton() : null,
+            scrolledUnderElevation: isDesktop ? 0 : null,
+            title: Text(_editing ? '编辑模板' : '新建模板'),
+          ),
+          bottomNavigationBar: SafeArea(
+            child: Padding(
+              padding: isDesktop
+                  ? const EdgeInsets.fromLTRB(20, 8, 20, 14)
+                  : const EdgeInsets.fromLTRB(16, 8, 16, 12),
+              child: FilledButton(
+                key: const Key('save_template_button'),
+                onPressed: _busy || _loading ? null : _submit,
+                child: Text(_busy ? '保存中…' : '保存模板'),
+              ),
             ),
           ),
-        ),
-        body: _loading
-            ? const Loading()
-            : Center(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 640),
-                  child: ListView(
-                    padding: const EdgeInsets.all(16),
-                    children: [
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          for (final (value, label) in const <(int, String)>[
-                            (RecordType.expense, '支出'),
-                            (RecordType.income, '收入'),
-                            (RecordType.transfer, '转账'),
-                            (RecordType.reimbursable, '报销'),
-                            (RecordType.advanceExpense, '预支'),
-                            (RecordType.advanceIncome, '预收'),
-                          ])
-                            ChoiceChip(
-                              key: Key('template_type_$value'),
-                              label: Text(label),
-                              selected: _type == value,
-                              onSelected: _busy
-                                  ? null
-                                  : (_) => setState(() {
-                                      _type = value;
-                                      _categoryId = null;
-                                      _parentCatId = null;
-                                    }),
-                            ),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-                      TextField(
-                        key: const Key('template_name_input'),
-                        controller: _nameController,
-                        enabled: !_busy,
-                        maxLength: maxTemplateNameLength,
-                        decoration: const InputDecoration(
-                          labelText: '模板名称（可选，如：早餐地铁）',
-                          border: OutlineInputBorder(),
-                        ),
-                      ),
-                      if (books.isNotEmpty && effectiveBookId != null) ...[
-                        const SizedBox(height: 8),
-                        _ControlledDropdown<int>(
-                          fieldKey: const Key('template_book_dropdown'),
-                          label: '所属账本',
-                          enabled: !_busy,
-                          value: effectiveBookId,
-                          items: [
-                            for (final b in books)
-                              DropdownMenuItem<int>(
-                                value: b.id,
-                                child: Text(b.name),
-                              ),
-                          ],
-                          onChanged: (v) {
-                            if (v == null) return;
-                            setState(() {
-                              _bookId = v;
-                              _categoryId = null;
-                              _parentCatId = null;
-                            });
-                          },
-                        ),
-                      ],
-                      const SizedBox(height: 16),
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(
-                            child: TextField(
-                              key: const Key('template_amount_input'),
-                              controller: _amountController,
-                              enabled: !_busy,
-                              keyboardType:
-                                  const TextInputType.numberWithOptions(
-                                    decimal: true,
-                                  ),
-                              inputFormatters: _decimalFormatters,
-                              decoration: InputDecoration(
-                                labelText: '预设金额',
-                                prefixText: '$enteredCurr ',
-                                border: const OutlineInputBorder(),
-                              ),
-                            ),
-                          ),
-                          if (_type != RecordType.transfer &&
-                              currencies.length > 1) ...[
-                            const SizedBox(width: 8),
-                            SizedBox(
-                              width: 120,
-                              child: _ControlledDropdown<String>(
-                                fieldKey: const Key(
-                                  'template_currency_dropdown',
-                                ),
-                                label: '币种',
-                                enabled: !_busy,
-                                value:
-                                    currencies.any((c) => c.code == enteredCurr)
-                                    ? enteredCurr
-                                    : currencies.first.code,
-                                items: [
-                                  for (final c in currencies)
-                                    DropdownMenuItem<String>(
-                                      value: c.code,
-                                      child: Text(c.code),
-                                    ),
-                                ],
-                                onChanged: (v) =>
-                                    setState(() => _sourceCurrency = v),
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-                      if (_type == RecordType.transfer)
-                        ..._buildTransferFields(assets)
-                      else
-                        ..._buildCategoryAndAssetFields(categories, assets),
-                      const SizedBox(height: 16),
-                      TextField(
-                        key: const Key('template_remark_input'),
-                        controller: _remarkController,
-                        enabled: !_busy,
-                        maxLength: 200,
-                        onChanged: (_) => setState(() {}),
-                        decoration: const InputDecoration(
-                          labelText: '预设备注',
-                          border: OutlineInputBorder(),
-                        ),
-                      ),
-                      if (_type != RecordType.transfer)
-                        FrequentRemarkChips(
-                          categoryId: _categoryId ?? noRef,
-                          selectedRemark: _remarkController.text,
-                          enabled: !_busy,
-                          onSelectRemark: (text) => setState(() {
-                            _remarkController.text = text;
-                          }),
-                        ),
-                      const SizedBox(height: 8),
-                      SwitchListTile(
-                        key: const Key('template_autosave_tile'),
-                        contentPadding: EdgeInsets.zero,
-                        title: const Text('点击模板直接生成账单（秒记）'),
-                        subtitle: const Text('开启后点击快捷模板立即入账；关闭则仅预填记账表单'),
-                        value: _autoSave,
-                        onChanged: _busy
-                            ? null
-                            : (v) => setState(() => _autoSave = v),
-                      ),
-                      if (_type != RecordType.transfer) ...[
-                        SwitchListTile(
-                          contentPadding: EdgeInsets.zero,
-                          title: const Text('不计入收支'),
-                          value: _excludeExIn,
-                          onChanged: _busy
-                              ? null
-                              : (v) => setState(() => _excludeExIn = v),
-                        ),
-                        SwitchListTile(
-                          contentPadding: EdgeInsets.zero,
-                          title: const Text('不计入预算'),
-                          value: _excludeBudget,
-                          onChanged: _busy
-                              ? null
-                              : (v) => setState(() => _excludeBudget = v),
-                        ),
-                      ],
-                      if (tags.isNotEmpty) ...[
-                        const SizedBox(height: 8),
-                        Text(
-                          '标签',
-                          style: Theme.of(context).textTheme.labelLarge,
-                        ),
-                        const SizedBox(height: 8),
+          body: _loading
+              ? const Loading()
+              : Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 640),
+                    child: ListView(
+                      padding: isDesktop
+                          ? const EdgeInsets.fromLTRB(20, 12, 20, 16)
+                          : const EdgeInsets.all(16),
+                      children: [
                         Wrap(
                           spacing: 8,
                           runSpacing: 8,
                           children: [
-                            for (final t in tags)
-                              FilterChip(
-                                key: Key('template_tag_${t.tagId}'),
-                                label: Text(t.name),
-                                selected: _selectedTagIds.contains(t.tagId),
+                            for (final (value, label) in const <(int, String)>[
+                              (RecordType.expense, '支出'),
+                              (RecordType.income, '收入'),
+                              (RecordType.transfer, '转账'),
+                              (RecordType.reimbursable, '报销'),
+                              (RecordType.advanceExpense, '预支'),
+                              (RecordType.advanceIncome, '预收'),
+                            ])
+                              ChoiceChip(
+                                key: Key('template_type_$value'),
+                                label: Text(label),
+                                selected: _type == value,
                                 onSelected: _busy
                                     ? null
-                                    : (sel) => setState(() {
-                                        if (sel) {
-                                          _selectedTagIds.add(t.tagId);
-                                        } else {
-                                          _selectedTagIds.remove(t.tagId);
-                                        }
+                                    : (_) => setState(() {
+                                        _type = value;
+                                        _categoryId = null;
+                                        _parentCatId = null;
                                       }),
                               ),
                           ],
                         ),
-                      ],
-                      if (_error != null)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 12),
-                          child: Text(
-                            _error!,
-                            key: const Key('template_form_error'),
-                            style: TextStyle(
-                              color: Theme.of(context).colorScheme.error,
-                            ),
+                        const SizedBox(height: 16),
+                        TextField(
+                          key: const Key('template_name_input'),
+                          controller: _nameController,
+                          enabled: !_busy,
+                          maxLength: maxTemplateNameLength,
+                          decoration: const InputDecoration(
+                            labelText: '模板名称（可选，如：早餐地铁）',
+                            border: OutlineInputBorder(),
                           ),
                         ),
-                    ],
+                        if (books.isNotEmpty && effectiveBookId != null) ...[
+                          const SizedBox(height: 8),
+                          _ControlledDropdown<int>(
+                            fieldKey: const Key('template_book_dropdown'),
+                            label: '所属账本',
+                            enabled: !_busy,
+                            value: effectiveBookId,
+                            items: [
+                              for (final b in books)
+                                DropdownMenuItem<int>(
+                                  value: b.id,
+                                  child: Text(b.name),
+                                ),
+                            ],
+                            onChanged: (v) {
+                              if (v == null) return;
+                              setState(() {
+                                _bookId = v;
+                                _categoryId = null;
+                                _parentCatId = null;
+                              });
+                            },
+                          ),
+                        ],
+                        const SizedBox(height: 16),
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                key: const Key('template_amount_input'),
+                                controller: _amountController,
+                                enabled: !_busy,
+                                keyboardType:
+                                    const TextInputType.numberWithOptions(
+                                      decimal: true,
+                                    ),
+                                inputFormatters: _decimalFormatters,
+                                decoration: InputDecoration(
+                                  labelText: '预设金额',
+                                  prefixText: '$enteredCurr ',
+                                  border: const OutlineInputBorder(),
+                                  contentPadding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 14,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            if (_type != RecordType.transfer &&
+                                currencies.length > 1) ...[
+                              const SizedBox(width: 8),
+                              SizedBox(
+                                width: 120,
+                                child: _ControlledDropdown<String>(
+                                  fieldKey: const Key(
+                                    'template_currency_dropdown',
+                                  ),
+                                  label: '币种',
+                                  enabled: !_busy,
+                                  value:
+                                      currencies.any(
+                                        (c) => c.code == enteredCurr,
+                                      )
+                                      ? enteredCurr
+                                      : currencies.first.code,
+                                  items: [
+                                    for (final c in currencies)
+                                      DropdownMenuItem<String>(
+                                        value: c.code,
+                                        child: Text(c.code),
+                                      ),
+                                  ],
+                                  onChanged: (v) =>
+                                      setState(() => _sourceCurrency = v),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        if (_type == RecordType.transfer)
+                          ..._buildTransferFields(assets)
+                        else
+                          ..._buildCategoryAndAssetFields(categories, assets),
+                        const SizedBox(height: 16),
+                        TextField(
+                          key: const Key('template_remark_input'),
+                          controller: _remarkController,
+                          enabled: !_busy,
+                          maxLength: 200,
+                          onChanged: (_) => setState(() {}),
+                          decoration: const InputDecoration(
+                            labelText: '预设备注',
+                            border: OutlineInputBorder(),
+                          ),
+                        ),
+                        if (_type != RecordType.transfer)
+                          FrequentRemarkChips(
+                            categoryId: _categoryId ?? noRef,
+                            selectedRemark: _remarkController.text,
+                            enabled: !_busy,
+                            onSelectRemark: (text) => setState(() {
+                              _remarkController.text = text;
+                            }),
+                          ),
+                        const SizedBox(height: 8),
+                        SwitchListTile(
+                          key: const Key('template_autosave_tile'),
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('点击模板直接生成账单（秒记）'),
+                          subtitle: const Text('开启后点击快捷模板立即入账；关闭则仅预填记账表单'),
+                          value: _autoSave,
+                          onChanged: _busy
+                              ? null
+                              : (v) => setState(() => _autoSave = v),
+                        ),
+                        if (_type != RecordType.transfer) ...[
+                          SwitchListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: const Text('不计入收支'),
+                            value: _excludeExIn,
+                            onChanged: _busy
+                                ? null
+                                : (v) => setState(() => _excludeExIn = v),
+                          ),
+                          SwitchListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: const Text('不计入预算'),
+                            value: _excludeBudget,
+                            onChanged: _busy
+                                ? null
+                                : (v) => setState(() => _excludeBudget = v),
+                          ),
+                        ],
+                        if (tags.isNotEmpty) ...[
+                          const SizedBox(height: 8),
+                          Text(
+                            '标签',
+                            style: Theme.of(context).textTheme.labelLarge,
+                          ),
+                          const SizedBox(height: 8),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              for (final t in tags)
+                                FilterChip(
+                                  key: Key('template_tag_${t.tagId}'),
+                                  label: Text(t.name),
+                                  selected: _selectedTagIds.contains(t.tagId),
+                                  onSelected: _busy
+                                      ? null
+                                      : (sel) => setState(() {
+                                          if (sel) {
+                                            _selectedTagIds.add(t.tagId);
+                                          } else {
+                                            _selectedTagIds.remove(t.tagId);
+                                          }
+                                        }),
+                                ),
+                            ],
+                          ),
+                        ],
+                        if (_error != null)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 12),
+                            child: Text(
+                              _error!,
+                              key: const Key('template_form_error'),
+                              style: TextStyle(
+                                color: Theme.of(context).colorScheme.error,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
                 ),
-              ),
+        ),
       ),
     );
   }
@@ -657,13 +678,14 @@ class _ControlledDropdown<T> extends StatelessWidget {
     decoration: InputDecoration(
       labelText: label,
       border: const OutlineInputBorder(),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
     ),
     child: DropdownButtonHideUnderline(
       child: DropdownButton<T>(
         key: fieldKey,
         isExpanded: true,
         isDense: true,
+        style: Theme.of(context).textTheme.bodyLarge,
         value: value,
         items: items,
         onChanged: enabled ? onChanged : null,

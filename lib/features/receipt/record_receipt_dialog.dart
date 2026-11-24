@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/adaptive.dart';
 import '../../app/providers.dart';
 import '../../core/failure.dart';
 import '../../data/db/database.dart';
@@ -207,6 +208,9 @@ class _RecordReceiptDialogState extends ConsumerState<RecordReceiptDialog> {
     final fileAccess = ref.watch(receiptFileAccessProvider);
     final saveCap = fileAccess.saveLocationCapability;
     final shareCap = fileAccess.shareCapability;
+    final hideUnavailableShare =
+        DesktopAdaptive.isDesktop(context) &&
+        shareCap.state != CapabilityState.available;
 
     return Dialog(
       backgroundColor: Colors.transparent,
@@ -246,35 +250,54 @@ class _RecordReceiptDialogState extends ConsumerState<RecordReceiptDialog> {
                           ),
                         ),
                       ),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            key: const Key('receipt-save-btn'),
-                            onPressed:
-                                _busy ||
-                                    saveCap.state != CapabilityState.available
-                                ? null
-                                : () => _exportPng(vm, share: false),
-                            icon: const Icon(Icons.save_alt_outlined, size: 18),
-                            label: const Text('保存图片'),
-                          ),
+                    if (hideUnavailableShare)
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton.icon(
+                          key: const Key('receipt-save-btn'),
+                          onPressed:
+                              _busy ||
+                                  saveCap.state != CapabilityState.available
+                              ? null
+                              : () => _exportPng(vm, share: false),
+                          icon: const Icon(Icons.save_alt_outlined, size: 18),
+                          label: const Text('保存图片'),
                         ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: FilledButton.icon(
-                            key: const Key('receipt-share-btn'),
-                            onPressed:
-                                _busy ||
-                                    shareCap.state != CapabilityState.available
-                                ? null
-                                : () => _exportPng(vm, share: true),
-                            icon: const Icon(Icons.share_outlined, size: 18),
-                            label: const Text('分享小票'),
+                      )
+                    else
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              key: const Key('receipt-save-btn'),
+                              onPressed:
+                                  _busy ||
+                                      saveCap.state != CapabilityState.available
+                                  ? null
+                                  : () => _exportPng(vm, share: false),
+                              icon: const Icon(
+                                Icons.save_alt_outlined,
+                                size: 18,
+                              ),
+                              label: const Text('保存图片'),
+                            ),
                           ),
-                        ),
-                      ],
-                    ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: FilledButton.icon(
+                              key: const Key('receipt-share-btn'),
+                              onPressed:
+                                  _busy ||
+                                      shareCap.state !=
+                                          CapabilityState.available
+                                  ? null
+                                  : () => _exportPng(vm, share: true),
+                              icon: const Icon(Icons.share_outlined, size: 18),
+                              label: const Text('分享小票'),
+                            ),
+                          ),
+                        ],
+                      ),
                     const SizedBox(height: 4),
                     TextButton(
                       key: const Key('receipt-close-btn'),
@@ -601,61 +624,81 @@ class _BillLocationEditorDialogState extends State<BillLocationEditorDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('设置消费地点'),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    final fieldBorder = isDesktop ? const OutlineInputBorder() : null;
+    final fieldGap = isDesktop ? 12.0 : 8.0;
+    Widget content = Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        TextField(
+          key: const Key('loc-simple-name'),
+          controller: _simpleController,
+          decoration: InputDecoration(
+            labelText: '地点简称（如：人民广场）',
+            border: fieldBorder,
+          ),
+        ),
+        SizedBox(height: fieldGap),
+        TextField(
+          key: const Key('loc-detail-name'),
+          controller: _detailController,
+          decoration: InputDecoration(
+            labelText: '详细地址（选填）',
+            border: fieldBorder,
+          ),
+        ),
+        SizedBox(height: fieldGap),
+        Row(
           children: [
-            TextField(
-              key: const Key('loc-simple-name'),
-              controller: _simpleController,
-              decoration: const InputDecoration(labelText: '地点简称（如：人民广场）'),
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              key: const Key('loc-detail-name'),
-              controller: _detailController,
-              decoration: const InputDecoration(labelText: '详细地址（选填）'),
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    key: const Key('loc-latitude'),
-                    controller: _latController,
-                    keyboardType: const TextInputType.numberWithOptions(
-                      signed: true,
-                      decimal: true,
-                    ),
-                    decoration: const InputDecoration(labelText: '纬度（选填）'),
-                  ),
+            Expanded(
+              child: TextField(
+                key: const Key('loc-latitude'),
+                controller: _latController,
+                keyboardType: const TextInputType.numberWithOptions(
+                  signed: true,
+                  decimal: true,
                 ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: TextField(
-                    key: const Key('loc-longitude'),
-                    controller: _lngController,
-                    keyboardType: const TextInputType.numberWithOptions(
-                      signed: true,
-                      decimal: true,
-                    ),
-                    decoration: const InputDecoration(labelText: '经度（选填）'),
-                  ),
+                decoration: InputDecoration(
+                  labelText: '纬度（选填）',
+                  border: fieldBorder,
                 ),
-              ],
-            ),
-            if (_error != null) ...[
-              const SizedBox(height: 8),
-              Text(
-                _error!,
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
               ),
-            ],
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: TextField(
+                key: const Key('loc-longitude'),
+                controller: _lngController,
+                keyboardType: const TextInputType.numberWithOptions(
+                  signed: true,
+                  decimal: true,
+                ),
+                decoration: InputDecoration(
+                  labelText: '经度（选填）',
+                  border: fieldBorder,
+                ),
+              ),
+            ),
           ],
         ),
-      ),
+        if (_error != null) ...[
+          const SizedBox(height: 8),
+          Text(
+            _error!,
+            style: TextStyle(color: Theme.of(context).colorScheme.error),
+          ),
+        ],
+      ],
+    );
+    if (isDesktop) {
+      content = ConstrainedBox(
+        constraints: const BoxConstraints(minWidth: 380, maxWidth: 440),
+        child: content,
+      );
+    }
+    return AlertDialog(
+      title: const Text('设置消费地点'),
+      content: SingleChildScrollView(child: content),
       actions: [
         TextButton(
           key: const Key('loc-clear-btn'),

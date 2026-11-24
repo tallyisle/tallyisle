@@ -1,12 +1,17 @@
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../app/adaptive.dart';
 import '../../app/providers.dart';
 import '../../data/db/database.dart';
 import '../../domain/model/codes.dart';
 import '../../domain/rules/template_card_rules.dart';
 import '../common/common.dart';
+import '../common/desktop_modal_page.dart';
+import '../me/me_page.dart' show MeEmbeddedNavigationScope;
 import 'remarks_page.dart';
 import 'template_editor_page.dart';
 import 'template_providers.dart';
@@ -107,6 +112,13 @@ class _TemplateQuickBarState extends ConsumerState<TemplateQuickBar> {
       widget.onManageTemplates!();
       return;
     }
+    if (DesktopAdaptive.isDesktop(context)) {
+      pushDesktopModalOrMaterialRoute<void>(
+        context,
+        child: const TemplatesPage(),
+      );
+      return;
+    }
     Navigator.of(
       context,
     ).push(MaterialPageRoute<void>(builder: (_) => const TemplatesPage()));
@@ -192,20 +204,22 @@ class _TemplatesPageState extends ConsumerState<TemplatesPage> {
 
   int _selectedBookFilter = _allBooksSentinel;
   bool _busy = false;
+  List<int>? _optimisticAllTemplateIds;
+  int _reorderSeq = 0;
   final CommandIds _toggleIds = CommandIds();
   final CommandIds _deleteIds = CommandIds();
+  final CommandIds _reorderIds = CommandIds();
 
   int? get _bookFilterOrNull =>
       _selectedBookFilter == _allBooksSentinel ? null : _selectedBookFilter;
 
   Future<void> _openCreate() async {
     final currentBookId = ref.read(currentBookIdProvider).value;
-    await Navigator.of(context).push(
-      MaterialPageRoute<int>(
-        builder: (_) => TemplateEditorPage(
-          initialBookId: _bookFilterOrNull ?? currentBookId,
-          initialType: ref.read(templateTypeFilterProvider),
-        ),
+    await pushDesktopModalOrMaterialRoute<int>(
+      context,
+      child: TemplateEditorPage(
+        initialBookId: _bookFilterOrNull ?? currentBookId,
+        initialType: ref.read(templateTypeFilterProvider),
       ),
     );
     if (mounted) {
@@ -214,10 +228,9 @@ class _TemplatesPageState extends ConsumerState<TemplatesPage> {
   }
 
   Future<void> _openEdit(RecordTemplate t) async {
-    await Navigator.of(context).push(
-      MaterialPageRoute<int>(
-        builder: (_) => TemplateEditorPage(templateId: t.id),
-      ),
+    await pushDesktopModalOrMaterialRoute<int>(
+      context,
+      child: TemplateEditorPage(templateId: t.id),
     );
     if (mounted) {
       ref.invalidate(allBookCategoriesMapProvider);
@@ -300,6 +313,96 @@ class _TemplatesPageState extends ConsumerState<TemplatesPage> {
     }
   }
 
+  List<RecordTemplate> _applyOptimisticTemplates(
+    List<RecordTemplate> rawTemplates,
+  ) {
+    final optimisticIds = _optimisticAllTemplateIds;
+    if (optimisticIds == null || optimisticIds.length != rawTemplates.length) {
+      return rawTemplates;
+    }
+    final byId = <int, RecordTemplate>{for (final t in rawTemplates) t.id: t};
+    final ordered = <RecordTemplate>[];
+    for (final id in optimisticIds) {
+      final match = byId[id];
+      if (match == null) return rawTemplates;
+      ordered.add(match);
+    }
+    return ordered;
+  }
+
+  static List<int> _permuteSubsetSlots({
+    required List<int> fullIds,
+    required List<int> reorderedSubsetIds,
+  }) {
+    final subsetSet = reorderedSubsetIds.toSet();
+    var cursor = 0;
+    return <int>[
+      for (final id in fullIds)
+        if (subsetSet.contains(id)) reorderedSubsetIds[cursor++] else id,
+    ];
+  }
+
+  Future<void> _reorderVisibleTemplates({
+    required List<RecordTemplate> allTemplates,
+    required List<RecordTemplate> visibleRows,
+    required int oldIndex,
+    required int newIndex,
+  }) async {
+    if (_busy || oldIndex == newIndex) return;
+    final nextVisible = List<RecordTemplate>.from(visibleRows);
+    final moved = nextVisible.removeAt(oldIndex);
+    nextVisible.insert(newIndex, moved);
+
+    final mergedIds = _permuteSubsetSlots(
+      fullIds: allTemplates.map((t) => t.id).toList(),
+      reorderedSubsetIds: nextVisible.map((t) => t.id).toList(),
+    );
+
+    setState(() {
+      _optimisticAllTemplateIds = mergedIds;
+    });
+
+    try {
+      final svc = await ref.read(templateRemarkServiceProvider.future);
+      await svc.reorderTemplates(
+        commandId: _reorderIds.forPayload(<Object?>[
+          'reorder-tpl',
+          _reorderSeq++,
+          mergedIds,
+        ]),
+        orderedIds: mergedIds,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _optimisticAllTemplateIds = null;
+      });
+      _showTemplateSnack(context, safeMessage(e));
+    }
+  }
+
+  Widget _buildReorderProxy(
+    Widget child,
+    int index,
+    Animation<double> animation,
+  ) {
+    return AnimatedBuilder(
+      animation: animation,
+      builder: (context, child) {
+        final t = Curves.easeInOut.transform(animation.value);
+        final scheme = Theme.of(context).colorScheme;
+        return Material(
+          elevation: 6 * t,
+          color: Colors.transparent,
+          shadowColor: scheme.shadow.withValues(alpha: 0.28),
+          borderRadius: BorderRadius.circular(14),
+          child: child,
+        );
+      },
+      child: child,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final selectedType = ref.watch(templateTypeFilterProvider);
@@ -320,148 +423,278 @@ class _TemplatesPageState extends ConsumerState<TemplatesPage> {
         ? _selectedBookFilter
         : _allBooksSentinel;
 
-    final templatesAsync = ref.watch(
-      templatesQueryProvider((
-        bookId: controlledBookFilter == _allBooksSentinel
-            ? null
-            : controlledBookFilter,
-        type: selectedType,
-      )),
+    const allFilterQuery = (bookId: null, type: null);
+    final allTemplatesAsync = ref.watch(templatesQueryProvider(allFilterQuery));
+    ref.listen<AsyncValue<List<RecordTemplate>>>(
+      templatesQueryProvider(allFilterQuery),
+      (_, next) {
+        final rows = next.value;
+        final optimistic = _optimisticAllTemplateIds;
+        if (rows == null || optimistic == null) return;
+        final dbIds = rows.map((t) => t.id).toList();
+        if (dbIds.length != optimistic.length ||
+            listEquals(dbIds, optimistic)) {
+          if (mounted) {
+            setState(() => _optimisticAllTemplateIds = null);
+          }
+        }
+      },
     );
 
-    return Scaffold(
-      key: const Key('templates_page'),
-      appBar: AppBar(
-        title: const Text('账单模板'),
-        actions: [
-          TextButton.icon(
-            key: const Key('open_remarks_page_button'),
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute<void>(builder: (_) => const RemarksPage()),
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    final meScope = MeEmbeddedNavigationScope.maybeOf(context);
+    final isPopupModal = isDesktop && ModalRoute.of(context) is PopupRoute;
+
+    return DesktopModalEscapeScope(
+      enabled: isPopupModal,
+      child: Scaffold(
+        key: const Key('templates_page'),
+        appBar: AppBar(
+          leading: isPopupModal ? const CloseButton() : null,
+          scrolledUnderElevation: isDesktop ? 0 : null,
+          title: const Text('账单模板'),
+          actions: [
+            TextButton.icon(
+              key: const Key('open_remarks_page_button'),
+              onPressed: () {
+                if (meScope != null) {
+                  meScope.onSelectRoute('/remarks');
+                  return;
+                }
+                if (isDesktop) {
+                  pushDesktopModalOrMaterialRoute<void>(
+                    context,
+                    child: const RemarksPage(),
+                  );
+                  return;
+                }
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(builder: (_) => const RemarksPage()),
+                );
+              },
+              icon: const Icon(Icons.comment_outlined, size: 18),
+              label: const Text('常用备注'),
             ),
-            icon: const Icon(Icons.comment_outlined, size: 18),
-            label: const Text('常用备注'),
-          ),
-        ],
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        key: const Key('add_template_fab'),
-        onPressed: _openCreate,
-        icon: const Icon(Icons.add),
-        label: const Text('新建模板'),
-      ),
-      body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 720),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-                child: InputDecorator(
-                  decoration: const InputDecoration(
-                    labelText: '筛选账本',
-                    border: OutlineInputBorder(),
-                    isDense: true,
-                    contentPadding: EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 4,
+            if (isDesktop) ...[
+              const SizedBox(width: 8),
+              FilledButton.icon(
+                key: const Key('add_template_fab'),
+                style: FilledButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
+                ),
+                onPressed: _openCreate,
+                icon: const Icon(Icons.add, size: 18),
+                label: const Text('新建模板'),
+              ),
+              const SizedBox(width: 12),
+            ],
+          ],
+        ),
+        floatingActionButton: isDesktop
+            ? null
+            : FloatingActionButton.extended(
+                key: const Key('add_template_fab'),
+                heroTag: 'fab-templates',
+                onPressed: _openCreate,
+                icon: const Icon(Icons.add),
+                label: const Text('新建模板'),
+              ),
+        body: Center(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: isDesktop ? 800 : 720),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                  child: InputDecorator(
+                    decoration: const InputDecoration(
+                      labelText: '筛选账本',
+                      border: OutlineInputBorder(),
+                      contentPadding: EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 14,
+                      ),
+                    ),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<int>(
+                        key: const Key('templates_book_filter'),
+                        isExpanded: true,
+                        isDense: true,
+                        value: controlledBookFilter,
+                        items: [
+                          const DropdownMenuItem<int>(
+                            value: _allBooksSentinel,
+                            child: Text('全部账本'),
+                          ),
+                          for (final b in books)
+                            DropdownMenuItem<int>(
+                              value: b.id,
+                              child: Text(b.name),
+                            ),
+                        ],
+                        onChanged: (v) {
+                          if (v != null) {
+                            setState(() => _selectedBookFilter = v);
+                          }
+                        },
+                      ),
                     ),
                   ),
-                  child: DropdownButtonHideUnderline(
-                    child: DropdownButton<int>(
-                      key: const Key('templates_book_filter'),
-                      isExpanded: true,
-                      isDense: true,
-                      value: controlledBookFilter,
-                      items: [
-                        const DropdownMenuItem<int>(
-                          value: _allBooksSentinel,
-                          child: Text('全部账本'),
-                        ),
-                        for (final b in books)
-                          DropdownMenuItem<int>(
-                            value: b.id,
-                            child: Text(b.name),
+                ),
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
+                  child: Row(
+                    children: [
+                      for (final (value, label) in const <(int?, String)>[
+                        (null, '全部'),
+                        (RecordType.expense, '支出'),
+                        (RecordType.income, '收入'),
+                        (RecordType.transfer, '转账'),
+                        (RecordType.reimbursable, '报销'),
+                        (RecordType.advanceExpense, '预支'),
+                        (RecordType.advanceIncome, '预收'),
+                      ])
+                        Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: ChoiceChip(
+                            key: Key('template_filter_${value ?? "all"}'),
+                            label: Text(label),
+                            selected: selectedType == value,
+                            onSelected: (_) => ref
+                                .read(templateTypeFilterProvider.notifier)
+                                .select(value),
                           ),
-                      ],
-                      onChanged: (v) {
-                        if (v != null) {
-                          setState(() => _selectedBookFilter = v);
+                        ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  child: asyncBody(allTemplatesAsync, (rawAll) {
+                    final allTemplates = _applyOptimisticTemplates(rawAll);
+                    final targetBookId =
+                        controlledBookFilter == _allBooksSentinel
+                        ? null
+                        : controlledBookFilter;
+                    final rows = allTemplates.where((t) {
+                      if (targetBookId != null && t.bookId != targetBookId) {
+                        return false;
+                      }
+                      if (selectedType != null && t.type != selectedType) {
+                        return false;
+                      }
+                      return true;
+                    }).toList();
+
+                    if (rows.isEmpty) {
+                      return Center(
+                        key: const Key('templates_empty_state'),
+                        child: Padding(
+                          padding: const EdgeInsets.all(24),
+                          child: Text(
+                            isDesktop
+                                ? '暂无账单模板，点击右上角“新建模板”添加常用记账项'
+                                : '暂无账单模板，点击右下角“新建模板”添加常用记账项',
+                            style: Theme.of(context).textTheme.bodyMedium,
+                          ),
+                        ),
+                      );
+                    }
+                    return ReorderableListView.builder(
+                      key: ValueKey(
+                        'templates-reorder-list-${targetBookId ?? "all"}-${selectedType ?? "all"}',
+                      ),
+                      buildDefaultDragHandles: false,
+                      padding: EdgeInsets.fromLTRB(
+                        16,
+                        4,
+                        16,
+                        isDesktop ? 24 : 88,
+                      ),
+                      itemCount: rows.length,
+                      onReorderStart: (_) {
+                        if (!isDesktop) {
+                          HapticFeedback.selectionClick();
                         }
                       },
-                    ),
-                  ),
-                ),
-              ),
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 8,
-                ),
-                child: Row(
-                  children: [
-                    for (final (value, label) in const <(int?, String)>[
-                      (null, '全部'),
-                      (RecordType.expense, '支出'),
-                      (RecordType.income, '收入'),
-                      (RecordType.transfer, '转账'),
-                      (RecordType.reimbursable, '报销'),
-                      (RecordType.advanceExpense, '预支'),
-                      (RecordType.advanceIncome, '预收'),
-                    ])
-                      Padding(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: ChoiceChip(
-                          key: Key('template_filter_${value ?? "all"}'),
-                          label: Text(label),
-                          selected: selectedType == value,
-                          onSelected: (_) => ref
-                              .read(templateTypeFilterProvider.notifier)
-                              .select(value),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-              Expanded(
-                child: asyncBody(templatesAsync, (rows) {
-                  if (rows.isEmpty) {
-                    return Center(
-                      key: const Key('templates_empty_state'),
-                      child: Padding(
-                        padding: const EdgeInsets.all(24),
-                        child: Text(
-                          '暂无账单模板，点击右下角“新建模板”添加常用记账项',
-                          style: Theme.of(context).textTheme.bodyMedium,
-                        ),
-                      ),
+                      proxyDecorator: _buildReorderProxy,
+                      onReorderItem: (oldIndex, newIndex) =>
+                          _reorderVisibleTemplates(
+                            allTemplates: allTemplates,
+                            visibleRows: rows,
+                            oldIndex: oldIndex,
+                            newIndex: newIndex,
+                          ),
+                      itemBuilder: (context, index) {
+                        final t = rows[index];
+                        final dragHandle = isDesktop
+                            ? ReorderableDragStartListener(
+                                index: index,
+                                enabled: !_busy,
+                                child: MouseRegion(
+                                  cursor: _busy
+                                      ? SystemMouseCursors.basic
+                                      : SystemMouseCursors.grab,
+                                  child: Padding(
+                                    key: Key('template-drag-handle-${t.id}'),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 2,
+                                      vertical: 2,
+                                    ),
+                                    child: Icon(
+                                      Icons.drag_handle_rounded,
+                                      size: 20,
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.outline,
+                                    ),
+                                  ),
+                                ),
+                              )
+                            : null;
+                        final cardWidget = Padding(
+                          padding: EdgeInsets.only(
+                            bottom: index == rows.length - 1 ? 0 : 8,
+                          ),
+                          child: _TemplateCardTile(
+                            template: t,
+                            bookMap: bookMap,
+                            catMap: catMap,
+                            assetMap: assetMap,
+                            tagMap: tagMap,
+                            busy: _busy,
+                            dragHandle: dragHandle,
+                            onEdit: () => _openEdit(t),
+                            onDelete: () => _deleteTemplate(t),
+                            onApplyInstant: () => _applyInstant(t),
+                            onToggleAutoSave: (v) => _toggleAutoSave(t, v),
+                          ),
+                        );
+                        if (isDesktop) {
+                          return KeyedSubtree(
+                            key: ValueKey('template-reorder-item-${t.id}'),
+                            child: cardWidget,
+                          );
+                        }
+                        return ReorderableDelayedDragStartListener(
+                          key: ValueKey('template-reorder-item-${t.id}'),
+                          index: index,
+                          enabled: !_busy,
+                          child: cardWidget,
+                        );
+                      },
                     );
-                  }
-                  return ListView.separated(
-                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 88),
-                    itemCount: rows.length,
-                    separatorBuilder: (_, _) => const SizedBox(height: 8),
-                    itemBuilder: (context, index) {
-                      final t = rows[index];
-                      return _TemplateCardTile(
-                        template: t,
-                        bookMap: bookMap,
-                        catMap: catMap,
-                        assetMap: assetMap,
-                        tagMap: tagMap,
-                        busy: _busy,
-                        onEdit: () => _openEdit(t),
-                        onDelete: () => _deleteTemplate(t),
-                        onApplyInstant: () => _applyInstant(t),
-                        onToggleAutoSave: (v) => _toggleAutoSave(t, v),
-                      );
-                    },
-                  );
-                }),
-              ),
-            ],
+                  }),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -477,6 +710,7 @@ class _TemplateCardTile extends StatelessWidget {
     required this.assetMap,
     required this.tagMap,
     required this.busy,
+    this.dragHandle,
     required this.onEdit,
     required this.onDelete,
     required this.onApplyInstant,
@@ -489,6 +723,7 @@ class _TemplateCardTile extends StatelessWidget {
   final Map<int, Asset> assetMap;
   final Map<String, Tag> tagMap;
   final bool busy;
+  final Widget? dragHandle;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
   final VoidCallback onApplyInstant;
@@ -549,6 +784,10 @@ class _TemplateCardTile extends StatelessWidget {
             children: [
               Row(
                 children: [
+                  if (dragHandle != null) ...[
+                    dragHandle!,
+                    const SizedBox(width: 8),
+                  ],
                   Expanded(
                     child: Text(
                       title,

@@ -27,7 +27,11 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   FlutterWindow window(project);
   Win32Window::Point origin(10, 10);
   Win32Window::Size size(1280, 800);
-  if (!window.Create(L"帐屿", origin, size)) {
+  const wchar_t* window_title =
+      PRIMARYLANGID(::GetUserDefaultUILanguage()) == LANG_CHINESE
+          ? L"帐屿"
+          : L"TallyIsle";
+  if (!window.Create(window_title, origin, size)) {
     return EXIT_FAILURE;
   }
   window.SetQuitOnClose(true);

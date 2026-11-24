@@ -3,10 +3,12 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/adaptive.dart';
 import '../../app/providers.dart';
 import '../../data/db/database.dart';
 import '../../domain/rules/savings_plan.dart';
 import '../common/common.dart';
+import '../common/desktop_modal_page.dart';
 import 'savings_detail_page.dart';
 import 'savings_editor_page.dart';
 import 'savings_providers.dart';
@@ -61,19 +63,22 @@ class _SavingsPageState extends ConsumerState<SavingsPage>
   }
 
   Future<void> _openEditor() async {
-    await Navigator.of(
+    await pushDesktopModalOrMaterialRoute<int>(
       context,
-    ).push<int>(MaterialPageRoute(builder: (_) => const SavingsEditorPage()));
+      child: const SavingsEditorPage(),
+    );
   }
 
   Future<void> _openDetail(int planId) async {
-    await Navigator.of(context).push<void>(
-      MaterialPageRoute(builder: (_) => SavingsDetailPage(planId: planId)),
+    await pushDesktopModalOrMaterialRoute<void>(
+      context,
+      child: SavingsDetailPage(planId: planId),
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    final isDesktop = DesktopAdaptive.isDesktop(context);
     final activeAsync = ref.watch(activeSavingsPlansProvider);
     final archivedAsync = ref.watch(archivedSavingsPlansProvider);
     final summaryAsync = ref.watch(savingsActiveSummaryProvider);
@@ -84,13 +89,42 @@ class _SavingsPageState extends ConsumerState<SavingsPage>
       key: const Key('savings_page'),
       appBar: AppBar(
         title: const Text('存钱计划'),
-        bottom: TabBar(
-          controller: _tabController,
-          tabs: const [
-            Tab(key: Key('savings_tab_active'), text: '进行中'),
-            Tab(key: Key('savings_tab_archived'), text: '已归档'),
-          ],
-        ),
+        actions: isDesktop && _tabIndex == 0
+            ? [
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: FilledButton.tonalIcon(
+                    key: const Key('add_savings_plan_fab'),
+                    onPressed: _openEditor,
+                    icon: const Icon(Icons.add, size: 18),
+                    label: const Text('新建计划'),
+                  ),
+                ),
+              ]
+            : null,
+        bottom: isDesktop
+            ? PreferredSize(
+                preferredSize: const Size.fromHeight(46),
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 800),
+                    child: TabBar(
+                      controller: _tabController,
+                      tabs: const [
+                        Tab(key: Key('savings_tab_active'), text: '进行中'),
+                        Tab(key: Key('savings_tab_archived'), text: '已归档'),
+                      ],
+                    ),
+                  ),
+                ),
+              )
+            : TabBar(
+                controller: _tabController,
+                tabs: const [
+                  Tab(key: Key('savings_tab_active'), text: '进行中'),
+                  Tab(key: Key('savings_tab_archived'), text: '已归档'),
+                ],
+              ),
       ),
       body: TabBarView(
         controller: _tabController,
@@ -108,9 +142,10 @@ class _SavingsPageState extends ConsumerState<SavingsPage>
           ),
         ],
       ),
-      floatingActionButton: _tabIndex == 0
+      floatingActionButton: !isDesktop && _tabIndex == 0
           ? FloatingActionButton.extended(
               key: const Key('add_savings_plan_fab'),
+              heroTag: 'fab-savings',
               onPressed: _openEditor,
               icon: const Icon(Icons.add),
               label: const Text('新建计划'),
@@ -135,19 +170,22 @@ class _ActivePlansTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => asyncBody(plansAsync, (plans) {
+    final isDesktop = DesktopAdaptive.isDesktop(context);
     final today = LocalCalendarDate.fromDateTime(DateTime.now());
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 88),
+    final list = ListView(
+      padding: EdgeInsets.fromLTRB(16, 12, 16, isDesktop ? 24 : 88),
       children: [
         _ActiveSummaryCard(summaryAsync: summaryAsync),
         const SizedBox(height: 12),
         if (plans.isEmpty)
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 48),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 48),
             child: Center(
               child: Text(
-                '暂无进行中的存钱计划，点击右下角“新建计划”开始存钱吧',
-                key: Key('empty_active_savings_text'),
+                isDesktop
+                    ? '暂无进行中的存钱计划，点击右上角“新建计划”开始存钱吧'
+                    : '暂无进行中的存钱计划，点击右下角“新建计划”开始存钱吧',
+                key: const Key('empty_active_savings_text'),
                 textAlign: TextAlign.center,
               ),
             ),
@@ -163,6 +201,13 @@ class _ActivePlansTab extends StatelessWidget {
             const SizedBox(height: 10),
           ],
       ],
+    );
+    if (!isDesktop) return list;
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 800),
+        child: list,
+      ),
     );
   });
 }
@@ -185,8 +230,9 @@ class _ArchivedPlansTab extends StatelessWidget {
         child: Text('暂无已归档的存钱计划', key: Key('empty_archived_savings_text')),
       );
     }
+    final isDesktop = DesktopAdaptive.isDesktop(context);
     final today = LocalCalendarDate.fromDateTime(DateTime.now());
-    return ListView.separated(
+    final list = ListView.separated(
       padding: const EdgeInsets.all(16),
       itemCount: plans.length,
       separatorBuilder: (_, _) => const SizedBox(height: 10),
@@ -199,6 +245,13 @@ class _ArchivedPlansTab extends StatelessWidget {
           onTap: () => onTapPlan(plan.id),
         );
       },
+    );
+    if (!isDesktop) return list;
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 800),
+        child: list,
+      ),
     );
   });
 }

@@ -38,6 +38,24 @@ enum AppThemeModePreference {
   };
 }
 
+/// Preferred budget period for the real-time record editor budget hint (`F-006`, `F-038`).
+enum RecordBudgetHintMode {
+  auto('auto', '自动'),
+  monthly('monthly', '月预算'),
+  yearly('yearly', '年预算');
+
+  const RecordBudgetHintMode(this.code, this.label);
+  final String code;
+  final String label;
+
+  static RecordBudgetHintMode fromCode(String? code) => switch (code) {
+    'auto' || null || '' => RecordBudgetHintMode.auto,
+    'monthly' => RecordBudgetHintMode.monthly,
+    'yearly' => RecordBudgetHintMode.yearly,
+    _ => throw _corruptSettings,
+  };
+}
+
 /// Curated free theme color swatches (`P-03`: zero VIP gating).
 final class ThemeSeedPreset {
   const ThemeSeedPreset({required this.hex, required this.name});
@@ -83,6 +101,8 @@ final class AppSettings {
     this.showBalanceChangeRecordOnHome = false,
     this.showHomeAssetSummaryBanner = true,
     this.showHomeBudgetCard = true,
+    this.showRecordBudgetHint = true,
+    this.recordBudgetHintMode = RecordBudgetHintMode.auto,
     this.defaultRecordType = RecordType.expense,
     this.themeMode = AppThemeModePreference.system,
     this.themeSeedHex = defaultThemeSeedHex,
@@ -98,6 +118,12 @@ final class AppSettings {
 
   /// Whether Home shows the current-period budget progress card.
   final bool showHomeBudgetCard;
+
+  /// Whether the record editor shows the real-time budget hint bar (`F-006`).
+  final bool showRecordBudgetHint;
+
+  /// Preferred budget period mode for the record editor budget hint (`auto` / `monthly` / `yearly`).
+  final RecordBudgetHintMode recordBudgetHintMode;
 
   /// Default record type (`0` expense, `1` income, `2` transfer).
   final int defaultRecordType;
@@ -118,6 +144,8 @@ final class AppSettings {
       showBalanceChangeRecordOnHome: showBalanceChangeRecordOnHome,
       showHomeAssetSummaryBanner: showHomeAssetSummaryBanner,
       showHomeBudgetCard: showHomeBudgetCard,
+      showRecordBudgetHint: showRecordBudgetHint,
+      recordBudgetHintMode: recordBudgetHintMode,
       defaultRecordType: defaultRecordType,
       themeMode: themeMode,
       themeSeedHex: normalizedHex,
@@ -128,6 +156,8 @@ final class AppSettings {
     bool? showBalanceChangeRecordOnHome,
     bool? showHomeAssetSummaryBanner,
     bool? showHomeBudgetCard,
+    bool? showRecordBudgetHint,
+    RecordBudgetHintMode? recordBudgetHintMode,
     int? defaultRecordType,
     AppThemeModePreference? themeMode,
     String? themeSeedHex,
@@ -137,6 +167,8 @@ final class AppSettings {
     showHomeAssetSummaryBanner:
         showHomeAssetSummaryBanner ?? this.showHomeAssetSummaryBanner,
     showHomeBudgetCard: showHomeBudgetCard ?? this.showHomeBudgetCard,
+    showRecordBudgetHint: showRecordBudgetHint ?? this.showRecordBudgetHint,
+    recordBudgetHintMode: recordBudgetHintMode ?? this.recordBudgetHintMode,
     defaultRecordType: defaultRecordType ?? this.defaultRecordType,
     themeMode: themeMode ?? this.themeMode,
     themeSeedHex: themeSeedHex != null
@@ -148,6 +180,8 @@ final class AppSettings {
     'showBalanceChangeRecordOnHome': showBalanceChangeRecordOnHome,
     'showHomeAssetSummaryBanner': showHomeAssetSummaryBanner,
     'showHomeBudgetCard': showHomeBudgetCard,
+    'showRecordBudgetHint': showRecordBudgetHint,
+    'recordBudgetHintMode': recordBudgetHintMode.code,
     'defaultRecordType': defaultRecordType,
     'themeMode': themeMode.code,
     'themeSeedHex': themeSeedHex,
@@ -168,6 +202,8 @@ final class AppSettings {
     final showBalanceChange = decoded['showBalanceChangeRecordOnHome'] ?? false;
     final showAssetBanner = decoded['showHomeAssetSummaryBanner'] ?? true;
     final showBudgetCard = decoded['showHomeBudgetCard'] ?? true;
+    final showRecordBudgetHint = decoded['showRecordBudgetHint'] ?? true;
+    final rawRecordBudgetHintMode = decoded['recordBudgetHintMode'];
     final defaultType = decoded['defaultRecordType'] ?? RecordType.expense;
     final rawMode = decoded['themeMode'] as String?;
     final rawHex = (decoded['themeSeedHex'] as String?) ?? defaultThemeSeedHex;
@@ -175,6 +211,9 @@ final class AppSettings {
     if (showBalanceChange is! bool ||
         showAssetBanner is! bool ||
         showBudgetCard is! bool ||
+        showRecordBudgetHint is! bool ||
+        (rawRecordBudgetHintMode != null &&
+            rawRecordBudgetHintMode is! String) ||
         defaultType is! int ||
         !allowedDefaultRecordTypes.contains(defaultType)) {
       throw _corruptSettings;
@@ -191,6 +230,10 @@ final class AppSettings {
       showBalanceChangeRecordOnHome: showBalanceChange,
       showHomeAssetSummaryBanner: showAssetBanner,
       showHomeBudgetCard: showBudgetCard,
+      showRecordBudgetHint: showRecordBudgetHint,
+      recordBudgetHintMode: RecordBudgetHintMode.fromCode(
+        rawRecordBudgetHintMode as String?,
+      ),
       defaultRecordType: defaultType,
       themeMode: AppThemeModePreference.fromCode(rawMode),
       themeSeedHex: cleanHex,
@@ -205,6 +248,8 @@ final class AppSettings {
               other.showBalanceChangeRecordOnHome &&
           showHomeAssetSummaryBanner == other.showHomeAssetSummaryBanner &&
           showHomeBudgetCard == other.showHomeBudgetCard &&
+          showRecordBudgetHint == other.showRecordBudgetHint &&
+          recordBudgetHintMode == other.recordBudgetHintMode &&
           defaultRecordType == other.defaultRecordType &&
           themeMode == other.themeMode &&
           themeSeedHex == other.themeSeedHex;
@@ -214,6 +259,8 @@ final class AppSettings {
     showBalanceChangeRecordOnHome,
     showHomeAssetSummaryBanner,
     showHomeBudgetCard,
+    showRecordBudgetHint,
+    recordBudgetHintMode,
     defaultRecordType,
     themeMode,
     themeSeedHex,

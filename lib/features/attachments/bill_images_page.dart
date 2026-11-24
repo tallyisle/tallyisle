@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/adaptive.dart';
 import '../../app/providers.dart';
 import '../../core/failure.dart';
 import '../../data/db/database.dart';
@@ -205,20 +206,51 @@ class _BillAttachmentStripState extends ConsumerState<BillAttachmentStrip> {
 Future<void> _showImagePreviewDialog(BuildContext context, String fileName) =>
     showDialog<void>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(fileName, maxLines: 1, overflow: TextOverflow.ellipsis),
-        content: SizedBox(
-          width: 300,
-          height: 300,
-          child: _AttachmentImageBox(fileName: fileName, fit: BoxFit.contain),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('关闭'),
-          ),
-        ],
-      ),
+      builder: (ctx) {
+        final isDesktop = DesktopAdaptive.isDesktop(ctx);
+        final mq = MediaQuery.sizeOf(ctx);
+        final boxW = (mq.width - 112).clamp(260.0, 680.0);
+        final boxH = (mq.height - 200).clamp(200.0, 500.0);
+        return AlertDialog(
+          title: Text(fileName, maxLines: 1, overflow: TextOverflow.ellipsis),
+          content: isDesktop
+              ? ConstrainedBox(
+                  constraints: const BoxConstraints(
+                    maxWidth: 720,
+                    maxHeight: 560,
+                  ),
+                  child: SizedBox(
+                    width: boxW,
+                    height: boxH,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: InteractiveViewer(
+                        minScale: 0.5,
+                        maxScale: 4.0,
+                        child: _AttachmentImageBox(
+                          fileName: fileName,
+                          fit: BoxFit.contain,
+                        ),
+                      ),
+                    ),
+                  ),
+                )
+              : SizedBox(
+                  width: 300,
+                  height: 300,
+                  child: _AttachmentImageBox(
+                    fileName: fileName,
+                    fit: BoxFit.contain,
+                  ),
+                ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('关闭'),
+            ),
+          ],
+        );
+      },
     );
 
 class _AttachmentThumbTile extends StatelessWidget {
@@ -242,15 +274,20 @@ class _AttachmentThumbTile extends StatelessWidget {
         clipBehavior: Clip.none,
         children: [
           Positioned.fill(
-            child: InkWell(
-              onTap: onTap,
+            child: ClipRRect(
               borderRadius: BorderRadius.circular(8),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: _AttachmentImageBox(
-                  fileName: fileName,
-                  fit: BoxFit.cover,
-                ),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  _AttachmentImageBox(fileName: fileName, fit: BoxFit.cover),
+                  Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      onTap: onTap,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
@@ -423,31 +460,53 @@ class _BillImagesPageState extends ConsumerState<BillImagesPage> {
       context: context,
       builder: (ctx) {
         final dt = DateTime.fromMillisecondsSinceEpoch(entry.record.recordTime);
+        final isDesktop = DesktopAdaptive.isDesktop(ctx);
+        final mq = MediaQuery.sizeOf(ctx);
+        final boxW = (mq.width - 112).clamp(260.0, 680.0);
+        final boxH = (mq.height - 240).clamp(180.0, 460.0);
+        final detailBody = Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(
+              width: isDesktop ? boxW : 280,
+              height: isDesktop ? boxH : 220,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: isDesktop
+                    ? InteractiveViewer(
+                        minScale: 0.5,
+                        maxScale: 4.0,
+                        child: _AttachmentImageBox(
+                          fileName: entry.fileName,
+                          fit: BoxFit.contain,
+                        ),
+                      )
+                    : _AttachmentImageBox(
+                        fileName: entry.fileName,
+                        fit: BoxFit.contain,
+                      ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text('时间：${formatDateTime(dt)}'),
+            if (entry.record.remark.isNotEmpty)
+              Text('备注：${entry.record.remark}'),
+          ],
+        );
         return AlertDialog(
           title: Text(
             '${RecordType.names[entry.record.type] ?? '账单'} · ${formatMinor(entry.record.moneyMinor.abs())}',
           ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              SizedBox(
-                width: 280,
-                height: 220,
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: _AttachmentImageBox(
-                    fileName: entry.fileName,
-                    fit: BoxFit.contain,
+          content: isDesktop
+              ? ConstrainedBox(
+                  constraints: const BoxConstraints(
+                    maxWidth: 720,
+                    maxHeight: 560,
                   ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              Text('时间：${formatDateTime(dt)}'),
-              if (entry.record.remark.isNotEmpty)
-                Text('备注：${entry.record.remark}'),
-            ],
-          ),
+                  child: SingleChildScrollView(child: detailBody),
+                )
+              : detailBody,
           actions: [
             TextButton(
               key: const Key('gallery-remove-image-btn'),
@@ -498,8 +557,157 @@ class _BillImagesPageState extends ConsumerState<BillImagesPage> {
     final recordsAsync = ref.watch(recordsWithImagesProvider(queryBookId));
     final scanAsync = ref.watch(orphanAttachmentScanProvider);
 
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    final bodyColumn = Column(
+      children: [
+        scanAsync.when(
+          data: (scan) => Card(
+            margin: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Row(
+                children: [
+                  const Icon(Icons.photo_library_outlined),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      '有效关联图片 ${scan.referencedCount} 张'
+                      '${scan.missingCount > 0 ? ' · 缺失原图 ${scan.missingCount} 张' : ''}'
+                      ' · 无用缓存 ${scan.orphanCount} 个（${_formatByteSize(scan.orphanTotalBytes)}）',
+                      key: const Key('bill-images-scan-summary'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  TextButton(
+                    key: const Key('bill-images-cleanup-btn'),
+                    style: TextButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                    ),
+                    onPressed: _busy || scan.orphanCount == 0
+                        ? null
+                        : () => _runOrphanCleanup(scan),
+                    child: const Text('清理无用缓存'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          loading: () => const LinearProgressIndicator(),
+          error: (_, _) => const SizedBox.shrink(),
+        ),
+        Expanded(
+          child: asyncBody(recordsAsync, (records) {
+            final groups = <String, List<_GalleryEntry>>{};
+            for (final r in records) {
+              List<String> files;
+              try {
+                files = parseRecordImages(r.images);
+              } on Failure {
+                continue;
+              }
+              if (files.isEmpty) continue;
+              final dt = DateTime.fromMillisecondsSinceEpoch(r.recordTime);
+              final monthKey = '${dt.year}年${two(dt.month)}月';
+              final bucket = groups.putIfAbsent(monthKey, () => []);
+              for (final f in files) {
+                bucket.add(_GalleryEntry(record: r, fileName: f));
+              }
+            }
+
+            if (groups.isEmpty) {
+              return const Center(child: Text('暂无带图片的账单记录'));
+            }
+
+            final monthKeys = groups.keys.toList();
+            return ListView.builder(
+              padding: const EdgeInsets.all(16),
+              itemCount: monthKeys.length,
+              itemBuilder: (context, sectionIndex) {
+                final monthTitle = monthKeys[sectionIndex];
+                final entries = groups[monthTitle]!;
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      child: Text(
+                        '$monthTitle（${entries.length} 张）',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                    ),
+                    GridView.builder(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      itemCount: entries.length,
+                      gridDelegate:
+                          const SliverGridDelegateWithMaxCrossAxisExtent(
+                            maxCrossAxisExtent: 150,
+                            mainAxisSpacing: 8,
+                            crossAxisSpacing: 8,
+                          ),
+                      itemBuilder: (context, idx) {
+                        final entry = entries[idx];
+                        return ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              _AttachmentImageBox(
+                                fileName: entry.fileName,
+                                fit: BoxFit.cover,
+                              ),
+                              Positioned(
+                                left: 0,
+                                right: 0,
+                                bottom: 0,
+                                child: Container(
+                                  color: Colors.black54,
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 6,
+                                    vertical: 3,
+                                  ),
+                                  child: Text(
+                                    formatMinor(entry.record.moneyMinor.abs()),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 11,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              Positioned.fill(
+                                child: Material(
+                                  color: Colors.transparent,
+                                  child: InkWell(
+                                    key: Key(
+                                      'gallery-tile-${entry.record.recordId}-${entry.fileName}',
+                                    ),
+                                    onTap: () => _openEntryDetail(entry),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+                );
+              },
+            );
+          }),
+        ),
+      ],
+    );
+
     return Scaffold(
       appBar: AppBar(
+        scrolledUnderElevation: isDesktop ? 0 : null,
         title: const Text('账单图片库'),
         actions: [
           FilterChip(
@@ -511,149 +719,14 @@ class _BillImagesPageState extends ConsumerState<BillImagesPage> {
           const SizedBox(width: 12),
         ],
       ),
-      body: Column(
-        children: [
-          scanAsync.when(
-            data: (scan) => Card(
-              margin: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Row(
-                  children: [
-                    const Icon(Icons.photo_library_outlined),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        '有效关联图片 ${scan.referencedCount} 张'
-                        '${scan.missingCount > 0 ? ' · 缺失原图 ${scan.missingCount} 张' : ''}'
-                        ' · 无用缓存 ${scan.orphanCount} 个（${_formatByteSize(scan.orphanTotalBytes)}）',
-                        key: const Key('bill-images-scan-summary'),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    TextButton(
-                      key: const Key('bill-images-cleanup-btn'),
-                      style: TextButton.styleFrom(
-                        visualDensity: VisualDensity.compact,
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                      ),
-                      onPressed: _busy || scan.orphanCount == 0
-                          ? null
-                          : () => _runOrphanCleanup(scan),
-                      child: const Text('清理无用缓存'),
-                    ),
-                  ],
-                ),
+      body: isDesktop
+          ? Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 840),
+                child: bodyColumn,
               ),
-            ),
-            loading: () => const LinearProgressIndicator(),
-            error: (_, _) => const SizedBox.shrink(),
-          ),
-          Expanded(
-            child: asyncBody(recordsAsync, (records) {
-              final groups = <String, List<_GalleryEntry>>{};
-              for (final r in records) {
-                List<String> files;
-                try {
-                  files = parseRecordImages(r.images);
-                } on Failure {
-                  continue;
-                }
-                if (files.isEmpty) continue;
-                final dt = DateTime.fromMillisecondsSinceEpoch(r.recordTime);
-                final monthKey = '${dt.year}年${two(dt.month)}月';
-                final bucket = groups.putIfAbsent(monthKey, () => []);
-                for (final f in files) {
-                  bucket.add(_GalleryEntry(record: r, fileName: f));
-                }
-              }
-
-              if (groups.isEmpty) {
-                return const Center(child: Text('暂无带图片的账单记录'));
-              }
-
-              final monthKeys = groups.keys.toList();
-              return ListView.builder(
-                padding: const EdgeInsets.all(16),
-                itemCount: monthKeys.length,
-                itemBuilder: (context, sectionIndex) {
-                  final monthTitle = monthKeys[sectionIndex];
-                  final entries = groups[monthTitle]!;
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 8),
-                        child: Text(
-                          '$monthTitle（${entries.length} 张）',
-                          style: Theme.of(context).textTheme.titleMedium,
-                        ),
-                      ),
-                      GridView.builder(
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        itemCount: entries.length,
-                        gridDelegate:
-                            const SliverGridDelegateWithMaxCrossAxisExtent(
-                              maxCrossAxisExtent: 150,
-                              mainAxisSpacing: 8,
-                              crossAxisSpacing: 8,
-                            ),
-                        itemBuilder: (context, idx) {
-                          final entry = entries[idx];
-                          return InkWell(
-                            key: Key(
-                              'gallery-tile-${entry.record.recordId}-${entry.fileName}',
-                            ),
-                            onTap: () => _openEntryDetail(entry),
-                            borderRadius: BorderRadius.circular(8),
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(8),
-                              child: Stack(
-                                fit: StackFit.expand,
-                                children: [
-                                  _AttachmentImageBox(
-                                    fileName: entry.fileName,
-                                    fit: BoxFit.cover,
-                                  ),
-                                  Positioned(
-                                    left: 0,
-                                    right: 0,
-                                    bottom: 0,
-                                    child: Container(
-                                      color: Colors.black54,
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 6,
-                                        vertical: 3,
-                                      ),
-                                      child: Text(
-                                        formatMinor(
-                                          entry.record.moneyMinor.abs(),
-                                        ),
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: const TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 11,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-                      const SizedBox(height: 12),
-                    ],
-                  );
-                },
-              );
-            }),
-          ),
-        ],
-      ),
+            )
+          : bodyColumn,
     );
   }
 }

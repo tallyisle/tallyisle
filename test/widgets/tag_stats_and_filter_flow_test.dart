@@ -1,4 +1,4 @@
-import 'package:drift/drift.dart' show driftRuntimeOptions;
+import 'package:drift/drift.dart' show Value, driftRuntimeOptions;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -11,6 +11,9 @@ import 'package:tallyisle/data/db/database.dart';
 import 'package:tallyisle/data/ledger/ledger_service.dart';
 import 'package:tallyisle/data/repo/search_queries.dart';
 import 'package:tallyisle/domain/model/codes.dart';
+import 'package:tallyisle/domain/rules/billing_period.dart';
+import 'package:tallyisle/features/stats/tag_stats_page.dart';
+import 'package:tallyisle/features/stats/tag_stats_providers.dart';
 
 void main() {
   driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
@@ -491,6 +494,152 @@ void main() {
         db.tags,
       )..where((t) => t.tagId.equals(t1))).getSingle();
       expect(updatedT1.color, '');
+
+      await tester.pumpWidget(const SizedBox());
+      await settle();
+      await tester.pump(const Duration(seconds: 1));
+      await tester.runAsync(() => db.close());
+    },
+  );
+
+  testWidgets(
+    'TagRankingsPage & TagDetailStatsPage: year/year-month pickers respect custom startDay, show 回本月/回本年 pills, cancel swipe, and have zero overflow at 360x640 @ 1.2x',
+    (tester) async {
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        tester.platformDispatcher.clearTextScaleFactorTestValue();
+      });
+
+      tester.view.physicalSize = const Size(360, 640);
+      tester.view.devicePixelRatio = 1.0;
+      tester.platformDispatcher.textScaleFactorTestValue = 1.2;
+
+      final db = AppDatabase(NativeDatabase.memory());
+      await (db.update(db.accountBooks)..where((b) => b.id.equals(1))).write(
+        const AccountBooksCompanion(startDay: Value(15)),
+      );
+      final catalog = CatalogService(db);
+      final tagId = await catalog.createTag(
+        commandId: 'mk-picker-tag',
+        name: '差旅报销',
+        color: '#1E88E5',
+      );
+
+      final now = DateTime.now();
+      final curMonth = BillingPeriod.containing(now, 15);
+      final curYear = BillingPeriod.containingYear(now, 15);
+      final targetYear = curYear.year - 1;
+
+      Future<void> settle() async {
+        for (var i = 0; i < 10; i++) {
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 20)),
+          );
+          await tester.pump();
+        }
+      }
+
+      // 1. TagRankingsPage
+      late ProviderContainer container;
+      await tester.pumpWidget(
+        ProviderScope(
+          retry: (_, _) => null,
+          overrides: [databaseProvider.overrideWith((ref) async => db)],
+          child: Consumer(
+            builder: (context, ref, _) {
+              container = ProviderScope.containerOf(context, listen: false);
+              return const MaterialApp(home: TagRankingsPage());
+            },
+          ),
+        ),
+      );
+      await settle();
+
+      await tester.tap(find.byKey(const Key('tag-rankings-mode-month')));
+      await settle();
+      expect(tester.takeException(), isNull);
+      expect(find.byKey(const Key('tag-stats-period-reset')), findsNothing);
+
+      // Horizontal swipe does NOT change offset
+      await tester.drag(find.byType(ListView).first, const Offset(180, 0));
+      await settle();
+      expect(container.read(tagStatsOffsetProvider), 0);
+
+      // Open Year-Month picker -> pick prev year month 5
+      await tester.tap(
+        find.byKey(const Key('tag-stats-period-picker-trigger')),
+      );
+      await settle();
+      await tester.tap(find.byKey(const Key('ym-picker-prev-year')));
+      await settle();
+      await tester.tap(find.byKey(const Key('ym-picker-month-5')));
+      await settle();
+      expect(tester.takeException(), isNull);
+      expect(
+        container.read(tagStatsOffsetProvider),
+        (curMonth.year - 1 - curMonth.year) * 12 + (5 - curMonth.month),
+      );
+      expect(find.byKey(const Key('tag-stats-period-reset')), findsOneWidget);
+      expect(find.text('回本月'), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('tag-stats-period-reset')));
+      await settle();
+      expect(container.read(tagStatsOffsetProvider), 0);
+
+      // Switch to 按年 -> Year-Only picker -> pick targetYear -> 回本年
+      await tester.tap(find.byKey(const Key('tag-rankings-mode-year')));
+      await settle();
+      await tester.tap(
+        find.byKey(const Key('tag-stats-period-picker-trigger')),
+      );
+      await settle();
+      await tester.tap(find.byKey(Key('y-picker-year-$targetYear')));
+      await settle();
+      expect(tester.takeException(), isNull);
+      expect(container.read(tagStatsOffsetProvider), -1);
+      expect(find.byKey(const Key('tag-stats-period-reset')), findsOneWidget);
+      expect(find.text('回本年'), findsOneWidget);
+
+      // 2. TagDetailStatsPage
+      await tester.pumpWidget(
+        ProviderScope(
+          retry: (_, _) => null,
+          overrides: [databaseProvider.overrideWith((ref) async => db)],
+          child: Consumer(
+            builder: (context, ref, _) {
+              container = ProviderScope.containerOf(context, listen: false);
+              return MaterialApp(home: TagDetailStatsPage(tagId: tagId));
+            },
+          ),
+        ),
+      );
+      await settle();
+      await tester.tap(find.byKey(const Key('tag-detail-mode-month')));
+      await settle();
+      expect(tester.takeException(), isNull);
+      expect(find.byKey(const Key('tag-detail-period-reset')), findsNothing);
+
+      await tester.tap(
+        find.byKey(const Key('tag-detail-period-picker-trigger')),
+      );
+      await settle();
+      await tester.tap(find.byKey(const Key('ym-picker-prev-year')));
+      await settle();
+      await tester.tap(find.byKey(const Key('ym-picker-month-7')));
+      await settle();
+      expect(tester.takeException(), isNull);
+      expect(
+        container.read(tagStatsOffsetProvider),
+        (curMonth.year - 1 - curMonth.year) * 12 + (7 - curMonth.month),
+      );
+      expect(find.byKey(const Key('tag-detail-period-reset')), findsOneWidget);
+      expect(find.text('回本月'), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('tag-detail-period-reset')));
+      await settle();
+      expect(container.read(tagStatsOffsetProvider), 0);
+      expect(find.byKey(const Key('tag-detail-period-reset')), findsNothing);
 
       await tester.pumpWidget(const SizedBox());
       await settle();

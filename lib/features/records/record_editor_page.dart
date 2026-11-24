@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../app/adaptive.dart';
 import '../../app/providers.dart';
 import '../../core/failure.dart';
 import '../../core/money.dart';
@@ -17,10 +18,12 @@ import '../../data/tools/template_remark_service.dart';
 import '../../domain/ledger/record_extra.dart';
 import '../../domain/ledger/record_relations.dart';
 import '../../domain/model/codes.dart';
+import '../../domain/rules/app_settings_rules.dart';
 import '../../domain/rules/asset_overview.dart'
     show RateTable, normalizeCurrency;
 import '../../domain/rules/currency_rates.dart';
 import '../../domain/rules/record_keypad_calc.dart';
+import '../assets/assets_page.dart';
 import '../attachments/attachment_providers.dart';
 import '../automation/automation_providers.dart'
     show widgetSnapshotServiceProvider;
@@ -28,13 +31,16 @@ import '../budget/budget_widgets.dart';
 import '../categories/categories_page.dart';
 import '../common/catalog_icons.dart';
 import '../common/common.dart';
+import '../common/desktop_modal_page.dart';
 import '../receipt/diy_toolbar_settings_page.dart';
 import '../receipt/receipt_diy_providers.dart';
 import '../receipt/record_receipt_dialog.dart' show BillLocationEditorDialog;
+import '../stats/tag_stats_page.dart' show TagColorDot, parseTagColor;
 import '../tags/tags_page.dart';
 import '../templates/template_providers.dart';
 import '../templates/templates_page.dart'
     show RemarksPage, TemplatePrefill, TemplateQuickBar, TemplatesPage;
+import 'desktop_record_editor_dialog.dart';
 import 'record_datetime_dialog.dart';
 import 'record_keypad.dart';
 
@@ -159,6 +165,8 @@ class RecordEditorPage extends ConsumerStatefulWidget {
     this.initialTo,
     this.initialAmount,
     this.initialRemark,
+    this.initialRecordTimeMs,
+    this.embeddedInDesktopDialog = false,
   });
 
   final String? recordId;
@@ -172,6 +180,8 @@ class RecordEditorPage extends ConsumerStatefulWidget {
   final int? initialTo;
   final String? initialAmount;
   final String? initialRemark;
+  final int? initialRecordTimeMs;
+  final bool embeddedInDesktopDialog;
 
   @override
   ConsumerState<RecordEditorPage> createState() => _RecordEditorPageState();
@@ -184,9 +194,22 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
   final discount = TextEditingController();
   final fee = TextEditingController();
   final remark = TextEditingController();
-  final _amountFocus = FocusNode();
-  final _remarkFocus = FocusNode();
-  final _feeFocus = FocusNode();
+  late final FocusNode _amountFocus = FocusNode(
+    debugLabel: 'record-editor-amount',
+    onKeyEvent: _handleAmountFieldKeyEvent,
+  );
+  late final FocusNode _remarkFocus = FocusNode(
+    debugLabel: 'record-editor-remark',
+    onKeyEvent: _handleAuxFieldKeyEvent,
+  );
+  late final FocusNode _feeFocus = FocusNode(
+    debugLabel: 'record-editor-fee',
+    onKeyEvent: _handleAuxFieldKeyEvent,
+  );
+  late final FocusNode _desktopScopeFocus = FocusNode(
+    debugLabel: 'record-editor-desktop-scope',
+    onKeyEvent: _handleDesktopScopeKeyEvent,
+  );
   final ids = CommandIds();
   final imageIds = CommandIds();
   final remarkIds = CommandIds();
@@ -201,10 +224,31 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
   int? _resolvedBookId;
   int? _initialCategoriesBookId;
   List<RecordCategory> _initialCategories = const <RecordCategory>[];
+  List<Asset> _initialAssets = const <Asset>[];
+  List<AssetBook> _initialAssetBooks = const <AssetBook>[];
+  static const List<int> _creatableRecordTypes = <int>[
+    RecordType.expense,
+    RecordType.income,
+    RecordType.transfer,
+    RecordType.reimbursable,
+    RecordType.advanceExpense,
+    RecordType.advanceIncome,
+  ];
+
   int type = RecordType.expense;
+  bool _userTouchedType = false;
   int? categoryId;
   int? parentCatId;
   bool _userTouchedCategory = false;
+  bool _userTouchedAsset = false;
+  int? _middleActivePointer;
+  int? _lastBlockedMiddlePointer;
+  Offset? _middlePointerDownPos;
+  Duration? _middlePointerDownTime;
+  Offset _middleTotalDelta = Offset.zero;
+  double _middleDragDx = 0.0;
+  bool _middleSwipeBlockedByChild = false;
+  bool _middleDragHandledByArena = false;
   Set<String> selectedTagIds = {};
   List<String> imageNames = const <String>[];
   BillLocationInfo? location;
@@ -215,12 +259,20 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
 
   /// The user typed the converted amount themselves (stop auto-filling).
   bool convertedEdited = false;
+
+  /// True while preserving an existing FX bill's loaded converted amount until
+  /// the user edits amount/discount/currency/account.
+  bool _preservingLoadedConversion = false;
+  int _pickerReorderSeq = 0;
   bool feeFromTarget = false;
   bool excludeBudget = false, excludeExIn = false;
   bool _attachmentsExpanded = false;
   bool _savedAndResetBanner = false;
   bool _remarksShowAllScope = false;
   _BottomPanelMode _panelMode = _BottomPanelMode.customKeypad;
+  bool _desktopKeypadExpanded = false;
+  bool _desktopRemarksExpanded = false;
+  bool _didAutoFocusDesktopAmount = false;
   bool _imeWasVisible = false;
   DateTime time = DateTime.now();
   LedgerRecord? original;
@@ -228,6 +280,23 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
   String? error;
 
   bool get editing => widget.recordId != null;
+
+  bool get _isDesktopActive => mounted && DesktopAdaptive.isDesktop(context);
+
+  bool get _isEmbeddedInDesktopDialog =>
+      widget.embeddedInDesktopDialog ||
+      (mounted && DesktopRecordDialogScope.isEmbedded(context));
+
+  bool get _isImperativeDialogRoute {
+    if (!mounted) return false;
+    final route = ModalRoute.of(context);
+    return route is PopupRoute && route.settings is! Page;
+  }
+
+  bool get _isTopmostRoute =>
+      mounted && (ModalRoute.of(context)?.isCurrent ?? true);
+
+  bool get _canSubmitNow => !busy && !loading && (!editing || original != null);
 
   bool get _hasOsKeyboardFieldFocus =>
       _remarkFocus.hasFocus || _feeFocus.hasFocus;
@@ -244,10 +313,358 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     if (_feeFocus.hasFocus) _feeFocus.unfocus();
   }
 
+  void _ensureInitialDesktopFocusScheduled() {
+    if (_didAutoFocusDesktopAmount || loading || busy || !_isDesktopActive) {
+      return;
+    }
+    _didAutoFocusDesktopAmount = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || busy || loading || _hasOsKeyboardFieldFocus) return;
+      if (!_amountFocus.hasFocus) {
+        _amountFocus.requestFocus();
+      }
+    });
+  }
+
+  void _focusDesktopAmountIfIdle() {
+    if (!_isDesktopActive ||
+        !_isTopmostRoute ||
+        busy ||
+        loading ||
+        _hasOsKeyboardFieldFocus) {
+      return;
+    }
+    if (!_amountFocus.hasFocus) {
+      _amountFocus.requestFocus();
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted ||
+          !_isTopmostRoute ||
+          busy ||
+          loading ||
+          _hasOsKeyboardFieldFocus) {
+        return;
+      }
+      if (!_amountFocus.hasFocus) {
+        _amountFocus.requestFocus();
+      }
+    });
+  }
+
+  void _closeEditor([String? result]) {
+    _unfocusOsKeyboardFields();
+    if (_isImperativeDialogRoute) {
+      if (Navigator.of(context).canPop()) {
+        Navigator.of(context).pop(result);
+      }
+      return;
+    }
+    final router = GoRouter.maybeOf(context);
+    if (router != null) {
+      if (context.canPop()) {
+        context.pop(result);
+      } else {
+        context.go('/');
+      }
+    } else if (Navigator.of(context).canPop()) {
+      Navigator.of(context).pop(result);
+    }
+  }
+
+  void _toggleDesktopKeypadPanel() {
+    if (busy) return;
+    setState(() {
+      _desktopKeypadExpanded = !_desktopKeypadExpanded;
+      if (_desktopKeypadExpanded) {
+        _desktopRemarksExpanded = false;
+      }
+    });
+    _focusDesktopAmountIfIdle();
+  }
+
+  void _toggleDesktopRemarksPanel() {
+    if (busy) return;
+    setState(() {
+      _desktopRemarksExpanded = !_desktopRemarksExpanded;
+      if (_desktopRemarksExpanded) {
+        _desktopKeypadExpanded = false;
+      }
+    });
+    if (!_desktopRemarksExpanded) {
+      _focusDesktopAmountIfIdle();
+    }
+  }
+
+  static bool _isEnterKey(LogicalKeyboardKey key) =>
+      key == LogicalKeyboardKey.enter || key == LogicalKeyboardKey.numpadEnter;
+
+  bool _isPrimarySubmitModifierPressed(HardwareKeyboard hw) {
+    if (hw.isAltPressed) return false;
+    if (DesktopAdaptive.isMacOS(context)) {
+      return hw.isControlPressed || hw.isMetaPressed;
+    }
+    return hw.isControlPressed && !hw.isMetaPressed;
+  }
+
+  static String? _mapDesktopKeyToKeypadToken(
+    KeyEvent event,
+    HardwareKeyboard hw,
+  ) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+      return null;
+    }
+    if (hw.isControlPressed || hw.isMetaPressed || hw.isAltPressed) {
+      return null;
+    }
+    final key = event.logicalKey;
+    final shift = hw.isShiftPressed;
+
+    if (shift) {
+      if (key == LogicalKeyboardKey.equal ||
+          key == LogicalKeyboardKey.add ||
+          key == LogicalKeyboardKey.numpadAdd ||
+          event.character == '+') {
+        return '+';
+      }
+      if (key == LogicalKeyboardKey.digit8 ||
+          key == LogicalKeyboardKey.asterisk ||
+          key == LogicalKeyboardKey.numpadMultiply ||
+          event.character == '*') {
+        return '×';
+      }
+      return null;
+    }
+
+    return switch (key) {
+      LogicalKeyboardKey.digit0 || LogicalKeyboardKey.numpad0 => '0',
+      LogicalKeyboardKey.digit1 || LogicalKeyboardKey.numpad1 => '1',
+      LogicalKeyboardKey.digit2 || LogicalKeyboardKey.numpad2 => '2',
+      LogicalKeyboardKey.digit3 || LogicalKeyboardKey.numpad3 => '3',
+      LogicalKeyboardKey.digit4 || LogicalKeyboardKey.numpad4 => '4',
+      LogicalKeyboardKey.digit5 || LogicalKeyboardKey.numpad5 => '5',
+      LogicalKeyboardKey.digit6 || LogicalKeyboardKey.numpad6 => '6',
+      LogicalKeyboardKey.digit7 || LogicalKeyboardKey.numpad7 => '7',
+      LogicalKeyboardKey.digit8 || LogicalKeyboardKey.numpad8 => '8',
+      LogicalKeyboardKey.digit9 || LogicalKeyboardKey.numpad9 => '9',
+      LogicalKeyboardKey.period || LogicalKeyboardKey.numpadDecimal => '.',
+      LogicalKeyboardKey.add || LogicalKeyboardKey.numpadAdd => '+',
+      LogicalKeyboardKey.minus || LogicalKeyboardKey.numpadSubtract => '-',
+      LogicalKeyboardKey.asterisk || LogicalKeyboardKey.numpadMultiply => '×',
+      LogicalKeyboardKey.slash || LogicalKeyboardKey.numpadDivide => '/',
+      LogicalKeyboardKey.backspace => '⌫',
+      LogicalKeyboardKey.delete => event is KeyDownEvent ? 'CLEAR' : null,
+      LogicalKeyboardKey.equal ||
+      LogicalKeyboardKey.numpadEqual => event is KeyDownEvent ? '=' : null,
+      _ => switch (event.character) {
+        '+' => '+',
+        '-' || '−' => '-',
+        '*' => '×',
+        '/' => '/',
+        '.' => '.',
+        '=' => event is KeyDownEvent ? '=' : null,
+        _ => null,
+      },
+    };
+  }
+
+  void _cycleDesktopFieldFocus({required bool reverse}) {
+    if (busy || loading) return;
+    final ring = <FocusNode>[
+      _amountFocus,
+      if (type == RecordType.transfer) _feeFocus,
+      _remarkFocus,
+    ];
+    final currentIdx = ring.indexWhere((n) => n.hasFocus);
+    final int nextIdx;
+    if (currentIdx < 0) {
+      nextIdx = reverse ? ring.length - 1 : 0;
+    } else if (reverse) {
+      nextIdx = (currentIdx - 1 + ring.length) % ring.length;
+    } else {
+      nextIdx = (currentIdx + 1) % ring.length;
+    }
+    final target = ring[nextIdx];
+    target.requestFocus();
+    if (identical(target, _remarkFocus)) {
+      remark.selection = TextSelection.collapsed(offset: remark.text.length);
+    } else if (identical(target, _feeFocus)) {
+      fee.selection = TextSelection.collapsed(offset: fee.text.length);
+    } else if (identical(target, _amountFocus)) {
+      amount.selection = TextSelection.collapsed(offset: amount.text.length);
+    }
+  }
+
+  void _triggerDesktopEnter() {
+    if (!_canSubmitNow) return;
+    if (hasOperator(amount.text)) {
+      _evaluateInPlace();
+      return;
+    }
+    unawaited(_save(stayAndReset: false));
+  }
+
+  void _triggerDesktopSaveAndAgain() {
+    if (!_canSubmitNow) return;
+    unawaited(_save(stayAndReset: true));
+  }
+
+  void _applyDesktopKeypadToken(String token) {
+    if (busy || loading) return;
+    if (token == '=') {
+      _evaluateInPlace();
+      return;
+    }
+    ScaffoldMessenger.maybeOf(context)?.clearSnackBars();
+    _unfocusOsKeyboardFields();
+    final nextValue = applyCustomKeypadValue(
+      amount.value,
+      token,
+      allowMultiplyDivide: true,
+    );
+    setState(() {
+      error = null;
+      _savedAndResetBanner = false;
+      if (_desktopRemarksExpanded) {
+        _desktopRemarksExpanded = false;
+      }
+      amount.value = nextValue;
+      if (_preservingLoadedConversion) {
+        _preservingLoadedConversion = false;
+        convertedEdited = false;
+      }
+      _autoConvert();
+    });
+    if (!_amountFocus.hasFocus) {
+      _amountFocus.requestFocus();
+    }
+  }
+
+  KeyEventResult _handleSharedDesktopShortcuts(
+    KeyEvent event, {
+    required bool isTextFieldComposing,
+  }) {
+    if (!_isDesktopActive || !_isTopmostRoute) {
+      return KeyEventResult.ignored;
+    }
+    if (event is! KeyDownEvent) {
+      return KeyEventResult.ignored;
+    }
+    final hw = HardwareKeyboard.instance;
+    final key = event.logicalKey;
+
+    if (key == LogicalKeyboardKey.escape &&
+        !hw.isControlPressed &&
+        !hw.isAltPressed &&
+        !hw.isMetaPressed &&
+        !hw.isShiftPressed) {
+      if (isTextFieldComposing) return KeyEventResult.ignored;
+      if (!busy) {
+        _closeEditor();
+      }
+      return KeyEventResult.handled;
+    }
+
+    if (key == LogicalKeyboardKey.tab &&
+        !hw.isControlPressed &&
+        !hw.isAltPressed &&
+        !hw.isMetaPressed) {
+      if (isTextFieldComposing) return KeyEventResult.ignored;
+      _cycleDesktopFieldFocus(reverse: hw.isShiftPressed);
+      return KeyEventResult.handled;
+    }
+
+    if (_isEnterKey(key) &&
+        _isPrimarySubmitModifierPressed(hw) &&
+        !hw.isShiftPressed) {
+      _triggerDesktopSaveAndAgain();
+      return KeyEventResult.handled;
+    }
+
+    if (_isEnterKey(key) &&
+        !hw.isControlPressed &&
+        !hw.isMetaPressed &&
+        !hw.isAltPressed &&
+        !hw.isShiftPressed) {
+      if (isTextFieldComposing) return KeyEventResult.ignored;
+      _triggerDesktopEnter();
+      return KeyEventResult.handled;
+    }
+
+    return KeyEventResult.ignored;
+  }
+
+  KeyEventResult _handleAmountFieldKeyEvent(FocusNode node, KeyEvent event) {
+    if (!_isDesktopActive || !_isTopmostRoute) {
+      return KeyEventResult.ignored;
+    }
+    final shared = _handleSharedDesktopShortcuts(
+      event,
+      isTextFieldComposing: false,
+    );
+    if (shared != KeyEventResult.ignored) {
+      return shared;
+    }
+    final token = _mapDesktopKeyToKeypadToken(event, HardwareKeyboard.instance);
+    if (token != null) {
+      _applyDesktopKeypadToken(token);
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
+  KeyEventResult _handleAuxFieldKeyEvent(FocusNode node, KeyEvent event) {
+    if (!_isDesktopActive || !_isTopmostRoute) {
+      return KeyEventResult.ignored;
+    }
+    final activeCtrl = identical(node, _feeFocus) ? fee : remark;
+    final composing =
+        activeCtrl.value.composing.isValid &&
+        !activeCtrl.value.composing.isCollapsed;
+    return _handleSharedDesktopShortcuts(
+      event,
+      isTextFieldComposing: composing,
+    );
+  }
+
+  KeyEventResult _handleDesktopScopeKeyEvent(FocusNode node, KeyEvent event) {
+    if (!_isDesktopActive || !_isTopmostRoute || _hasOsKeyboardFieldFocus) {
+      return KeyEventResult.ignored;
+    }
+    final shared = _handleSharedDesktopShortcuts(
+      event,
+      isTextFieldComposing: false,
+    );
+    if (shared != KeyEventResult.ignored) {
+      return shared;
+    }
+    final token = _mapDesktopKeyToKeypadToken(event, HardwareKeyboard.instance);
+    if (token != null) {
+      _applyDesktopKeypadToken(token);
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
   void _activateCustomKeypad() {
     if (busy) return;
     _imeWasVisible = false;
     _unfocusOsKeyboardFields();
+    if (_isDesktopActive) {
+      if (_desktopRemarksExpanded) {
+        setState(() => _desktopRemarksExpanded = false);
+      }
+      if (!_amountFocus.hasFocus) {
+        _amountFocus.requestFocus();
+      }
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && !busy && !_hasOsKeyboardFieldFocus) {
+          if (!_amountFocus.hasFocus) {
+            _amountFocus.requestFocus();
+          }
+        }
+      });
+      return;
+    }
     unawaited(SystemChannels.textInput.invokeMethod<void>('TextInput.hide'));
     if (_panelMode != _BottomPanelMode.customKeypad) {
       setState(() => _panelMode = _BottomPanelMode.customKeypad);
@@ -259,6 +676,10 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
 
   void _toggleFrequentRemarksPanel() {
     if (busy) return;
+    if (_isDesktopActive) {
+      _toggleDesktopRemarksPanel();
+      return;
+    }
     if (_panelMode == _BottomPanelMode.frequentRemarks) {
       _activateCustomKeypad();
       return;
@@ -348,6 +769,27 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     return fromProvider ?? DiyToolbarConfig.defaults();
   }
 
+  Future<int> _resolveDefaultRecordType(AppDatabase db) async {
+    final row = await (db.select(
+      db.preferences,
+    )..where((t) => t.key.equals(appSettingsPreferenceKey))).getSingleOrNull();
+    if (row != null) {
+      try {
+        return AppSettings.parse(row.value).defaultRecordType;
+      } on Failure {
+        // Fall back to provider or expense default.
+      }
+    }
+    final fromProvider = mounted
+        ? ref.read(appSettingsProvider).value?.defaultRecordType
+        : null;
+    if (fromProvider != null &&
+        allowedDefaultRecordTypes.contains(fromProvider)) {
+      return fromProvider;
+    }
+    return RecordType.expense;
+  }
+
   void _persistDateTimePickerStyles({
     required RecordDatePickerStyle datePickerStyle,
     required RecordTimePickerStyle timePickerStyle,
@@ -386,9 +828,172 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     });
   }
 
+  static Map<int, Set<int>> _buildAssetBookBindings(Iterable<AssetBook> links) {
+    final bound = <int, Set<int>>{};
+    for (final l in links) {
+      bound.putIfAbsent(l.assetId, () => <int>{}).add(l.bookId);
+    }
+    return bound;
+  }
+
+  static bool _isAssetVisibleInBook(
+    int candidateId,
+    int? bookId,
+    Map<int, Set<int>> assetBookBindings,
+  ) {
+    final bound = assetBookBindings[candidateId];
+    if (bound == null || bound.isEmpty) return true;
+    return bookId != null && bound.contains(bookId);
+  }
+
+  static bool _isSelectableBookAsset(
+    int candidateId, {
+    required int? bookId,
+    required Iterable<Asset> assets,
+    required Map<int, Set<int>> assetBookBindings,
+  }) {
+    if (candidateId == noRef || candidateId <= 0) return false;
+    final asset = assets.where((a) => a.id == candidateId).firstOrNull;
+    if (asset == null) return false;
+    if (asset.status != AssetStatus.active || asset.type == AssetType.debt) {
+      return false;
+    }
+    return _isAssetVisibleInBook(asset.id, bookId, assetBookBindings);
+  }
+
+  static int _computeEffectiveDefaultAccountId({
+    required DiyToolbarConfig config,
+    required int? bookId,
+    required Iterable<Asset> assets,
+    required Map<int, Set<int>> assetBookBindings,
+  }) {
+    if (bookId == null) return noRef;
+    return resolveEffectiveDefaultAccountId(
+      config: config,
+      bookId: bookId,
+      assets: assets.map((a) => (id: a.id, type: a.type, status: a.status)),
+      assetBookBindings: assetBookBindings,
+    );
+  }
+
+  ({int assetId, int fromAssetId, int toAssetId, bool changed})
+  _computeReconciledCreateModeAccounts({
+    required int? bookId,
+    required Iterable<Asset> latestAssets,
+    required Map<int, Set<int>> latestBindings,
+    required DiyToolbarConfig latestConfig,
+    int? previousEffectiveDefaultId,
+  }) {
+    bool isEligible(int id) => _isSelectableBookAsset(
+      id,
+      bookId: bookId,
+      assets: latestAssets,
+      assetBookBindings: latestBindings,
+    );
+
+    final effectiveDefaultId = _computeEffectiveDefaultAccountId(
+      config: latestConfig,
+      bookId: bookId,
+      assets: latestAssets,
+      assetBookBindings: latestBindings,
+    );
+
+    var nextAssetId = assetId;
+    var nextFromAssetId = fromAssetId;
+    var nextToAssetId = toAssetId;
+
+    if (nextToAssetId != noRef && !isEligible(nextToAssetId)) {
+      nextToAssetId = noRef;
+    }
+
+    if (nextFromAssetId != noRef && !isEligible(nextFromAssetId)) {
+      nextFromAssetId =
+          (!_userTouchedAsset &&
+              effectiveDefaultId != noRef &&
+              effectiveDefaultId != nextToAssetId)
+          ? effectiveDefaultId
+          : noRef;
+    } else if (!_userTouchedAsset && type == RecordType.transfer) {
+      final shouldApplyDefault =
+          nextFromAssetId == noRef ||
+          (previousEffectiveDefaultId != null &&
+              previousEffectiveDefaultId != noRef &&
+              nextFromAssetId == previousEffectiveDefaultId);
+      if (shouldApplyDefault) {
+        nextFromAssetId =
+            (effectiveDefaultId != noRef && effectiveDefaultId != nextToAssetId)
+            ? effectiveDefaultId
+            : noRef;
+      }
+    }
+    if (nextFromAssetId != noRef && nextFromAssetId == nextToAssetId) {
+      nextFromAssetId = noRef;
+    }
+
+    if (nextAssetId != noRef && !isEligible(nextAssetId)) {
+      nextAssetId = !_userTouchedAsset ? effectiveDefaultId : noRef;
+    } else if (!_userTouchedAsset && type != RecordType.transfer) {
+      final shouldApplyDefault =
+          nextAssetId == noRef ||
+          (previousEffectiveDefaultId != null &&
+              previousEffectiveDefaultId != noRef &&
+              nextAssetId == previousEffectiveDefaultId);
+      if (shouldApplyDefault) {
+        nextAssetId = effectiveDefaultId;
+      }
+    }
+
+    final changed =
+        nextAssetId != assetId ||
+        nextFromAssetId != fromAssetId ||
+        nextToAssetId != toAssetId;
+    return (
+      assetId: nextAssetId,
+      fromAssetId: nextFromAssetId,
+      toAssetId: nextToAssetId,
+      changed: changed,
+    );
+  }
+
+  Future<void> _refreshAndReconcileAccountsFromDb() async {
+    if (!mounted || editing) return;
+    try {
+      final db = await ref.read(databaseProvider.future);
+      final latestAssets = await LedgerQueries(db).getAssets();
+      final latestAssetBooks = await db.select(db.assetBooks).get();
+      final latestBookId = await _readCurrentBookId(db);
+      final latestConfig = await _resolveLatestDiyConfig(db);
+      if (!mounted || editing) return;
+      _resolvedBookId = latestBookId;
+      _initialAssets = latestAssets;
+      _initialAssetBooks = latestAssetBooks;
+      final reconciled = _computeReconciledCreateModeAccounts(
+        bookId: latestBookId,
+        latestAssets: latestAssets,
+        latestBindings: _buildAssetBookBindings(latestAssetBooks),
+        latestConfig: latestConfig,
+      );
+      if (reconciled.changed) {
+        setState(() {
+          assetId = reconciled.assetId;
+          fromAssetId = reconciled.fromAssetId;
+          toAssetId = reconciled.toAssetId;
+          convertedEdited = false;
+          _autoConvert();
+        });
+      } else {
+        setState(() {
+          _autoConvert();
+        });
+      }
+    } catch (_) {
+      // Non-blocking post-navigation catalog sync.
+    }
+  }
+
   String _currencyOf(int id) {
     if (id == noRef) return baseCurrency;
-    final assets = ref.read(assetsProvider).value ?? const <Asset>[];
+    final assets = ref.read(assetsProvider).value ?? _initialAssets;
     final a = assets.where((x) => x.id == id).firstOrNull;
     return normalizeCurrency(a?.currency) ?? baseCurrency;
   }
@@ -411,8 +1016,31 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     return (sourceCurrency ?? ac, ac);
   }
 
+  BigInt _currentDiscountMinor() {
+    if (type != RecordType.expense && type != RecordType.income) {
+      return BigInt.zero;
+    }
+    final raw = discount.text.trim();
+    if (raw.isEmpty) return BigInt.zero;
+    try {
+      final parsed = parseAmount(raw);
+      return parsed.storageMinor > BigInt.zero
+          ? parsed.storageMinor
+          : BigInt.zero;
+    } on Failure {
+      return BigInt.zero;
+    }
+  }
+
+  BigInt _netSourceMinorFromGross(BigInt grossMinor) {
+    final disc = _currentDiscountMinor();
+    if (disc <= BigInt.zero) return grossMinor;
+    return grossMinor > disc ? grossMinor - disc : BigInt.zero;
+  }
+
   /// Fills [converted] from manual rates using exact calculator evaluation
-  /// unless the user edited [converted] manually.
+  /// (after subtracting discount for expense/income) unless the user edited
+  /// [converted] manually.
   void _autoConvert() {
     if (convertedEdited) return;
     final (sc, ac) = _currencies();
@@ -427,8 +1055,9 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
       return;
     }
     try {
-      final minor = evaluateKeypadExpression(text).clampedMinor;
-      converted.text = formatMinor(rates.convert(minor, sc, ac));
+      final grossMinor = evaluateKeypadExpression(text).clampedMinor;
+      final netMinor = _netSourceMinorFromGross(grossMinor);
+      converted.text = formatMinor(rates.convert(netMinor, sc, ac));
     } on Failure {
       converted.text = '';
     }
@@ -447,8 +1076,9 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     final text = amount.text.trim();
     if (rates == null || text.isEmpty) return '0.00';
     try {
-      final minor = evaluateKeypadExpression(text).clampedMinor;
-      return formatMinor(rates.convert(minor, sc, ac));
+      final grossMinor = evaluateKeypadExpression(text).clampedMinor;
+      final netMinor = _netSourceMinorFromGross(grossMinor);
+      return formatMinor(rates.convert(netMinor, sc, ac));
     } on Failure {
       return '0.00';
     }
@@ -458,21 +1088,23 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     TemplatePrefill prefill, {
     RecordCategory? fallbackFirstCategory,
     bool? autoSelectFirstOverride,
+    DiyToolbarConfig? diyConfigOverride,
   }) {
+    final effectiveConfig =
+        diyConfigOverride ??
+        ref.read(diyToolbarConfigProvider).value ??
+        DiyToolbarConfig.defaults();
+    final currentBookId =
+        original?.accountBookId ??
+        ref.read(currentBookIdProvider).value ??
+        _resolvedBookId ??
+        (prefill.bookExists ? prefill.bookId : null);
     RecordCategory? resolvedFallback = fallbackFirstCategory;
     if (prefill.categoryId == null && prefill.type != RecordType.transfer) {
       final autoSelectEnabled =
           autoSelectFirstOverride ??
-          (ref
-                  .read(diyToolbarConfigProvider)
-                  .value
-                  ?.isEnabled(DiyToolbarAction.autoSelectFirstCategory) ??
-              false);
+          effectiveConfig.isEnabled(DiyToolbarAction.autoSelectFirstCategory);
       if (autoSelectEnabled && resolvedFallback == null) {
-        final currentBookId =
-            original?.accountBookId ??
-            ref.read(currentBookIdProvider).value ??
-            _resolvedBookId;
         final currentCats = currentBookId == null
             ? const <RecordCategory>[]
             : (ref.read(categoriesProvider(currentBookId)).value ??
@@ -482,8 +1114,68 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
         resolvedFallback = _firstTopCategoryForType(prefill.type, currentCats);
       }
     }
+
+    final currentAssets = ref.read(assetsProvider).value ?? _initialAssets;
+    final currentAssetBooks =
+        ref.read(assetBooksProvider).value ?? _initialAssetBooks;
+    final bindings = _buildAssetBookBindings(currentAssetBooks);
+    final effectiveDefaultId = editing
+        ? noRef
+        : _computeEffectiveDefaultAccountId(
+            config: effectiveConfig,
+            bookId: currentBookId,
+            assets: currentAssets,
+            assetBookBindings: bindings,
+          );
+
+    int nextAssetId = noRef;
+    int nextFromAssetId = noRef;
+    int nextToAssetId = noRef;
+    bool nextUserTouchedAsset = false;
+
+    if (prefill.type == RecordType.transfer) {
+      final validFrom = _isSelectableBookAsset(
+        prefill.fromAssetId,
+        bookId: currentBookId,
+        assets: currentAssets,
+        assetBookBindings: bindings,
+      );
+      final validTo = _isSelectableBookAsset(
+        prefill.toAssetId,
+        bookId: currentBookId,
+        assets: currentAssets,
+        assetBookBindings: bindings,
+      );
+      nextToAssetId = validTo ? prefill.toAssetId : noRef;
+      if (validFrom && prefill.fromAssetId != nextToAssetId) {
+        nextFromAssetId = prefill.fromAssetId;
+        nextUserTouchedAsset = true;
+      } else {
+        nextFromAssetId =
+            (effectiveDefaultId != noRef && effectiveDefaultId != nextToAssetId)
+            ? effectiveDefaultId
+            : noRef;
+        nextUserTouchedAsset = validTo;
+      }
+    } else {
+      final validAsset = _isSelectableBookAsset(
+        prefill.assetId,
+        bookId: currentBookId,
+        assets: currentAssets,
+        assetBookBindings: bindings,
+      );
+      if (validAsset) {
+        nextAssetId = prefill.assetId;
+        nextUserTouchedAsset = true;
+      } else {
+        nextAssetId = effectiveDefaultId;
+        nextUserTouchedAsset = false;
+      }
+    }
+
     setState(() {
       type = prefill.type;
+      _userTouchedType = true;
       if (prefill.type == RecordType.transfer) {
         categoryId = null;
         parentCatId = null;
@@ -498,9 +1190,10 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
         _userTouchedCategory = false;
       }
       _remarksShowAllScope = false;
-      assetId = prefill.assetId;
-      fromAssetId = prefill.fromAssetId;
-      toAssetId = prefill.toAssetId;
+      assetId = nextAssetId;
+      fromAssetId = nextFromAssetId;
+      toAssetId = nextToAssetId;
+      _userTouchedAsset = nextUserTouchedAsset;
       _setAmountText(prefill.amountText);
       fee.text = prefill.feeText;
       feeFromTarget = prefill.feeFromTarget;
@@ -535,18 +1228,36 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     required String currencySymbol,
   }) async {
     _unfocusOsKeyboardFields();
+    BigInt? maxGrossMinor;
+    final rawAmt = amount.text.trim();
+    if (rawAmt.isNotEmpty) {
+      try {
+        final eval = evaluateKeypadExpression(rawAmt);
+        if (!eval.dividedByZero && !eval.isNegative) {
+          maxGrossMinor = eval.clampedMinor;
+        }
+      } on Failure {
+        maxGrossMinor = null;
+      }
+    }
     final result = await showDialog<String>(
       context: context,
       builder: (_) => _DiscountEditDialog(
         initialText: discount.text,
         currencyCode: currencyCode,
         currencySymbol: currencySymbol,
+        maxGrossMinor: maxGrossMinor,
       ),
     );
     if (!mounted) return;
     if (result != null) {
       setState(() {
         discount.text = result;
+        if (_preservingLoadedConversion) {
+          _preservingLoadedConversion = false;
+          convertedEdited = false;
+        }
+        _autoConvert();
         _savedAndResetBanner = false;
       });
     }
@@ -563,6 +1274,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
   }) async {
     _unfocusOsKeyboardFields();
     final rates = ref.read(rateTableProvider).value;
+    final discMinor = _currentDiscountMinor();
     final res = await showDialog<({String text, bool edited})>(
       context: context,
       builder: (_) => _ConversionEditDialog(
@@ -575,12 +1287,14 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
         sourceSymbol: _symbolForCurrency(sc, currencies),
         targetCurrency: ac,
         amountText: amount.text,
+        discountMinor: discMinor,
         rates: rates,
       ),
     );
     if (!mounted) return;
     if (res != null) {
       setState(() {
+        _preservingLoadedConversion = false;
         converted.text = res.text;
         convertedEdited = res.edited && res.text.isNotEmpty;
         if (!convertedEdited) {
@@ -611,6 +1325,20 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
         _imeWasVisible = true;
       }
       setState(() => _panelMode = _BottomPanelMode.osKeyboard);
+      if (_feeFocus.hasFocus && !_isDesktopActive) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          final feeCtx = _feeFocus.context;
+          if (mounted && _feeFocus.hasFocus && feeCtx != null) {
+            unawaited(
+              Scrollable.ensureVisible(
+                feeCtx,
+                alignment: 0.5,
+                duration: Duration.zero,
+              ),
+            );
+          }
+        });
+      }
     } else {
       _imeWasVisible = false;
       setState(() {
@@ -624,10 +1352,17 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
   void _showCalcError(String message) {
     if (!mounted) return;
     final mq = MediaQuery.of(context);
-    final slotHeight = math.max(
-      RecordCustomKeypad.panelHeight + mq.padding.bottom,
-      mq.viewInsets.bottom,
-    );
+    final double slotHeight;
+    if (_isDesktopActive) {
+      slotHeight = _desktopKeypadExpanded
+          ? RecordCustomKeypad.desktopDefaultPanelHeight + 48.0
+          : 52.0;
+    } else {
+      slotHeight = math.max(
+        RecordCustomKeypad.panelHeight + mq.padding.bottom,
+        mq.viewInsets.bottom,
+      );
+    }
     final targetMargin = slotHeight + 118.0;
     final bottomMargin = mq.size.height - mq.padding.top > targetMargin + 96
         ? targetMargin
@@ -654,6 +1389,10 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
       _savedAndResetBanner = false;
       _panelMode = _BottomPanelMode.customKeypad;
       amount.value = nextValue;
+      if (_preservingLoadedConversion) {
+        _preservingLoadedConversion = false;
+        convertedEdited = false;
+      }
       _autoConvert();
     });
     if (!_amountFocus.hasFocus) {
@@ -684,6 +1423,10 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
         error = null;
         _savedAndResetBanner = false;
         _setAmountText(evaluated.decimal);
+        if (_preservingLoadedConversion) {
+          _preservingLoadedConversion = false;
+          convertedEdited = false;
+        }
         _autoConvert();
       });
     } on Failure {
@@ -702,13 +1445,43 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     _amountFocus.addListener(_onAmountFocusChanged);
     _remarkFocus.addListener(_onOsKeyboardFieldFocusChanged);
     _feeFocus.addListener(_onOsKeyboardFieldFocusChanged);
-    type = widget.initialType ?? RecordType.expense;
+    if (!editing &&
+        widget.initialType == null &&
+        widget.initialCategory == null) {
+      final cachedDefaultType = ref
+          .read(appSettingsProvider)
+          .value
+          ?.defaultRecordType;
+      if (cachedDefaultType != null &&
+          allowedDefaultRecordTypes.contains(cachedDefaultType)) {
+        type = cachedDefaultType;
+      } else {
+        type = RecordType.expense;
+      }
+    } else {
+      type = widget.initialType ?? RecordType.expense;
+    }
     categoryId = widget.initialCategory;
     assetId = widget.initialAsset ?? noRef;
     fromAssetId = widget.initialFrom ?? noRef;
     toAssetId = widget.initialTo ?? noRef;
+    if (!editing &&
+        type == RecordType.transfer &&
+        fromAssetId == noRef &&
+        widget.initialFrom == null &&
+        widget.initialAsset != null) {
+      fromAssetId = widget.initialAsset!;
+      assetId = noRef;
+    }
+    _userTouchedAsset =
+        widget.initialAsset != null ||
+        widget.initialFrom != null ||
+        widget.initialTo != null;
     if (widget.initialAmount != null) _setAmountText(widget.initialAmount!);
     if (widget.initialRemark != null) remark.text = widget.initialRemark!;
+    if (!editing && widget.initialRecordTimeMs != null) {
+      time = DateTime.fromMillisecondsSinceEpoch(widget.initialRecordTimeMs!);
+    }
     unawaited(_load());
   }
 
@@ -742,9 +1515,15 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     assetId = r.type == RecordType.reimbursable ? r.fromAssetId : r.assetId;
     fromAssetId = r.fromAssetId;
     toAssetId = r.toAssetId;
-    _setAmountText(formatMinor(r.moneyMinor));
-    if (r.discountMinor != null && r.discountMinor! > BigInt.zero) {
-      discount.text = formatMinor(r.discountMinor!);
+    final discMinor =
+        (r.type == RecordType.expense || r.type == RecordType.income) &&
+            r.discountMinor != null &&
+            r.discountMinor! > BigInt.zero
+        ? r.discountMinor!
+        : BigInt.zero;
+    _setAmountText(formatMinor(r.moneyMinor + discMinor));
+    if (discMinor > BigInt.zero) {
+      discount.text = formatMinor(discMinor);
     }
     remark.text = r.remark;
     excludeBudget = r.excludeBudget;
@@ -771,12 +1550,14 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
         if (sc != ac) {
           converted.text = formatMinor(snap.assetNet!);
           convertedEdited = true;
+          _preservingLoadedConversion = true;
         }
       } else if (sc != ac) {
         sourceCurrency = sc;
         _setAmountText(formatMinor(snap.sourceGross));
         converted.text = formatMinor(snap.assetNet!);
         convertedEdited = true;
+        _preservingLoadedConversion = true;
       }
     }
     if (feeRow != null) {
@@ -795,6 +1576,10 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
   Future<void> _load() async {
     try {
       final db = await ref.read(databaseProvider.future);
+      final loadedAssets = await LedgerQueries(db).getAssets();
+      final loadedAssetBooks = await db.select(db.assetBooks).get();
+      _initialAssets = loadedAssets;
+      _initialAssetBooks = loadedAssetBooks;
       if (editing) {
         await _loadExisting(db, widget.recordId!);
         if (_resolvedBookId != null) {
@@ -807,11 +1592,11 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
         final cats = await LedgerQueries(db).getCategories(_resolvedBookId!);
         _initialCategoriesBookId = _resolvedBookId;
         _initialCategories = cats;
+        final diyConfig = await _resolveLatestDiyConfig(db);
         if (widget.initialTemplateId != null) {
           final prefill = await TemplateRemarkService(
             db,
           ).buildTemplatePrefill(widget.initialTemplateId!);
-          final diyConfig = await _resolveLatestDiyConfig(db);
           final autoSelect = diyConfig.isEnabled(
             DiyToolbarAction.autoSelectFirstCategory,
           );
@@ -826,23 +1611,63 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
               prefill,
               fallbackFirstCategory: fallbackCat,
               autoSelectFirstOverride: autoSelect,
+              diyConfigOverride: diyConfig,
             );
           }
-        } else if (widget.initialCategory == null &&
-            type != RecordType.transfer &&
-            categoryId == null &&
-            !_userTouchedCategory) {
-          final diyConfig = await _resolveLatestDiyConfig(db);
-          if (diyConfig.isEnabled(DiyToolbarAction.autoSelectFirstCategory)) {
-            final first = _firstTopCategoryForType(type, cats);
-            if (first != null &&
-                mounted &&
-                categoryId == null &&
-                !_userTouchedCategory &&
-                type != RecordType.transfer) {
-              categoryId = first.id;
-              parentCatId = first.id;
+        } else {
+          if (widget.initialType == null && !_userTouchedType) {
+            if (widget.initialCategory != null) {
+              final targetCat = cats
+                  .where((c) => c.id == widget.initialCategory)
+                  .firstOrNull;
+              if (targetCat != null && targetCat.type == RecordType.income) {
+                type = RecordType.income;
+              }
+            } else {
+              final resolvedDefaultType = await _resolveDefaultRecordType(db);
+              if (mounted && !_userTouchedType) {
+                type = resolvedDefaultType;
+                if (type == RecordType.transfer) {
+                  categoryId = null;
+                  parentCatId = null;
+                  if (fromAssetId == noRef &&
+                      widget.initialFrom == null &&
+                      widget.initialAsset != null) {
+                    fromAssetId = widget.initialAsset!;
+                    assetId = noRef;
+                  }
+                }
+              }
             }
+          }
+          if (widget.initialCategory == null &&
+              type != RecordType.transfer &&
+              categoryId == null &&
+              !_userTouchedCategory) {
+            if (diyConfig.isEnabled(DiyToolbarAction.autoSelectFirstCategory)) {
+              final first = _firstTopCategoryForType(type, cats);
+              if (first != null &&
+                  mounted &&
+                  categoryId == null &&
+                  !_userTouchedCategory &&
+                  type != RecordType.transfer) {
+                categoryId = first.id;
+                parentCatId = first.id;
+              }
+            }
+          }
+          if (mounted) {
+            final bindings = _buildAssetBookBindings(loadedAssetBooks);
+            final reconciled = _computeReconciledCreateModeAccounts(
+              bookId: _resolvedBookId,
+              latestAssets: loadedAssets,
+              latestBindings: bindings,
+              latestConfig: diyConfig,
+            );
+            assetId = reconciled.assetId;
+            fromAssetId = reconciled.fromAssetId;
+            toAssetId = reconciled.toAssetId;
+            _autoConvert();
           }
         }
       }
@@ -866,6 +1691,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     _amountFocus.dispose();
     _remarkFocus.dispose();
     _feeFocus.dispose();
+    _desktopScopeFocus.dispose();
     super.dispose();
   }
 
@@ -935,10 +1761,42 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
       final effectiveDiscount = parsedDiscount != null && !parsedDiscount.isZero
           ? parsedDiscount
           : null;
+      if (effectiveDiscount != null &&
+          effectiveDiscount.storageMinor > money.storageMinor) {
+        throw const Failure(FailureCode.validation, '优惠金额不能大于原金额');
+      }
+      final netSourceMinor = effectiveDiscount != null
+          ? money.storageMinor - effectiveDiscount.storageMinor
+          : money.storageMinor;
+      final netSourceMoney = Money.minor(netSourceMinor);
+
+      final effectiveDiyConfig = await _resolveLatestDiyConfig(db);
+      if (!editing) {
+        final liveAssets = await LedgerQueries(db).getAssets();
+        final liveAssetBooks = await db.select(db.assetBooks).get();
+        _initialAssets = liveAssets;
+        _initialAssetBooks = liveAssetBooks;
+        final reconciledBeforeSave = _computeReconciledCreateModeAccounts(
+          bookId: bookId,
+          latestAssets: liveAssets,
+          latestBindings: _buildAssetBookBindings(liveAssetBooks),
+          latestConfig: effectiveDiyConfig,
+        );
+        if (reconciledBeforeSave.changed) {
+          assetId = reconciledBeforeSave.assetId;
+          fromAssetId = reconciledBeforeSave.fromAssetId;
+          toAssetId = reconciledBeforeSave.toAssetId;
+          convertedEdited = false;
+          _preservingLoadedConversion = false;
+          _autoConvert();
+        }
+      }
 
       // Multi-currency (`ledger-catalog.md` §4 `curr`) via direct DB read.
+      // L-01: Keypad enters gross; discount applies to expense/income so
+      // same-currency books netSource and cross-currency converts netSource.
       final (sc, ac) = _currencies();
-      var booked = money;
+      var booked = type == RecordType.transfer ? money : netSourceMoney;
       if (sc != ac) {
         final currencyRows = await db.select(db.currencies).get();
         final rates = RateTable({
@@ -946,9 +1804,9 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
         });
         final text = converted.text.trim();
         final target = text.isEmpty
-            ? Money.minor(rates.convert(money.storageMinor, sc, ac))
+            ? Money.minor(rates.convert(netSourceMinor, sc, ac))
             : parseAmount(text);
-        if (!money.isZero && target.units <= BigInt.zero) {
+        if (netSourceMinor > BigInt.zero && target.units <= BigInt.zero) {
           throw const Failure(FailureCode.validation, '折算金额须大于 0');
         }
         if (type != RecordType.transfer) booked = target;
@@ -957,6 +1815,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
           sourceMinor: money.storageMinor,
           account: ac,
           assetMinor: target.storageMinor,
+          discountMinor: effectiveDiscount?.storageMinor,
           rates: rates,
         );
       } else if (sc != baseCurrency) {
@@ -968,11 +1827,34 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
           source: sc,
           sourceMinor: money.storageMinor,
           account: ac,
-          assetMinor: money.storageMinor,
+          assetMinor: booked.storageMinor,
+          discountMinor: effectiveDiscount?.storageMinor,
           rates: rates,
         );
       } else {
         extra.currency = null;
+      }
+
+      // L-07: Preserve historical FX `bm` when editing non-amount fields.
+      if (old != null && old.type == type) {
+        final oldSnap = RecordExtra.parse(old.extraInfo).currency;
+        final newSnap = extra.currency;
+        final oldDisc = old.discountMinor ?? BigInt.zero;
+        final newDisc = effectiveDiscount?.storageMinor ?? BigInt.zero;
+        if (oldSnap != null &&
+            oldSnap.isValid &&
+            newSnap != null &&
+            newSnap.isValid &&
+            normalizeCurrency(oldSnap.sourceCode) ==
+                normalizeCurrency(newSnap.sourceCode) &&
+            oldSnap.sourceGross == newSnap.sourceGross &&
+            normalizeCurrency(oldSnap.assetCode) ==
+                normalizeCurrency(newSnap.assetCode) &&
+            (oldSnap.assetNet ?? old.moneyMinor) ==
+                (newSnap.assetNet ?? booked.storageMinor) &&
+            oldDisc == newDisc) {
+          extra.currency = oldSnap;
+        }
       }
 
       final draft = RecordDraft(
@@ -1033,7 +1915,6 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
         );
       }
 
-      final effectiveDiyConfig = await _resolveLatestDiyConfig(db);
       final remarksEnabled = effectiveDiyConfig.isEnabled(
         DiyToolbarAction.frequentRemarks,
       );
@@ -1088,16 +1969,45 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
               currentCategories,
             );
           }
+          final refreshedAssets = await LedgerQueries(db).getAssets();
+          final refreshedAssetBooks = await db.select(db.assetBooks).get();
+          final refreshedBindings = _buildAssetBookBindings(
+            refreshedAssetBooks,
+          );
+          final resetToDefaultAccount =
+              effectiveDiyConfig.autoSelectDefaultAccount;
+          final nextDefaultAccountId = _computeEffectiveDefaultAccountId(
+            config: effectiveDiyConfig,
+            bookId: bookId,
+            assets: refreshedAssets,
+            assetBookBindings: refreshedBindings,
+          );
+          final initialAssetStillEligible =
+              widget.initialAsset != null &&
+              _isSelectableBookAsset(
+                widget.initialAsset!,
+                bookId: bookId,
+                assets: refreshedAssets,
+                assetBookBindings: refreshedBindings,
+              );
           if (!mounted) return;
           setState(() {
             busy = false;
             _draftNonce++;
+            _initialAssets = refreshedAssets;
+            _initialAssetBooks = refreshedAssetBooks;
             _setAmountText('');
             converted.clear();
             convertedEdited = false;
+            _preservingLoadedConversion = false;
             discount.clear();
             fee.clear();
+            feeFromTarget = false;
             remark.clear();
+            selectedTagIds.clear();
+            excludeBudget = false;
+            excludeExIn = false;
+            sourceCurrency = null;
             imageNames = const <String>[];
             location = null;
             _attachmentsExpanded = false;
@@ -1107,7 +2017,78 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
               parentCatId = nextAutoFirstCat?.id;
               _userTouchedCategory = false;
             }
+            _userTouchedAsset = initialAssetStillEligible;
+            if (initialAssetStillEligible) {
+              if (type == RecordType.transfer) {
+                toAssetId = noRef;
+                fromAssetId =
+                    _isSelectableBookAsset(
+                      fromAssetId,
+                      bookId: bookId,
+                      assets: refreshedAssets,
+                      assetBookBindings: refreshedBindings,
+                    )
+                    ? fromAssetId
+                    : widget.initialAsset!;
+                assetId = noRef;
+              } else {
+                assetId =
+                    _isSelectableBookAsset(
+                      assetId,
+                      bookId: bookId,
+                      assets: refreshedAssets,
+                      assetBookBindings: refreshedBindings,
+                    )
+                    ? assetId
+                    : widget.initialAsset!;
+                fromAssetId = noRef;
+                toAssetId = noRef;
+              }
+            } else if (resetToDefaultAccount) {
+              if (type == RecordType.transfer) {
+                toAssetId = noRef;
+                fromAssetId = nextDefaultAccountId;
+                assetId = noRef;
+              } else {
+                assetId = nextDefaultAccountId;
+                fromAssetId = noRef;
+                toAssetId = noRef;
+              }
+            } else {
+              if (assetId != noRef &&
+                  !_isSelectableBookAsset(
+                    assetId,
+                    bookId: bookId,
+                    assets: refreshedAssets,
+                    assetBookBindings: refreshedBindings,
+                  )) {
+                assetId = noRef;
+              }
+              if (fromAssetId != noRef &&
+                  !_isSelectableBookAsset(
+                    fromAssetId,
+                    bookId: bookId,
+                    assets: refreshedAssets,
+                    assetBookBindings: refreshedBindings,
+                  )) {
+                fromAssetId = noRef;
+              }
+              if (toAssetId != noRef &&
+                  !_isSelectableBookAsset(
+                    toAssetId,
+                    bookId: bookId,
+                    assets: refreshedAssets,
+                    assetBookBindings: refreshedBindings,
+                  )) {
+                toAssetId = noRef;
+              }
+              if (fromAssetId != noRef && fromAssetId == toAssetId) {
+                toAssetId = noRef;
+              }
+            }
+            _autoConvert();
             _panelMode = _BottomPanelMode.customKeypad;
+            _desktopRemarksExpanded = false;
             _savedAndResetBanner = true;
             error = null;
           });
@@ -1115,30 +2096,46 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
           return;
         }
 
+        final nextDefaultType = await _resolveDefaultRecordType(db);
+        if (!mounted) return;
         _unfocusOsKeyboardFields();
+        if (_isImperativeDialogRoute) {
+          unawaited(
+            Navigator.of(context).pushReplacement(
+              createDesktopRecordEditorDialogRoute(
+                context,
+                initialType: nextDefaultType,
+              ),
+            ),
+          );
+          return;
+        }
         final router = GoRouter.maybeOf(context);
         if (router != null) {
-          context.pushReplacement('/record/new');
+          final nextLocation = nextDefaultType == RecordType.expense
+              ? '/record/new'
+              : '/record/new?type=$nextDefaultType';
+          final canReplace =
+              router.routerDelegate.currentConfiguration.matches.length > 1 &&
+              context.canPop();
+          if (canReplace) {
+            context.pushReplacement(nextLocation);
+          } else {
+            unawaited(context.push(nextLocation));
+          }
         } else {
           unawaited(
             Navigator.of(context).pushReplacement(
-              MaterialPageRoute<void>(builder: (_) => const RecordEditorPage()),
+              MaterialPageRoute<void>(
+                builder: (_) => RecordEditorPage(initialType: nextDefaultType),
+              ),
             ),
           );
         }
         return;
       }
 
-      final router = GoRouter.maybeOf(context);
-      if (router != null) {
-        if (context.canPop()) {
-          context.pop(id);
-        } else {
-          context.go('/');
-        }
-      } else if (Navigator.of(context).canPop()) {
-        Navigator.of(context).pop(id);
-      }
+      _closeEditor(id);
     } catch (e) {
       if (mounted) setState(() => error = safeMessage(e));
     } finally {
@@ -1210,7 +2207,18 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
   }
 
   void _openCategoriesManager() {
-    if (GoRouter.maybeOf(context) != null) {
+    if (_isDesktopActive) {
+      unawaited(
+        pushDesktopModalOrMaterialRoute<void>(
+          context,
+          maxWidth: 820,
+          maxHeight: 720,
+          child: const CategoriesPage(),
+        ),
+      );
+      return;
+    }
+    if (!_isImperativeDialogRoute && GoRouter.maybeOf(context) != null) {
       unawaited(context.push('/categories'));
     } else {
       unawaited(
@@ -1222,7 +2230,18 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
   }
 
   void _openTagsManager() {
-    if (GoRouter.maybeOf(context) != null) {
+    if (_isDesktopActive) {
+      unawaited(
+        pushDesktopModalOrMaterialRoute<void>(
+          context,
+          maxWidth: 780,
+          maxHeight: 700,
+          child: const TagsPage(),
+        ),
+      );
+      return;
+    }
+    if (!_isImperativeDialogRoute && GoRouter.maybeOf(context) != null) {
       unawaited(context.push('/tags'));
     } else {
       unawaited(
@@ -1234,7 +2253,18 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
   }
 
   void _openTemplatesManager() {
-    if (GoRouter.maybeOf(context) != null) {
+    if (_isDesktopActive) {
+      unawaited(
+        pushDesktopModalOrMaterialRoute<void>(
+          context,
+          maxWidth: 820,
+          maxHeight: 720,
+          child: const TemplatesPage(),
+        ),
+      );
+      return;
+    }
+    if (!_isImperativeDialogRoute && GoRouter.maybeOf(context) != null) {
       unawaited(context.push('/templates'));
     } else {
       unawaited(
@@ -1247,7 +2277,18 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
 
   void _openRemarksManager() {
     _unfocusOsKeyboardFields();
-    if (GoRouter.maybeOf(context) != null) {
+    if (_isDesktopActive) {
+      unawaited(
+        pushDesktopModalOrMaterialRoute<void>(
+          context,
+          maxWidth: 820,
+          maxHeight: 720,
+          child: RemarksPage(initialCategoryId: categoryId),
+        ),
+      );
+      return;
+    }
+    if (!_isImperativeDialogRoute && GoRouter.maybeOf(context) != null) {
       unawaited(
         context.push(
           categoryId == null ? '/remarks' : '/remarks?categoryId=$categoryId',
@@ -1292,13 +2333,17 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
         : null;
 
     final showRemarksToggle = remarksEnabled && type != RecordType.transfer;
-    final inRemarksMode = _panelMode == _BottomPanelMode.frequentRemarks;
+    final inRemarksMode = _isDesktopActive
+        ? _desktopRemarksExpanded
+        : (_panelMode == _BottomPanelMode.frequentRemarks);
     final remarksToggleBtn = showRemarksToggle
         ? TextFieldTapRegion(
             child: ExcludeFocus(
               child: IconButton(
                 key: const Key('editor-remarks-toggle-btn'),
-                tooltip: inRemarksMode ? '切换数字键盘' : '常用备注',
+                tooltip: inRemarksMode
+                    ? (_isDesktopActive ? '收起常用备注' : '切换数字键盘')
+                    : '常用备注',
                 visualDensity: VisualDensity.compact,
                 padding: EdgeInsets.zero,
                 constraints: const BoxConstraints.tightFor(
@@ -1328,112 +2373,242 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     return clearBtn ?? remarksToggleBtn;
   }
 
+  Future<void> _openAssetsManager() {
+    if (!_isImperativeDialogRoute && GoRouter.maybeOf(context) != null) {
+      return context.push<void>('/assets/manage');
+    }
+    if (_isDesktopActive) {
+      return pushDesktopModalOrMaterialRoute<void>(
+        context,
+        maxWidth: 860,
+        maxHeight: 740,
+        child: const AssetsPage(standaloneManagement: true),
+      );
+    }
+    return Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => const AssetsPage(standaloneManagement: true),
+      ),
+    );
+  }
+
   Future<void> _openAccountPickerSheet({
     required String title,
     required List<Asset> assets,
     required int currentId,
     required bool allowNone,
+    int defaultAccountId = noRef,
     required ValueChanged<int> onSelected,
   }) async {
     _unfocusOsKeyboardFields();
-    final chosen = await showModalBottomSheet<int>(
-      context: context,
-      showDragHandle: true,
-      isScrollControlled: true,
-      sheetAnimationStyle: AnimationStyle.noAnimation,
-      builder: (sheetCtx) {
-        final cs = Theme.of(sheetCtx).colorScheme;
-        return SafeArea(
-          child: ConstrainedBox(
-            constraints: BoxConstraints(
-              maxHeight: MediaQuery.sizeOf(sheetCtx).height * 0.65,
+    final isDesktop = _isDesktopActive;
+    var openedManager = false;
+    var didReorder = false;
+
+    Future<void> persistReorder(List<int> orderedIds) async {
+      final service = await ref.read(ledgerServiceProvider.future);
+      final seq = ++_pickerReorderSeq;
+      await service.reorderAssets(
+        commandId: ids.forPayload(['picker-reorder', orderedIds, seq]),
+        orderedAssetIds: orderedIds,
+      );
+      didReorder = true;
+    }
+
+    final int? chosen;
+    if (isDesktop) {
+      chosen = await showDialog<int>(
+        context: context,
+        builder: (dialogCtx) {
+          return Dialog(
+            key: const Key('desktop-account-picker-dialog'),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(18),
             ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                  child: Row(
-                    children: [
-                      Text(
-                        title,
-                        style: Theme.of(sheetCtx).textTheme.titleMedium,
-                      ),
-                      const Spacer(),
-                      if (GoRouter.maybeOf(context) != null)
-                        TextButton.icon(
-                          onPressed: () {
-                            Navigator.pop(sheetCtx);
-                            unawaited(context.push('/assets'));
-                          },
-                          icon: const Icon(Icons.settings_outlined, size: 16),
-                          label: const Text('管理账户'),
-                        ),
-                    ],
-                  ),
-                ),
-                Flexible(
-                  child: ListView(
-                    shrinkWrap: true,
-                    children: [
-                      if (allowNone)
-                        ListTile(
-                          leading: Container(
-                            width: 36,
-                            height: 36,
-                            decoration: BoxDecoration(
-                              color: cs.surfaceContainerHighest,
-                              shape: BoxShape.circle,
-                            ),
-                            alignment: Alignment.center,
-                            child: Icon(
-                              Icons.remove_circle_outline_rounded,
-                              size: 18,
-                              color: cs.onSurfaceVariant,
-                            ),
-                          ),
-                          title: const Text('不选账户'),
-                          trailing: currentId == noRef
-                              ? Icon(Icons.check_rounded, color: cs.primary)
-                              : null,
-                          onTap: () => Navigator.pop(sheetCtx, noRef),
-                        ),
-                      for (final a in assets)
-                        ListTile(
-                          leading: AssetIconAvatar(
-                            iconKey: a.icon,
-                            colorHex: a.color,
-                            name: a.name,
-                            assetType: a.type,
-                            subType: a.subType,
-                            size: 36,
-                            selected: currentId == a.id,
-                          ),
-                          title: Text(a.name),
-                          subtitle: Text(
-                            '${normalizeCurrency(a.currency) ?? baseCurrency} · ${formatMinor(a.balanceMinor)}',
-                            style: const TextStyle(fontSize: 12),
-                          ),
-                          trailing: currentId == a.id
-                              ? Icon(Icons.check_rounded, color: cs.primary)
-                              : null,
-                          onTap: () => Navigator.pop(sheetCtx, a.id),
-                        ),
-                    ],
-                  ),
-                ),
-              ],
+            clipBehavior: Clip.antiAlias,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 420, maxHeight: 520),
+              child: _AccountPickerBody(
+                title: title,
+                initialAssets: assets,
+                currentId: currentId,
+                allowNone: allowNone,
+                defaultAccountId: defaultAccountId,
+                isDesktop: true,
+                onSelect: (id) => Navigator.of(dialogCtx).pop(id),
+                onOpenManager: () {
+                  openedManager = true;
+                  Navigator.of(dialogCtx).pop();
+                },
+                onClose: () => Navigator.of(dialogCtx).pop(),
+                onReorderPersist: persistReorder,
+              ),
             ),
-          ),
-        );
-      },
-    );
-    if (chosen == null || !mounted) return;
-    onSelected(chosen);
+          );
+        },
+      );
+    } else {
+      chosen = await showModalBottomSheet<int>(
+        context: context,
+        showDragHandle: true,
+        isScrollControlled: true,
+        sheetAnimationStyle: AnimationStyle.noAnimation,
+        builder: (sheetCtx) {
+          return SafeArea(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.sizeOf(sheetCtx).height * 0.65,
+              ),
+              child: _AccountPickerBody(
+                title: title,
+                initialAssets: assets,
+                currentId: currentId,
+                allowNone: allowNone,
+                defaultAccountId: defaultAccountId,
+                isDesktop: false,
+                onSelect: (id) => Navigator.pop(sheetCtx, id),
+                onOpenManager: () {
+                  openedManager = true;
+                  Navigator.pop(sheetCtx);
+                },
+                onReorderPersist: persistReorder,
+              ),
+            ),
+          );
+        },
+      );
+    }
+    if (!mounted) return;
+    if (openedManager) {
+      await _openAssetsManager();
+      if (!mounted) return;
+      await _refreshAndReconcileAccountsFromDb();
+      if (!mounted) return;
+      _focusDesktopAmountIfIdle();
+      return;
+    }
+    if (didReorder) {
+      await _refreshAndReconcileAccountsFromDb();
+      if (!mounted) return;
+    }
+    if (chosen != null) {
+      onSelected(chosen);
+    }
+    _focusDesktopAmountIfIdle();
   }
 
   Future<void> _openTagPickerSheet(List<Tag> tags) async {
     _unfocusOsKeyboardFields();
+    if (_isDesktopActive) {
+      await showDialog<void>(
+        context: context,
+        builder: (dialogCtx) {
+          return Dialog(
+            key: const Key('desktop-tag-picker-dialog'),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(18),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 420, maxHeight: 500),
+              child: StatefulBuilder(
+                builder: (dialogCtx, setDialogState) {
+                  return Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 14, 16, 16),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Row(
+                          children: [
+                            Text(
+                              '选择标签',
+                              style: Theme.of(dialogCtx).textTheme.titleMedium
+                                  ?.copyWith(fontWeight: FontWeight.w600),
+                            ),
+                            const Spacer(),
+                            TextButton.icon(
+                              key: const Key('manage-tags-sheet-btn'),
+                              onPressed: () {
+                                Navigator.of(dialogCtx).pop();
+                                _openTagsManager();
+                              },
+                              icon: const Icon(Icons.sell_outlined, size: 16),
+                              label: const Text('管理标签'),
+                            ),
+                            CloseButton(
+                              onPressed: () => Navigator.of(dialogCtx).pop(),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        if (tags.isEmpty)
+                          const Padding(
+                            padding: EdgeInsets.symmetric(vertical: 20),
+                            child: Text(
+                              '暂无可用标签，可点击右上角“管理标签”新建。',
+                              textAlign: TextAlign.center,
+                            ),
+                          )
+                        else
+                          Flexible(
+                            child: SingleChildScrollView(
+                              child: Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: [
+                                  for (final t in tags)
+                                    FilterChip(
+                                      key: Key('tag-${t.name}'),
+                                      avatar:
+                                          t.color != null && t.color!.isNotEmpty
+                                          ? TagColorDot(
+                                              colorHex: t.color,
+                                              size: 8,
+                                            )
+                                          : null,
+                                      selectedColor: parseTagColor(
+                                        t.color,
+                                      )?.withValues(alpha: 0.22),
+                                      label: Text(t.name),
+                                      selected: selectedTagIds.contains(
+                                        t.tagId,
+                                      ),
+                                      onSelected: (sel) {
+                                        setState(() {
+                                          if (sel) {
+                                            selectedTagIds.add(t.tagId);
+                                          } else {
+                                            selectedTagIds.remove(t.tagId);
+                                          }
+                                        });
+                                        setDialogState(() {});
+                                      },
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        const SizedBox(height: 14),
+                        FilledButton.tonal(
+                          onPressed: () => Navigator.of(dialogCtx).pop(),
+                          child: const Text('完成'),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+          );
+        },
+      );
+      if (mounted) {
+        _focusDesktopAmountIfIdle();
+      }
+      return;
+    }
+
     await showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
@@ -1525,94 +2700,204 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     if (type == RecordType.transfer) return;
     _unfocusOsKeyboardFields();
     final ac = _currencyOf(assetId);
-    final chosen = await showModalBottomSheet<String>(
-      context: context,
-      showDragHandle: true,
-      isScrollControlled: true,
-      sheetAnimationStyle: AnimationStyle.noAnimation,
-      builder: (sheetCtx) {
-        final cs = Theme.of(sheetCtx).colorScheme;
-        return SafeArea(
-          child: ConstrainedBox(
-            constraints: BoxConstraints(
-              maxHeight: MediaQuery.sizeOf(sheetCtx).height * 0.65,
+    final String? chosen;
+    if (_isDesktopActive) {
+      chosen = await showDialog<String>(
+        context: context,
+        builder: (dialogCtx) {
+          final cs = Theme.of(dialogCtx).colorScheme;
+          return Dialog(
+            key: const Key('desktop-currency-picker-dialog'),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(18),
             ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                  child: Text(
-                    '选择记账币种',
-                    style: Theme.of(sheetCtx).textTheme.titleMedium,
+            clipBehavior: Clip.antiAlias,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 420, maxHeight: 520),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 14, 10, 10),
+                    child: Row(
+                      children: [
+                        Text(
+                          '选择记账币种',
+                          style: Theme.of(dialogCtx).textTheme.titleMedium
+                              ?.copyWith(fontWeight: FontWeight.w600),
+                        ),
+                        const Spacer(),
+                        CloseButton(
+                          onPressed: () => Navigator.of(dialogCtx).pop(),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-                Flexible(
-                  child: ListView(
-                    shrinkWrap: true,
-                    children: [
-                      ListTile(
-                        key: const Key('currency-option-follow-account'),
-                        leading: CircleAvatar(
-                          radius: 15,
-                          backgroundColor: cs.primaryContainer,
-                          child: Icon(
-                            Icons.account_balance_wallet_outlined,
-                            size: 15,
-                            color: cs.onPrimaryContainer,
-                          ),
-                        ),
-                        title: Text('跟随账户币种（当前：$ac）'),
-                        subtitle: const Text(
-                          '切换资产账户时自动同步该账户币种',
-                          style: TextStyle(fontSize: 12),
-                        ),
-                        trailing: sourceCurrency == null
-                            ? Icon(Icons.check_rounded, color: cs.primary)
-                            : null,
-                        onTap: () => Navigator.pop(
-                          sheetCtx,
-                          _followAccountCurrencySentinel,
-                        ),
+                  const Divider(height: 1),
+                  Flexible(
+                    child: ListView(
+                      shrinkWrap: true,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 6,
                       ),
-                      const Divider(height: 1, indent: 16, endIndent: 16),
-                      for (final c in currencies)
+                      children: [
                         ListTile(
-                          key: Key('currency-option-${c.code}'),
+                          key: const Key('currency-option-follow-account'),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
                           leading: CircleAvatar(
                             radius: 15,
-                            backgroundColor: cs.secondaryContainer,
-                            child: Text(
-                              c.symbol,
-                              style: TextStyle(
-                                fontSize: 13,
-                                color: cs.onSecondaryContainer,
-                                fontWeight: FontWeight.w600,
-                              ),
+                            backgroundColor: cs.primaryContainer,
+                            child: Icon(
+                              Icons.account_balance_wallet_outlined,
+                              size: 15,
+                              color: cs.onPrimaryContainer,
                             ),
                           ),
-                          title: Text('${c.code} · ${c.name}'),
-                          trailing: sourceCurrency == c.code
+                          title: Text('跟随账户币种（当前：$ac）'),
+                          subtitle: const Text(
+                            '切换资产账户时自动同步该账户币种',
+                            style: TextStyle(fontSize: 12),
+                          ),
+                          trailing: sourceCurrency == null
                               ? Icon(Icons.check_rounded, color: cs.primary)
                               : null,
-                          onTap: () => Navigator.pop(sheetCtx, c.code),
+                          onTap: () => Navigator.of(
+                            dialogCtx,
+                          ).pop(_followAccountCurrencySentinel),
                         ),
-                    ],
+                        const Divider(height: 4, indent: 12, endIndent: 12),
+                        for (final c in currencies)
+                          ListTile(
+                            key: Key('currency-option-${c.code}'),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            leading: CircleAvatar(
+                              radius: 15,
+                              backgroundColor: cs.secondaryContainer,
+                              child: Text(
+                                c.symbol,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: cs.onSecondaryContainer,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                            title: Text('${c.code} · ${c.name}'),
+                            trailing: sourceCurrency == c.code
+                                ? Icon(Icons.check_rounded, color: cs.primary)
+                                : null,
+                            onTap: () => Navigator.of(dialogCtx).pop(c.code),
+                          ),
+                      ],
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-        );
-      },
-    );
-    if (chosen == null || !mounted) return;
-    setState(() {
-      sourceCurrency = chosen == _followAccountCurrencySentinel ? null : chosen;
-      convertedEdited = false;
-      _autoConvert();
-    });
+          );
+        },
+      );
+    } else {
+      chosen = await showModalBottomSheet<String>(
+        context: context,
+        showDragHandle: true,
+        isScrollControlled: true,
+        sheetAnimationStyle: AnimationStyle.noAnimation,
+        builder: (sheetCtx) {
+          final cs = Theme.of(sheetCtx).colorScheme;
+          return SafeArea(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.sizeOf(sheetCtx).height * 0.65,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                    child: Text(
+                      '选择记账币种',
+                      style: Theme.of(sheetCtx).textTheme.titleMedium,
+                    ),
+                  ),
+                  Flexible(
+                    child: ListView(
+                      shrinkWrap: true,
+                      children: [
+                        ListTile(
+                          key: const Key('currency-option-follow-account'),
+                          leading: CircleAvatar(
+                            radius: 15,
+                            backgroundColor: cs.primaryContainer,
+                            child: Icon(
+                              Icons.account_balance_wallet_outlined,
+                              size: 15,
+                              color: cs.onPrimaryContainer,
+                            ),
+                          ),
+                          title: Text('跟随账户币种（当前：$ac）'),
+                          subtitle: const Text(
+                            '切换资产账户时自动同步该账户币种',
+                            style: TextStyle(fontSize: 12),
+                          ),
+                          trailing: sourceCurrency == null
+                              ? Icon(Icons.check_rounded, color: cs.primary)
+                              : null,
+                          onTap: () => Navigator.pop(
+                            sheetCtx,
+                            _followAccountCurrencySentinel,
+                          ),
+                        ),
+                        const Divider(height: 1, indent: 16, endIndent: 16),
+                        for (final c in currencies)
+                          ListTile(
+                            key: Key('currency-option-${c.code}'),
+                            leading: CircleAvatar(
+                              radius: 15,
+                              backgroundColor: cs.secondaryContainer,
+                              child: Text(
+                                c.symbol,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: cs.onSecondaryContainer,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                            title: Text('${c.code} · ${c.name}'),
+                            trailing: sourceCurrency == c.code
+                                ? Icon(Icons.check_rounded, color: cs.primary)
+                                : null,
+                            onTap: () => Navigator.pop(sheetCtx, c.code),
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      );
+    }
+    if (!mounted) return;
+    if (chosen != null) {
+      setState(() {
+        sourceCurrency = chosen == _followAccountCurrencySentinel
+            ? null
+            : chosen;
+        convertedEdited = false;
+        _autoConvert();
+      });
+    }
+    _focusDesktopAmountIfIdle();
   }
 
   @override
@@ -1627,11 +2912,25 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
               (bookId == _initialCategoriesBookId
                   ? _initialCategories
                   : const <RecordCategory>[]));
-    final assets = (ref.watch(assetsProvider).value ?? const <Asset>[])
-        .where(
-          (a) => a.status != AssetStatus.settled && a.type != AssetType.debt,
-        )
-        .toList();
+    final rawAssets = ref.watch(assetsProvider).value ?? _initialAssets;
+    final rawAssetBooks =
+        ref.watch(assetBooksProvider).value ?? _initialAssetBooks;
+    final assetBookBindings = _buildAssetBookBindings(rawAssetBooks);
+    final preservedEditAssetIds = <int>{
+      if (editing && original != null) ...[
+        if (original!.assetId != noRef) original!.assetId,
+        if (original!.fromAssetId != noRef) original!.fromAssetId,
+        if (original!.toAssetId != noRef) original!.toAssetId,
+      ],
+    };
+    final assets = rawAssets.where((a) {
+      if (preservedEditAssetIds.contains(a.id)) {
+        return a.type != AssetType.debt;
+      }
+      return a.status == AssetStatus.active &&
+          a.type != AssetType.debt &&
+          _isAssetVisibleInBook(a.id, bookId, assetBookBindings);
+    }).toList();
     final tags = (ref.watch(activeTagsProvider).value ?? const <Tag>[])
         .where((t) => t.parent != 1)
         .toList();
@@ -1649,6 +2948,127 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     final diyConfig =
         ref.watch(diyToolbarConfigProvider).value ??
         DiyToolbarConfig.defaults();
+    final effectiveDefaultAccountId = editing
+        ? noRef
+        : _computeEffectiveDefaultAccountId(
+            config: diyConfig,
+            bookId: bookId,
+            assets: rawAssets,
+            assetBookBindings: assetBookBindings,
+          );
+
+    void reconcileCreateModeAccountsFromLiveCatalog({
+      required List<Asset> latestAssets,
+      required List<AssetBook> latestAssetBooks,
+      int? latestBookId,
+      DiyToolbarConfig? prevConfig,
+      DiyToolbarConfig? latestConfig,
+    }) {
+      if (loading || editing) return;
+      final currentBookId =
+          latestBookId ??
+          original?.accountBookId ??
+          ref.read(currentBookIdProvider).value ??
+          _resolvedBookId;
+      final latestBindings = _buildAssetBookBindings(latestAssetBooks);
+      final currentCfg =
+          latestConfig ??
+          ref.read(diyToolbarConfigProvider).value ??
+          DiyToolbarConfig.defaults();
+      final prevEffective = prevConfig == null
+          ? null
+          : _computeEffectiveDefaultAccountId(
+              config: prevConfig,
+              bookId: currentBookId,
+              assets: latestAssets,
+              assetBookBindings: latestBindings,
+            );
+      _initialAssets = latestAssets;
+      _initialAssetBooks = latestAssetBooks;
+      final reconciled = _computeReconciledCreateModeAccounts(
+        bookId: currentBookId,
+        latestAssets: latestAssets,
+        latestBindings: latestBindings,
+        latestConfig: currentCfg,
+        previousEffectiveDefaultId: prevEffective,
+      );
+      if (reconciled.changed) {
+        setState(() {
+          assetId = reconciled.assetId;
+          fromAssetId = reconciled.fromAssetId;
+          toAssetId = reconciled.toAssetId;
+          convertedEdited = false;
+          _autoConvert();
+        });
+      }
+    }
+
+    ref.listen<AsyncValue<List<Asset>>>(assetsProvider, (_, next) {
+      if (!next.hasValue) return;
+      reconcileCreateModeAccountsFromLiveCatalog(
+        latestAssets: next.value!,
+        latestAssetBooks:
+            ref.read(assetBooksProvider).value ?? _initialAssetBooks,
+      );
+    });
+
+    ref.listen<AsyncValue<List<AssetBook>>>(assetBooksProvider, (_, next) {
+      if (!next.hasValue) return;
+      reconcileCreateModeAccountsFromLiveCatalog(
+        latestAssets: ref.read(assetsProvider).value ?? _initialAssets,
+        latestAssetBooks: next.value!,
+      );
+    });
+
+    ref.listen<AsyncValue<int>>(currentBookIdProvider, (_, next) {
+      if (!next.hasValue) return;
+      _resolvedBookId = next.value;
+      reconcileCreateModeAccountsFromLiveCatalog(
+        latestAssets: ref.read(assetsProvider).value ?? _initialAssets,
+        latestAssetBooks:
+            ref.read(assetBooksProvider).value ?? _initialAssetBooks,
+        latestBookId: next.value,
+      );
+    });
+
+    ref.listen<AsyncValue<AppSettings>>(appSettingsProvider, (prev, next) {
+      if (editing ||
+          widget.initialType != null ||
+          widget.initialTemplateId != null ||
+          widget.initialCategory != null ||
+          _userTouchedType ||
+          _userTouchedCategory ||
+          amount.text.isNotEmpty ||
+          remark.text.isNotEmpty) {
+        return;
+      }
+      if (prev?.hasValue == true || !next.hasValue) return;
+      final nextDefaultType = next.value!.defaultRecordType;
+      if (!allowedDefaultRecordTypes.contains(nextDefaultType) ||
+          nextDefaultType == type) {
+        return;
+      }
+      if (!loading) {
+        _switchRecordTypeTo(
+          nextDefaultType,
+          categories: categories,
+          diyConfig: diyConfig,
+          effectiveDefaultAccountId: effectiveDefaultAccountId,
+          markUserTouchedType: false,
+        );
+      } else {
+        setState(() {
+          type = nextDefaultType;
+          if (type == RecordType.transfer &&
+              fromAssetId == noRef &&
+              widget.initialFrom == null &&
+              widget.initialAsset != null) {
+            fromAssetId = widget.initialAsset!;
+            assetId = noRef;
+          }
+        });
+      }
+    });
 
     ref.listen<AsyncValue<DiyToolbarConfig>>(diyToolbarConfigProvider, (
       prev,
@@ -1690,116 +3110,211 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
           });
         }
       }
+      if (!loading && !editing && next.hasValue) {
+        reconcileCreateModeAccountsFromLiveCatalog(
+          latestAssets: ref.read(assetsProvider).value ?? _initialAssets,
+          latestAssetBooks:
+              ref.read(assetBooksProvider).value ?? _initialAssetBooks,
+          prevConfig: prev?.value,
+          latestConfig: next.value!,
+        );
+      }
     });
 
+    if (!loading && !editing) {
+      final hasStaleHeldAsset =
+          (assetId != noRef && !assets.any((a) => a.id == assetId)) ||
+          (fromAssetId != noRef && !assets.any((a) => a.id == fromAssetId)) ||
+          (toAssetId != noRef && !assets.any((a) => a.id == toAssetId));
+      if (hasStaleHeldAsset) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted || loading || editing) return;
+          reconcileCreateModeAccountsFromLiveCatalog(
+            latestAssets: ref.read(assetsProvider).value ?? _initialAssets,
+            latestAssetBooks:
+                ref.read(assetBooksProvider).value ?? _initialAssetBooks,
+          );
+        });
+      }
+    }
+
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    final embeddedInDialog = _isEmbeddedInDesktopDialog;
     final canSubmit = !busy && !loading && (!editing || original != null);
     final canPopRoute =
+        embeddedInDialog ||
         (GoRouter.maybeOf(context)?.canPop() ?? false) ||
         Navigator.of(context).canPop();
 
+    if (isDesktop && !loading) {
+      _ensureInitialDesktopFocusScheduled();
+    }
+
+    Widget buildEditorContent() {
+      final column = Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Zone 1: Compact Type Bar (primary tabs + secondary pills)
+          _buildTypeSwitcherBar(
+            context,
+            categories: categories,
+            diyConfig: diyConfig,
+            effectiveDefaultAccountId: effectiveDefaultAccountId,
+          ),
+          // Zone 2 + Zone 3: Scrollable middle zone + unified bottom dock & slot
+          Expanded(
+            child: LayoutBuilder(
+              builder: (context, areaConstraints) {
+                return _buildMiddleAndBottomZones(
+                  context,
+                  areaConstraints: areaConstraints,
+                  bookId: bookId,
+                  categories: categories,
+                  assets: assets,
+                  tags: tags,
+                  currencies: currencies,
+                  diyConfig: diyConfig,
+                  effectiveDefaultAccountId: effectiveDefaultAccountId,
+                  canSubmit: canSubmit,
+                );
+              },
+            ),
+          ),
+        ],
+      );
+      if (isDesktop && embeddedInDialog) {
+        return column;
+      }
+      return Center(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: isDesktop ? 620 : 680),
+          child: column,
+        ),
+      );
+    }
+
+    final scaffold = Scaffold(
+      resizeToAvoidBottomInset: false,
+      appBar: AppBar(
+        toolbarHeight: 48,
+        leading: canPopRoute
+            ? (isDesktop && embeddedInDialog
+                  ? CloseButton(
+                      key: const Key('desktop-editor-close-btn'),
+                      onPressed: busy ? null : _closeEditor,
+                    )
+                  : BackButton(onPressed: busy ? null : _closeEditor))
+            : null,
+        title: Text(editing ? '编辑账单' : '记一笔'),
+        actions: [
+          if (!editing && diyConfig.isEnabled(DiyToolbarAction.templates))
+            IconButton(
+              key: const Key('editor-templates-btn'),
+              tooltip: '账单模板',
+              icon: const Icon(Icons.bookmarks_outlined, size: 21),
+              onPressed: busy ? null : _openTemplatesManager,
+            ),
+          IconButton(
+            key: const Key('editor-diy-toolbar-btn'),
+            tooltip: '记账工具栏自定义',
+            icon: const Icon(Icons.tune, size: 21),
+            onPressed: busy
+                ? null
+                : () {
+                    if (_isDesktopActive) {
+                      unawaited(
+                        pushDesktopModalOrMaterialRoute<void>(
+                          context,
+                          maxWidth: 760,
+                          maxHeight: 700,
+                          child: const DiyToolbarSettingsPage(),
+                        ),
+                      );
+                    } else if (!_isImperativeDialogRoute &&
+                        GoRouter.maybeOf(context) != null) {
+                      unawaited(context.push('/settings/diy-toolbar'));
+                    } else {
+                      unawaited(
+                        Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => const DiyToolbarSettingsPage(),
+                          ),
+                        ),
+                      );
+                    }
+                  },
+          ),
+          IconButton(
+            key: const Key('editor-quick-save-btn'),
+            tooltip: '保存',
+            icon: const Icon(Icons.check_rounded, size: 22),
+            onPressed: canSubmit
+                ? () => unawaited(_save(stayAndReset: false))
+                : null,
+          ),
+        ],
+      ),
+      body: loading ? const Loading() : buildEditorContent(),
+    );
+
     return PopScope(
-      canPop: !busy && _panelMode == _BottomPanelMode.customKeypad,
+      canPop:
+          !busy && (isDesktop || _panelMode == _BottomPanelMode.customKeypad),
       onPopInvokedWithResult: (didPop, _) {
-        if (!didPop && !busy) {
+        if (!didPop && !busy && !isDesktop) {
           _activateCustomKeypad();
         }
       },
-      child: Scaffold(
-        resizeToAvoidBottomInset: false,
-        appBar: AppBar(
-          toolbarHeight: 48,
-          leading: canPopRoute
-              ? BackButton(
-                  onPressed: busy
-                      ? null
-                      : () {
-                          _unfocusOsKeyboardFields();
-                          final router = GoRouter.maybeOf(context);
-                          if (router != null && context.canPop()) {
-                            context.pop();
-                          } else if (Navigator.of(context).canPop()) {
-                            Navigator.of(context).pop();
-                          }
-                        },
-                )
-              : null,
-          title: Text(editing ? '编辑账单' : '记一笔'),
-          actions: [
-            if (!editing && diyConfig.isEnabled(DiyToolbarAction.templates))
-              IconButton(
-                key: const Key('editor-templates-btn'),
-                tooltip: '账单模板',
-                icon: const Icon(Icons.bookmarks_outlined, size: 21),
-                onPressed: busy ? null : _openTemplatesManager,
-              ),
-            IconButton(
-              key: const Key('editor-diy-toolbar-btn'),
-              tooltip: '记账工具栏自定义',
-              icon: const Icon(Icons.tune, size: 21),
-              onPressed: busy
-                  ? null
-                  : () {
-                      if (GoRouter.maybeOf(context) != null) {
-                        unawaited(context.push('/settings/diy-toolbar'));
-                      } else {
-                        unawaited(
-                          Navigator.of(context).push(
-                            MaterialPageRoute<void>(
-                              builder: (_) => const DiyToolbarSettingsPage(),
-                            ),
-                          ),
-                        );
-                      }
-                    },
-            ),
-            IconButton(
-              key: const Key('editor-quick-save-btn'),
-              tooltip: '保存',
-              icon: const Icon(Icons.check_rounded, size: 22),
-              onPressed: canSubmit
-                  ? () => unawaited(_save(stayAndReset: false))
-                  : null,
-            ),
-          ],
-        ),
-        body: loading
-            ? const Loading()
-            : Center(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 680),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      // Zone 1: Compact Type Bar (primary tabs + secondary pills)
-                      _buildTypeSwitcherBar(
-                        context,
-                        categories: categories,
-                        diyConfig: diyConfig,
-                      ),
-                      // Zone 2 + Zone 3: Scrollable middle zone + unified bottom dock & slot
-                      Expanded(
-                        child: LayoutBuilder(
-                          builder: (context, areaConstraints) {
-                            return _buildMiddleAndBottomZones(
-                              context,
-                              areaConstraints: areaConstraints,
-                              bookId: bookId,
-                              categories: categories,
-                              assets: assets,
-                              tags: tags,
-                              currencies: currencies,
-                              diyConfig: diyConfig,
-                              canSubmit: canSubmit,
-                            );
-                          },
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-      ),
+      child: isDesktop
+          ? Focus(focusNode: _desktopScopeFocus, child: scaffold)
+          : scaffold,
     );
+  }
+
+  int _countVisibleToolbarPills(
+    DiyToolbarConfig diyConfig,
+    List<Currency> currencies,
+  ) {
+    var count = 1 + (type != RecordType.transfer ? 1 : 0);
+    for (final item in diyConfig.items) {
+      switch (item.action) {
+        case DiyToolbarAction.tags:
+          if (item.enabled || selectedTagIds.isNotEmpty) count++;
+        case DiyToolbarAction.discount:
+          if ((type == RecordType.expense || type == RecordType.income) &&
+              (item.enabled || discount.text.trim().isNotEmpty)) {
+            count++;
+          }
+        case DiyToolbarAction.images:
+          if (item.enabled || imageNames.isNotEmpty) count++;
+        case DiyToolbarAction.location:
+          if (item.enabled || (location != null && !location!.isEmpty)) {
+            count++;
+          }
+        case DiyToolbarAction.currency:
+          if (type != RecordType.transfer) {
+            final (sc, acctCurr) = _currencies();
+            if ((item.enabled && currencies.length > 1) ||
+                (sourceCurrency != null && sc != acctCurr)) {
+              count++;
+            }
+          }
+        case DiyToolbarAction.excludeExIn:
+          if (type != RecordType.transfer && (item.enabled || excludeExIn)) {
+            count++;
+          }
+        case DiyToolbarAction.excludeBudget:
+          if (type != RecordType.transfer && (item.enabled || excludeBudget)) {
+            count++;
+          }
+        case DiyToolbarAction.templates:
+        case DiyToolbarAction.frequentRemarks:
+        case DiyToolbarAction.keypadMultiplyDivide:
+        case DiyToolbarAction.autoSelectFirstCategory:
+          break;
+      }
+    }
+    return count;
   }
 
   Widget _buildMiddleAndBottomZones(
@@ -1811,20 +3326,235 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     required List<Tag> tags,
     required List<Currency> currencies,
     required DiyToolbarConfig diyConfig,
+    required int effectiveDefaultAccountId,
     required bool canSubmit,
   }) {
+    final isDesktop = DesktopAdaptive.isDesktop(context);
     final cs = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final mediaQuery = MediaQuery.of(context);
+    final trayColor = isDark
+        ? cs.surfaceContainerLowest
+        : cs.surfaceContainerLow;
+
+    if (isDesktop) {
+      final rawTextScale = MediaQuery.textScalerOf(context).scale(1.0);
+      final textScale = rawTextScale.clamp(1.0, 2.0);
+      final scaleDelta = textScale - 1.0;
+      final compactViewport = areaConstraints.maxHeight < 580.0;
+      final minMiddleZoneHeight = areaConstraints.maxHeight < 260.0
+          ? (areaConstraints.maxHeight * 0.45).clamp(0.0, 120.0)
+          : (compactViewport
+                ? (scaleDelta > 0.05 ? 124.0 : 132.0)
+                : math.min(
+                    186.0,
+                    math.max(146.0, areaConstraints.maxHeight * 0.26),
+                  ));
+      final maxDockHeight = math.max(
+        0.0,
+        areaConstraints.maxHeight - minMiddleZoneHeight,
+      );
+
+      final (sc, ac) = _currencies();
+      final showBudgetHint =
+          bookId != null &&
+          categoryId != null &&
+          !excludeBudget &&
+          (type == RecordType.expense ||
+              type == RecordType.income ||
+              type == RecordType.reimbursable);
+      final showAttachments =
+          (_attachmentsExpanded || imageNames.isNotEmpty) &&
+          (diyConfig.isEnabled(DiyToolbarAction.images) ||
+              imageNames.isNotEmpty);
+      final pillCount = _countVisibleToolbarPills(diyConfig, currencies);
+      final innerWidth = math.max(200.0, areaConstraints.maxWidth - 24.0);
+      final avgPillWidth = 78.0 * textScale;
+      final pillRows = pillCount <= 1
+          ? 1
+          : ((pillCount * avgPillWidth) / innerWidth).ceil().clamp(1, 4);
+      final singlePillHeight = scaleDelta > 0.02
+          ? math.max(24.0, (7.0 + 17.5 * textScale).ceilToDouble())
+          : 24.0;
+      final minPillToolbarVisibleHeight = math.max(
+        30.0,
+        singlePillHeight + 6.0,
+      );
+
+      final summaryAmountReserve =
+          43.0 +
+          28.0 * scaleDelta +
+          (hasPendingOperator(amount.text) ? 15.0 * textScale + 2.0 : 0.0) +
+          (sc != ac ? 17.0 * textScale + 2.0 : 0.0);
+      final budgetBannerReserve = showBudgetHint
+          ? (12.0 + 18.0 * textScale)
+          : 0.0;
+      final savedBannerReserve = (_savedAndResetBanner && error == null)
+          ? (26.0 + 16.0 * scaleDelta)
+          : 0.0;
+      double errorBannerReserve = 0.0;
+      if (error != null) {
+        final errorAvailW = math.max(120.0, areaConstraints.maxWidth - 68.0);
+        final estErrorW = error!.runes.length * 12.5 * textScale;
+        final isTwoLineError =
+            error!.contains('\n') || estErrorW > errorAvailW * 0.80;
+        errorBannerReserve = isTwoLineError
+            ? (14.0 + 36.0 * textScale)
+            : (12.0 + 18.0 * textScale);
+      }
+      final remarkRowReserve =
+          (scaleDelta > 0.02
+              ? (20.0 + 18.0 * textScale).ceilToDouble()
+              : 38.0) +
+          6.0;
+
+      final showRemarksActionBtn =
+          diyConfig.isEnabled(DiyToolbarAction.frequentRemarks) &&
+          type != RecordType.transfer;
+      final compactActionBar = areaConstraints.maxWidth < 550.0 * textScale;
+      final estLeftActionW =
+          (41.0 + 39.0 * textScale) +
+          (showRemarksActionBtn ? (47.0 + 52.0 * textScale) : 0.0);
+      final estRightActionW = compactActionBar
+          ? (60.0 + 70.0 * textScale)
+          : (60.0 + 220.0 * textScale);
+      final actionBarInnerW = math.max(120.0, areaConstraints.maxWidth - 24.0);
+      final actionBarWraps =
+          (estLeftActionW + 8.0 + estRightActionW) > actionBarInnerW * 0.94;
+      final singleActionRowH = scaleDelta > 0.02
+          ? math.max(34.0, (14.0 + 19.0 * textScale).ceilToDouble())
+          : 34.0;
+      final actionBarReserve = actionBarWraps
+          ? (15.0 + singleActionRowH * 2.0 + 6.0)
+          : (15.0 + singleActionRowH);
+
+      final pinnedDockReserve =
+          summaryAmountReserve +
+          budgetBannerReserve +
+          savedBannerReserve +
+          errorBannerReserve +
+          remarkRowReserve +
+          actionBarReserve +
+          (scaleDelta > 0.02 ? 4.0 * scaleDelta : 0.0);
+      final pillAndAttachmentReserve =
+          (pillRows * singlePillHeight + (pillRows - 1) * 4.0 + 6.0) +
+          (showAttachments ? 72.0 : 0.0);
+      final idealAvailableForPanel = math.max(
+        0.0,
+        maxDockHeight - pinnedDockReserve - pillAndAttachmentReserve,
+      );
+      final hardMaxPanelHeight = math.max(
+        0.0,
+        maxDockHeight - pinnedDockReserve - minPillToolbarVisibleHeight,
+      );
+
+      double? desktopKeypadKeyHeight;
+      double desktopPanelSlotHeight = 0.0;
+      if (_desktopKeypadExpanded) {
+        final maxKeyH = compactViewport
+            ? 40.0
+            : RecordCustomKeypad.desktopDefaultKeyRowHeight;
+        final minStandardPanelH =
+            RecordCustomKeypad.desktopPanelHeightForKeyHeight(
+              RecordCustomKeypad.desktopMinKeyRowHeight,
+            );
+        if (idealAvailableForPanel >= minStandardPanelH) {
+          desktopKeypadKeyHeight = RecordCustomKeypad.resolveDesktopKeyHeight(
+            idealAvailableForPanel,
+            maxKeyHeight: maxKeyH,
+            minKeyHeight: RecordCustomKeypad.desktopMinKeyRowHeight,
+          );
+        } else {
+          final targetPanelAvail = idealAvailableForPanel > 0
+              ? idealAvailableForPanel
+              : hardMaxPanelHeight;
+          final safeMinKeyH = math.min(
+            30.0,
+            math.max(22.0, (hardMaxPanelHeight - 25.0) / 4.0),
+          );
+          desktopKeypadKeyHeight = RecordCustomKeypad.resolveDesktopKeyHeight(
+            targetPanelAvail,
+            maxKeyHeight: maxKeyH,
+            minKeyHeight: safeMinKeyH,
+          );
+        }
+        desktopPanelSlotHeight = math.min(
+          RecordCustomKeypad.desktopPanelHeightForKeyHeight(
+            desktopKeypadKeyHeight,
+          ),
+          hardMaxPanelHeight,
+        );
+      } else if (_desktopRemarksExpanded && type != RecordType.transfer) {
+        desktopPanelSlotHeight = math.min(
+          compactViewport ? 156.0 : 184.0,
+          hardMaxPanelHeight,
+        );
+      }
+
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(
+            child: _buildScrollableMiddleZone(
+              context,
+              bookId: bookId,
+              categories: categories,
+              assets: assets,
+              diyConfig: diyConfig,
+              effectiveDefaultAccountId: effectiveDefaultAccountId,
+            ),
+          ),
+          ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: maxDockHeight),
+            child: _buildBottomDock(
+              context,
+              bookId: bookId,
+              categories: categories,
+              assets: assets,
+              tags: tags,
+              currencies: currencies,
+              diyConfig: diyConfig,
+              canSubmit: canSubmit,
+              panelSlotHeight: desktopPanelSlotHeight,
+              desktopKeypadKeyHeight: desktopKeypadKeyHeight,
+              bottomSafePadding: 0.0,
+            ),
+          ),
+        ],
+      );
+    }
+
     final imeHeight = mediaQuery.viewInsets.bottom;
     final basePanelHeight =
         RecordCustomKeypad.panelHeight + mediaQuery.padding.bottom;
     final rawTargetSlotHeight = math.max(basePanelHeight, imeHeight);
 
-    const minDockHeaderReserve = 112.0;
+    final double minMiddleHeight;
+    if (areaConstraints.maxHeight >= 240.0) {
+      final baseMinMiddle = (areaConstraints.maxHeight * 0.22).clamp(
+        84.0,
+        132.0,
+      );
+      minMiddleHeight = imeHeight > 0
+          ? math.min(
+              baseMinMiddle,
+              math.max(84.0, areaConstraints.maxHeight - imeHeight - 112.0),
+            )
+          : baseMinMiddle;
+    } else {
+      minMiddleHeight = math
+          .max(48.0, areaConstraints.maxHeight * 0.30)
+          .clamp(0.0, areaConstraints.maxHeight * 0.45);
+    }
+    final maxBottomHeight = math.max(
+      0.0,
+      areaConstraints.maxHeight - minMiddleHeight,
+    );
+
+    final minDockHeaderReserve = math.min(112.0, maxBottomHeight * 0.48);
     final maxAllowedSlotHeight = math.max(
       0.0,
-      areaConstraints.maxHeight - minDockHeaderReserve,
+      maxBottomHeight - minDockHeaderReserve,
     );
     final targetSlotHeight = math.min(
       rawTargetSlotHeight,
@@ -1832,9 +3562,6 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     );
     final panelSlotHeight = math.min(basePanelHeight, targetSlotHeight);
     final extraImeSpacer = math.max(0.0, targetSlotHeight - panelSlotHeight);
-    final trayColor = isDark
-        ? cs.surfaceContainerLowest
-        : cs.surfaceContainerLow;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1846,10 +3573,11 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
             categories: categories,
             assets: assets,
             diyConfig: diyConfig,
+            effectiveDefaultAccountId: effectiveDefaultAccountId,
           ),
         ),
         ConstrainedBox(
-          constraints: BoxConstraints(maxHeight: areaConstraints.maxHeight),
+          constraints: BoxConstraints(maxHeight: maxBottomHeight),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1884,11 +3612,132 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     );
   }
 
+  void _switchRecordTypeTo(
+    int nextType, {
+    required List<RecordCategory> categories,
+    required DiyToolbarConfig diyConfig,
+    required int effectiveDefaultAccountId,
+    bool markUserTouchedType = true,
+  }) {
+    if (busy || editing || type == nextType) return;
+    if (_feeFocus.hasFocus && nextType != RecordType.transfer) {
+      _feeFocus.unfocus();
+    }
+    setState(() {
+      type = nextType;
+      if (markUserTouchedType) {
+        _userTouchedType = true;
+      }
+      _userTouchedCategory = false;
+      if (nextType != RecordType.expense && nextType != RecordType.income) {
+        discount.clear();
+      }
+      if (nextType == RecordType.transfer) {
+        categoryId = null;
+        parentCatId = null;
+        sourceCurrency = null;
+        convertedEdited = false;
+        _desktopRemarksExpanded = false;
+        if (_panelMode == _BottomPanelMode.frequentRemarks) {
+          _panelMode = _BottomPanelMode.customKeypad;
+        }
+        if (!_userTouchedAsset && fromAssetId == noRef) {
+          fromAssetId =
+              (effectiveDefaultAccountId != noRef &&
+                  effectiveDefaultAccountId != toAssetId)
+              ? effectiveDefaultAccountId
+              : noRef;
+        }
+      } else {
+        if (diyConfig.isEnabled(DiyToolbarAction.autoSelectFirstCategory)) {
+          final first = _firstTopCategoryForType(nextType, categories);
+          categoryId = first?.id;
+          parentCatId = first?.id;
+        } else {
+          categoryId = null;
+          parentCatId = null;
+        }
+        if (!_userTouchedAsset && assetId == noRef) {
+          assetId = effectiveDefaultAccountId;
+        }
+      }
+      _remarksShowAllScope = false;
+      _autoConvert();
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final chipFinder = Key('type-$nextType');
+      Element? targetElement;
+      void visit(Element el) {
+        if (targetElement != null) return;
+        if (el.widget.key == chipFinder) {
+          targetElement = el;
+          return;
+        }
+        el.visitChildren(visit);
+      }
+
+      context.visitChildElements(visit);
+      if (targetElement != null) {
+        unawaited(
+          Scrollable.ensureVisible(
+            targetElement!,
+            alignment: 0.5,
+            duration: const Duration(milliseconds: 160),
+            curve: Curves.easeOutCubic,
+          ),
+        );
+      }
+    });
+    _focusDesktopAmountIfIdle();
+  }
+
+  void _stepRecordTypeBySwipe(
+    int delta, {
+    required List<RecordCategory> categories,
+    required DiyToolbarConfig diyConfig,
+    required int effectiveDefaultAccountId,
+  }) {
+    if (busy || editing || loading) return;
+    final currentIdx = _creatableRecordTypes.indexOf(type);
+    if (currentIdx < 0) return;
+    final targetIdx = (currentIdx + delta).clamp(
+      0,
+      _creatableRecordTypes.length - 1,
+    );
+    if (targetIdx == currentIdx) return;
+    _switchRecordTypeTo(
+      _creatableRecordTypes[targetIdx],
+      categories: categories,
+      diyConfig: diyConfig,
+      effectiveDefaultAccountId: effectiveDefaultAccountId,
+    );
+  }
+
+  Widget _buildHorizontalSwipeShield({required Widget child}) {
+    return Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: (event) {
+        _lastBlockedMiddlePointer = event.pointer;
+        _middleSwipeBlockedByChild = true;
+      },
+      child: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onHorizontalDragStart: (_) {},
+        onHorizontalDragUpdate: (_) {},
+        onHorizontalDragEnd: (_) {},
+        child: child,
+      ),
+    );
+  }
+
   Widget _buildTypeSwitcherBar(
     BuildContext context, {
     required List<RecordCategory> categories,
     required DiyToolbarConfig diyConfig,
+    required int effectiveDefaultAccountId,
   }) {
+    final isDesktop = DesktopAdaptive.isDesktop(context);
     final cs = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final unselectedBg = isDark
@@ -1900,17 +3749,21 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
       return ChoiceChip(
         key: Key('type-$value'),
         showCheckmark: false,
-        visualDensity: primary
-            ? const VisualDensity(horizontal: -1, vertical: -2)
-            : const VisualDensity(horizontal: -2, vertical: -3),
+        visualDensity: isDesktop
+            ? VisualDensity.compact
+            : (primary
+                  ? const VisualDensity(horizontal: -1, vertical: -2)
+                  : const VisualDensity(horizontal: -2, vertical: -3)),
         materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-        padding: EdgeInsets.symmetric(horizontal: primary ? 8 : 5, vertical: 0),
+        padding: isDesktop
+            ? const EdgeInsets.symmetric(horizontal: 10, vertical: 4)
+            : EdgeInsets.symmetric(horizontal: primary ? 8 : 5, vertical: 0),
         shape: const StadiumBorder(),
         side: BorderSide.none,
         selectedColor: primary ? cs.primary : cs.secondaryContainer,
         backgroundColor: unselectedBg,
         labelStyle: TextStyle(
-          fontSize: primary ? 13 : 11.5,
+          fontSize: isDesktop ? 13 : (primary ? 13 : 11.5),
           fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
           color: selected
               ? (primary ? cs.onPrimary : cs.onSecondaryContainer)
@@ -1920,33 +3773,12 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
         selected: selected,
         onSelected: busy || editing
             ? null
-            : (_) {
-                if (type == value) return;
-                setState(() {
-                  type = value;
-                  _userTouchedCategory = false;
-                  if (value == RecordType.transfer) {
-                    categoryId = null;
-                    parentCatId = null;
-                    sourceCurrency = null;
-                    convertedEdited = false;
-                    if (_panelMode == _BottomPanelMode.frequentRemarks) {
-                      _panelMode = _BottomPanelMode.customKeypad;
-                    }
-                  } else if (diyConfig.isEnabled(
-                    DiyToolbarAction.autoSelectFirstCategory,
-                  )) {
-                    final first = _firstTopCategoryForType(value, categories);
-                    categoryId = first?.id;
-                    parentCatId = first?.id;
-                  } else {
-                    categoryId = null;
-                    parentCatId = null;
-                  }
-                  _remarksShowAllScope = false;
-                  _autoConvert();
-                });
-              },
+            : (_) => _switchRecordTypeTo(
+                value,
+                categories: categories,
+                diyConfig: diyConfig,
+                effectiveDefaultAccountId: effectiveDefaultAccountId,
+              ),
       );
     }
 
@@ -1978,6 +3810,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     required List<RecordCategory> categories,
     required List<Asset> assets,
     required DiyToolbarConfig diyConfig,
+    required int effectiveDefaultAccountId,
   }) {
     if (categoryId != null && parentCatId == null) {
       final chosen = categories.where((c) => c.id == categoryId).firstOrNull;
@@ -2008,7 +3841,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
               .where((c) => c.parentCatId == parentCatId && !c.isHide)
               .toList();
 
-    return CustomScrollView(
+    final scrollView = CustomScrollView(
       key: const Key('editor-zone2-scroll'),
       slivers: [
         if (!editing &&
@@ -2017,25 +3850,18 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
           SliverPadding(
             padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
             sliver: SliverToBoxAdapter(
-              child: TemplateQuickBar(
-                bookId: bookId,
-                recordType: type,
-                enabled: !busy,
-                recordTimeMs: time.millisecondsSinceEpoch,
-                onPrefill: _applyTemplatePrefill,
-                onInstantSaved: (savedId) {
-                  if (!mounted) return;
-                  final router = GoRouter.maybeOf(context);
-                  if (router != null) {
-                    if (context.canPop()) {
-                      context.pop(savedId);
-                    } else {
-                      context.go('/');
-                    }
-                  } else if (Navigator.of(context).canPop()) {
-                    Navigator.of(context).pop(savedId);
-                  }
-                },
+              child: _buildHorizontalSwipeShield(
+                child: TemplateQuickBar(
+                  bookId: bookId,
+                  recordType: type,
+                  enabled: !busy,
+                  recordTimeMs: time.millisecondsSinceEpoch,
+                  onPrefill: _applyTemplatePrefill,
+                  onInstantSaved: (savedId) {
+                    if (!mounted) return;
+                    _closeEditor(savedId);
+                  },
+                ),
               ),
             ),
           ),
@@ -2043,7 +3869,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
           SliverPadding(
             padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
             sliver: SliverToBoxAdapter(
-              child: _buildTransferCard(context, assets),
+              child: _buildTransferCard(context, assets, diyConfig: diyConfig),
             ),
           )
         else ...[
@@ -2051,16 +3877,21 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
             SliverPadding(
               padding: const EdgeInsets.symmetric(horizontal: 12),
               sliver: SliverToBoxAdapter(
-                child: RecordSubcategoryStrip(
-                  parentCategory: selectedParent,
-                  subCategories: subCats,
-                  selectedCategoryId: categoryId,
-                  enabled: !busy,
-                  onSelectCategoryId: (id) => setState(() {
-                    _userTouchedCategory = true;
-                    categoryId = id;
-                    _remarksShowAllScope = false;
-                  }),
+                child: _buildHorizontalSwipeShield(
+                  child: RecordSubcategoryStrip(
+                    parentCategory: selectedParent,
+                    subCategories: subCats,
+                    selectedCategoryId: categoryId,
+                    enabled: !busy,
+                    onSelectCategoryId: (id) {
+                      setState(() {
+                        _userTouchedCategory = true;
+                        categoryId = id;
+                        _remarksShowAllScope = false;
+                      });
+                      _focusDesktopAmountIfIdle();
+                    },
+                  ),
                 ),
               ),
             ),
@@ -2070,24 +3901,168 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
               categories: topCats,
               selectedParentId: parentCatId,
               enabled: !busy,
-              onSelectCategory: (cat) => setState(() {
-                _userTouchedCategory = true;
-                parentCatId = cat.id;
-                categoryId = cat.id;
-                _remarksShowAllScope = false;
-              }),
+              onSelectCategory: (cat) {
+                setState(() {
+                  _userTouchedCategory = true;
+                  parentCatId = cat.id;
+                  categoryId = cat.id;
+                  _remarksShowAllScope = false;
+                });
+                _focusDesktopAmountIfIdle();
+              },
               onManageCategories: _openCategoriesManager,
             ),
           ),
         ],
       ],
     );
+
+    if (editing) {
+      return scrollView;
+    }
+
+    void resetMiddleSwipeTracking() {
+      _middleActivePointer = null;
+      _middlePointerDownPos = null;
+      _middlePointerDownTime = null;
+      _middleTotalDelta = Offset.zero;
+      _middleDragDx = 0.0;
+      _middleSwipeBlockedByChild = false;
+      _middleDragHandledByArena = false;
+    }
+
+    return Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: (event) {
+        _middleActivePointer = event.pointer;
+        _middlePointerDownPos = event.position;
+        _middlePointerDownTime = event.timeStamp;
+        _middleTotalDelta = Offset.zero;
+        _middleSwipeBlockedByChild = _lastBlockedMiddlePointer == event.pointer;
+        _middleDragHandledByArena = false;
+      },
+      onPointerMove: (event) {
+        if (event.pointer != _middleActivePointer) return;
+        final start = _middlePointerDownPos;
+        if (start != null) {
+          _middleTotalDelta = event.position - start;
+        }
+      },
+      onPointerUp: (event) {
+        if (event.pointer != _middleActivePointer) return;
+        if (_middleDragHandledByArena) {
+          // GestureDetector won the arena; let onHorizontalDragEnd/Cancel read
+          // _middlePointerDownPos & _middleTotalDelta and reset state there.
+          return;
+        }
+        final start = _middlePointerDownPos;
+        final downTime = _middlePointerDownTime;
+        final delta = start != null
+            ? (event.position - start)
+            : _middleTotalDelta;
+        final blocked = _middleSwipeBlockedByChild;
+        resetMiddleSwipeTracking();
+        if (blocked) {
+          return;
+        }
+        final dx = delta.dx;
+        final dy = delta.dy;
+        if (dx.abs() <= dy.abs() * 1.5) {
+          return;
+        }
+        final elapsedUs = downTime == null
+            ? 0
+            : (event.timeStamp - downTime).inMicroseconds;
+        final vx = elapsedUs > 0 ? dx * 1000000.0 / elapsedUs : 0.0;
+        final vy = elapsedUs > 0 ? dy * 1000000.0 / elapsedUs : 0.0;
+        final validDistance = dx.abs() > 48.0;
+        final validFling =
+            dx.abs() > 24.0 &&
+            vx.abs() > 360.0 &&
+            vx.abs() > vy.abs() * 1.5 &&
+            vx.sign == dx.sign;
+        if (!validDistance && !validFling) {
+          return;
+        }
+        _stepRecordTypeBySwipe(
+          dx < 0 ? 1 : -1,
+          categories: categories,
+          diyConfig: diyConfig,
+          effectiveDefaultAccountId: effectiveDefaultAccountId,
+        );
+      },
+      onPointerCancel: (event) {
+        if (event.pointer == _middleActivePointer) {
+          resetMiddleSwipeTracking();
+        }
+      },
+      child: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onHorizontalDragStart: (_) {
+          _middleDragHandledByArena = true;
+          _middleDragDx = 0.0;
+        },
+        onHorizontalDragUpdate: (details) {
+          _middleDragDx += details.primaryDelta ?? details.delta.dx;
+        },
+        onHorizontalDragCancel: () {
+          // A child recognizer (e.g. unfocused TextField's eager drag recognizer)
+          // may reject our HorizontalDragGestureRecognizer mid-move; keep pointer
+          // tracking alive until onPointerUp / onPointerCancel decides.
+          _middleDragDx = 0.0;
+          _middleDragHandledByArena = false;
+        },
+        onHorizontalDragEnd: (details) {
+          final blocked = _middleSwipeBlockedByChild;
+          final dx = _middlePointerDownPos != null
+              ? _middleTotalDelta.dx
+              : _middleDragDx;
+          final dy = _middlePointerDownPos != null ? _middleTotalDelta.dy : 0.0;
+          resetMiddleSwipeTracking();
+          if (blocked || dx.abs() <= dy.abs() * 1.5) {
+            return;
+          }
+          final vx =
+              details.primaryVelocity ?? details.velocity.pixelsPerSecond.dx;
+          final vy = details.velocity.pixelsPerSecond.dy;
+          final validDistance = dx.abs() > 48.0;
+          final validFling =
+              dx.abs() > 24.0 &&
+              vx.abs() > 360.0 &&
+              vx.abs() > vy.abs() * 1.5 &&
+              vx.sign == dx.sign;
+          if (!validDistance && !validFling) {
+            return;
+          }
+          _stepRecordTypeBySwipe(
+            dx < 0 ? 1 : -1,
+            categories: categories,
+            diyConfig: diyConfig,
+            effectiveDefaultAccountId: effectiveDefaultAccountId,
+          );
+        },
+        child: scrollView,
+      ),
+    );
   }
 
-  Widget _buildTransferCard(BuildContext context, List<Asset> assets) {
+  Widget _buildTransferCard(
+    BuildContext context,
+    List<Asset> assets, {
+    required DiyToolbarConfig diyConfig,
+  }) {
     final cs = Theme.of(context).colorScheme;
     final fromAsset = assets.where((a) => a.id == fromAssetId).firstOrNull;
     final toAsset = assets.where((a) => a.id == toAssetId).firstOrNull;
+    final configuredDefaultId = diyConfig.autoSelectDefaultAccount
+        ? diyConfig.defaultAccountId
+        : noRef;
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    final textScale = MediaQuery.textScalerOf(context).scale(1.0);
+    final desktopTransferRowHeight = math.max(
+      44.0,
+      (24.0 + 18.0 * textScale).ceilToDouble(),
+    );
 
     Widget accountSlot({
       required Key key,
@@ -2111,7 +4086,9 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                       assets: assets,
                       currentId: asset?.id ?? noRef,
                       allowNone: false,
+                      defaultAccountId: configuredDefaultId,
                       onSelected: (v) => setState(() {
+                        _userTouchedAsset = true;
                         onPick(v);
                         convertedEdited = false;
                         _autoConvert();
@@ -2222,6 +4199,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                   onPressed: busy
                       ? null
                       : () => setState(() {
+                          _userTouchedAsset = true;
                           final tmp = fromAssetId;
                           fromAssetId = toAssetId;
                           toAssetId = tmp;
@@ -2245,48 +4223,89 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
           children: [
             Expanded(
               child: ConstrainedBox(
-                constraints: const BoxConstraints(minHeight: 42),
-                child: TextField(
-                  key: const Key('fee'),
-                  controller: fee,
-                  focusNode: _feeFocus,
-                  enabled: !busy,
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
-                  ),
-                  textInputAction: TextInputAction.done,
-                  onEditingComplete: _activateCustomKeypad,
-                  onSubmitted: (_) => _activateCustomKeypad(),
-                  inputFormatters: amountInputFormatters,
-                  style: const TextStyle(fontSize: 14),
-                  decoration: InputDecoration(
-                    labelText: '手续费（可选）',
-                    prefixText:
-                        '${feeFromTarget ? _currencies().$2 : _currencies().$1} ',
-                    isDense: true,
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 10,
+                constraints: BoxConstraints(
+                  minHeight: isDesktop ? desktopTransferRowHeight : 42,
+                ),
+                child: Listener(
+                  behavior: HitTestBehavior.translucent,
+                  onPointerDown: (event) {
+                    if (_feeFocus.hasFocus) {
+                      _lastBlockedMiddlePointer = event.pointer;
+                      _middleSwipeBlockedByChild = true;
+                    }
+                  },
+                  child: TextField(
+                    key: const Key('fee'),
+                    controller: fee,
+                    focusNode: _feeFocus,
+                    enabled: !busy,
+                    enableInteractiveSelection: _feeFocus.hasFocus,
+                    scrollPhysics: _feeFocus.hasFocus
+                        ? null
+                        : const NeverScrollableScrollPhysics(),
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
                     ),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
+                    textInputAction: TextInputAction.done,
+                    onEditingComplete: () {
+                      if (!_isDesktopActive) {
+                        _activateCustomKeypad();
+                      }
+                    },
+                    onSubmitted: (_) {
+                      if (_isDesktopActive) {
+                        _triggerDesktopEnter();
+                      } else {
+                        _activateCustomKeypad();
+                      }
+                    },
+                    inputFormatters: amountInputFormatters,
+                    style: const TextStyle(fontSize: 14),
+                    decoration: InputDecoration(
+                      labelText: '手续费（可选）',
+                      prefixText:
+                          '${feeFromTarget ? _currencies().$2 : _currencies().$1} ',
+                      isDense: !isDesktop,
+                      constraints: isDesktop
+                          ? BoxConstraints.tightFor(
+                              height: desktopTransferRowHeight,
+                            )
+                          : null,
+                      contentPadding: EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: isDesktop ? 10 : 10,
+                      ),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
                     ),
                   ),
                 ),
               ),
             ),
             const SizedBox(width: 8),
-            FilterChip(
-              key: const Key('transfer-fee-side-toggle'),
-              visualDensity: VisualDensity.compact,
-              label: Text(
-                feeFromTarget ? '转入方扣费' : '转出方扣费',
-                style: const TextStyle(fontSize: 12),
+            SizedBox(
+              height: isDesktop ? desktopTransferRowHeight : null,
+              child: FilterChip(
+                key: const Key('transfer-fee-side-toggle'),
+                visualDensity: isDesktop
+                    ? VisualDensity.standard
+                    : VisualDensity.compact,
+                materialTapTargetSize: isDesktop
+                    ? MaterialTapTargetSize.shrinkWrap
+                    : null,
+                padding: isDesktop
+                    ? const EdgeInsets.symmetric(horizontal: 10, vertical: 6)
+                    : null,
+                label: Text(
+                  feeFromTarget ? '转入方扣费' : '转出方扣费',
+                  style: const TextStyle(fontSize: 12),
+                ),
+                selected: feeFromTarget,
+                onSelected: busy
+                    ? null
+                    : (v) => setState(() => feeFromTarget = v),
               ),
-              selected: feeFromTarget,
-              onSelected: busy
-                  ? null
-                  : (v) => setState(() => feeFromTarget = v),
             ),
           ],
         ),
@@ -2305,6 +4324,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     required bool canSubmit,
     required double panelSlotHeight,
     required double bottomSafePadding,
+    double? desktopKeypadKeyHeight,
   }) {
     final cs = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -2334,10 +4354,15 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
       }
     }
 
-    final allAssets = ref.watch(assetsProvider).value ?? assets;
-    final currentAsset = allAssets.where((a) => a.id == assetId).firstOrNull;
-    final fromAsset = allAssets.where((a) => a.id == fromAssetId).firstOrNull;
-    final toAsset = allAssets.where((a) => a.id == toAssetId).firstOrNull;
+    final lookupAssets = editing
+        ? (ref.watch(assetsProvider).value ??
+              (_initialAssets.isNotEmpty ? _initialAssets : assets))
+        : assets;
+    final currentAsset = lookupAssets.where((a) => a.id == assetId).firstOrNull;
+    final fromAsset = lookupAssets
+        .where((a) => a.id == fromAssetId)
+        .firstOrNull;
+    final toAsset = lookupAssets.where((a) => a.id == toAssetId).firstOrNull;
     final selectedCat = categoryId == null
         ? null
         : categories.where((c) => c.id == categoryId).firstOrNull;
@@ -2565,20 +4590,431 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
       );
     }
 
+    final dockDecoration = BoxDecoration(
+      color: isDark ? cs.surfaceContainerLow : cs.surface,
+      borderRadius: const BorderRadius.vertical(top: Radius.circular(18)),
+      boxShadow: [
+        BoxShadow(
+          color: Colors.black.withAlpha(isDark ? 28 : 10),
+          blurRadius: 12,
+          offset: const Offset(0, -3),
+        ),
+      ],
+    );
+
+    final topBanners = <Widget>[
+      // Live budget hint bar (0px when no budget set)
+      if (bookId != null &&
+          categoryId != null &&
+          (type == RecordType.expense ||
+              type == RecordType.income ||
+              type == RecordType.reimbursable))
+        RecordBudgetHintBar(
+          bookId: bookId,
+          recordTime: time.millisecondsSinceEpoch,
+          categoryId: categoryId!,
+          excludeBudget: excludeBudget,
+        ),
+
+      // Non-blocking save-and-new confirmation banner
+      if (_savedAndResetBanner && error == null)
+        Container(
+          key: const Key('save-and-new-banner'),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          color: cs.primaryContainer.withAlpha(160),
+          child: Row(
+            children: [
+              Icon(
+                Icons.check_circle_outline_rounded,
+                size: 15,
+                color: cs.primary,
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  '已保存，可继续记下一笔',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                    color: cs.onPrimaryContainer,
+                  ),
+                ),
+              ),
+              InkWell(
+                onTap: () => setState(() => _savedAndResetBanner = false),
+                child: Icon(
+                  Icons.close,
+                  size: 15,
+                  color: cs.onPrimaryContainer,
+                ),
+              ),
+            ],
+          ),
+        ),
+
+      // Validation / conflict error banner
+      if (error != null)
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+          color: cs.errorContainer.withAlpha(180),
+          child: Row(
+            children: [
+              Icon(Icons.error_outline, size: 15, color: cs.error),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  error!,
+                  key: const Key('form-error'),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 12, color: cs.error),
+                ),
+              ),
+              InkWell(
+                onTap: () => setState(() => error = null),
+                child: Icon(Icons.close, size: 15, color: cs.error),
+              ),
+            ],
+          ),
+        ),
+    ];
+
+    Widget buildSummaryAmountRow({required bool isDesktopLayout}) {
+      return Padding(
+        key: const Key('editor-summary-amount-row'),
+        padding: isDesktopLayout
+            ? const EdgeInsets.fromLTRB(14, 6, 14, 4)
+            : const EdgeInsets.fromLTRB(14, 10, 14, 6),
+        child: LayoutBuilder(
+          builder: (context, rowConstraints) {
+            final maxAmountWidth = math.max(
+              124.0,
+              rowConstraints.maxWidth * 0.62,
+            );
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Expanded(child: summaryLeft),
+                const SizedBox(width: 8),
+                ConstrainedBox(
+                  constraints: BoxConstraints(maxWidth: maxAmountWidth),
+                  child: GestureDetector(
+                    key: const Key('amount-tap-area'),
+                    behavior: HitTestBehavior.opaque,
+                    onTap: busy ? null : _activateCustomKeypad,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        if (livePreview != null)
+                          Text(
+                            '= $livePreview',
+                            key: const Key('amount-live-preview'),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: cs.primary,
+                              fontFeatures: const [
+                                FontFeature.tabularFigures(),
+                              ],
+                            ),
+                          ),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          crossAxisAlignment: CrossAxisAlignment.baseline,
+                          textBaseline: TextBaseline.alphabetic,
+                          children: [
+                            currencyPrefixWidget,
+                            SizedBox(width: sc == baseCurrency ? 2 : 5),
+                            Flexible(
+                              child: IntrinsicWidth(
+                                child: TextField(
+                                  key: const Key('amount'),
+                                  controller: amount,
+                                  focusNode: _amountFocus,
+                                  enabled: !busy,
+                                  readOnly: false,
+                                  showCursor: true,
+                                  keyboardType: TextInputType.none,
+                                  textInputAction: TextInputAction.done,
+                                  textAlign: TextAlign.right,
+                                  inputFormatters: _keypadExpressionFormatters,
+                                  onTapOutside: isDesktopLayout ? (_) {} : null,
+                                  onTap: busy ? null : _activateCustomKeypad,
+                                  onChanged: (_) {
+                                    ScaffoldMessenger.maybeOf(
+                                      context,
+                                    )?.clearSnackBars();
+                                    setState(() {
+                                      error = null;
+                                      _savedAndResetBanner = false;
+                                      if (_preservingLoadedConversion) {
+                                        _preservingLoadedConversion = false;
+                                        convertedEdited = false;
+                                      }
+                                      _autoConvert();
+                                    });
+                                  },
+                                  onSubmitted: (_) {
+                                    if (hasPendingOperator(amount.text)) {
+                                      try {
+                                        final res = evaluateKeypadExpression(
+                                          amount.text,
+                                        );
+                                        if (res.dividedByZero) {
+                                          _showCalcError('算式无效或除数不能为 0');
+                                          return;
+                                        }
+                                        if (res.isNegative) {
+                                          _showCalcError('计算结果不能小于 0');
+                                          return;
+                                        }
+                                        if (res.exceededMax) {
+                                          _showCalcError(
+                                            '金额不能超过 88888888888.00',
+                                          );
+                                          return;
+                                        }
+                                        final next = res.money.decimal;
+                                        setState(() {
+                                          error = null;
+                                          _setAmountText(next);
+                                          if (_preservingLoadedConversion) {
+                                            _preservingLoadedConversion = false;
+                                            convertedEdited = false;
+                                          }
+                                          _autoConvert();
+                                        });
+                                      } on Failure catch (e) {
+                                        _showCalcError(safeMessage(e));
+                                        return;
+                                      }
+                                    }
+                                  },
+                                  style: TextStyle(
+                                    fontSize: 22,
+                                    fontWeight: FontWeight.w800,
+                                    color: amountColor,
+                                    fontFeatures: const [
+                                      FontFeature.tabularFigures(),
+                                    ],
+                                  ),
+                                  decoration: InputDecoration(
+                                    isCollapsed: isDesktopLayout,
+                                    isDense: !isDesktopLayout,
+                                    constraints: isDesktopLayout
+                                        ? const BoxConstraints(minHeight: 32)
+                                        : null,
+                                    hintText: amount.text.isEmpty
+                                        ? '0.00'
+                                        : null,
+                                    hintStyle: TextStyle(
+                                      fontSize: 22,
+                                      fontWeight: FontWeight.w700,
+                                      color: cs.outlineVariant,
+                                    ),
+                                    contentPadding: const EdgeInsets.symmetric(
+                                      vertical: 4,
+                                    ),
+                                    border: InputBorder.none,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        if (conversionSummaryWidget != null)
+                          conversionSummaryWidget,
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
+      );
+    }
+
+    if (DesktopAdaptive.isDesktop(context)) {
+      final desktopTextScale = MediaQuery.textScalerOf(
+        context,
+      ).scale(1.0).clamp(1.0, 2.0);
+      final desktopRemarkRowHeight = desktopTextScale > 1.02
+          ? (20.0 + 18.0 * desktopTextScale).ceilToDouble()
+          : 38.0;
+      final remarkSuffix = _buildRemarkSuffixIcon(
+        remarksEnabled: remarksEnabled,
+      );
+      final showAttachmentStrip =
+          (_attachmentsExpanded || imageNames.isNotEmpty) &&
+          (diyConfig.isEnabled(DiyToolbarAction.images) ||
+              imageNames.isNotEmpty);
+
+      return Container(
+        key: const Key('editor-bottom-dock'),
+        clipBehavior: Clip.antiAlias,
+        decoration: dockDecoration,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            ...topBanners,
+            // Pinned Row 1: Category / Transfer Summary + Amount Bar (never scrolled out!)
+            buildSummaryAmountRow(isDesktopLayout: true),
+            // Pinned Row 2: Explicit Horizontally-Centered Desktop Remark Row
+            Container(
+              key: const Key('editor-remark-row'),
+              height: desktopRemarkRowHeight,
+              margin: const EdgeInsets.fromLTRB(12, 2, 12, 4),
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              decoration: BoxDecoration(
+                color: isDark
+                    ? cs.surfaceContainerHighest.withAlpha(115)
+                    : cs.surfaceContainerLow,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: busy ? null : () => _remarkFocus.requestFocus(),
+                    child: Icon(
+                      Icons.edit_note_rounded,
+                      size: 18,
+                      color: cs.onSurfaceVariant.withAlpha(185),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: TextField(
+                      key: const Key('remark'),
+                      controller: remark,
+                      focusNode: _remarkFocus,
+                      enabled: !busy,
+                      maxLength: 200,
+                      textInputAction: TextInputAction.done,
+                      onEditingComplete: () {},
+                      onSubmitted: (_) => _triggerDesktopEnter(),
+                      buildCounter:
+                          (
+                            _, {
+                            required currentLength,
+                            required isFocused,
+                            required maxLength,
+                          }) => null,
+                      onChanged: (_) =>
+                          setState(() => _savedAndResetBanner = false),
+                      textAlignVertical: TextAlignVertical.center,
+                      style: const TextStyle(fontSize: 13.5, height: 1.25),
+                      decoration: InputDecoration(
+                        isCollapsed: true,
+                        hintText: '输入备注...',
+                        hintStyle: TextStyle(
+                          fontSize: 13.5,
+                          height: 1.25,
+                          color: cs.onSurfaceVariant.withAlpha(160),
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(vertical: 8),
+                        border: InputBorder.none,
+                      ),
+                    ),
+                  ),
+                  if (remarkSuffix != null) ...[
+                    const SizedBox(width: 4),
+                    remarkSuffix,
+                  ],
+                ],
+              ),
+            ),
+            // Flexible Row 3: Optional Attachment Strip + Compact Pill Toolbar
+            Flexible(
+              fit: FlexFit.loose,
+              child: SingleChildScrollView(
+                physics: const ClampingScrollPhysics(),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (showAttachmentStrip)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 4, 12, 2),
+                        child: BillAttachmentStrip(
+                          key: const Key('record-attachment-strip'),
+                          imageNames: imageNames,
+                          readOnly: busy,
+                          onChanged: (next) =>
+                              setState(() => imageNames = next),
+                        ),
+                      ),
+                    _buildPillToolbar(
+                      context,
+                      assets: assets,
+                      tags: tags,
+                      currencies: currencies,
+                      diyConfig: diyConfig,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            // Row 4: Optional Compact Adaptive Keypad or Frequent Remarks Panel
+            if (panelSlotHeight > 0 &&
+                (_desktopKeypadExpanded ||
+                    (_desktopRemarksExpanded && type != RecordType.transfer)))
+              Container(
+                key: const Key('editor-bottom-panel-slot'),
+                height: panelSlotHeight,
+                color: trayColor,
+                child: _desktopRemarksExpanded && type != RecordType.transfer
+                    ? _buildFrequentRemarksPanel(
+                        context,
+                        categories: categories,
+                        selectedCategory: selectedCat,
+                        bottomSafePadding: 0,
+                      )
+                    : SingleChildScrollView(
+                        physics: const ClampingScrollPhysics(),
+                        child: RecordCustomKeypad(
+                          amountText: amount.text,
+                          enabled: canSubmit,
+                          busy: busy,
+                          enableMultiplyDivide: true,
+                          desktopCompact: true,
+                          keyHeightOverride: desktopKeypadKeyHeight,
+                          onKeyTap: _onKeypadKey,
+                          onBackspace: () => _onKeypadKey('BACKSPACE'),
+                          onClearAll: () => _onKeypadKey('CLEAR'),
+                          onEvaluate: _evaluateInPlace,
+                          onSave: () => unawaited(_save(stayAndReset: false)),
+                          onSaveAndNew: () =>
+                              unawaited(_save(stayAndReset: true)),
+                        ),
+                      ),
+              ),
+            // Pinned Row 5: Desktop Action Bar
+            _buildDesktopActionBar(
+              context,
+              trayColor: trayColor,
+              remarksEnabled: remarksEnabled && type != RecordType.transfer,
+              pendingOp: pendingOp,
+              canSubmit: canSubmit,
+            ),
+          ],
+        ),
+      );
+    }
+
     return Container(
       key: const Key('editor-bottom-dock'),
       clipBehavior: Clip.antiAlias,
-      decoration: BoxDecoration(
-        color: isDark ? cs.surfaceContainerLow : cs.surface,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(18)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withAlpha(isDark ? 28 : 10),
-            blurRadius: 12,
-            offset: const Offset(0, -3),
-          ),
-        ],
-      ),
+      decoration: dockDecoration,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2592,89 +5028,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  // Live budget hint bar (0px when no budget set)
-                  if (bookId != null &&
-                      categoryId != null &&
-                      (type == RecordType.expense ||
-                          type == RecordType.income ||
-                          type == RecordType.reimbursable))
-                    RecordBudgetHintBar(
-                      bookId: bookId,
-                      recordTime: time.millisecondsSinceEpoch,
-                      categoryId: categoryId!,
-                      excludeBudget: excludeBudget,
-                    ),
-
-                  // Non-blocking save-and-new confirmation banner
-                  if (_savedAndResetBanner && error == null)
-                    Container(
-                      key: const Key('save-and-new-banner'),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 4,
-                      ),
-                      color: cs.primaryContainer.withAlpha(160),
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.check_circle_outline_rounded,
-                            size: 15,
-                            color: cs.primary,
-                          ),
-                          const SizedBox(width: 6),
-                          Expanded(
-                            child: Text(
-                              '已保存，可继续记下一笔',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w500,
-                                color: cs.onPrimaryContainer,
-                              ),
-                            ),
-                          ),
-                          InkWell(
-                            onTap: () =>
-                                setState(() => _savedAndResetBanner = false),
-                            child: Icon(
-                              Icons.close,
-                              size: 15,
-                              color: cs.onPrimaryContainer,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-
-                  // Validation / conflict error banner
-                  if (error != null)
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 5,
-                      ),
-                      color: cs.errorContainer.withAlpha(180),
-                      child: Row(
-                        children: [
-                          Icon(Icons.error_outline, size: 15, color: cs.error),
-                          const SizedBox(width: 6),
-                          Expanded(
-                            child: Text(
-                              error!,
-                              key: const Key('form-error'),
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(fontSize: 12, color: cs.error),
-                            ),
-                          ),
-                          InkWell(
-                            onTap: () => setState(() => error = null),
-                            child: Icon(Icons.close, size: 15, color: cs.error),
-                          ),
-                        ],
-                      ),
-                    ),
+                  ...topBanners,
 
                   // Collapsible image attachment strip
                   if ((_attachmentsExpanded || imageNames.isNotEmpty) &&
@@ -2691,168 +5045,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                     ),
 
                   // Row 1: Category / Transfer Summary + Tight Left-Prefixed Amount Bar
-                  Padding(
-                    key: const Key('editor-summary-amount-row'),
-                    padding: const EdgeInsets.fromLTRB(14, 10, 14, 6),
-                    child: LayoutBuilder(
-                      builder: (context, rowConstraints) {
-                        final maxAmountWidth = math.max(
-                          124.0,
-                          rowConstraints.maxWidth * 0.62,
-                        );
-                        return Row(
-                          crossAxisAlignment: CrossAxisAlignment.center,
-                          children: [
-                            Expanded(child: summaryLeft),
-                            const SizedBox(width: 8),
-                            ConstrainedBox(
-                              constraints: BoxConstraints(
-                                maxWidth: maxAmountWidth,
-                              ),
-                              child: GestureDetector(
-                                key: const Key('amount-tap-area'),
-                                behavior: HitTestBehavior.opaque,
-                                onTap: busy ? null : _activateCustomKeypad,
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  crossAxisAlignment: CrossAxisAlignment.end,
-                                  children: [
-                                    if (livePreview != null)
-                                      Text(
-                                        '= $livePreview',
-                                        key: const Key('amount-live-preview'),
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: TextStyle(
-                                          fontSize: 11,
-                                          fontWeight: FontWeight.w600,
-                                          color: cs.primary,
-                                          fontFeatures: const [
-                                            FontFeature.tabularFigures(),
-                                          ],
-                                        ),
-                                      ),
-                                    Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      mainAxisAlignment: MainAxisAlignment.end,
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.baseline,
-                                      textBaseline: TextBaseline.alphabetic,
-                                      children: [
-                                        currencyPrefixWidget,
-                                        SizedBox(
-                                          width: sc == baseCurrency ? 2 : 5,
-                                        ),
-                                        Flexible(
-                                          child: IntrinsicWidth(
-                                            child: TextField(
-                                              key: const Key('amount'),
-                                              controller: amount,
-                                              focusNode: _amountFocus,
-                                              enabled: !busy,
-                                              readOnly: false,
-                                              showCursor: true,
-                                              keyboardType: TextInputType.none,
-                                              textInputAction:
-                                                  TextInputAction.done,
-                                              textAlign: TextAlign.right,
-                                              inputFormatters:
-                                                  _keypadExpressionFormatters,
-                                              onTap: busy
-                                                  ? null
-                                                  : _activateCustomKeypad,
-                                              onChanged: (_) {
-                                                ScaffoldMessenger.maybeOf(
-                                                  context,
-                                                )?.clearSnackBars();
-                                                setState(() {
-                                                  error = null;
-                                                  _savedAndResetBanner = false;
-                                                  _autoConvert();
-                                                });
-                                              },
-                                              onSubmitted: (_) {
-                                                if (hasPendingOperator(
-                                                  amount.text,
-                                                )) {
-                                                  try {
-                                                    final res =
-                                                        evaluateKeypadExpression(
-                                                          amount.text,
-                                                        );
-                                                    if (res.dividedByZero) {
-                                                      _showCalcError(
-                                                        '算式无效或除数不能为 0',
-                                                      );
-                                                      return;
-                                                    }
-                                                    if (res.isNegative) {
-                                                      _showCalcError(
-                                                        '计算结果不能小于 0',
-                                                      );
-                                                      return;
-                                                    }
-                                                    if (res.exceededMax) {
-                                                      _showCalcError(
-                                                        '金额不能超过 88888888888.00',
-                                                      );
-                                                      return;
-                                                    }
-                                                    final next =
-                                                        res.money.decimal;
-                                                    setState(() {
-                                                      error = null;
-                                                      _setAmountText(next);
-                                                      _autoConvert();
-                                                    });
-                                                  } on Failure catch (e) {
-                                                    _showCalcError(
-                                                      safeMessage(e),
-                                                    );
-                                                    return;
-                                                  }
-                                                }
-                                              },
-                                              style: TextStyle(
-                                                fontSize: 22,
-                                                fontWeight: FontWeight.w800,
-                                                color: amountColor,
-                                                fontFeatures: const [
-                                                  FontFeature.tabularFigures(),
-                                                ],
-                                              ),
-                                              decoration: InputDecoration(
-                                                isDense: true,
-                                                hintText: amount.text.isEmpty
-                                                    ? '0.00'
-                                                    : null,
-                                                hintStyle: TextStyle(
-                                                  fontSize: 22,
-                                                  fontWeight: FontWeight.w700,
-                                                  color: cs.outlineVariant,
-                                                ),
-                                                contentPadding:
-                                                    const EdgeInsets.symmetric(
-                                                      vertical: 4,
-                                                    ),
-                                                border: InputBorder.none,
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                    if (conversionSummaryWidget != null)
-                                      conversionSummaryWidget,
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ],
-                        );
-                      },
-                    ),
-                  ),
+                  buildSummaryAmountRow(isDesktopLayout: false),
 
                   // Row 2: Borderless Tonal Remark Input Row (tags live exclusively in pill toolbar)
                   Container(
@@ -2872,8 +5065,18 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                       enabled: !busy,
                       maxLength: 200,
                       textInputAction: TextInputAction.done,
-                      onEditingComplete: _activateCustomKeypad,
-                      onSubmitted: (_) => _activateCustomKeypad(),
+                      onEditingComplete: () {
+                        if (!_isDesktopActive) {
+                          _activateCustomKeypad();
+                        }
+                      },
+                      onSubmitted: (_) {
+                        if (_isDesktopActive) {
+                          _triggerDesktopEnter();
+                        } else {
+                          _activateCustomKeypad();
+                        }
+                      },
                       buildCounter:
                           (
                             _, {
@@ -2929,7 +5132,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
             ),
           ),
 
-          // Unified Bottom Panel Slot for Custom Keypad / Plan A Frequent Remarks
+          // Unified Bottom Panel Slot (Mobile)
           if (_panelMode != _BottomPanelMode.osKeyboard)
             Container(
               key: const Key('editor-bottom-panel-slot'),
@@ -2963,6 +5166,150 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                     ),
             ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildDesktopActionBar(
+    BuildContext context, {
+    required Color trayColor,
+    required bool remarksEnabled,
+    required bool pendingOp,
+    required bool canSubmit,
+  }) {
+    final cs = Theme.of(context).colorScheme;
+    final modLabel = DesktopAdaptive.primaryModifierLabel(context);
+    final fullSaveAndAgainLabel = '再记 ($modLabel+Enter)';
+    final fullSaveLabel = pendingOp
+        ? '= (Enter)'
+        : (busy ? '保存中…' : '保存 (Enter)');
+    final compactSaveLabel = pendingOp ? '=' : (busy ? '保存中…' : '保存');
+
+    final leftButtons = <Widget>[
+      if (remarksEnabled)
+        _DesktopActionToggleChip(
+          buttonKey: const Key('desktop-toggle-remarks'),
+          icon: Icons.speaker_notes_outlined,
+          label: '常用备注',
+          active: _desktopRemarksExpanded,
+          onTap: busy ? null : _toggleDesktopRemarksPanel,
+        ),
+      _DesktopActionToggleChip(
+        buttonKey: const Key('desktop-toggle-keypad'),
+        icon: Icons.calculate_outlined,
+        label: '小键盘',
+        active: _desktopKeypadExpanded,
+        onTap: busy ? null : _toggleDesktopKeypadPanel,
+      ),
+    ];
+
+    return TextFieldTapRegion(
+      child: ExcludeFocus(
+        child: LayoutBuilder(
+          builder: (context, barConstraints) {
+            final textScale = MediaQuery.textScalerOf(
+              context,
+            ).scale(1.0).clamp(1.0, 2.0);
+            final compactBar = barConstraints.maxWidth < 550.0 * textScale;
+            final saveAndAgainButton = OutlinedButton(
+              key: const Key('desktop-save-and-again'),
+              style: OutlinedButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                minimumSize: const Size(0, 34),
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                side: BorderSide(
+                  color: cs.outlineVariant.withValues(alpha: 0.85),
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              onPressed: canSubmit ? _triggerDesktopSaveAndAgain : null,
+              child: Text(
+                compactBar ? '再记' : fullSaveAndAgainLabel,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            );
+            final saveButton = FilledButton(
+              key: const Key('desktop-save-button'),
+              style: FilledButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                minimumSize: const Size(0, 34),
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              onPressed: canSubmit
+                  ? (pendingOp
+                        ? _evaluateInPlace
+                        : () => unawaited(_save(stayAndReset: false)))
+                  : null,
+              child: Text(
+                compactBar ? compactSaveLabel : fullSaveLabel,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            );
+            final rightButtons = <Widget>[
+              compactBar
+                  ? Tooltip(
+                      message: fullSaveAndAgainLabel,
+                      child: saveAndAgainButton,
+                    )
+                  : saveAndAgainButton,
+              compactBar
+                  ? Tooltip(message: fullSaveLabel, child: saveButton)
+                  : saveButton,
+            ];
+
+            return Container(
+              key: const Key('desktop-editor-action-bar'),
+              padding: const EdgeInsets.fromLTRB(12, 6, 12, 8),
+              decoration: BoxDecoration(
+                color: trayColor,
+                border: Border(
+                  top: BorderSide(
+                    color: cs.outlineVariant.withValues(alpha: 0.35),
+                    width: 0.6,
+                  ),
+                ),
+              ),
+              child: OverflowBar(
+                alignment: MainAxisAlignment.spaceBetween,
+                overflowAlignment: OverflowBarAlignment.end,
+                spacing: 8,
+                overflowSpacing: 6,
+                children: [
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: leftButtons,
+                  ),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 6,
+                    alignment: WrapAlignment.end,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: rightButtons,
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
       ),
     );
   }
@@ -3139,9 +5486,16 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                     ),
                     IconButton(
                       key: const Key('editor-remarks-back-keypad-btn'),
-                      tooltip: '返回数字键盘',
+                      tooltip: DesktopAdaptive.isDesktop(context)
+                          ? '收起常用备注'
+                          : '返回数字键盘',
                       visualDensity: VisualDensity.compact,
-                      icon: const Icon(Icons.dialpad_rounded, size: 18),
+                      icon: Icon(
+                        DesktopAdaptive.isDesktop(context)
+                            ? Icons.keyboard_arrow_down_rounded
+                            : Icons.dialpad_rounded,
+                        size: 18,
+                      ),
                       onPressed: busy ? null : _activateCustomKeypad,
                     ),
                   ],
@@ -3168,8 +5522,11 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                   data: (_) {
                     if (displayedRemarks.isEmpty) {
                       return Center(
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 24),
+                        child: SingleChildScrollView(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 24,
+                            vertical: 4,
+                          ),
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
@@ -3257,9 +5614,13 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
     required List<Currency> currencies,
     required DiyToolbarConfig diyConfig,
   }) {
+    final isDesktop = DesktopAdaptive.isDesktop(context);
     final cs = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final currentAsset = assets.where((a) => a.id == assetId).firstOrNull;
+    final configuredDefaultId = diyConfig.autoSelectDefaultAccount
+        ? diyConfig.defaultAccountId
+        : noRef;
     final selectedTags = tags
         .where((t) => selectedTagIds.contains(t.tagId))
         .toList();
@@ -3284,16 +5645,19 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
           ? (accentColor != null ? cs.onSurface : cs.onSecondaryContainer)
           : cs.onSurface;
       return Padding(
-        padding: const EdgeInsets.only(right: 6),
+        padding: EdgeInsets.only(right: isDesktop ? 0 : 6),
         child: Material(
           color: bgColor,
           shape: const StadiumBorder(side: BorderSide.none),
           clipBehavior: Clip.antiAlias,
           child: InkWell(
             key: key,
+            canRequestFocus: !isDesktop,
             onTap: busy ? null : onTap,
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              padding: isDesktop
+                  ? const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5)
+                  : const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -3359,7 +5723,13 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
               assets: assets,
               currentId: currentAsset?.id ?? noRef,
               allowNone: true,
+              defaultAccountId: configuredDefaultId,
               onSelected: (v) => setState(() {
+                _userTouchedAsset = true;
+                if (assetId != v && _preservingLoadedConversion) {
+                  _preservingLoadedConversion = false;
+                  convertedEdited = false;
+                }
                 assetId = v;
                 _autoConvert();
               }),
@@ -3374,8 +5744,8 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
       ),
     ];
 
-    final (_, ac) = _currencies();
-    final acSymbol = _symbolForCurrency(ac, currencies);
+    final (sc, _) = _currencies();
+    final scSymbol = _symbolForCurrency(sc, currencies);
 
     for (final item in diyConfig.items) {
       switch (item.action) {
@@ -3409,9 +5779,9 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
             String discLabel = '优惠';
             if (hasDisc) {
               try {
-                discLabel = '优惠 $acSymbol${parseAmount(discRaw).decimal}';
+                discLabel = '优惠 $scSymbol${parseAmount(discRaw).decimal}';
               } on Failure {
-                discLabel = '优惠 $acSymbol$discRaw';
+                discLabel = '优惠 $scSymbol$discRaw';
               }
             }
             pills.add(
@@ -3422,8 +5792,8 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                 active: hasDisc,
                 onTap: () => unawaited(
                   _openDiscountDialog(
-                    currencyCode: ac,
-                    currencySymbol: acSymbol,
+                    currencyCode: sc,
+                    currencySymbol: scSymbol,
                   ),
                 ),
               ),
@@ -3514,6 +5884,17 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
       }
     }
 
+    if (isDesktop) {
+      return ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 30),
+        child: Padding(
+          key: const Key('editor-pill-toolbar'),
+          padding: const EdgeInsets.fromLTRB(12, 2, 12, 4),
+          child: Wrap(spacing: 5, runSpacing: 4, children: pills),
+        ),
+      );
+    }
+
     return ConstrainedBox(
       constraints: const BoxConstraints(minHeight: 38),
       child: SingleChildScrollView(
@@ -3531,11 +5912,13 @@ class _DiscountEditDialog extends StatefulWidget {
     required this.initialText,
     required this.currencyCode,
     required this.currencySymbol,
+    this.maxGrossMinor,
   });
 
   final String initialText;
   final String currencyCode;
   final String currencySymbol;
+  final BigInt? maxGrossMinor;
 
   @override
   State<_DiscountEditDialog> createState() => _DiscountEditDialogState();
@@ -3565,6 +5948,16 @@ class _DiscountEditDialogState extends State<_DiscountEditDialog> {
     }
     try {
       final parsed = parseAmount(trimmed);
+      if (parsed.isNegative) {
+        setState(() => _errorText = '优惠金额不能为负数');
+        return;
+      }
+      if (widget.maxGrossMinor != null &&
+          widget.maxGrossMinor! > BigInt.zero &&
+          parsed.storageMinor > widget.maxGrossMinor!) {
+        setState(() => _errorText = '优惠金额不能大于原金额');
+        return;
+      }
       Navigator.of(context).pop(parsed.isZero ? '' : parsed.decimal);
     } on Failure catch (e) {
       setState(() => _errorText = safeMessage(e));
@@ -3636,6 +6029,7 @@ class _ConversionEditDialog extends StatefulWidget {
     required this.sourceSymbol,
     required this.targetCurrency,
     required this.amountText,
+    this.discountMinor,
     required this.rates,
   });
 
@@ -3646,6 +6040,7 @@ class _ConversionEditDialog extends StatefulWidget {
   final String sourceSymbol;
   final String targetCurrency;
   final String amountText;
+  final BigInt? discountMinor;
   final RateTable? rates;
 
   @override
@@ -3676,9 +6071,13 @@ class _ConversionEditDialogState extends State<_ConversionEditDialog> {
     String next = '';
     if (rates != null && rawAmt.isNotEmpty) {
       try {
-        final minor = evaluateKeypadExpression(rawAmt).clampedMinor;
+        final grossMinor = evaluateKeypadExpression(rawAmt).clampedMinor;
+        final disc = widget.discountMinor ?? BigInt.zero;
+        final netMinor = !widget.isTransfer && disc > BigInt.zero
+            ? (grossMinor > disc ? grossMinor - disc : BigInt.zero)
+            : grossMinor;
         next = formatMinor(
-          rates.convert(minor, widget.sourceCurrency, widget.targetCurrency),
+          rates.convert(netMinor, widget.sourceCurrency, widget.targetCurrency),
         );
       } on Failure {
         next = '';
@@ -3768,6 +6167,379 @@ class _ConversionEditDialogState extends State<_ConversionEditDialog> {
           key: const Key('converted-confirm-btn'),
           onPressed: _submit,
           child: const Text('确定'),
+        ),
+      ],
+    );
+  }
+}
+
+class _DesktopActionToggleChip extends StatelessWidget {
+  const _DesktopActionToggleChip({
+    required this.buttonKey,
+    required this.icon,
+    required this.label,
+    required this.active,
+    required this.onTap,
+  });
+
+  final Key buttonKey;
+  final IconData icon;
+  final String label;
+  final bool active;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final bgColor = active
+        ? cs.secondaryContainer
+        : (isDark ? cs.surfaceContainerHigh : cs.surface);
+    final fgColor = active ? cs.onSecondaryContainer : cs.onSurfaceVariant;
+
+    return Material(
+      color: bgColor,
+      borderRadius: BorderRadius.circular(10),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        key: buttonKey,
+        canRequestFocus: false,
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 16, color: fgColor),
+              const SizedBox(width: 5),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: active ? FontWeight.w600 : FontWeight.w500,
+                  color: fgColor,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AccountPickerBody extends StatefulWidget {
+  const _AccountPickerBody({
+    required this.title,
+    required this.initialAssets,
+    required this.currentId,
+    required this.allowNone,
+    required this.defaultAccountId,
+    required this.isDesktop,
+    required this.onSelect,
+    required this.onOpenManager,
+    this.onClose,
+    required this.onReorderPersist,
+  });
+
+  final String title;
+  final List<Asset> initialAssets;
+  final int currentId;
+  final bool allowNone;
+  final int defaultAccountId;
+  final bool isDesktop;
+  final ValueChanged<int> onSelect;
+  final VoidCallback onOpenManager;
+  final VoidCallback? onClose;
+  final Future<void> Function(List<int> orderedIds) onReorderPersist;
+
+  @override
+  State<_AccountPickerBody> createState() => _AccountPickerBodyState();
+}
+
+class _AccountPickerBodyState extends State<_AccountPickerBody> {
+  late List<Asset> _items = List<Asset>.of(widget.initialAssets);
+  bool _reordering = false;
+  bool _savingOrder = false;
+
+  String _subtitleOf(Asset a) {
+    final ccy = normalizeCurrency(a.currency) ?? baseCurrency;
+    final bal = formatMinor(a.balanceMinor);
+    if (a.type == AssetType.credit) {
+      return '信用账户 · $ccy · $bal';
+    }
+    return '$ccy · $bal';
+  }
+
+  Widget _buildAccountTitle(BuildContext ctx, Asset a) {
+    final isDefault =
+        widget.defaultAccountId != noRef &&
+        a.id == widget.defaultAccountId &&
+        a.status == AssetStatus.active &&
+        a.type != AssetType.debt;
+    if (!isDefault) {
+      return Text(a.name, maxLines: 1, overflow: TextOverflow.ellipsis);
+    }
+    final itemCs = Theme.of(ctx).colorScheme;
+    return Row(
+      children: [
+        Flexible(
+          child: Text(a.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+        ),
+        const SizedBox(width: 6),
+        Container(
+          key: Key('account-default-badge-${a.id}'),
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+          decoration: BoxDecoration(
+            color: itemCs.secondaryContainer,
+            borderRadius: BorderRadius.circular(999),
+          ),
+          child: Text(
+            '默认',
+            style: TextStyle(
+              fontSize: 10.5,
+              fontWeight: FontWeight.w600,
+              color: itemCs.onSecondaryContainer,
+              height: 1.2,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _handleReorder(int oldIndex, int newIndex) async {
+    if (oldIndex < 0 ||
+        oldIndex >= _items.length ||
+        newIndex < 0 ||
+        newIndex >= _items.length ||
+        oldIndex == newIndex) {
+      return;
+    }
+    final previous = List<Asset>.of(_items);
+    final updated = List<Asset>.of(_items);
+    final moved = updated.removeAt(oldIndex);
+    updated.insert(newIndex, moved);
+    setState(() {
+      _items = updated;
+      _savingOrder = true;
+    });
+    try {
+      await widget.onReorderPersist([for (final a in updated) a.id]);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _items = previous);
+      ScaffoldMessenger.maybeOf(
+        context,
+      )?.showSnackBar(SnackBar(content: Text(safeMessage(e))));
+    } finally {
+      if (mounted) {
+        setState(() => _savingOrder = false);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final canReorder = _items.length >= 2;
+    final avatarSize = widget.isDesktop ? 34.0 : 36.0;
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Padding(
+          padding: widget.isDesktop
+              ? const EdgeInsets.fromLTRB(20, 14, 10, 10)
+              : const EdgeInsets.fromLTRB(16, 0, 12, 8),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  widget.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: widget.isDesktop
+                      ? theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        )
+                      : theme.textTheme.titleMedium,
+                ),
+              ),
+              if (canReorder)
+                TextButton(
+                  key: const Key('toggle-account-picker-reorder-btn'),
+                  style: TextButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                  ),
+                  onPressed: _savingOrder
+                      ? null
+                      : () => setState(() => _reordering = !_reordering),
+                  child: Text(_reordering ? '完成' : '排序'),
+                ),
+              TextButton.icon(
+                key: const Key('manage-assets-sheet-btn'),
+                style: TextButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                ),
+                onPressed: _savingOrder ? null : widget.onOpenManager,
+                icon: const Icon(Icons.settings_outlined, size: 16),
+                label: const Text('管理账户'),
+              ),
+              if (widget.isDesktop && widget.onClose != null)
+                CloseButton(onPressed: widget.onClose),
+            ],
+          ),
+        ),
+        if (widget.isDesktop) const Divider(height: 1),
+        Flexible(
+          child: _reordering
+              ? ReorderableListView.builder(
+                  key: const Key('account-picker-reorder-list'),
+                  shrinkWrap: true,
+                  buildDefaultDragHandles: false,
+                  padding: widget.isDesktop
+                      ? const EdgeInsets.symmetric(horizontal: 8, vertical: 6)
+                      : EdgeInsets.zero,
+                  onReorderStart: (_) {
+                    if (!widget.isDesktop) {
+                      HapticFeedback.selectionClick();
+                    }
+                  },
+                  proxyDecorator: (child, index, animation) => Material(
+                    elevation: 6,
+                    color: cs.surface,
+                    borderRadius: BorderRadius.circular(12),
+                    clipBehavior: Clip.antiAlias,
+                    child: child,
+                  ),
+                  itemCount: _items.length,
+                  onReorderItem: (oldIndex, newIndex) =>
+                      unawaited(_handleReorder(oldIndex, newIndex)),
+                  itemBuilder: (ctx, index) {
+                    final a = _items[index];
+                    final dragHandle = ReorderableDragStartListener(
+                      index: index,
+                      child: MouseRegion(
+                        cursor: SystemMouseCursors.grab,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 4,
+                            vertical: 6,
+                          ),
+                          child: Icon(
+                            Icons.drag_handle_rounded,
+                            key: Key('account-picker-drag-${a.id}'),
+                            size: 20,
+                            color: cs.outline,
+                          ),
+                        ),
+                      ),
+                    );
+                    final tile = ListTile(
+                      shape: widget.isDesktop
+                          ? RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            )
+                          : null,
+                      leading: AssetIconAvatar(
+                        iconKey: a.icon,
+                        colorHex: a.color,
+                        name: a.name,
+                        assetType: a.type,
+                        subType: a.subType,
+                        size: avatarSize,
+                        selected: widget.currentId == a.id,
+                      ),
+                      title: _buildAccountTitle(ctx, a),
+                      subtitle: Text(
+                        _subtitleOf(a),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                      trailing: dragHandle,
+                    );
+                    if (widget.isDesktop) {
+                      return KeyedSubtree(
+                        key: ValueKey('picker-account-item-${a.id}'),
+                        child: tile,
+                      );
+                    }
+                    return ReorderableDelayedDragStartListener(
+                      key: ValueKey('picker-account-item-${a.id}'),
+                      index: index,
+                      child: tile,
+                    );
+                  },
+                )
+              : ListView(
+                  shrinkWrap: true,
+                  padding: widget.isDesktop
+                      ? const EdgeInsets.symmetric(horizontal: 8, vertical: 6)
+                      : EdgeInsets.zero,
+                  children: [
+                    if (widget.allowNone)
+                      ListTile(
+                        shape: widget.isDesktop
+                            ? RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              )
+                            : null,
+                        leading: Container(
+                          width: avatarSize,
+                          height: avatarSize,
+                          decoration: BoxDecoration(
+                            color: cs.surfaceContainerHighest,
+                            shape: BoxShape.circle,
+                          ),
+                          alignment: Alignment.center,
+                          child: Icon(
+                            Icons.remove_circle_outline_rounded,
+                            size: 18,
+                            color: cs.onSurfaceVariant,
+                          ),
+                        ),
+                        title: const Text('不选账户'),
+                        trailing: widget.currentId == noRef
+                            ? Icon(Icons.check_rounded, color: cs.primary)
+                            : null,
+                        onTap: () => widget.onSelect(noRef),
+                      ),
+                    for (final a in _items)
+                      ListTile(
+                        key: ValueKey('picker-account-row-${a.id}'),
+                        shape: widget.isDesktop
+                            ? RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              )
+                            : null,
+                        leading: AssetIconAvatar(
+                          iconKey: a.icon,
+                          colorHex: a.color,
+                          name: a.name,
+                          assetType: a.type,
+                          subType: a.subType,
+                          size: avatarSize,
+                          selected: widget.currentId == a.id,
+                        ),
+                        title: _buildAccountTitle(context, a),
+                        subtitle: Text(
+                          _subtitleOf(a),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                        trailing: widget.currentId == a.id
+                            ? Icon(Icons.check_rounded, color: cs.primary)
+                            : null,
+                        onTap: () => widget.onSelect(a.id),
+                      ),
+                  ],
+                ),
         ),
       ],
     );

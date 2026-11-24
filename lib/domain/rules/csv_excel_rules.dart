@@ -3,9 +3,14 @@ import 'dart:typed_data';
 
 import '../../core/failure.dart';
 import '../../core/money.dart';
+import '../ledger/record_extra.dart';
 import '../model/codes.dart';
 import 'asset_overview.dart' show normalizeCurrency;
+import 'currency_rates.dart' show worldCurrencies;
 import 'csv_excel_codec.dart';
+import 'haohao_import_rules.dart';
+import 'qianji_import_rules.dart';
+import 'receipt_diy_rules.dart' show maxBillImages, validateAttachmentFileName;
 
 /// 15-column header for standard CSV export (with currency column, §2.2 / R8).
 const List<String> csvExportHeader15 = [
@@ -317,18 +322,69 @@ final class SheetDateParser {
   }
 }
 
+/// Flexibly parses a date/time string across all supported import formats
+/// (used by 钱迹 & 好好记账 where `:ss` and `:mm` or date-only rows may coexist).
+({int epochMs, String pattern})? parseFlexibleImportDateTime(String raw) {
+  var s = raw.trim();
+  if (s.isEmpty) return null;
+  if (s.contains('T')) {
+    s = s
+        .replaceFirst('T', ' ')
+        .replaceFirst(RegExp(r'(?:Z|[+-]\d{2}:?\d{2})$'), '')
+        .replaceFirst(RegExp(r'\.\d+$'), '')
+        .trim();
+  }
+  if (s.contains('年')) {
+    s = s
+        .replaceAll('年', '-')
+        .replaceAll('月', '-')
+        .replaceAll('日', '')
+        .replaceAll('号', '')
+        .trim();
+  }
+
+  for (final candidate in ImportDatePattern.values) {
+    final ms = SheetDateParser._tryMatch(
+      s,
+      candidate,
+      allowMinuteFallbackFromSec: false,
+    );
+    if (ms != null) {
+      return (epochMs: ms, pattern: candidate.pattern);
+    }
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // Exact Decimal Amount Parser (R2: HALF_UP to minor units, ZERO double math!)
 // ---------------------------------------------------------------------------
 
-/// Strips `,`, `¥`, `￥`, `$`, `元`, `金额` and whitespace, then parses exact
-/// decimal or scientific notation to `int64` minor units using `HALF_UP`.
+/// Strips `,`, currency symbols (`¥`, `￥`, `$`, `€`, `£`, `HK$`, etc.), `元`, `金额`
+/// and whitespace, then parses exact decimal or scientific notation to `int64`
+/// minor units using `HALF_UP`.
 BigInt? parseImportAmountMinor(String raw) {
   var cleaned = raw
       .replaceAll(',', '')
+      .replaceAll('HK\$', '')
+      .replaceAll('US\$', '')
+      .replaceAll('NT\$', '')
+      .replaceAll('MOP\$', '')
+      .replaceAll('NZ\$', '')
+      .replaceAll('JP¥', '')
+      .replaceAll('JP￥', '')
       .replaceAll('\u00A5', '') // ¥
       .replaceAll('\uFFE5', '') // ￥
       .replaceAll(r'$', '')
+      .replaceAll('€', '')
+      .replaceAll('£', '')
+      .replaceAll('₩', '')
+      .replaceAll('฿', '')
+      .replaceAll('₽', '')
+      .replaceAll('₫', '')
+      .replaceAll('₱', '')
+      .replaceAll('₹', '')
+      .replaceAll('₺', '')
       .replaceAll('金额', '')
       .replaceAll('元', '')
       .replaceAll(RegExp(r'\s+'), '')
@@ -370,16 +426,261 @@ BigInt? parseImportAmountMinor(String raw) {
   }
 }
 
+/// Normalizes currency codes, symbols (`￥`/`¥`->`CNY`, `$`->`USD`, `€`->`EUR`,
+/// `HK$`->`HKD`, `JP¥`->`JPY`, etc.), and localized names to ISO 4217 uppercase codes.
+String? normalizeImportCurrencyCode(String? raw) {
+  if (raw == null) return null;
+  final trimmed = raw.trim();
+  if (trimmed.isEmpty) return null;
+
+  const symbolAndAliasMap = <String, String>{
+    '￥': 'CNY',
+    '¥': 'CNY',
+    'CN¥': 'CNY',
+    'CN￥': 'CNY',
+    'RMB': 'CNY',
+    'CNH': 'CNY',
+    '人民币': 'CNY',
+    '元': 'CNY',
+    r'$': 'USD',
+    r'US$': 'USD',
+    r'U$': 'USD',
+    '美元': 'USD',
+    '美金': 'USD',
+    '€': 'EUR',
+    '欧元': 'EUR',
+    r'HK$': 'HKD',
+    '港币': 'HKD',
+    '港元': 'HKD',
+    'JP¥': 'JPY',
+    'JP￥': 'JPY',
+    'J¥': 'JPY',
+    'J￥': 'JPY',
+    '日元': 'JPY',
+    '日币': 'JPY',
+    '£': 'GBP',
+    'UK£': 'GBP',
+    '英镑': 'GBP',
+    r'NT$': 'TWD',
+    'NTD': 'TWD',
+    '新台币': 'TWD',
+    '台币': 'TWD',
+    r'MOP$': 'MOP',
+    '澳门元': 'MOP',
+    '葡币': 'MOP',
+    r'S$': 'SGD',
+    r'SG$': 'SGD',
+    '新加坡元': 'SGD',
+    '新币': 'SGD',
+    r'A$': 'AUD',
+    r'AU$': 'AUD',
+    '澳元': 'AUD',
+    '澳币': 'AUD',
+    r'C$': 'CAD',
+    r'CA$': 'CAD',
+    '加元': 'CAD',
+    '加币': 'CAD',
+    r'NZ$': 'NZD',
+    '新西兰元': 'NZD',
+    '纽元': 'NZD',
+    '₩': 'KRW',
+    'KR₩': 'KRW',
+    '韩元': 'KRW',
+    '韩币': 'KRW',
+    '฿': 'THB',
+    '泰铢': 'THB',
+    'RM': 'MYR',
+    '林吉特': 'MYR',
+    '马币': 'MYR',
+    '马来西亚林吉特': 'MYR',
+    '₽': 'RUB',
+    '卢布': 'RUB',
+    '俄罗斯卢布': 'RUB',
+    '₫': 'VND',
+    '越南盾': 'VND',
+    '₱': 'PHP',
+    '菲律宾比索': 'PHP',
+    'RP': 'IDR',
+    'Rp': 'IDR',
+    '印尼盾': 'IDR',
+    '₹': 'INR',
+    '印度卢比': 'INR',
+    '₺': 'TRY',
+    '土耳其里拉': 'TRY',
+    '瑞郎': 'CHF',
+    '瑞士法郎': 'CHF',
+  };
+
+  final mapped =
+      symbolAndAliasMap[trimmed] ?? symbolAndAliasMap[trimmed.toUpperCase()];
+  if (mapped != null) return mapped;
+
+  if (RegExp(r'^[A-Za-z]{3,8}$').hasMatch(trimmed)) {
+    final upper = trimmed.toUpperCase();
+    if (upper == 'RMB' || upper == 'CNH') return 'CNY';
+    if (upper == 'NTD') return 'TWD';
+    return upper;
+  }
+
+  for (final spec in worldCurrencies) {
+    if (spec.name == trimmed || spec.symbol == trimmed) {
+      return spec.code;
+    }
+  }
+  return normalizeCurrency(trimmed);
+}
+
+/// Resolves embedded `.xlsx` media bytes and/or `.zip` bundle image bytes for a row,
+/// falling back to validated relative attachment filenames (capped at 9).
+({List<String> fileNames, List<Uint8List> imageBytes}) resolveImportCellImages({
+  required String rawCell,
+  required List<Uint8List> preExtracted,
+  Uint8List? Function(String rawRef)? bundleResolver,
+}) {
+  final bytesList = <Uint8List>[];
+  for (final img in preExtracted) {
+    if (img.isEmpty) continue;
+    bytesList.add(img);
+    if (bytesList.length >= maxBillImages) break;
+  }
+
+  final tokens = <String>[
+    if (rawCell.trim().isNotEmpty)
+      for (final part in rawCell.split(RegExp(r'[,;\n\r]+')))
+        if (part.trim().isNotEmpty) part.trim(),
+  ];
+
+  if (bundleResolver != null && bytesList.length < maxBillImages) {
+    for (final token in tokens) {
+      final resolved = bundleResolver(token);
+      if (resolved != null && resolved.isNotEmpty) {
+        bytesList.add(resolved);
+        if (bytesList.length >= maxBillImages) break;
+      }
+    }
+  }
+
+  if (bytesList.isNotEmpty) {
+    return (fileNames: const <String>[], imageBytes: bytesList);
+  }
+
+  final safeNames = <String>[];
+  final seen = <String>{};
+  for (final token in tokens) {
+    final lower = token.toLowerCase();
+    if (lower.startsWith('http://') || lower.startsWith('https://')) continue;
+    try {
+      final safe = validateAttachmentFileName(token);
+      if (seen.add(safe)) {
+        safeNames.add(safe);
+        if (safeNames.length >= maxBillImages) break;
+      }
+    } on Failure {
+      // Skip non-local paths when no bundle/embedded bytes are available.
+    }
+  }
+  return (fileNames: safeNames, imageBytes: const <Uint8List>[]);
+}
+
 // ---------------------------------------------------------------------------
 // Platform Converters & Row Validation (R2..R4, §2.2, §6.2, §6.3)
 // ---------------------------------------------------------------------------
 
 final class ImportAccountRef {
-  const ImportAccountRef({required this.id, required this.name, this.currency});
+  const ImportAccountRef({
+    required this.id,
+    required this.name,
+    this.currency,
+    this.type = AssetType.normal,
+    this.subType = noRef,
+  });
 
   final int id;
   final String name;
   final String? currency;
+  final int type;
+  final int subType;
+}
+
+/// Helper indexing funding accounts (`type != 4`) and debt projects (`type == 4`).
+final class ImportAccountLookup {
+  ImportAccountLookup(Iterable<ImportAccountRef> accounts) {
+    for (final a in accounts) {
+      final trimmed = a.name.trim();
+      if (trimmed.isEmpty) continue;
+      if (a.type == AssetType.debt) {
+        _debtsByName.putIfAbsent(trimmed, () => a);
+        if (a.subType != noRef) {
+          _debtsByNameAndSub.putIfAbsent((trimmed, a.subType), () => a);
+        }
+      } else {
+        _fundingByName.putIfAbsent(trimmed, () => a);
+      }
+    }
+  }
+
+  final Map<String, ImportAccountRef> _fundingByName = {};
+  final Map<String, ImportAccountRef> _debtsByName = {};
+  final Map<(String, int), ImportAccountRef> _debtsByNameAndSub = {};
+
+  ImportAccountRef? findFunding(String name) => _fundingByName[name.trim()];
+
+  ImportAccountRef? findDebt(String name, [int debtSubType = noRef]) {
+    final trimmed = name.trim();
+    if (debtSubType != noRef) {
+      final exact = _debtsByNameAndSub[(trimmed, debtSubType)];
+      if (exact != null) return exact;
+    }
+    return _debtsByName[trimmed];
+  }
+}
+
+/// Child specification for a linked `RecordType.reimburseReceipt (15)` bill.
+final class ImportReimburseChildSpec {
+  const ImportReimburseChildSpec({
+    required this.recordTime,
+    required this.moneyMinor,
+    this.assetName = '',
+    this.currencyCode,
+    this.remark = '',
+    this.tags = const [],
+    this.images = const [],
+    this.embeddedImageBytes = const [],
+  });
+
+  final int recordTime;
+  final BigInt moneyMinor;
+  final String assetName;
+  final String? currencyCode;
+  final String remark;
+  final List<String> tags;
+  final List<String> images;
+  final List<Uint8List> embeddedImageBytes;
+}
+
+/// Child specification for a linked negative refund bill (`rel_info.lrefundi`).
+final class ImportRefundChildSpec {
+  const ImportRefundChildSpec({
+    required this.recordTime,
+    required this.moneyMinor,
+    this.assetName = '',
+    this.currencyCode,
+    this.remark = '',
+    this.tags = const [],
+    this.images = const [],
+    this.embeddedImageBytes = const [],
+  });
+
+  final int recordTime;
+
+  /// Positive magnitude of the refund; stored as `-moneyMinor` on the child record.
+  final BigInt moneyMinor;
+  final String assetName;
+  final String? currencyCode;
+  final String remark;
+  final List<String> tags;
+  final List<String> images;
+  final List<Uint8List> embeddedImageBytes;
 }
 
 final class ValidImportRow {
@@ -388,34 +689,48 @@ final class ValidImportRow {
     required this.rowNo,
     required this.recordTime,
     required this.type,
+    this.subType = RecordDirection.none,
     required this.moneyMinor,
     required this.parentCategoryName,
     this.subCategoryName = '',
     this.assetName = '',
     this.toAssetName = '',
+    this.debtName = '',
+    this.debtSubType = noRef,
     this.resolvedAssetId = noRef,
     this.resolvedFromAssetId = noRef,
     this.resolvedToAssetId = noRef,
     this.bookName = '',
     this.currencyCode,
+    this.targetCurrencyCode,
+    this.targetMoneyMinor,
+    this.explicitCurrencySnapshot,
+    this.explicitRateToAnchor,
     this.remark = '',
     this.tags = const [],
     this.images = const [],
+    this.embeddedImageBytes = const [],
     BigInt? feeMinor,
     this.discountMinor,
     this.excludeBudget = false,
     this.excludeExIn = false,
+    this.reimburseChildren = const [],
+    this.refundChildren = const [],
+    this.sourceRecordKey,
   }) : feeMinor = feeMinor ?? BigInt.zero;
 
   final int sheetNo;
   final int rowNo;
   final int recordTime;
   final int type;
+  final int subType;
   final BigInt moneyMinor;
   final String parentCategoryName;
   final String subCategoryName;
   final String assetName;
   final String toAssetName;
+  final String debtName;
+  final int debtSubType;
   final int resolvedAssetId;
   final int resolvedFromAssetId;
   final int resolvedToAssetId;
@@ -425,13 +740,21 @@ final class ValidImportRow {
   int get toAssetId => resolvedToAssetId;
   final String bookName;
   final String? currencyCode;
+  final String? targetCurrencyCode;
+  final BigInt? targetMoneyMinor;
+  final CurrencySnapshot? explicitCurrencySnapshot;
+  final Map<String, String>? explicitRateToAnchor;
   final String remark;
   final List<String> tags;
   final List<String> images;
+  final List<Uint8List> embeddedImageBytes;
   final BigInt feeMinor;
   final BigInt? discountMinor;
   final bool excludeBudget;
   final bool excludeExIn;
+  final List<ImportReimburseChildSpec> reimburseChildren;
+  final List<ImportRefundChildSpec> refundChildren;
+  final String? sourceRecordKey;
 }
 
 final class ImportFailItem {
@@ -459,6 +782,8 @@ final class SpreadsheetImportAnalysis {
     required this.unknownAssets,
     required this.lockedDateFormats,
     this.textEncoding,
+    this.defaultAutoCreateAccounts = false,
+    this.mergedChildRowCount = 0,
   });
 
   final String platformName;
@@ -471,8 +796,15 @@ final class SpreadsheetImportAnalysis {
   final Map<int, String> lockedDateFormats;
   final CsvTextEncoding? textEncoding;
 
-  /// `import_record_count` stored in `import_platform`: valid + bad rows, excluding empty rows (§2.1).
-  int get totalRecordCount => validRows.length + failRows.length;
+  /// `true` for 钱迹 & 好好记账, `false` for Official Templates, Standard CSV, WeChat, Alipay.
+  final bool defaultAutoCreateAccounts;
+
+  /// Count of separate child rows (e.g. 钱迹 `报销记录` / `退款`) merged onto parent rows.
+  final int mergedChildRowCount;
+
+  /// `import_record_count` stored in `import_platform`: valid + merged children + bad rows, excluding empty rows (§2.1).
+  int get totalRecordCount =>
+      validRows.length + mergedChildRowCount + failRows.length;
 }
 
 final class _ResolvedSheetBinding {
@@ -531,9 +863,38 @@ final class _ResolvedSheetBinding {
 SpreadsheetImportAnalysis analyzeSpreadsheetImport({
   required DecodedSpreadsheet spreadsheet,
   required Iterable<ImportAccountRef> existingAccounts,
+  Map<int, Map<int, List<Uint8List>>> xlsxEmbeddedImagesBySheet = const {},
+  Uint8List? Function(String rawRef)? bundleImageResolver,
+  bool? allowUnknownTransferAccounts,
 }) {
+  // Check third-party rich formats (钱迹 & 好好记账) on the first non-empty sheet.
+  for (final sheet in spreadsheet.sheets) {
+    if (_isSheetCompletelyEmpty(sheet.rows)) continue;
+    if (tryMatchQianjiSheetHeader(sheet.rows) != null) {
+      return analyzeQianjiSpreadsheetImport(
+        spreadsheet: spreadsheet,
+        existingAccounts: existingAccounts,
+        xlsxEmbeddedImagesBySheet: xlsxEmbeddedImagesBySheet,
+        bundleImageResolver: bundleImageResolver,
+        allowUnknownTransferAccounts: allowUnknownTransferAccounts,
+      );
+    }
+    if (tryMatchHaohaoSheetHeader(sheet.rows) != null) {
+      return analyzeHaohaoSpreadsheetImport(
+        spreadsheet: spreadsheet,
+        existingAccounts: existingAccounts,
+        xlsxEmbeddedImagesBySheet: xlsxEmbeddedImagesBySheet,
+        bundleImageResolver: bundleImageResolver,
+        allowUnknownTransferAccounts: allowUnknownTransferAccounts,
+      );
+    }
+    break;
+  }
+
+  final allowUnknownTransfers = allowUnknownTransferAccounts ?? false;
   final accountsByName = <String, ImportAccountRef>{};
   for (final a in existingAccounts) {
+    if (a.type == AssetType.debt) continue;
     final trimmed = a.name.trim();
     if (trimmed.isNotEmpty) {
       accountsByName.putIfAbsent(trimmed, () => a);
@@ -558,6 +919,9 @@ SpreadsheetImportAnalysis analyzeSpreadsheetImport({
       continue;
     }
     primaryBinding ??= binding;
+    final sheetImages =
+        xlsxEmbeddedImagesBySheet[sheet.sheetNo] ??
+        const <int, List<Uint8List>>{};
 
     final dateParser = SheetDateParser();
     for (
@@ -695,7 +1059,9 @@ SpreadsheetImportAnalysis analyzeSpreadsheetImport({
         }
         final fromAcc = asset1Name.isEmpty ? null : accountsByName[asset1Name];
         final toAcc = asset2Name.isEmpty ? null : accountsByName[asset2Name];
-        if (fromAcc == null || toAcc == null) {
+        if (asset1Name.isEmpty ||
+            asset2Name.isEmpty ||
+            (!allowUnknownTransfers && (fromAcc == null || toAcc == null))) {
           failRows.add(
             ImportFailItem(
               sheetNo: sheet.sheetNo,
@@ -707,8 +1073,10 @@ SpreadsheetImportAnalysis analyzeSpreadsheetImport({
           );
           continue;
         }
-        resolvedFromId = fromAcc.id;
-        resolvedToId = toAcc.id;
+        if (fromAcc == null) unknownAssetsSet.add(asset1Name);
+        if (toAcc == null) unknownAssetsSet.add(asset2Name);
+        resolvedFromId = fromAcc?.id ?? noRef;
+        resolvedToId = toAcc?.id ?? noRef;
       } else if (asset1Name.isNotEmpty) {
         final matched = accountsByName[asset1Name];
         if (matched != null) {
@@ -782,7 +1150,7 @@ SpreadsheetImportAnalysis analyzeSpreadsheetImport({
         }
       }
 
-      // 7. Remark (200-char cap), Tags (strip '#', max 8), Images (max 3), Booleans
+      // 7. Remark (200-char cap), Tags (strip '#', max 8), Images, Booleans
       final remarkParts = <String>[];
       for (final rc in binding.remarkCols) {
         final part = cell(rc);
@@ -791,11 +1159,29 @@ SpreadsheetImportAnalysis analyzeSpreadsheetImport({
       final remark = truncateRunes(remarkParts.join(' - '), 200);
 
       final tags = _parseImportTags(cell(binding.tagCol));
-      final images = _parseImportImages(cell(binding.imageCol));
+      final rawImgCell = cell(binding.imageCol);
+      final preEmbedded = sheetImages[rIdx] ?? const <Uint8List>[];
+      final List<String> images;
+      final List<Uint8List> embeddedImageBytes;
+      if (preEmbedded.isNotEmpty || bundleImageResolver != null) {
+        final imgRes = resolveImportCellImages(
+          rawCell: rawImgCell,
+          preExtracted: preEmbedded,
+          bundleResolver: bundleImageResolver,
+        );
+        images = imgRes.fileNames;
+        embeddedImageBytes = imgRes.imageBytes;
+      } else {
+        images = _parseImportImages(rawImgCell);
+        embeddedImageBytes = const <Uint8List>[];
+      }
+
       final excludeBudget = _parseImportBool(cell(binding.excludeBudgetCol));
       final excludeExIn = _parseImportBool(cell(binding.excludeExInCol));
       final bookName = truncateRunes(cell(binding.bookCol), 30);
-      final currencyCode = normalizeCurrency(cell(binding.currencyCol));
+      final currencyCode = normalizeImportCurrencyCode(
+        cell(binding.currencyCol),
+      );
 
       validRows.add(
         ValidImportRow(
@@ -816,6 +1202,7 @@ SpreadsheetImportAnalysis analyzeSpreadsheetImport({
           remark: remark,
           tags: tags,
           images: images,
+          embeddedImageBytes: embeddedImageBytes,
           feeMinor: feeMinor,
           discountMinor: discountMinor,
           excludeBudget: excludeBudget,
@@ -828,7 +1215,7 @@ SpreadsheetImportAnalysis analyzeSpreadsheetImport({
   if (primaryBinding == null) {
     throw const Failure(
       FailureCode.validation,
-      '不支持的平台或表头格式，请使用官方模板（v1~v3）、本应用导出 CSV、微信或支付宝账单',
+      '不支持的平台或表头格式，请使用官方模板（v1~v3）、本应用导出 CSV、钱迹、好好记账、微信或支付宝账单',
     );
   }
 
@@ -842,6 +1229,7 @@ SpreadsheetImportAnalysis analyzeSpreadsheetImport({
     unknownAssets: unknownAssetsSet.toList(growable: false),
     lockedDateFormats: lockedFormats,
     textEncoding: spreadsheet.textEncoding,
+    defaultAutoCreateAccounts: false,
   );
 }
 

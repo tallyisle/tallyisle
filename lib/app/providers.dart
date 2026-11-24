@@ -82,6 +82,7 @@ final class PeriodOffset extends Notifier<int> {
   void previous() => state = state - 1;
   void next() => state = state + 1;
   void reset() => state = 0;
+  void setOffset(int offset) => state = offset;
 }
 
 final periodOffsetProvider = NotifierProvider<PeriodOffset, int>(
@@ -226,18 +227,39 @@ final calendarMonthOffsetProvider = NotifierProvider<CalendarMonthOffset, int>(
   CalendarMonthOffset.new,
 );
 
-final calendarCurrentMonthProvider = Provider<CalendarMonth>((ref) {
-  final offset = ref.watch(calendarMonthOffsetProvider);
+final calendarMonthForOffsetProvider = Provider.family<CalendarMonth, int>((
+  ref,
+  offset,
+) {
   final now = DateTime.now();
   return CalendarMonth(now.year, now.month + offset);
 });
 
+final calendarCurrentMonthProvider = Provider<CalendarMonth>((ref) {
+  final offset = ref.watch(calendarMonthOffsetProvider);
+  return ref.watch(calendarMonthForOffsetProvider(offset));
+});
+
+final calendarRecordsForOffsetProvider =
+    StreamProvider.family<List<LedgerRecord>, int>((ref, offset) async* {
+      final q = await ref.watch(queriesProvider.future);
+      final bookId = await ref.watch(currentBookIdProvider.future);
+      final month = ref.watch(calendarMonthForOffsetProvider(offset));
+      yield* q.watchRecords(
+        bookId,
+        month.startMs,
+        month.endMs,
+        includeBalanceAdjust: false,
+      );
+    });
+
 final calendarRecordsProvider = StreamProvider<List<LedgerRecord>>((
   ref,
 ) async* {
+  final offset = ref.watch(calendarMonthOffsetProvider);
   final q = await ref.watch(queriesProvider.future);
   final bookId = await ref.watch(currentBookIdProvider.future);
-  final month = ref.watch(calendarCurrentMonthProvider);
+  final month = ref.watch(calendarMonthForOffsetProvider(offset));
   yield* q.watchRecords(
     bookId,
     month.startMs,
@@ -246,10 +268,13 @@ final calendarRecordsProvider = StreamProvider<List<LedgerRecord>>((
   );
 });
 
-final calendarDailySummariesProvider =
-    Provider<AsyncValue<Map<int, CalendarDailySummary<LedgerRecord>>>>((ref) {
-      final month = ref.watch(calendarCurrentMonthProvider);
-      final recordsAsync = ref.watch(calendarRecordsProvider);
+final calendarDailySummariesForOffsetProvider =
+    Provider.family<
+      AsyncValue<Map<int, CalendarDailySummary<LedgerRecord>>>,
+      int
+    >((ref, offset) {
+      final month = ref.watch(calendarMonthForOffsetProvider(offset));
+      final recordsAsync = ref.watch(calendarRecordsForOffsetProvider(offset));
       return recordsAsync.whenData(
         (records) => summarizeCalendarMonth(
           month,
@@ -260,11 +285,23 @@ final calendarDailySummariesProvider =
       );
     });
 
+final calendarDailySummariesProvider =
+    Provider<AsyncValue<Map<int, CalendarDailySummary<LedgerRecord>>>>((ref) {
+      final offset = ref.watch(calendarMonthOffsetProvider);
+      return ref.watch(calendarDailySummariesForOffsetProvider(offset));
+    });
+
+final calendarMonthSummaryForOffsetProvider =
+    Provider.family<AsyncValue<IncomeExpense>, int>((ref, offset) {
+      final recordsAsync = ref.watch(calendarRecordsForOffsetProvider(offset));
+      return recordsAsync.whenData(
+        (records) => aggregateIncomeExpense(records.map(statEntryOf)),
+      );
+    });
+
 final calendarMonthSummaryProvider = Provider<AsyncValue<IncomeExpense>>((ref) {
-  final recordsAsync = ref.watch(calendarRecordsProvider);
-  return recordsAsync.whenData(
-    (records) => aggregateIncomeExpense(records.map(statEntryOf)),
-  );
+  final offset = ref.watch(calendarMonthOffsetProvider);
+  return ref.watch(calendarMonthSummaryForOffsetProvider(offset));
 });
 
 final catalogServiceProvider = FutureProvider<CatalogService>(

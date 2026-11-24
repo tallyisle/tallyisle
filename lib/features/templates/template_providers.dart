@@ -52,12 +52,16 @@ final allRemarksProvider = StreamProvider.family<List<Remark>, int?>((
   yield* svc.watchAllRemarks(categoryId: categoryId);
 });
 
-final allBookCategoriesMapProvider = FutureProvider<Map<int, RecordCategory>>((
+final allBookCategoriesMapProvider = StreamProvider<Map<int, RecordCategory>>((
   ref,
-) async {
-  final db = await ref.watch(databaseProvider.future);
-  final rows = await db.select(db.recordCategories).get();
-  return <int, RecordCategory>{for (final r in rows) r.id: r};
+) {
+  final dbFuture = ref.watch(databaseProvider.future);
+  return Stream<AppDatabase>.fromFuture(dbFuture).asyncExpand(
+    (db) => db
+        .select(db.recordCategories)
+        .watch()
+        .map((rows) => <int, RecordCategory>{for (final r in rows) r.id: r}),
+  );
 });
 
 /// Selected type filter on `TemplatesPage` (`null` = 全部, or a `RecordType`).

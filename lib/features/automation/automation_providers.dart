@@ -5,10 +5,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
 import '../../data/automation/auto_bill_service.dart';
+import '../../data/automation/mcp_server_service.dart';
 import '../../data/automation/ocr_service.dart';
 import '../../data/automation/url_scheme_service.dart';
 import '../../data/automation/widget_snapshot_service.dart';
 import '../../domain/rules/auto_map_rules.dart';
+import '../../domain/rules/mcp_rules.dart';
 import '../../domain/rules/ocr_bill_rules.dart';
 import '../../platform/app_widgets.dart';
 import '../../platform/auto_bill_bridge.dart';
@@ -115,4 +117,21 @@ final ocrConfigProvider = StreamProvider<OcrEndpointConfig>((ref) async* {
 final ocrProviderInstanceProvider = StreamProvider<OcrProvider>((ref) async* {
   final service = await ref.watch(ocrServiceProvider.future);
   yield* service.watchProvider();
+});
+
+final mcpServerServiceProvider = FutureProvider<McpServerService>((ref) async {
+  final db = await ref.watch(databaseProvider.future);
+  final service = McpServerService(db);
+  ref.onDispose(() => unawaited(service.dispose()));
+  return service;
+});
+
+final mcpServerConfigProvider = StreamProvider<McpServerConfig>((ref) async* {
+  final service = await ref.watch(mcpServerServiceProvider.future);
+  yield* service.watchConfig();
+});
+
+final mcpRuntimeStatusProvider = StreamProvider<McpRuntimeStatus>((ref) async* {
+  final service = await ref.watch(mcpServerServiceProvider.future);
+  yield* service.watchRuntimeStatus();
 });

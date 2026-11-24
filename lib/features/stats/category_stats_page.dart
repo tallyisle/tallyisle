@@ -1,13 +1,20 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../app/adaptive.dart';
 import '../../app/providers.dart';
 import '../../data/db/database.dart';
 import '../../domain/model/codes.dart';
+import '../../domain/rules/billing_period.dart';
 import '../../domain/rules/category_stats.dart';
 import '../common/catalog_icons.dart';
 import '../common/common.dart';
+import '../common/desktop_modal_page.dart';
+import '../common/year_month_picker_dialog.dart';
+import '../records/record_detail_page.dart';
 import 'category_stats_providers.dart';
 
 /// Main category statistics page (F-008 / SCR-005, original `/anz/ADAct`).
@@ -22,6 +29,22 @@ class _CategoryStatsPageState extends ConsumerState<CategoryStatsPage> {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (ref.read(categoryStatsRangeKindProvider) == StatRangeKind.custom) {
+        ref
+            .read(categoryStatsRangeKindProvider.notifier)
+            .setRangeKind(StatRangeKind.month);
+      }
+      if (ref.read(categoryStatsOffsetProvider) != 0) {
+        ref.read(categoryStatsOffsetProvider.notifier).reset();
+      }
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     final dimension = ref.watch(categoryStatsDimensionProvider);
     final rangeKind = ref.watch(categoryStatsRangeKindProvider);
@@ -31,9 +54,91 @@ class _CategoryStatsPageState extends ConsumerState<CategoryStatsPage> {
     final resultAsync = ref.watch(categoryStatsResultProvider);
 
     final theme = Theme.of(context);
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    final isExpandedDesktop = DesktopAdaptive.isExpandedDesktop(context);
+
+    final dimensionSwitch = SegmentedButton<StatDimension>(
+      key: const Key('stat-dimension-switch'),
+      showSelectedIcon: false,
+      style: const ButtonStyle(
+        visualDensity: VisualDensity.compact,
+        padding: WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: 12)),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
+      segments: const [
+        ButtonSegment(
+          value: StatDimension.expense,
+          label: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text('支出', maxLines: 1, softWrap: false),
+          ),
+          icon: Icon(Icons.arrow_upward, size: 18),
+        ),
+        ButtonSegment(
+          value: StatDimension.income,
+          label: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text('收入', maxLines: 1, softWrap: false),
+          ),
+          icon: Icon(Icons.arrow_downward, size: 18),
+        ),
+      ],
+      selected: {dimension},
+      onSelectionChanged: (set) {
+        if (set.isNotEmpty) {
+          ref
+              .read(categoryStatsDimensionProvider.notifier)
+              .setDimension(set.first);
+        }
+      },
+    );
+
+    final headerSummaryWidget = resultAsync.when(
+      data: (res) => _HeaderSummaryCard(result: res),
+      loading: () => const Card(
+        child: SizedBox(
+          height: 100,
+          child: Center(child: CircularProgressIndicator()),
+        ),
+      ),
+      error: (e, _) => Card(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Text('加载统计失败: $e'),
+        ),
+      ),
+    );
+
+    final trendChartWidget = resultAsync.when(
+      data: (res) => _TrendChartCard(
+        buckets: res.trendBuckets,
+        smoothing: smoothing,
+        dimension: dimension,
+      ),
+      loading: () => const SizedBox.shrink(),
+      error: (_, _) => const SizedBox.shrink(),
+    );
+
+    final rankingsWidget = resultAsync.when(
+      data: (res) => _CategoryRankingsCard(result: res, isFlatten: isFlatten),
+      loading: () => const Center(
+        child: Padding(
+          padding: EdgeInsets.all(24),
+          child: CircularProgressIndicator(),
+        ),
+      ),
+      error: (e, _) => Center(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Text('加载分类排行失败: $e'),
+        ),
+      ),
+    );
 
     return Scaffold(
       key: _scaffoldKey,
+      drawerEdgeDragWidth: 0,
+      endDrawerEnableOpenDragGesture: false,
       appBar: AppBar(
         title: const Text('分类统计'),
         actions: [
@@ -63,106 +168,143 @@ class _CategoryStatsPageState extends ConsumerState<CategoryStatsPage> {
         ],
       ),
       endDrawer: const _CategoryStatsFilterDrawer(),
-      body: ListView(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        children: [
-          // 1. Dimension Switch: Expense / Income
-          SizedBox(
-            width: double.infinity,
-            child: SegmentedButton<StatDimension>(
-              key: const Key('stat-dimension-switch'),
-              showSelectedIcon: false,
-              style: const ButtonStyle(
-                visualDensity: VisualDensity.compact,
-                padding: WidgetStatePropertyAll(
-                  EdgeInsets.symmetric(horizontal: 12),
-                ),
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-              segments: const [
-                ButtonSegment(
-                  value: StatDimension.expense,
-                  label: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: Text('支出', maxLines: 1, softWrap: false),
+      body: isExpandedDesktop
+          ? Column(
+              children: [
+                Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 1440),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 20,
+                        vertical: 8,
+                      ),
+                      child: Row(
+                        children: [
+                          SizedBox(width: 210, child: dimensionSwitch),
+                          const SizedBox(width: 20),
+                          Expanded(
+                            child: _PeriodNavigationBar(
+                              rangeKind: rangeKind,
+                              periodAsync: periodAsync,
+                              compactDesktop: true,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
-                  icon: Icon(Icons.arrow_upward, size: 18),
                 ),
-                ButtonSegment(
-                  value: StatDimension.income,
-                  label: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: Text('收入', maxLines: 1, softWrap: false),
+                const Divider(height: 1),
+                Expanded(
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 1440),
+                      child: Row(
+                        key: const Key('category-stats-desktop-split'),
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Expanded(
+                            flex: 46,
+                            child: ListView(
+                              key: const Key('category-stats-left-pane'),
+                              padding: const EdgeInsets.fromLTRB(
+                                20,
+                                14,
+                                10,
+                                24,
+                              ),
+                              children: [
+                                Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    headerSummaryWidget,
+                                    const SizedBox(height: 16),
+                                    resultAsync.when(
+                                      data: (res) => _CategoryDonutChartCard(
+                                        key: const Key(
+                                          'category-stats-donut-card',
+                                        ),
+                                        result: res,
+                                        isFlatten: isFlatten,
+                                      ),
+                                      loading: () => const SizedBox.shrink(),
+                                      error: (_, _) => const SizedBox.shrink(),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 16),
+                                trendChartWidget,
+                              ],
+                            ),
+                          ),
+                          const VerticalDivider(width: 1),
+                          Expanded(
+                            flex: 54,
+                            child: ListView(
+                              key: const Key('category-stats-right-pane'),
+                              padding: const EdgeInsets.fromLTRB(
+                                10,
+                                14,
+                                20,
+                                24,
+                              ),
+                              children: [rankingsWidget],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
-                  icon: Icon(Icons.arrow_downward, size: 18),
                 ),
               ],
-              selected: {dimension},
-              onSelectionChanged: (set) {
-                if (set.isNotEmpty) {
-                  ref
-                      .read(categoryStatsDimensionProvider.notifier)
-                      .setDimension(set.first);
-                }
-              },
-            ),
-          ),
-          const SizedBox(height: 12),
+            )
+          : () {
+              final stackedList = ListView(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 8,
+                ),
+                children: [
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      // 1. Dimension Switch: Expense / Income
+                      SizedBox(width: double.infinity, child: dimensionSwitch),
+                      const SizedBox(height: 12),
 
-          // 2. Period Navigation Bar
-          _PeriodNavigationBar(rangeKind: rangeKind, periodAsync: periodAsync),
-          const SizedBox(height: 12),
+                      // 2. Period Navigation Bar
+                      _PeriodNavigationBar(
+                        rangeKind: rangeKind,
+                        periodAsync: periodAsync,
+                      ),
+                      const SizedBox(height: 12),
 
-          // 3. Header Summary Card
-          resultAsync.when(
-            data: (res) => _HeaderSummaryCard(result: res),
-            loading: () => const Card(
-              child: SizedBox(
-                height: 100,
-                child: Center(child: CircularProgressIndicator()),
-              ),
-            ),
-            error: (e, _) => Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Text('加载统计失败: $e'),
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
+                      // 3. Header Summary Card
+                      headerSummaryWidget,
+                    ],
+                  ),
+                  const SizedBox(height: 16),
 
-          // 4. Trend Line Chart
-          resultAsync.when(
-            data: (res) => _TrendChartCard(
-              buckets: res.trendBuckets,
-              smoothing: smoothing,
-              dimension: dimension,
-            ),
-            loading: () => const SizedBox.shrink(),
-            error: (_, _) => const SizedBox.shrink(),
-          ),
-          const SizedBox(height: 16),
+                  // 4. Trend Line Chart
+                  trendChartWidget,
+                  const SizedBox(height: 16),
 
-          // 5. Category Rankings Card
-          resultAsync.when(
-            data: (res) =>
-                _CategoryRankingsCard(result: res, isFlatten: isFlatten),
-            loading: () => const Center(
-              child: Padding(
-                padding: EdgeInsets.all(24),
-                child: CircularProgressIndicator(),
-              ),
-            ),
-            error: (e, _) => Center(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Text('加载分类排行失败: $e'),
-              ),
-            ),
-          ),
-          const SizedBox(height: 24),
-        ],
-      ),
+                  // 5. Category Rankings Card
+                  rankingsWidget,
+                  const SizedBox(height: 24),
+                ],
+              );
+              if (!isDesktop) return stackedList;
+              return Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 760),
+                  child: stackedList,
+                ),
+              );
+            }(),
     );
   }
 
@@ -176,14 +318,80 @@ class _PeriodNavigationBar extends ConsumerWidget {
   const _PeriodNavigationBar({
     required this.rangeKind,
     required this.periodAsync,
+    this.compactDesktop = false,
   });
 
   final StatRangeKind rangeKind;
-  final AsyncValue<dynamic> periodAsync;
+  final AsyncValue<BillingPeriod> periodAsync;
+  final bool compactDesktop;
+
+  Future<void> _onTapPeriodLabel(
+    BuildContext context,
+    WidgetRef ref,
+    int startDay,
+  ) async {
+    final now = DateTime.now();
+    if (rangeKind == StatRangeKind.custom) {
+      final current = periodAsync.value;
+      final picked = await showDateRangePicker(
+        context: context,
+        firstDate: DateTime(2000),
+        lastDate: DateTime(2100),
+        initialDateRange: current != null
+            ? DateTimeRange(start: current.start, end: current.end)
+            : DateTimeRange(
+                start: now.subtract(const Duration(days: 30)),
+                end: now,
+              ),
+      );
+      if (picked != null && context.mounted) {
+        ref
+            .read(categoryStatsCustomRangeProvider.notifier)
+            .setRange(picked.start, picked.end);
+      }
+      return;
+    }
+
+    if (rangeKind == StatRangeKind.year) {
+      final activeYearPeriod = BillingPeriod.containingYear(now, startDay);
+      final current = periodAsync.value ?? activeYearPeriod;
+      final pickedYear = await showYearOnlyPickerDialog(
+        context,
+        initialYear: current.year,
+        currentYear: activeYearPeriod.year,
+      );
+      if (pickedYear == null || !context.mounted) return;
+      final curYear = BillingPeriod.containingYear(
+        DateTime.now(),
+        startDay,
+      ).year;
+      ref
+          .read(categoryStatsOffsetProvider.notifier)
+          .setOffset(pickedYear - curYear);
+      return;
+    }
+
+    final activeMonthPeriod = BillingPeriod.containing(now, startDay);
+    final current = periodAsync.value ?? activeMonthPeriod;
+    final picked = await showYearMonthPickerDialog(
+      context,
+      initialYear: current.year,
+      initialMonth: current.month,
+      currentYear: activeMonthPeriod.year,
+      currentMonth: activeMonthPeriod.month,
+    );
+    if (picked == null || !context.mounted) return;
+    final nowPeriod = BillingPeriod.containing(DateTime.now(), startDay);
+    final newOffset =
+        (picked.year - nowPeriod.year) * 12 + (picked.month - nowPeriod.month);
+    ref.read(categoryStatsOffsetProvider.notifier).setOffset(newOffset);
+  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
+    final offset = ref.watch(categoryStatsOffsetProvider);
+    final startDay = ref.watch(currentBookProvider).value?.startDay ?? 1;
 
     String label = '加载中…';
     periodAsync.whenData((p) {
@@ -197,139 +405,151 @@ class _PeriodNavigationBar extends ConsumerWidget {
       }
     });
 
-    return Column(
+    final granularityChips = Wrap(
+      spacing: 8,
+      runSpacing: 4,
+      alignment: WrapAlignment.center,
       children: [
-        // Granularity Tabs
-        Wrap(
-          spacing: 8,
-          runSpacing: 4,
-          alignment: WrapAlignment.center,
-          children: [
-            ChoiceChip(
-              key: const Key('period-kind-month'),
-              label: const Text('按月'),
-              selected: rangeKind == StatRangeKind.month,
-              onSelected: (selected) {
-                if (selected) {
-                  ref
-                      .read(categoryStatsRangeKindProvider.notifier)
-                      .setRangeKind(StatRangeKind.month);
-                  ref.read(categoryStatsOffsetProvider.notifier).reset();
-                }
-              },
-            ),
-            ChoiceChip(
-              key: const Key('period-kind-year'),
-              label: const Text('按年'),
-              selected: rangeKind == StatRangeKind.year,
-              onSelected: (selected) {
-                if (selected) {
-                  ref
-                      .read(categoryStatsRangeKindProvider.notifier)
-                      .setRangeKind(StatRangeKind.year);
-                  ref.read(categoryStatsOffsetProvider.notifier).reset();
-                }
-              },
-            ),
-            ChoiceChip(
-              key: const Key('period-kind-custom'),
-              label: const Text('自定义'),
-              selected: rangeKind == StatRangeKind.custom,
-              onSelected: (selected) async {
-                if (selected) {
-                  final now = DateTime.now();
-                  final picked = await showDateRangePicker(
-                    context: context,
-                    firstDate: DateTime(2000),
-                    lastDate: DateTime(2100),
-                    initialDateRange: DateTimeRange(
-                      start: now.subtract(const Duration(days: 30)),
-                      end: now,
-                    ),
-                  );
-                  if (picked != null) {
-                    ref
-                        .read(categoryStatsRangeKindProvider.notifier)
-                        .setRangeKind(StatRangeKind.custom);
-                    ref
-                        .read(categoryStatsCustomRangeProvider.notifier)
-                        .setRange(picked.start, picked.end);
-                  }
-                }
-              },
-            ),
-          ],
+        ChoiceChip(
+          key: const Key('period-kind-month'),
+          label: const Text('按月'),
+          selected: rangeKind == StatRangeKind.month,
+          onSelected: (selected) {
+            if (selected) {
+              ref
+                  .read(categoryStatsRangeKindProvider.notifier)
+                  .setRangeKind(StatRangeKind.month);
+              ref.read(categoryStatsOffsetProvider.notifier).reset();
+            }
+          },
         ),
-        const SizedBox(height: 8),
+        ChoiceChip(
+          key: const Key('period-kind-year'),
+          label: const Text('按年'),
+          selected: rangeKind == StatRangeKind.year,
+          onSelected: (selected) {
+            if (selected) {
+              ref
+                  .read(categoryStatsRangeKindProvider.notifier)
+                  .setRangeKind(StatRangeKind.year);
+              ref.read(categoryStatsOffsetProvider.notifier).reset();
+            }
+          },
+        ),
+        ChoiceChip(
+          key: const Key('period-kind-custom'),
+          label: const Text('自定义'),
+          selected: rangeKind == StatRangeKind.custom,
+          onSelected: (selected) async {
+            if (selected) {
+              final now = DateTime.now();
+              final picked = await showDateRangePicker(
+                context: context,
+                firstDate: DateTime(2000),
+                lastDate: DateTime(2100),
+                initialDateRange: DateTimeRange(
+                  start: now.subtract(const Duration(days: 30)),
+                  end: now,
+                ),
+              );
+              if (picked != null && context.mounted) {
+                ref
+                    .read(categoryStatsRangeKindProvider.notifier)
+                    .setRangeKind(StatRangeKind.custom);
+                ref
+                    .read(categoryStatsCustomRangeProvider.notifier)
+                    .setRange(picked.start, picked.end);
+              }
+            }
+          },
+        ),
+      ],
+    );
 
-        // Navigation Arrows and Date Display
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            IconButton(
-              key: const Key('period-prev-button'),
-              tooltip: '上一周期',
-              icon: const Icon(Icons.chevron_left),
-              onPressed: rangeKind == StatRangeKind.custom
-                  ? null
-                  : () {
-                      ref.read(categoryStatsOffsetProvider.notifier).previous();
-                    },
-            ),
-            Expanded(
-              child: Center(
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(6),
-                  onTap: rangeKind == StatRangeKind.custom
-                      ? () async {
-                          final now = DateTime.now();
-                          final picked = await showDateRangePicker(
-                            context: context,
-                            firstDate: DateTime(2000),
-                            lastDate: DateTime(2100),
-                            initialDateRange: DateTimeRange(
-                              start: now.subtract(const Duration(days: 30)),
-                              end: now,
-                            ),
-                          );
-                          if (picked != null) {
-                            ref
-                                .read(categoryStatsCustomRangeProvider.notifier)
-                                .setRange(picked.start, picked.end);
-                          }
-                        }
-                      : null,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 6,
-                      vertical: 4,
-                    ),
-                    child: FittedBox(
-                      fit: BoxFit.scaleDown,
-                      child: Text(
-                        label,
-                        maxLines: 1,
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
+    final showResetPill = rangeKind != StatRangeKind.custom && offset != 0;
+
+    final periodSwitcherRow = Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        IconButton(
+          key: const Key('period-prev-button'),
+          tooltip: '上一周期',
+          icon: const Icon(Icons.chevron_left),
+          onPressed: rangeKind == StatRangeKind.custom
+              ? null
+              : () {
+                  ref.read(categoryStatsOffsetProvider.notifier).previous();
+                },
+        ),
+        Expanded(
+          child: Center(
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Flexible(
+                  child: InkWell(
+                    key: const Key('category-stats-period-picker-trigger'),
+                    borderRadius: BorderRadius.circular(8),
+                    onTap: () => _onTapPeriodLabel(context, ref, startDay),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 4,
+                      ),
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          label,
+                          maxLines: 1,
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                       ),
                     ),
                   ),
                 ),
-              ),
+                if (showResetPill) ...[
+                  const SizedBox(width: 6),
+                  PeriodResetPill(
+                    key: const Key('category-stats-period-reset'),
+                    label: rangeKind == StatRangeKind.year ? '回本年' : '回本月',
+                    onTap: () =>
+                        ref.read(categoryStatsOffsetProvider.notifier).reset(),
+                  ),
+                ],
+              ],
             ),
-            IconButton(
-              key: const Key('period-next-button'),
-              tooltip: '下一周期',
-              icon: const Icon(Icons.chevron_right),
-              onPressed: rangeKind == StatRangeKind.custom
-                  ? null
-                  : () {
-                      ref.read(categoryStatsOffsetProvider.notifier).next();
-                    },
-            ),
-          ],
+          ),
         ),
+        IconButton(
+          key: const Key('period-next-button'),
+          tooltip: '下一周期',
+          icon: const Icon(Icons.chevron_right),
+          onPressed: rangeKind == StatRangeKind.custom
+              ? null
+              : () {
+                  ref.read(categoryStatsOffsetProvider.notifier).next();
+                },
+        ),
+      ],
+    );
+
+    if (compactDesktop) {
+      return Row(
+        children: [
+          granularityChips,
+          const SizedBox(width: 16),
+          Expanded(child: periodSwitcherRow),
+        ],
+      );
+    }
+
+    return Column(
+      children: [
+        granularityChips,
+        const SizedBox(height: 8),
+        periodSwitcherRow,
       ],
     );
   }
@@ -529,6 +749,330 @@ class _HeaderSummaryCard extends StatelessWidget {
   }
 }
 
+/// Donut proportion chart card rendered on desktop widescreen left pane.
+class _CategoryDonutChartCard extends ConsumerWidget {
+  const _CategoryDonutChartCard({
+    super.key,
+    required this.result,
+    required this.isFlatten,
+  });
+
+  final CategoryStatsResult result;
+  final bool isFlatten;
+
+  static const _fallbackPalette = <Color>[
+    Color(0xFF3F51B5),
+    Color(0xFF009688),
+    Color(0xFFFF9800),
+    Color(0xFFE91E63),
+    Color(0xFF2196F3),
+    Color(0xFF8BC34A),
+    Color(0xFF9C27B0),
+    Color(0xFF795548),
+  ];
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final isExpense = result.dimension == StatDimension.expense;
+    final catType = isExpense ? RecordType.expense : RecordType.income;
+    final bookId = ref.watch(currentBookIdProvider).value ?? 1;
+    final categories =
+        ref.watch(categoriesProvider(bookId)).value ?? const <RecordCategory>[];
+    final catById = <int, RecordCategory>{for (final c in categories) c.id: c};
+
+    final rows = isFlatten ? result.flattenRows : result.firstLevelRows;
+    final slices = <_CategoryDonutSlice>[];
+    var totalSliceMinor = BigInt.zero;
+
+    for (var i = 0; i < rows.length; i++) {
+      final r = rows[i];
+      if (r.moneyMinor <= BigInt.zero) continue;
+      final dbCat = catById[r.categoryId];
+      final parentCat = (dbCat != null && dbCat.parentCatId != noRef)
+          ? catById[dbCat.parentCatId]
+          : (r.parentCatId != -1 ? catById[r.parentCatId] : null);
+      final catIcon = (dbCat?.icon != null && dbCat!.icon.trim().isNotEmpty)
+          ? dbCat.icon
+          : (r.icon.isNotEmpty ? r.icon : null);
+      final catColor =
+          (dbCat?.colorFill != null && dbCat!.colorFill!.trim().isNotEmpty)
+          ? dbCat.colorFill
+          : parentCat?.colorFill;
+      var color = resolveCategoryVisual(
+        iconKey: catIcon,
+        parentIconKey: parentCat?.icon,
+        colorHex: catColor,
+        name: r.name,
+        type: catType,
+      ).color;
+      if (slices.isNotEmpty && slices.last.color == color) {
+        color = _fallbackPalette[i % _fallbackPalette.length];
+      }
+      totalSliceMinor += r.moneyMinor;
+      slices.add(
+        _CategoryDonutSlice(
+          name: r.name,
+          moneyMinor: r.moneyMinor,
+          ratioText: r.ratioText,
+          color: color,
+        ),
+      );
+    }
+
+    final uncat = result.uncategorizedRow;
+    if (!isFlatten &&
+        uncat != null &&
+        uncat.count > 0 &&
+        uncat.moneyMinor > BigInt.zero) {
+      totalSliceMinor += uncat.moneyMinor;
+      slices.add(
+        _CategoryDonutSlice(
+          name: uncat.name,
+          moneyMinor: uncat.moneyMinor,
+          ratioText: uncat.ratioText,
+          color: theme.colorScheme.outline,
+        ),
+      );
+    }
+
+    final donutBox = SizedBox(
+      width: 152,
+      height: 152,
+      child: CustomPaint(
+        painter: _CategoryDonutPainter(
+          slices: slices,
+          totalSliceMinor: totalSliceMinor,
+          centerLabel: isExpense ? '总支出' : '总收入',
+          centerAmountText: '¥${formatMinor(result.headerTotalMinor)}',
+          textColor: theme.colorScheme.onSurface,
+          trackColor: theme.colorScheme.surfaceContainerHighest,
+        ),
+      ),
+    );
+
+    final topLegend = slices.take(5).toList();
+
+    return Card(
+      elevation: 2,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '分类占比分布',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 12),
+            if (slices.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 20),
+                child: Center(
+                  child: Text(
+                    '暂无分类占比数据',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              )
+            else
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final legendColumn = Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      for (final s in topLegend)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 4),
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 10,
+                                height: 10,
+                                decoration: BoxDecoration(
+                                  color: s.color,
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  '${s.name} · ${s.ratioText}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      if (slices.length > topLegend.length)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Text(
+                            '其余 ${slices.length - topLegend.length} 项见右侧列表',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ),
+                    ],
+                  );
+
+                  if (constraints.maxWidth >= 340) {
+                    return Row(
+                      children: [
+                        donutBox,
+                        const SizedBox(width: 16),
+                        Expanded(child: legendColumn),
+                      ],
+                    );
+                  }
+                  return Column(
+                    children: [
+                      Center(child: donutBox),
+                      const SizedBox(height: 12),
+                      legendColumn,
+                    ],
+                  );
+                },
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CategoryDonutSlice {
+  const _CategoryDonutSlice({
+    required this.name,
+    required this.moneyMinor,
+    required this.ratioText,
+    required this.color,
+  });
+
+  final String name;
+  final BigInt moneyMinor;
+  final String ratioText;
+  final Color color;
+}
+
+class _CategoryDonutPainter extends CustomPainter {
+  const _CategoryDonutPainter({
+    required this.slices,
+    required this.totalSliceMinor,
+    required this.centerLabel,
+    required this.centerAmountText,
+    required this.textColor,
+    required this.trackColor,
+  });
+
+  final List<_CategoryDonutSlice> slices;
+  final BigInt totalSliceMinor;
+  final String centerLabel;
+  final String centerAmountText;
+  final Color textColor;
+  final Color trackColor;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = math.min(size.width, size.height) / 2 - 12;
+    const strokeWidth = 22.0;
+
+    final trackPaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = strokeWidth
+      ..color = trackColor;
+    canvas.drawCircle(center, radius, trackPaint);
+
+    if (slices.isNotEmpty && totalSliceMinor > BigInt.zero) {
+      if (slices.length == 1) {
+        final singlePaint = Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = strokeWidth
+          ..color = slices.first.color;
+        canvas.drawCircle(center, radius, singlePaint);
+      } else {
+        var startAngle = -math.pi / 2;
+        var consumedBp = 0;
+        for (var i = 0; i < slices.length; i++) {
+          final slice = slices[i];
+          final bp = i == slices.length - 1
+              ? (10000 - consumedBp).clamp(0, 10000)
+              : ((slice.moneyMinor * BigInt.from(10000)) ~/ totalSliceMinor)
+                    .toInt()
+                    .clamp(0, 10000);
+          consumedBp += bp;
+          if (bp <= 0) continue;
+          final sweepAngle = 2 * math.pi * (bp / 10000.0);
+          final arcPaint = Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = strokeWidth
+            ..color = slice.color;
+          canvas.drawArc(
+            Rect.fromCircle(center: center, radius: radius),
+            startAngle,
+            sweepAngle,
+            false,
+            arcPaint,
+          );
+          startAngle += sweepAngle;
+        }
+      }
+    }
+
+    final tp = TextPainter(
+      text: TextSpan(
+        children: [
+          TextSpan(
+            text: '$centerLabel\n',
+            style: TextStyle(
+              color: textColor.withValues(alpha: 0.7),
+              fontSize: 11,
+            ),
+          ),
+          TextSpan(
+            text: centerAmountText,
+            style: TextStyle(
+              color: textColor,
+              fontSize: 13,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ],
+      ),
+      textAlign: TextAlign.center,
+      textDirection: TextDirection.ltr,
+    )..layout(maxWidth: math.max(40, size.width - 56));
+
+    tp.paint(
+      canvas,
+      Offset(center.dx - tp.width / 2, center.dy - tp.height / 2),
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _CategoryDonutPainter oldDelegate) {
+    return oldDelegate.slices != slices ||
+        oldDelegate.totalSliceMinor != totalSliceMinor ||
+        oldDelegate.centerAmountText != centerAmountText ||
+        oldDelegate.textColor != textColor;
+  }
+}
+
 /// Trend line chart card rendered using Flutter's native [CustomPaint].
 class _TrendChartCard extends StatefulWidget {
   const _TrendChartCard({
@@ -604,18 +1148,31 @@ class _TrendChartCardState extends State<_TrendChartCard> {
             const SizedBox(height: 12),
             SizedBox(
               height: 160,
-              child: GestureDetector(
-                onPanDown: (d) => _handleTouch(d.localPosition),
-                onPanUpdate: (d) => _handleTouch(d.localPosition),
-                onPanEnd: (_) => setState(() => _hoveredIndex = null),
-                onTapUp: (_) => setState(() => _hoveredIndex = null),
-                child: CustomPaint(
-                  size: Size.infinite,
-                  painter: _TrendChartPainter(
-                    buckets: widget.buckets,
-                    hoveredIndex: _hoveredIndex,
-                    chartColor: chartColor,
-                    theme: theme,
+              child: MouseRegion(
+                onHover: (e) {
+                  if (DesktopAdaptive.isDesktop(context)) {
+                    _handleTouch(e.localPosition);
+                  }
+                },
+                onExit: (_) {
+                  if (DesktopAdaptive.isDesktop(context) &&
+                      _hoveredIndex != null) {
+                    setState(() => _hoveredIndex = null);
+                  }
+                },
+                child: GestureDetector(
+                  onPanDown: (d) => _handleTouch(d.localPosition),
+                  onPanUpdate: (d) => _handleTouch(d.localPosition),
+                  onPanEnd: (_) => setState(() => _hoveredIndex = null),
+                  onTapUp: (_) => setState(() => _hoveredIndex = null),
+                  child: CustomPaint(
+                    size: Size.infinite,
+                    painter: _TrendChartPainter(
+                      buckets: widget.buckets,
+                      hoveredIndex: _hoveredIndex,
+                      chartColor: chartColor,
+                      theme: theme,
+                    ),
                   ),
                 ),
               ),
@@ -983,18 +1540,27 @@ class _CategoryRankingsCard extends ConsumerWidget {
     CategoryRowItem row,
     Map<int, RecordCategory> catById,
   ) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) => CategoryDrilldownPage(
-          categoryId: row.categoryId,
-          categoryName: row.name,
-          categoryIcon: row.icon,
-          isDirectChild: row.isDirectChild,
-          isFirstLevel: row.isFirstLevel,
-          rowItem: row,
-          result: result,
-          categoriesById: catById,
-        ),
+    if (GoRouter.maybeOf(context) != null &&
+        ModalRoute.of(context)?.settings is Page) {
+      try {
+        context.push('/stats/category/${row.categoryId}');
+        return;
+      } catch (_) {}
+    }
+    pushDesktopModalOrMaterialRoute<void>(
+      context,
+      maxWidth: 860,
+      maxHeight: 720,
+      barrierDismissible: true,
+      child: CategoryDrilldownPage(
+        categoryId: row.categoryId,
+        categoryName: row.name,
+        categoryIcon: row.icon,
+        isDirectChild: row.isDirectChild,
+        isFirstLevel: row.isFirstLevel,
+        rowItem: row,
+        result: result,
+        categoriesById: catById,
       ),
     );
   }
@@ -1003,17 +1569,26 @@ class _CategoryRankingsCard extends ConsumerWidget {
     BuildContext context,
     Map<int, RecordCategory> catById,
   ) {
+    if (GoRouter.maybeOf(context) != null &&
+        ModalRoute.of(context)?.settings is Page) {
+      try {
+        context.push('/stats/category/-1');
+        return;
+      } catch (_) {}
+    }
     final uncat = result.uncategorizedRow!;
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) => CategoryDrilldownPage(
-          categoryId: -1,
-          categoryName: uncat.name,
-          isFirstLevel: true,
-          uncategorizedRow: uncat,
-          result: result,
-          categoriesById: catById,
-        ),
+    pushDesktopModalOrMaterialRoute<void>(
+      context,
+      maxWidth: 860,
+      maxHeight: 720,
+      barrierDismissible: true,
+      child: CategoryDrilldownPage(
+        categoryId: -1,
+        categoryName: uncat.name,
+        isFirstLevel: true,
+        uncategorizedRow: uncat,
+        result: result,
+        categoriesById: catById,
       ),
     );
   }
@@ -1468,6 +2043,9 @@ class _CategoryStatsFilterDrawerState
                   // Include Exclude Budget switch
                   SwitchListTile(
                     key: const Key('filter-include-exclude-budget-switch'),
+                    contentPadding: DesktopAdaptive.isDesktop(context)
+                        ? EdgeInsets.zero
+                        : null,
                     title: const Text('包含不计入预算账单'),
                     subtitle: const Text('默认包含；取消则剔除已标记排除的账单'),
                     value: config.includeExcludeBudget,
@@ -1704,322 +2282,392 @@ class _CategoryDrilldownPageState extends State<CategoryDrilldownPage> {
       bills.sort((a, b) => b.recordTime.compareTo(a.recordTime));
     }
 
-    return Scaffold(
-      appBar: AppBar(title: Text(widget.categoryName)),
-      body: ListView(
+    final isExpandedDesktop = DesktopAdaptive.isExpandedDesktop(context);
+
+    final summaryCard = Card(
+      elevation: 2,
+      child: Padding(
         padding: const EdgeInsets.all(16),
-        children: [
-          // 1. Summary Card
-          Card(
+        child: Row(
+          children: [
+            if (!isUncat) ...[
+              CategoryIconAvatar(
+                iconKey: headerIcon,
+                parentIconKey: headerParentCat?.icon,
+                colorHex: headerColor,
+                name: widget.categoryName,
+                type: catType,
+                size: 42,
+              ),
+              const SizedBox(width: 12),
+            ],
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '该分类总额',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      '¥${formatMinor(totalAmount)}',
+                      maxLines: 1,
+                      style: theme.textTheme.headlineSmall?.copyWith(
+                        fontWeight: FontWeight.bold,
+                        color: widget.result.dimension == StatDimension.expense
+                            ? theme.colorScheme.error
+                            : theme.colorScheme.primary,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            Flexible(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerRight,
+                    child: Text(
+                      '占比 $ratioText',
+                      maxLines: 1,
+                      style: theme.textTheme.bodyMedium,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '$count 笔账单',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    final hasSubcategories =
+        !isUncat &&
+        widget.rowItem != null &&
+        widget.rowItem!.children.isNotEmpty;
+
+    final subcategoryCard = hasSubcategories
+        ? Card(
             elevation: 2,
             child: Padding(
               padding: const EdgeInsets.all(16),
-              child: Row(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  if (!isUncat) ...[
-                    CategoryIconAvatar(
-                      iconKey: headerIcon,
-                      parentIconKey: headerParentCat?.icon,
-                      colorHex: headerColor,
-                      name: widget.categoryName,
-                      type: catType,
-                      size: 42,
-                    ),
-                    const SizedBox(width: 12),
-                  ],
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          '该分类总额',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        FittedBox(
-                          fit: BoxFit.scaleDown,
-                          alignment: Alignment.centerLeft,
-                          child: Text(
-                            '¥${formatMinor(totalAmount)}',
-                            maxLines: 1,
-                            style: theme.textTheme.headlineSmall?.copyWith(
-                              fontWeight: FontWeight.bold,
-                              color:
-                                  widget.result.dimension ==
-                                      StatDimension.expense
-                                  ? theme.colorScheme.error
-                                  : theme.colorScheme.primary,
-                            ),
-                          ),
-                        ),
-                      ],
+                  Text(
+                    '子分类构成',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  Flexible(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        FittedBox(
-                          fit: BoxFit.scaleDown,
-                          alignment: Alignment.centerRight,
-                          child: Text(
-                            '占比 $ratioText',
-                            maxLines: 1,
-                            style: theme.textTheme.bodyMedium,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          '$count 笔账单',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-
-          // 2. Subcategory composition card (ASYM-CAT-05: keeps uniform interactive hierarchy)
-          if (!isUncat &&
-              widget.rowItem != null &&
-              widget.rowItem!.children.isNotEmpty) ...[
-            Card(
-              elevation: 2,
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      '子分类构成',
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    for (final child in widget.rowItem!.children)
-                      Builder(
-                        builder: (context) {
-                          final childDb =
-                              widget.categoriesById[child.categoryId];
-                          final childIcon =
-                              (childDb?.icon != null &&
-                                  childDb!.icon.trim().isNotEmpty)
-                              ? childDb.icon
-                              : (child.icon.isNotEmpty ? child.icon : null);
-                          final childColor =
-                              (childDb?.colorFill != null &&
-                                  childDb!.colorFill!.trim().isNotEmpty)
-                              ? childDb.colorFill
-                              : headerColor;
-                          return Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 4),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Flexible(
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      CategoryIconAvatar(
-                                        iconKey: childIcon,
-                                        parentIconKey: headerIcon,
-                                        colorHex: childColor,
-                                        name: child.name,
-                                        type: catType,
-                                        size: 22,
+                  const SizedBox(height: 8),
+                  for (final child in widget.rowItem!.children)
+                    Builder(
+                      builder: (context) {
+                        final childDb = widget.categoriesById[child.categoryId];
+                        final childIcon =
+                            (childDb?.icon != null &&
+                                childDb!.icon.trim().isNotEmpty)
+                            ? childDb.icon
+                            : (child.icon.isNotEmpty ? child.icon : null);
+                        final childColor =
+                            (childDb?.colorFill != null &&
+                                childDb!.colorFill!.trim().isNotEmpty)
+                            ? childDb.colorFill
+                            : headerColor;
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 4),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Flexible(
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    CategoryIconAvatar(
+                                      iconKey: childIcon,
+                                      parentIconKey: headerIcon,
+                                      colorHex: childColor,
+                                      name: child.name,
+                                      type: catType,
+                                      size: 22,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Flexible(
+                                      child: Text(
+                                        child.name,
+                                        overflow: TextOverflow.ellipsis,
                                       ),
-                                      const SizedBox(width: 8),
-                                      Flexible(
-                                        child: Text(
-                                          child.name,
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
+                                    ),
+                                  ],
                                 ),
-                                const SizedBox(width: 8),
-                                ConstrainedBox(
-                                  constraints: const BoxConstraints(
-                                    maxWidth: 140,
-                                  ),
-                                  child: FittedBox(
-                                    fit: BoxFit.scaleDown,
-                                    alignment: Alignment.centerRight,
-                                    child: Text(
-                                      '¥${formatMinor(child.moneyMinor)} (${child.ratioText})',
-                                      maxLines: 1,
-                                      style: theme.textTheme.bodySmall
-                                          ?.copyWith(
-                                            fontWeight: FontWeight.bold,
-                                          ),
+                              ),
+                              const SizedBox(width: 8),
+                              ConstrainedBox(
+                                constraints: const BoxConstraints(
+                                  maxWidth: 140,
+                                ),
+                                child: FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  alignment: Alignment.centerRight,
+                                  child: Text(
+                                    '¥${formatMinor(child.moneyMinor)} (${child.ratioText})',
+                                    maxLines: 1,
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      fontWeight: FontWeight.bold,
                                     ),
                                   ),
                                 ),
-                              ],
-                            ),
-                          );
-                        },
-                      ),
-                  ],
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+                ],
+              ),
+            ),
+          )
+        : null;
+
+    final billListHeader = Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Expanded(
+          child: Text(
+            '包含账单明细 ($count 笔)',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        SegmentedButton<bool>(
+          key: const Key('drilldown-sort-switch'),
+          showSelectedIcon: false,
+          style: const ButtonStyle(
+            visualDensity: VisualDensity.compact,
+            padding: WidgetStatePropertyAll(
+              EdgeInsets.symmetric(horizontal: 10),
+            ),
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          ),
+          segments: const [
+            ButtonSegment(
+              value: false,
+              label: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text('按时间', maxLines: 1, softWrap: false),
+              ),
+            ),
+            ButtonSegment(
+              value: true,
+              label: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text('按金额', maxLines: 1, softWrap: false),
+              ),
+            ),
+          ],
+          selected: {_sortByAmount},
+          onSelectionChanged: (set) {
+            if (set.isNotEmpty) {
+              setState(() => _sortByAmount = set.first);
+            }
+          },
+        ),
+      ],
+    );
+
+    Widget buildBillCard(CategoryBill bill) {
+      final entry = bill.entry;
+      final billCat = entry.recordCatId == noRef
+          ? null
+          : widget.categoriesById[entry.recordCatId];
+      final billParentCat = (billCat != null && billCat.parentCatId != noRef)
+          ? widget.categoriesById[billCat.parentCatId]
+          : null;
+      final billCatName = billCat != null
+          ? (billParentCat != null
+                ? '${billParentCat.name} · ${billCat.name}'
+                : billCat.name)
+          : (isUncat ? null : widget.categoryName);
+      final billColor =
+          (billCat?.colorFill != null && billCat!.colorFill!.trim().isNotEmpty)
+          ? billCat.colorFill
+          : (billParentCat?.colorFill ?? headerColor);
+      final isRefund =
+          (entry.type == RecordType.expense ||
+              entry.type == RecordType.income) &&
+          entry.moneyMinor < BigInt.zero;
+      return Card(
+        margin: const EdgeInsets.symmetric(vertical: 4),
+        child: ListTile(
+          key: Key('drilldown-bill-${bill.recordId}'),
+          leading: RecordTypeIconAvatar(
+            recordType: entry.type,
+            subType: entry.subType,
+            isRefund: isRefund,
+            categoryName: billCatName,
+            categoryIcon: billCat?.icon ?? headerIcon,
+            parentCategoryIcon: billParentCat?.icon,
+            categoryColor: billColor,
+          ),
+          title: Text(
+            bill.remark.isNotEmpty ? bill.remark : widget.categoryName,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          subtitle: Text(
+            formatDateTime(
+              DateTime.fromMillisecondsSinceEpoch(bill.recordTime),
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          trailing: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 120),
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerRight,
+              child: Text(
+                '¥${formatMinor(bill.netMinor)}',
+                maxLines: 1,
+                style: theme.textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.bold,
+                  color: widget.result.dimension == StatDimension.expense
+                      ? theme.colorScheme.error
+                      : theme.colorScheme.primary,
                 ),
               ),
             ),
-            const SizedBox(height: 16),
-          ],
-
-          // 3. Bill list header and sort toggle
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Expanded(
-                child: Text(
-                  '包含账单明细 ($count 笔)',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              SegmentedButton<bool>(
-                key: const Key('drilldown-sort-switch'),
-                showSelectedIcon: false,
-                style: const ButtonStyle(
-                  visualDensity: VisualDensity.compact,
-                  padding: WidgetStatePropertyAll(
-                    EdgeInsets.symmetric(horizontal: 10),
-                  ),
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                ),
-                segments: const [
-                  ButtonSegment(
-                    value: false,
-                    label: FittedBox(
-                      fit: BoxFit.scaleDown,
-                      child: Text('按时间', maxLines: 1, softWrap: false),
-                    ),
-                  ),
-                  ButtonSegment(
-                    value: true,
-                    label: FittedBox(
-                      fit: BoxFit.scaleDown,
-                      child: Text('按金额', maxLines: 1, softWrap: false),
-                    ),
-                  ),
-                ],
-                selected: {_sortByAmount},
-                onSelectionChanged: (set) {
-                  if (set.isNotEmpty) {
-                    setState(() => _sortByAmount = set.first);
-                  }
-                },
-              ),
-            ],
           ),
-          const SizedBox(height: 8),
+          onTap: () {
+            if (GoRouter.maybeOf(context) != null &&
+                ModalRoute.of(context)?.settings is Page) {
+              try {
+                context.push('/record/${bill.recordId}');
+                return;
+              } catch (_) {}
+            }
+            pushDesktopModalOrMaterialRoute<void>(
+              context,
+              maxWidth: 560,
+              maxHeight: 740,
+              barrierDismissible: true,
+              child: RecordDetailPage(recordId: bill.recordId),
+            );
+          },
+        ),
+      );
+    }
 
-          // 4. Bills list
-          if (bills.isEmpty)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 32),
-              child: Center(child: Text('无明细账单')),
-            )
-          else
-            for (final bill in bills)
-              Builder(
-                builder: (context) {
-                  final entry = bill.entry;
-                  final billCat = entry.recordCatId == noRef
-                      ? null
-                      : widget.categoriesById[entry.recordCatId];
-                  final billParentCat =
-                      (billCat != null && billCat.parentCatId != noRef)
-                      ? widget.categoriesById[billCat.parentCatId]
-                      : null;
-                  final billCatName = billCat != null
-                      ? (billParentCat != null
-                            ? '${billParentCat.name} · ${billCat.name}'
-                            : billCat.name)
-                      : (isUncat ? null : widget.categoryName);
-                  final billColor =
-                      (billCat?.colorFill != null &&
-                          billCat!.colorFill!.trim().isNotEmpty)
-                      ? billCat.colorFill
-                      : (billParentCat?.colorFill ?? headerColor);
-                  final isRefund =
-                      (entry.type == RecordType.expense ||
-                          entry.type == RecordType.income) &&
-                      entry.moneyMinor < BigInt.zero;
-                  return Card(
-                    margin: const EdgeInsets.symmetric(vertical: 4),
-                    child: ListTile(
-                      key: Key('drilldown-bill-${bill.recordId}'),
-                      leading: RecordTypeIconAvatar(
-                        recordType: entry.type,
-                        subType: entry.subType,
-                        isRefund: isRefund,
-                        categoryName: billCatName,
-                        categoryIcon: billCat?.icon ?? headerIcon,
-                        parentCategoryIcon: billParentCat?.icon,
-                        categoryColor: billColor,
-                      ),
-                      title: Text(
-                        bill.remark.isNotEmpty
-                            ? bill.remark
-                            : widget.categoryName,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      subtitle: Text(
-                        formatDateTime(
-                          DateTime.fromMillisecondsSinceEpoch(bill.recordTime),
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      trailing: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 120),
-                        child: FittedBox(
-                          fit: BoxFit.scaleDown,
-                          alignment: Alignment.centerRight,
-                          child: Text(
-                            '¥${formatMinor(bill.netMinor)}',
-                            maxLines: 1,
-                            style: theme.textTheme.titleSmall?.copyWith(
-                              fontWeight: FontWeight.bold,
-                              color:
-                                  widget.result.dimension ==
-                                      StatDimension.expense
-                                  ? theme.colorScheme.error
-                                  : theme.colorScheme.primary,
-                            ),
-                          ),
-                        ),
-                      ),
-                      onTap: () {
-                        context.push('/record/${bill.recordId}');
-                      },
-                    ),
-                  );
-                },
-              ),
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    final isPopupModal = isDesktop && ModalRoute.of(context) is PopupRoute;
+    final stackedDrilldownList = ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        summaryCard,
+        const SizedBox(height: 16),
+        if (subcategoryCard != null) ...[
+          subcategoryCard,
+          const SizedBox(height: 16),
         ],
+        billListHeader,
+        const SizedBox(height: 8),
+        if (bills.isEmpty)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 32),
+            child: Center(child: Text('无明细账单')),
+          )
+        else
+          for (final bill in bills) buildBillCard(bill),
+      ],
+    );
+
+    return Scaffold(
+      appBar: AppBar(
+        leading: isPopupModal ? const CloseButton() : null,
+        title: Text(widget.categoryName),
       ),
+      body: isExpandedDesktop
+          ? Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 1360),
+                child: Row(
+                  key: const Key('category-drilldown-desktop-split'),
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Expanded(
+                      flex: 42,
+                      child: ListView(
+                        padding: const EdgeInsets.fromLTRB(20, 16, 12, 24),
+                        children: [
+                          summaryCard,
+                          if (subcategoryCard != null) ...[
+                            const SizedBox(height: 16),
+                            subcategoryCard,
+                          ],
+                        ],
+                      ),
+                    ),
+                    const VerticalDivider(width: 1),
+                    Expanded(
+                      flex: 58,
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 16, 20, 16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            billListHeader,
+                            const SizedBox(height: 8),
+                            Expanded(
+                              child: bills.isEmpty
+                                  ? const Center(child: Text('无明细账单'))
+                                  : ListView.builder(
+                                      itemCount: bills.length,
+                                      itemBuilder: (context, index) =>
+                                          buildBillCard(bills[index]),
+                                    ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          : (isDesktop
+                ? Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 760),
+                      child: stackedDrilldownList,
+                    ),
+                  )
+                : stackedDrilldownList),
     );
   }
 }
@@ -2038,7 +2686,7 @@ class CategoryStatsOverviewCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
-    final resultAsync = ref.watch(categoryStatsResultProvider);
+    final resultAsync = ref.watch(statsHubCategoryOverviewProvider);
     final bookId = ref.watch(currentBookIdProvider).value ?? 1;
     final categories =
         ref.watch(categoriesProvider(bookId)).value ?? const <RecordCategory>[];

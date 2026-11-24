@@ -16,7 +16,7 @@ void main() {
   ];
 
   group('R1 & §6.1 File Guard and Smart Encoding Probe', () {
-    test('enforces 6 MiB ceiling and rejects unsupported extensions', () {
+    test('enforces 64 MiB ceiling and rejects unsupported extensions', () {
       final overLimit = Uint8List(maxImportFileBytes + 1);
       expect(
         () => decodeSpreadsheetFile(fileName: 'huge.csv', bytes: overLimit),
@@ -24,7 +24,7 @@ void main() {
           isA<Failure>().having(
             (f) => f.message,
             'message',
-            contains('文件大小不能超过6M'),
+            contains('文件大小不能超过64M'),
           ),
         ),
       );

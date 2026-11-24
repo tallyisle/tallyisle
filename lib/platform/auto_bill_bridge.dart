@@ -113,10 +113,10 @@ abstract interface class AutoBillBridge {
   /// Opens Android `Settings.ACTION_ACCESSIBILITY_SETTINGS`.
   Future<bool> openAccessibilitySettings();
 
-  /// Consumes and clears any pending cold-start `tallyisle://` or `yyjz://` URI.
+  /// Consumes and clears any pending cold-start `tallyisle://` URI.
   Future<String?> consumePendingDeepLink();
 
-  /// Emits incoming `tallyisle://` or `yyjz://` URIs received while the app is running.
+  /// Emits incoming `tallyisle://` URIs received while the app is running.
   Stream<String> get onDeepLink;
 
   /// Consumes and clears persisted background accessibility payment events.
@@ -341,7 +341,7 @@ final class InMemoryAutoBillBridge implements AutoBillBridge {
     return copy;
   }
 
-  /// Simulates an incoming `tallyisle://` or `yyjz://` URI.
+  /// Simulates an incoming `tallyisle://` URI.
   void simulateDeepLink(String uri) {
     if (!_deepLinkController.isClosed && _deepLinkController.hasListener) {
       _deepLinkController.add(uri);

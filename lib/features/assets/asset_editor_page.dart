@@ -3,14 +3,19 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../app/adaptive.dart';
 import '../../app/providers.dart';
 import '../../core/failure.dart';
 import '../../core/money.dart';
 import '../../data/db/database.dart';
 import '../../domain/ledger/asset_json.dart';
 import '../../domain/model/codes.dart';
+import '../../domain/rules/bank_icon_catalog.dart';
 import '../common/catalog_icons.dart';
 import '../common/common.dart';
+import '../common/desktop_modal_page.dart';
+import '../receipt/receipt_diy_providers.dart'
+    show DiyToolbarConfig, diyToolbarConfigProvider, prefKeyRecordDiyToolbar;
 
 final _maxAssetAmount = Money.parse('88888888888.00');
 
@@ -62,6 +67,8 @@ class _AssetEditorPageState extends ConsumerState<AssetEditorPage> {
   bool _userPickedVisual = false;
   String? currency;
   bool counted = true, busy = false, loading = true;
+  bool isDefaultAccount = false;
+  bool _userTouchedDefaultSwitch = false;
   int billDay = 1;
   int repaymentDay = 20;
   bool repaymentAfter = false;
@@ -103,6 +110,16 @@ class _AssetEditorPageState extends ConsumerState<AssetEditorPage> {
         counted = existing.type == AssetType.debt
             ? existing.isEffectiveAsset == 0
             : existing.isEffectiveAsset == 1;
+        final prefRow =
+            await (db.select(db.preferences)
+                  ..where((t) => t.key.equals(prefKeyRecordDiyToolbar)))
+                .getSingleOrNull();
+        final diyConfig = DiyToolbarConfig.decode(prefRow?.value);
+        isDefaultAccount =
+            existing.status == AssetStatus.active &&
+            existing.type != AssetType.debt &&
+            diyConfig.autoSelectDefaultAccount &&
+            diyConfig.defaultAccountId == existing.id;
         creditInfo = CreditInfo.parse(existing.creditInfo);
         extra = AssetExtra.parse(existing.extraInfo);
         if (isCredit) {
@@ -143,12 +160,14 @@ class _AssetEditorPageState extends ConsumerState<AssetEditorPage> {
         assetType: original!.type,
         subType: original!.subType,
       );
-      final nameChanged = name.text.trim() != original!.name;
-      if (nameChanged &&
+      final wasAutoVisual =
           (original!.icon.isEmpty || original!.icon == origDefault.iconKey) &&
           (original!.color == null ||
-              original!.color!.toUpperCase() ==
-                  origDefault.colorHex.toUpperCase())) {
+              original!.color!.trim().isEmpty ||
+              original!.color!.trim().toUpperCase() ==
+                  origDefault.colorHex.toUpperCase());
+      final nameChanged = name.text.trim() != original!.name;
+      if (nameChanged && wasAutoVisual) {
         effectiveIcon = null;
         effectiveColor = null;
       }
@@ -210,6 +229,9 @@ class _AssetEditorPageState extends ConsumerState<AssetEditorPage> {
       final visual = _currentVisual();
       final service = await ref.read(ledgerServiceProvider.future);
       final rem = remark.text.trim().isEmpty ? null : remark.text.trim();
+      final effectiveDefaultArg = type == AssetType.debt
+          ? null
+          : isDefaultAccount;
       if (editing) {
         await service.updateAsset(
           commandId: ids.forPayload([
@@ -224,6 +246,7 @@ class _AssetEditorPageState extends ConsumerState<AssetEditorPage> {
             creditLimit?.toJson(),
             creditJson,
             extraJson,
+            effectiveDefaultArg,
           ]),
           assetId: widget.assetId!,
           name: name.text,
@@ -236,6 +259,7 @@ class _AssetEditorPageState extends ConsumerState<AssetEditorPage> {
           limit: creditLimit,
           creditInfo: creditJson,
           extraInfo: extraJson,
+          setAsDefaultAccount: effectiveDefaultArg,
         );
       } else {
         // Credit accounts: the user enters the current debt as a positive number.
@@ -255,6 +279,7 @@ class _AssetEditorPageState extends ConsumerState<AssetEditorPage> {
             creditLimit?.toJson(),
             creditJson,
             extraJson,
+            effectiveDefaultArg,
           ]),
           name: name.text,
           initial: initial,
@@ -267,9 +292,19 @@ class _AssetEditorPageState extends ConsumerState<AssetEditorPage> {
           limit: creditLimit,
           creditInfo: creditJson,
           extraInfo: extraJson,
+          setAsDefaultAccount: effectiveDefaultArg,
         );
       }
-      if (mounted) context.pop();
+      if (mounted) {
+        final route = ModalRoute.of(context);
+        if (route != null && route.settings is! Page) {
+          await Navigator.of(context).maybePop();
+        } else if (GoRouter.maybeOf(context)?.canPop() ?? false) {
+          context.pop();
+        } else {
+          await Navigator.of(context).maybePop();
+        }
+      }
     } catch (e) {
       if (mounted) setState(() => error = safeMessage(e));
     } finally {
@@ -290,355 +325,426 @@ class _AssetEditorPageState extends ConsumerState<AssetEditorPage> {
     final assets = (ref.watch(assetsProvider).value ?? const <Asset>[])
         .where((a) => a.type != AssetType.credit && a.id != widget.assetId)
         .toList();
+    final currentOriginal =
+        editing &&
+            (ref.exists(databaseProvider) ||
+                ref.exists(assetProvider(widget.assetId!)))
+        ? (ref.watch(assetProvider(widget.assetId!)).value ?? original)
+        : original;
+    if (editing &&
+        (ref.exists(databaseProvider) ||
+            ref.exists(diyToolbarConfigProvider))) {
+      ref.listen<AsyncValue<DiyToolbarConfig>>(diyToolbarConfigProvider, (
+        _,
+        next,
+      ) {
+        if (!next.hasValue || currentOriginal == null) return;
+        final liveDefault =
+            currentOriginal.status == AssetStatus.active &&
+            currentOriginal.type != AssetType.debt &&
+            next.value!.autoSelectDefaultAccount &&
+            next.value!.defaultAccountId == currentOriginal.id;
+        if (!_userTouchedDefaultSwitch && isDefaultAccount != liveDefault) {
+          setState(() => isDefaultAccount = liveDefault);
+        }
+      });
+    }
+    final isInactiveExisting =
+        editing &&
+        currentOriginal != null &&
+        currentOriginal.status != AssetStatus.active;
+    final inactiveStatusLabel = currentOriginal?.status == AssetStatus.settled
+        ? '已结清'
+        : '已隐藏';
     final visual = _currentVisual();
     final titleText = isCredit
         ? (editing ? '编辑信用账户' : '新建信用账户')
         : (editing ? '编辑账户' : '新建账户');
 
-    return Scaffold(
-      appBar: AppBar(title: Text(titleText)),
-      bottomNavigationBar: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-          child: FilledButton(
-            key: const Key('asset-save'),
-            onPressed: busy || loading ? null : _save,
-            child: Text(busy ? '保存中…' : '保存'),
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+
+    return DesktopModalEscapeScope(
+      enabled: isDesktop,
+      child: Scaffold(
+        appBar: AppBar(
+          leading: isDesktop ? const CloseButton() : null,
+          scrolledUnderElevation: isDesktop ? 0 : null,
+          title: Text(titleText),
+        ),
+        bottomNavigationBar: SafeArea(
+          child: Padding(
+            padding: isDesktop
+                ? const EdgeInsets.fromLTRB(20, 8, 20, 14)
+                : const EdgeInsets.fromLTRB(16, 8, 16, 12),
+            child: FilledButton(
+              key: const Key('asset-save'),
+              onPressed: busy || loading ? null : _save,
+              child: Text(busy ? '保存中…' : '保存'),
+            ),
           ),
         ),
-      ),
-      body: loading
-          ? const Loading()
-          : Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 640),
-                child: ListView(
-                  padding: const EdgeInsets.all(16),
-                  children: [
-                    if (!editing)
-                      SizedBox(
-                        width: double.infinity,
-                        child: SegmentedButton<int>(
-                          showSelectedIcon: false,
-                          style: const ButtonStyle(
-                            visualDensity: VisualDensity.compact,
-                            padding: WidgetStatePropertyAll(
-                              EdgeInsets.symmetric(horizontal: 10),
+        body: loading
+            ? const Loading()
+            : Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 640),
+                  child: ListView(
+                    padding: isDesktop
+                        ? const EdgeInsets.fromLTRB(20, 12, 20, 16)
+                        : const EdgeInsets.all(16),
+                    children: [
+                      if (!editing)
+                        SizedBox(
+                          width: double.infinity,
+                          child: SegmentedButton<int>(
+                            showSelectedIcon: false,
+                            style: const ButtonStyle(
+                              visualDensity: VisualDensity.compact,
+                              padding: WidgetStatePropertyAll(
+                                EdgeInsets.symmetric(horizontal: 10),
+                              ),
                             ),
-                          ),
-                          segments: const [
-                            ButtonSegment(
-                              value: AssetType.normal,
-                              label: FittedBox(
-                                fit: BoxFit.scaleDown,
-                                child: Text(
-                                  '普通账户',
-                                  maxLines: 1,
-                                  softWrap: false,
+                            segments: const [
+                              ButtonSegment(
+                                value: AssetType.normal,
+                                label: FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  child: Text(
+                                    '普通账户',
+                                    maxLines: 1,
+                                    softWrap: false,
+                                  ),
+                                ),
+                                icon: Icon(
+                                  Icons.account_balance_wallet_outlined,
+                                  size: 18,
                                 ),
                               ),
-                              icon: Icon(
-                                Icons.account_balance_wallet_outlined,
-                                size: 18,
-                              ),
-                            ),
-                            ButtonSegment(
-                              value: AssetType.credit,
-                              label: FittedBox(
-                                fit: BoxFit.scaleDown,
-                                child: Text(
-                                  '信用账户',
-                                  maxLines: 1,
-                                  softWrap: false,
+                              ButtonSegment(
+                                value: AssetType.credit,
+                                label: FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  child: Text(
+                                    '信用账户',
+                                    maxLines: 1,
+                                    softWrap: false,
+                                  ),
                                 ),
+                                icon: Icon(Icons.credit_card, size: 18),
                               ),
-                              icon: Icon(Icons.credit_card, size: 18),
-                            ),
-                          ],
-                          selected: {type},
-                          onSelectionChanged: busy
-                              ? null
-                              : (s) => setState(() {
-                                  type = s.first;
-                                  if (!_userPickedVisual) {
-                                    selectedIcon = null;
-                                    selectedColor = null;
-                                  }
-                                }),
-                        ),
-                      ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      key: const Key('asset-name'),
-                      controller: name,
-                      enabled: !busy,
-                      onChanged: (_) => setState(() {}),
-                      decoration: InputDecoration(
-                        labelText: '账户名称',
-                        hintText: isCredit
-                            ? '如：招行信用卡、花呗、白条'
-                            : '如：现金、招行储蓄卡、微信钱包、支付宝',
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    InkWell(
-                      key: const Key('asset-visual-picker-trigger'),
-                      borderRadius: BorderRadius.circular(12),
-                      onTap: busy ? null : _pickVisual,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 10,
-                        ),
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: theme.colorScheme.outlineVariant,
+                            ],
+                            selected: {type},
+                            onSelectionChanged: busy
+                                ? null
+                                : (s) => setState(() {
+                                    type = s.first;
+                                    if (!_userPickedVisual) {
+                                      selectedIcon = null;
+                                      selectedColor = null;
+                                    }
+                                  }),
                           ),
                         ),
-                        child: Row(
-                          children: [
-                            AssetIconAvatar(
-                              iconKey: visual.iconKey,
-                              colorHex: visual.colorHex,
-                              name: visual.label,
-                              assetType: type,
-                              subType: original?.subType,
-                              size: 40,
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    '账户图标与颜色',
-                                    style: theme.textTheme.bodyMedium,
-                                  ),
-                                  Text(
-                                    '${visual.label} · 点击更换图标或配色',
-                                    style: theme.textTheme.bodySmall?.copyWith(
-                                      color: theme.colorScheme.outline,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            const Icon(Icons.chevron_right),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    if (!editing)
+                      const SizedBox(height: 12),
                       TextField(
-                        key: const Key('asset-balance'),
-                        controller: balance,
+                        key: const Key('asset-name'),
+                        controller: name,
                         enabled: !busy,
-                        keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true,
-                        ),
-                        inputFormatters: _amountInputFormatters,
+                        onChanged: (_) => setState(() {}),
                         decoration: InputDecoration(
-                          labelText: isCredit ? '当前欠款' : '当前余额',
-                          helperText: isCredit ? '没有欠款就留空或填 0' : null,
+                          labelText: '账户名称',
+                          hintText: isCredit
+                              ? '如：招行信用卡、花呗、白条'
+                              : '如：现金、招行储蓄卡、微信钱包、支付宝',
                         ),
-                      )
-                    else
-                      ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: Text(isCredit ? '当前欠款/溢存' : '当前余额'),
-                        subtitle: const Text('修改余额请在账户详情里使用“调整余额”'),
-                        trailing: Text(
-                          formatMinor(original?.balanceMinor ?? BigInt.zero),
-                        ),
-                      ),
-                    if (isCredit) ...[
-                      const SizedBox(height: 12),
-                      TextField(
-                        key: const Key('credit-limit'),
-                        controller: limit,
-                        enabled: !busy,
-                        keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true,
-                        ),
-                        inputFormatters: _amountInputFormatters,
-                        decoration: const InputDecoration(labelText: '信用额度'),
                       ),
                       const SizedBox(height: 12),
-                      DropdownButtonFormField<int>(
-                        key: const Key('bill-day'),
-                        isExpanded: true,
-                        initialValue: billDay,
-                        decoration: const InputDecoration(labelText: '账单日'),
-                        items: _dayItems(),
-                        onChanged: busy
-                            ? null
-                            : (v) => setState(() => billDay = v ?? 1),
-                      ),
-                      SwitchListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: const Text('账单日当天的消费计入本期账单'),
-                        value: billDayCounted,
-                        onChanged: busy
-                            ? null
-                            : (v) => setState(() => billDayCounted = v),
-                      ),
-                      SizedBox(
-                        width: double.infinity,
-                        child: SegmentedButton<bool>(
-                          showSelectedIcon: false,
-                          style: const ButtonStyle(
-                            visualDensity: VisualDensity.compact,
-                            padding: WidgetStatePropertyAll(
-                              EdgeInsets.symmetric(horizontal: 10),
+                      InkWell(
+                        key: const Key('asset-visual-picker-trigger'),
+                        borderRadius: BorderRadius.circular(12),
+                        onTap: busy ? null : _pickVisual,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 10,
+                          ),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: theme.colorScheme.outlineVariant,
                             ),
                           ),
-                          segments: const [
-                            ButtonSegment(
-                              value: false,
-                              label: FittedBox(
-                                fit: BoxFit.scaleDown,
-                                child: Text(
-                                  '固定还款日',
-                                  maxLines: 1,
-                                  softWrap: false,
+                          child: Row(
+                            children: [
+                              AssetIconAvatar(
+                                iconKey: visual.iconKey,
+                                colorHex: visual.colorHex,
+                                name: visual.label,
+                                assetType: type,
+                                subType: original?.subType,
+                                size: 40,
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      '账户图标与颜色',
+                                      style: theme.textTheme.bodyMedium,
+                                    ),
+                                    Text(
+                                      !_userPickedVisual &&
+                                              matchReviewedInstitution(
+                                                    name.text.trim(),
+                                                    assetType: type,
+                                                  ) !=
+                                                  null
+                                          ? '${visual.label}（已按名称智能关联）· 点击更换'
+                                          : '${visual.label} · 点击更换图标或配色',
+                                      style: theme.textTheme.bodySmall
+                                          ?.copyWith(
+                                            color: theme.colorScheme.outline,
+                                          ),
+                                    ),
+                                  ],
                                 ),
                               ),
-                            ),
-                            ButtonSegment(
-                              value: true,
-                              label: FittedBox(
-                                fit: BoxFit.scaleDown,
-                                child: Text(
-                                  '账单日后 N 天',
-                                  maxLines: 1,
-                                  softWrap: false,
-                                ),
-                              ),
-                            ),
-                          ],
-                          selected: {repaymentAfter},
-                          onSelectionChanged: busy
-                              ? null
-                              : (s) => setState(() => repaymentAfter = s.first),
+                              const Icon(Icons.chevron_right),
+                            ],
+                          ),
                         ),
                       ),
-                      const SizedBox(height: 8),
-                      if (repaymentAfter)
+                      const SizedBox(height: 12),
+                      if (!editing)
                         TextField(
-                          key: const Key('repay-after-days'),
-                          controller: afterDays,
+                          key: const Key('asset-balance'),
+                          controller: balance,
                           enabled: !busy,
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(
-                            labelText: '账单日后天数',
-                            suffixText: '天',
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                          ),
+                          inputFormatters: _amountInputFormatters,
+                          decoration: InputDecoration(
+                            labelText: isCredit ? '当前欠款' : '当前余额',
+                            helperText: isCredit ? '没有欠款就留空或填 0' : null,
                           ),
                         )
                       else
+                        ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: Text(isCredit ? '当前欠款/溢存' : '当前余额'),
+                          subtitle: const Text('修改余额请在账户详情里使用“调整余额”'),
+                          trailing: Text(
+                            formatMinor(original?.balanceMinor ?? BigInt.zero),
+                          ),
+                        ),
+                      if (isCredit) ...[
+                        const SizedBox(height: 12),
+                        TextField(
+                          key: const Key('credit-limit'),
+                          controller: limit,
+                          enabled: !busy,
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                          ),
+                          inputFormatters: _amountInputFormatters,
+                          decoration: const InputDecoration(labelText: '信用额度'),
+                        ),
+                        const SizedBox(height: 12),
                         DropdownButtonFormField<int>(
-                          key: const Key('repay-day'),
+                          key: const Key('bill-day'),
                           isExpanded: true,
-                          initialValue: repaymentDay,
-                          decoration: const InputDecoration(labelText: '还款日'),
+                          initialValue: billDay,
+                          decoration: const InputDecoration(labelText: '账单日'),
                           items: _dayItems(),
                           onChanged: busy
                               ? null
-                              : (v) => setState(() => repaymentDay = v ?? 1),
+                              : (v) => setState(() => billDay = v ?? 1),
                         ),
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('账单日当天的消费计入本期账单'),
+                          value: billDayCounted,
+                          onChanged: busy
+                              ? null
+                              : (v) => setState(() => billDayCounted = v),
+                        ),
+                        SizedBox(
+                          width: double.infinity,
+                          child: SegmentedButton<bool>(
+                            showSelectedIcon: false,
+                            style: const ButtonStyle(
+                              visualDensity: VisualDensity.compact,
+                              padding: WidgetStatePropertyAll(
+                                EdgeInsets.symmetric(horizontal: 10),
+                              ),
+                            ),
+                            segments: const [
+                              ButtonSegment(
+                                value: false,
+                                label: FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  child: Text(
+                                    '固定还款日',
+                                    maxLines: 1,
+                                    softWrap: false,
+                                  ),
+                                ),
+                              ),
+                              ButtonSegment(
+                                value: true,
+                                label: FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  child: Text(
+                                    '账单日后 N 天',
+                                    maxLines: 1,
+                                    softWrap: false,
+                                  ),
+                                ),
+                              ),
+                            ],
+                            selected: {repaymentAfter},
+                            onSelectionChanged: busy
+                                ? null
+                                : (s) =>
+                                      setState(() => repaymentAfter = s.first),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        if (repaymentAfter)
+                          TextField(
+                            key: const Key('repay-after-days'),
+                            controller: afterDays,
+                            enabled: !busy,
+                            keyboardType: TextInputType.number,
+                            decoration: const InputDecoration(
+                              labelText: '账单日后天数',
+                              suffixText: '天',
+                            ),
+                          )
+                        else
+                          DropdownButtonFormField<int>(
+                            key: const Key('repay-day'),
+                            isExpanded: true,
+                            initialValue: repaymentDay,
+                            decoration: const InputDecoration(labelText: '还款日'),
+                            items: _dayItems(),
+                            onChanged: busy
+                                ? null
+                                : (v) => setState(() => repaymentDay = v ?? 1),
+                          ),
+                        const SizedBox(height: 12),
+                        DropdownButtonFormField<int>(
+                          isExpanded: true,
+                          initialValue: assets.any((a) => a.id == repayAssetId)
+                              ? repayAssetId
+                              : noRef,
+                          decoration: const InputDecoration(
+                            labelText: '默认还款账户（可选）',
+                          ),
+                          items: [
+                            const DropdownMenuItem(
+                              value: noRef,
+                              child: Text(
+                                '不设置',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            for (final a in assets)
+                              DropdownMenuItem(
+                                value: a.id,
+                                child: Text(
+                                  a.name,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                          ],
+                          onChanged: busy
+                              ? null
+                              : (v) => setState(
+                                  () => repayAssetId = v == noRef ? null : v,
+                                ),
+                        ),
+                      ],
                       const SizedBox(height: 12),
-                      DropdownButtonFormField<int>(
+                      DropdownButtonFormField<String>(
                         isExpanded: true,
-                        initialValue: assets.any((a) => a.id == repayAssetId)
-                            ? repayAssetId
-                            : noRef,
-                        decoration: const InputDecoration(
-                          labelText: '默认还款账户（可选）',
-                        ),
+                        initialValue: currency ?? '',
+                        decoration: const InputDecoration(labelText: '币种'),
                         items: [
                           const DropdownMenuItem(
-                            value: noRef,
+                            value: '',
                             child: Text(
-                              '不设置',
+                              '本位币（人民币）',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
-                          for (final a in assets)
-                            DropdownMenuItem(
-                              value: a.id,
-                              child: Text(
-                                a.name,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
+                          for (final c in currencies)
+                            if (c.code != 'CNY')
+                              DropdownMenuItem(
+                                value: c.code,
+                                child: Text(
+                                  '${c.name}（${c.code}）',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
                               ),
-                            ),
                         ],
                         onChanged: busy
                             ? null
                             : (v) => setState(
-                                () => repayAssetId = v == noRef ? null : v,
+                                () => currency = (v == null || v.isEmpty)
+                                    ? null
+                                    : v,
                               ),
                       ),
-                    ],
-                    const SizedBox(height: 12),
-                    DropdownButtonFormField<String>(
-                      isExpanded: true,
-                      initialValue: currency ?? '',
-                      decoration: const InputDecoration(labelText: '币种'),
-                      items: [
-                        const DropdownMenuItem(
-                          value: '',
-                          child: Text(
-                            '本位币（人民币）',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: remark,
+                        enabled: !busy,
+                        decoration: const InputDecoration(labelText: '备注（可选）'),
+                      ),
+                      SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('计入总资产'),
+                        value: counted,
+                        onChanged: busy
+                            ? null
+                            : (v) => setState(() => counted = v),
+                      ),
+                      if (type != AssetType.debt)
+                        SwitchListTile(
+                          key: const Key('asset-default-account-switch'),
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('设为默认账户'),
+                          subtitle: Text(
+                            isInactiveExisting
+                                ? '该账户当前$inactiveStatusLabel，恢复为正常状态后才可设为默认账户'
+                                : '开启后新建账单时默认自动填入此账户',
                           ),
+                          value: isInactiveExisting ? false : isDefaultAccount,
+                          onChanged: busy || isInactiveExisting
+                              ? null
+                              : (v) => setState(() {
+                                  _userTouchedDefaultSwitch = true;
+                                  isDefaultAccount = v;
+                                }),
                         ),
-                        for (final c in currencies)
-                          if (c.code != 'CNY')
-                            DropdownMenuItem(
-                              value: c.code,
-                              child: Text(
-                                '${c.name}（${c.code}）',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                      ],
-                      onChanged: busy
-                          ? null
-                          : (v) => setState(
-                              () => currency = (v == null || v.isEmpty)
-                                  ? null
-                                  : v,
-                            ),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: remark,
-                      enabled: !busy,
-                      decoration: const InputDecoration(labelText: '备注（可选）'),
-                    ),
-                    SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text('计入总资产'),
-                      value: counted,
-                      onChanged: busy
-                          ? null
-                          : (v) => setState(() => counted = v),
-                    ),
-                    if (error != null)
-                      Text(
-                        error!,
-                        key: const Key('asset-error'),
-                        style: TextStyle(color: theme.colorScheme.error),
-                      ),
-                  ],
+                      if (error != null)
+                        Text(
+                          error!,
+                          key: const Key('asset-error'),
+                          style: TextStyle(color: theme.colorScheme.error),
+                        ),
+                    ],
+                  ),
                 ),
               ),
-            ),
+      ),
     );
   }
 }

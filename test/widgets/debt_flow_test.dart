@@ -9,7 +9,9 @@ import 'package:tallyisle/data/db/database.dart';
 import 'package:tallyisle/data/debt/debt_service.dart';
 import 'package:tallyisle/data/ledger/ledger_service.dart';
 import 'package:tallyisle/domain/model/codes.dart';
+import 'package:tallyisle/features/debt/debt_detail_page.dart';
 import 'package:tallyisle/features/debt/debt_page.dart';
+import 'package:tallyisle/features/debt/debt_providers.dart';
 
 void main() {
   Widget buildApp(Widget child, AppDatabase db, {ThemeData? theme}) =>
@@ -483,6 +485,90 @@ void main() {
         db.assets,
       )..where((t) => t.id.equals(bankId))).getSingle();
       expect(bankAfter.balanceMinor, BigInt.from(120000));
+
+      await tester.pumpWidget(const SizedBox());
+      await settle(tester);
+      await tester.pump(const Duration(seconds: 1));
+      await db.close();
+    },
+  );
+
+  testWidgets(
+    'DebtPage PageView swipes two-way between 进行中 and 已结清, and standalone DebtDetailPage delete uses safe maybePop (B-02)',
+    (tester) async {
+      final db = AppDatabase(NativeDatabase.memory());
+      final debtService = DebtService(db);
+      final activeId = await debtService.createDebt(
+        commandId: 'swipe-d1',
+        subType: AssetType.debtBorrow,
+        name: '进行中借款',
+        principal: Money.parse('300.00'),
+        bookId: 1,
+        startDate: 1700000000000,
+      );
+      final settledId = await debtService.createDebt(
+        commandId: 'swipe-d2',
+        subType: AssetType.debtLend,
+        name: '已结清借出',
+        principal: Money.parse('500.00'),
+        bookId: 1,
+        startDate: 1700000000000,
+      );
+      await debtService.settleDebt(
+        commandId: 'swipe-settle-d2',
+        debtId: settledId,
+      );
+
+      late ProviderContainer container;
+      await tester.pumpWidget(
+        ProviderScope(
+          retry: (_, _) => null,
+          overrides: [databaseProvider.overrideWith((ref) async => db)],
+          child: Builder(
+            builder: (context) {
+              container = ProviderScope.containerOf(context, listen: false);
+              return const MaterialApp(home: DebtPage());
+            },
+          ),
+        ),
+      );
+      await settle(tester);
+
+      expect(find.byKey(const Key('debt_summary_card')), findsOneWidget);
+      expect(find.text('进行中借款'), findsOneWidget);
+      expect(container.read(debtStatusTabProvider), AssetStatus.active);
+
+      // Swipe left on PageView -> switches to 已结清!
+      await tester.fling(
+        find.byKey(const Key('debt_page_view')),
+        const Offset(-300, 0),
+        1200,
+      );
+      await settle(tester);
+      expect(container.read(debtStatusTabProvider), AssetStatus.settled);
+      expect(find.text('已结清借出'), findsOneWidget);
+
+      // Swipe right -> switches back to 进行中!
+      await tester.fling(
+        find.byKey(const Key('debt_page_view')),
+        const Offset(300, 0),
+        1200,
+      );
+      await settle(tester);
+      expect(container.read(debtStatusTabProvider), AssetStatus.active);
+      expect(find.text('进行中借款'), findsOneWidget);
+
+      // B-02: Mount DebtDetailPage as root route (canPop == false) and delete -> maybePop does not crash!
+      await tester.pumpWidget(buildApp(DebtDetailPage(debtId: activeId), db));
+      await settle(tester);
+      await tester.tap(find.byKey(const Key('debt_detail_menu')));
+      await settle(tester);
+      await tester.tap(find.byKey(const Key('debt_menu_delete')));
+      await settle(tester);
+      await tester.tap(find.text('删除').last);
+      await settle(tester);
+      expect(tester.takeException(), isNull);
+      expect(find.text('借贷项目不存在或已删除'), findsOneWidget);
 
       await tester.pumpWidget(const SizedBox());
       await settle(tester);

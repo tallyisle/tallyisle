@@ -17,7 +17,29 @@ G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
 
 namespace {
 
-constexpr const gchar* kWindowTitle = "帐屿";
+const gchar* resolve_window_title() {
+  const gchar* const* languages = g_get_language_names();
+  if (languages != nullptr) {
+    for (const gchar* const* it = languages; *it != nullptr; ++it) {
+      const gchar* lang = *it;
+      if (lang[0] == '\0') {
+        continue;
+      }
+      if (g_ascii_strcasecmp(lang, "C") == 0 ||
+          g_ascii_strcasecmp(lang, "POSIX") == 0) {
+        break;
+      }
+      if (g_ascii_strncasecmp(lang, "zh", 2) == 0 &&
+          (lang[2] == '\0' || lang[2] == '_' || lang[2] == '-' ||
+           lang[2] == '.' || lang[2] == '@')) {
+        return "帐屿";
+      }
+      break;
+    }
+  }
+  return "TallyIsle";
+}
+
 constexpr const gchar* kRelativeLogoAssetPath =
     "data/flutter_assets/assets/branding/tallyisle-logo-original.png";
 
@@ -85,6 +107,13 @@ static void first_frame_cb(MyApplication* self, FlView* view) {
 
 // Implements GApplication::activate.
 static void my_application_activate(GApplication* application) {
+  GList* existing_windows =
+      gtk_application_get_windows(GTK_APPLICATION(application));
+  if (existing_windows != nullptr) {
+    gtk_window_present(GTK_WINDOW(existing_windows->data));
+    return;
+  }
+
   MyApplication* self = MY_APPLICATION(application);
   GtkWindow* window =
       GTK_WINDOW(gtk_application_window_new(GTK_APPLICATION(application)));
@@ -93,11 +122,12 @@ static void my_application_activate(GApplication* application) {
   // GNOME Shell). On KDE Plasma (Wayland and X11) and other window managers,
   // let KWin / native WM draw native titlebars instead of a GNOME HeaderBar.
   const gboolean use_header_bar = should_use_gnome_header_bar(window);
-  gtk_window_set_title(window, kWindowTitle);
+  const gchar* window_title = resolve_window_title();
+  gtk_window_set_title(window, window_title);
   if (use_header_bar) {
     GtkHeaderBar* header_bar = GTK_HEADER_BAR(gtk_header_bar_new());
     gtk_widget_show(GTK_WIDGET(header_bar));
-    gtk_header_bar_set_title(header_bar, kWindowTitle);
+    gtk_header_bar_set_title(header_bar, window_title);
     gtk_header_bar_set_show_close_button(header_bar, TRUE);
     gtk_window_set_titlebar(window, GTK_WIDGET(header_bar));
   }
@@ -110,6 +140,7 @@ static void my_application_activate(GApplication* application) {
       project, self->dart_entrypoint_arguments);
 
   FlView* view = fl_view_new(project);
+  gtk_widget_set_size_request(GTK_WIDGET(view), 420, 600);
   GdkRGBA background_color;
   // Background defaults to black, override it here if necessary, e.g. #00000000
   // for transparent.
@@ -135,7 +166,11 @@ static gboolean my_application_local_command_line(GApplication* application,
                                                   int* exit_status) {
   MyApplication* self = MY_APPLICATION(application);
   // Strip out the first argument as it is the binary name.
-  self->dart_entrypoint_arguments = g_strdupv(*arguments + 1);
+  g_clear_pointer(&self->dart_entrypoint_arguments, g_strfreev);
+  if (arguments != nullptr && *arguments != nullptr &&
+      (*arguments)[0] != nullptr) {
+    self->dart_entrypoint_arguments = g_strdupv(*arguments + 1);
+  }
 
   g_autoptr(GError) error = nullptr;
   if (!g_application_register(application, nullptr, &error)) {
@@ -194,6 +229,6 @@ MyApplication* my_application_new() {
   g_set_prgname(APPLICATION_ID);
 
   return MY_APPLICATION(g_object_new(my_application_get_type(),
-                                     "application-id", APPLICATION_ID, "flags",
-                                     G_APPLICATION_NON_UNIQUE, nullptr));
+                                     "application-id", APPLICATION_ID,
+                                     nullptr));
 }

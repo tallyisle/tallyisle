@@ -222,6 +222,9 @@ final class SavingsService {
         if (fromAsset == null) {
           throw const Failure(FailureCode.validation, '转出账户不存在');
         }
+        if (fromAsset.type == AssetType.debt) {
+          throw const Failure(FailureCode.validation, '转出账户不能为借贷账户');
+        }
       }
 
       Asset? toAsset;
@@ -231,6 +234,9 @@ final class SavingsService {
         )..where((t) => t.id.equals(draft.toAssetId))).getSingleOrNull();
         if (toAsset == null) {
           throw const Failure(FailureCode.validation, '转入账户不存在');
+        }
+        if (toAsset.type == AssetType.debt) {
+          throw const Failure(FailureCode.validation, '转入账户不能为借贷账户');
         }
       }
 
@@ -480,6 +486,15 @@ final class SavingsService {
 
       final effectiveFromId = fromAssetId ?? plan.fromAssetId;
       final effectiveToId = toAssetId ?? plan.toAssetId;
+      for (final aid in [effectiveFromId, effectiveToId]) {
+        if (aid == noRef) continue;
+        final a = await (db.select(
+          db.assets,
+        )..where((t) => t.id.equals(aid))).getSingleOrNull();
+        if (a != null && a.type == AssetType.debt) {
+          throw const Failure(FailureCode.validation, '存钱计划不能绑定借贷账户');
+        }
+      }
 
       final transferLink = await _insertTransferIfAccountsActive(
         plan: plan,
@@ -1013,11 +1028,14 @@ final class SavingsService {
       db.assets,
     )..where((t) => t.id.equals(toAssetId))).getSingleOrNull();
 
-    // R5: Only link transfer when BOTH accounts exist and are active (`status == 0`).
+    // R5 & L-05: Only link transfer when BOTH accounts exist, are active
+    // (`status == 0`), and are non-debt funding accounts.
     if (fromAsset == null ||
         toAsset == null ||
         fromAsset.status != AssetStatus.active ||
-        toAsset.status != AssetStatus.active) {
+        toAsset.status != AssetStatus.active ||
+        fromAsset.type == AssetType.debt ||
+        toAsset.type == AssetType.debt) {
       return const _TransferLinkResult.planOnly();
     }
 
@@ -1110,7 +1128,7 @@ final class SavingsService {
       final asset = await (db.select(
         db.assets,
       )..where((t) => t.id.equals(entry.key))).getSingleOrNull();
-      if (asset == null) continue;
+      if (asset == null || asset.type == AssetType.debt) continue;
       final balance = Money.minor(asset.balanceMinor + entry.value);
       await (db.update(db.assets)..where((t) => t.id.equals(entry.key))).write(
         AssetsCompanion(balanceMinor: Value(balance.storageMinor)),

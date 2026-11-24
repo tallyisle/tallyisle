@@ -8,7 +8,10 @@ import 'package:sqlite3/sqlite3.dart' as raw_sqlite;
 
 import '../../core/failure.dart';
 import '../../core/money.dart';
+import '../../domain/model/codes.dart';
+import '../../domain/rules/haohao_db_migration_rules.dart';
 import '../../domain/rules/ios_migration_rules.dart';
+import '../../domain/rules/receipt_diy_rules.dart';
 import '../../domain/rules/reminder_rules.dart';
 import '../../platform/notifications.dart';
 import '../db/database.dart';
@@ -24,6 +27,9 @@ enum MigrationSourceKind {
 
   /// LAN `ServerBackup.zip` (plain or WinZip AE-2) or bare SQLite `.db` file.
   lanBackup,
+
+  /// Haohaojizhang (`好好记账`) `account_record*.db` or unencrypted `.zip` backup.
+  haohaoDb,
 }
 
 /// Summary & cleaned payload returned by preflight before touching SQLite.
@@ -49,9 +55,18 @@ final class MigrationPreview {
   int get assetCount => payload.assets.length;
   int get recordCount => payload.records.length;
   int get budgetCount => payload.budgets.length;
+  int get installmentCount => payload.installments.length;
+  int get periodCount => payload.periods.length;
+  int get savingsPlanCount => payload.moneySavePlans.length;
+  int get savingsRecordCount => payload.moneySavePlanRecords.length;
+  int get planCount => installmentCount + periodCount + savingsPlanCount;
+  int get tagCount => payload.tags.length;
+  int get templateCount => payload.templates.length;
   int get reminderCount => payload.reminders.length;
   int get assetBookRefCount => payload.assetBookRefs.length;
   int get statStoryCount => payload.statStory.length;
+  int get customCurrencyCount =>
+      haohaoPayloadMetaOf(payload)?.upsertCurrencies.length ?? 0;
   int get totalEntityCount => payload.totalCrossEntityCount;
 }
 
@@ -636,9 +651,12 @@ final class CrossMigrationService {
         :final wasEncrypted,
       ):
         final payload = await _readPayloadFromSqliteBytes(dbBytes);
+        final isHaohao = haohaoPayloadMetaOf(payload) != null;
         return LanInspectReady(
           MigrationPreview(
-            sourceKind: MigrationSourceKind.lanBackup,
+            sourceKind: isHaohao
+                ? MigrationSourceKind.haohaoDb
+                : MigrationSourceKind.lanBackup,
             fileName: fileName,
             entryName: entryName,
             payload: payload,
@@ -649,9 +667,48 @@ final class CrossMigrationService {
     }
   }
 
+  /// Inspects a Haohaojizhang (`好好记账` v1.22.5) `account_record*.db` bare
+  /// SQLite file or unencrypted `.zip` archive containing `*.db`, converting
+  /// its 22-table Room schema into a [MigrationPreview] without touching the
+  /// live database.
+  Future<MigrationPreview> inspectHaohaoDb({
+    required String fileName,
+    required Uint8List bytes,
+  }) async {
+    if (bytes.isEmpty) {
+      throw const Failure(FailureCode.validation, '好好记账数据库备份文件为空');
+    }
+    final extraction = extractLanSqliteBytes(bytes: bytes, fileName: fileName);
+    switch (extraction) {
+      case LanExtractionPasswordRequired():
+      case LanExtractionWrongPassword():
+        throw const Failure(
+          FailureCode.validation,
+          '好好记账数据库备份暂不支持加密压缩包，请先解压出 .db 文件',
+        );
+      case LanExtractionSuccess(
+        :final dbBytes,
+        :final entryName,
+        :final wasEncrypted,
+      ):
+        final payload = await _readPayloadFromSqliteBytes(
+          dbBytes,
+          requireHaohaoSchema: true,
+        );
+        return MigrationPreview(
+          sourceKind: MigrationSourceKind.haohaoDb,
+          fileName: fileName,
+          entryName: entryName,
+          payload: payload,
+          wasEncrypted: wasEncrypted,
+        );
+    }
+  }
+
   Future<MigrationPayload> _readPayloadFromSqliteBytes(
-    Uint8List dbBytes,
-  ) async {
+    Uint8List dbBytes, {
+    bool requireHaohaoSchema = false,
+  }) async {
     final rootDir = _tempRootDir ?? Directory.systemTemp;
     final tempDir = rootDir.createTempSync('ti_lan_restore_');
     raw_sqlite.Database? sourceDb;
@@ -668,7 +725,10 @@ final class CrossMigrationService {
         throw const Failure(FailureCode.corruptData, '备份数据库文件损坏，无法读取');
       }
 
-      return _extractMigrationPayloadFromRawDb(sourceDb);
+      return _extractMigrationPayloadFromRawDb(
+        sourceDb,
+        requireHaohaoSchema: requireHaohaoSchema,
+      );
     } on Failure {
       rethrow;
     } on raw_sqlite.SqliteException {
@@ -686,8 +746,9 @@ final class CrossMigrationService {
   }
 
   MigrationPayload _extractMigrationPayloadFromRawDb(
-    raw_sqlite.Database sourceDb,
-  ) {
+    raw_sqlite.Database sourceDb, {
+    bool requireHaohaoSchema = false,
+  }) {
     final tableRows = sourceDb.select(
       "SELECT name FROM sqlite_master WHERE type = 'table'",
     );
@@ -695,6 +756,16 @@ final class CrossMigrationService {
       for (final r in tableRows)
         if (r['name'] is String) r['name'] as String,
     };
+
+    if (isHaohaoDatabaseTables(tables)) {
+      return _extractHaohaoPayloadFromRawDb(sourceDb, tables);
+    }
+    if (requireHaohaoSchema) {
+      throw const Failure(
+        FailureCode.validation,
+        '所选文件不是有效的好好记账数据库备份（未找到 assets_account / bill_info 表）',
+      );
+    }
 
     Set<String> columnsOf(String table) {
       if (!tables.contains(table)) return const {};
@@ -1322,6 +1393,115 @@ final class CrossMigrationService {
     return payload;
   }
 
+  MigrationPayload _extractHaohaoPayloadFromRawDb(
+    raw_sqlite.Database sourceDb,
+    Set<String> tables,
+  ) {
+    final actualNameByLower = <String, String>{
+      for (final t in tables) t.toLowerCase(): t,
+    };
+
+    List<Map<String, Object?>> selectRows(String lowerTable) {
+      final actual = actualNameByLower[lowerTable];
+      if (actual == null) return const <Map<String, Object?>>[];
+      final rs = sourceDb.select('SELECT * FROM "$actual"');
+      return <Map<String, Object?>>[
+        for (final row in rs)
+          <String, Object?>{
+            for (final key in row.keys) key.toLowerCase(): row[key],
+          },
+      ];
+    }
+
+    List<Map<String, Object?>> selectPreferred(
+      String primaryLower, [
+      String? legacyLower,
+    ]) {
+      final primary = selectRows(primaryLower);
+      if (primary.isNotEmpty || legacyLower == null) return primary;
+      return selectRows(legacyLower);
+    }
+
+    final accountBooks = selectPreferred('account_book', 'account_book_new');
+    final assetsAccounts = selectPreferred(
+      'assets_account',
+      'assets_account_new',
+    );
+    final debts = selectPreferred('debt_info', 'debt_info_new');
+    final billCategories = selectPreferred(
+      'bill_category',
+      'bill_category_new',
+    );
+    final tags = selectPreferred('tags', 'tag');
+    final billTags = selectPreferred('bill_tags', 'bill_tag');
+    final budgets = selectPreferred('budget', 'budget_new');
+    final billCategoryBudgets = selectRows('bill_category_budget');
+    final recycleInfos = selectPreferred('recycle_info', 'recycle_info_new');
+    final recycleTags = selectRows('recycle_tags');
+    final installmentBills = selectRows('installment_bill');
+    final savingPlans = selectRows('saving_plan');
+    final savingPlanItems = selectRows('saving_plan_item');
+    final billTemplates = selectRows('bill_template');
+    final billTemplateTags = selectRows('bill_template_tags');
+    final billInfos = selectPreferred('bill_info', 'bill_info_new');
+    final users = selectRows('user');
+    final userCurrencies = selectRows('user_currencies');
+    final billInitialBalances = selectRows('bill_initial_balance');
+
+    final hasAnySourceRow =
+        accountBooks.isNotEmpty ||
+        assetsAccounts.isNotEmpty ||
+        debts.isNotEmpty ||
+        billCategories.isNotEmpty ||
+        billInfos.isNotEmpty ||
+        budgets.isNotEmpty ||
+        recycleInfos.isNotEmpty ||
+        savingPlans.isNotEmpty ||
+        billTemplates.isNotEmpty ||
+        tags.isNotEmpty;
+    if (!hasAnySourceRow) {
+      throw const Failure(
+        FailureCode.validation,
+        '好好记账数据库不包含有效账本记录，已拒绝导入以保护本地数据',
+      );
+    }
+
+    final snapshot = HaohaoDbSnapshot(
+      users: users,
+      userCurrencies: userCurrencies,
+      accountBooks: accountBooks,
+      assetsAccounts: assetsAccounts,
+      billInitialBalances: billInitialBalances,
+      debts: debts,
+      billCategories: billCategories,
+      tags: tags,
+      billTags: billTags,
+      budgets: budgets,
+      billCategoryBudgets: billCategoryBudgets,
+      recycleInfos: recycleInfos,
+      recycleTags: recycleTags,
+      installmentBills: installmentBills,
+      savingPlans: savingPlans,
+      savingPlanItems: savingPlanItems,
+      billTemplates: billTemplates,
+      billTemplateTags: billTemplateTags,
+      billInfos: billInfos,
+    );
+
+    final payload = convertHaohaoDbSnapshot(
+      snapshot,
+      fallbackNowMs: db.nowMs(),
+    );
+    final nonBookCount = payload.totalCrossEntityCount - payload.books.length;
+    if (accountBooks.isEmpty && nonBookCount <= 0) {
+      throw const Failure(
+        FailureCode.validation,
+        '好好记账数据库不包含有效账本记录，已拒绝导入以保护本地数据',
+      );
+    }
+    return payload;
+  }
+
   // ==========================================================================
   // 4. Single-Transaction Atomic Replacement (`R5`, `R6`, `CE-IOS-02`)
   // ==========================================================================
@@ -1343,6 +1523,7 @@ final class CrossMigrationService {
       throw const Failure(FailureCode.validation, '迁移数据为空，已拦截导入以保护本地账本');
     }
 
+    final haohaoMeta = haohaoPayloadMetaOf(payload);
     final hashInput = <Object?>[
       'cross-migration-apply-v1',
       sha256
@@ -1351,6 +1532,11 @@ final class CrossMigrationService {
       payload.lanNotes?.length,
       payload.lanAutoMaps?.length,
       payload.lanCurrencies?.length,
+      if (haohaoMeta != null && haohaoMeta.upsertCurrencies.isNotEmpty)
+        <Object?>[
+          for (final c in haohaoMeta.upsertCurrencies)
+            <String>[c.code, c.rateToAnchor],
+        ],
     ];
     final payloadHash = sha256
         .convert(utf8.encode(jsonEncode(hashInput)))
@@ -1851,10 +2037,56 @@ final class CrossMigrationService {
             }
           });
 
+          // Upsert missing foreign currencies (e.g. Haohao `user_currencies`)
+          // without clobbering any existing local custom exchange rates.
+          if (haohaoMeta != null && haohaoMeta.upsertCurrencies.isNotEmpty) {
+            final existingCurrencyCodes = <String>{
+              for (final c in await db.select(db.currencies).get())
+                c.code.trim().toUpperCase(),
+            };
+            final toInsert = <CurrenciesCompanion>[
+              if (!existingCurrencyCodes.contains('CNY'))
+                CurrenciesCompanion.insert(
+                  code: 'CNY',
+                  name: '人民币',
+                  symbol: '¥',
+                  rateToAnchor: '1',
+                  anchorCode: 'CNY',
+                ),
+              for (final c in haohaoMeta.upsertCurrencies)
+                if (c.code.trim().toUpperCase() != 'CNY' &&
+                    existingCurrencyCodes.add(c.code.trim().toUpperCase()))
+                  CurrenciesCompanion.insert(
+                    code: c.code.trim().toUpperCase(),
+                    name: c.name,
+                    symbol: c.symbol,
+                    type: Value(c.type),
+                    rateToAnchor: c.rateToAnchor,
+                    anchorCode: c.anchorCode,
+                    rateRefreshTime: Value(c.rateRefreshTime),
+                    icon: Value(c.icon),
+                    enable: Value(c.enable),
+                  ),
+            ];
+            if (toInsert.isNotEmpty) {
+              await db.batch((b) {
+                b.insertAll(
+                  db.currencies,
+                  toInsert,
+                  mode: InsertMode.insertOrIgnore,
+                );
+              });
+            }
+          }
+
           // 3. Reset active book ID in `ti_preference` to a valid imported book
+          final preferredBookId = haohaoMeta?.preferredBookId;
           final activeBookId = payload.books.isEmpty
               ? defaultBookId
-              : payload.resolveActiveBookId();
+              : (preferredBookId != null &&
+                        effectiveBooks.any((b) => b.id == preferredBookId)
+                    ? preferredBookId
+                    : payload.resolveActiveBookId());
           await db
               .into(db.preferences)
               .insertOnConflictUpdate(
@@ -1863,6 +2095,27 @@ final class CrossMigrationService {
                   value: '$activeBookId',
                 ),
               );
+
+          // Clear stale defaultAccountId since `db.assets` was wiped & replaced.
+          final diyRow =
+              await (db.select(db.preferences)
+                    ..where((t) => t.key.equals(prefKeyRecordDiyToolbar)))
+                  .getSingleOrNull();
+          if (diyRow != null) {
+            final resetDiy = DiyToolbarConfig.decode(diyRow.value)
+                .copyWithDefaultAccount(
+                  autoSelectDefaultAccount: false,
+                  defaultAccountId: noRef,
+                );
+            await db
+                .into(db.preferences)
+                .insertOnConflictUpdate(
+                  PreferencesCompanion.insert(
+                    key: prefKeyRecordDiyToolbar,
+                    value: resetDiy.encode(),
+                  ),
+                );
+          }
 
           // 4. Clear stale command receipts and persist this migration command receipt
           await db.delete(db.writeCommands).go();

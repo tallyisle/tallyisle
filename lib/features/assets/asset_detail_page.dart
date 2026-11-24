@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../app/adaptive.dart';
 import '../../app/providers.dart';
 import '../../core/failure.dart';
 import '../../core/money.dart';
@@ -12,9 +13,46 @@ import '../../domain/ledger/asset_json.dart';
 import '../../domain/model/codes.dart';
 import '../common/catalog_icons.dart';
 import '../common/common.dart';
+import '../common/desktop_modal_page.dart';
+import '../debt/debt_detail_page.dart';
+import '../debt/debt_providers.dart' show debtServiceProvider;
+import '../deposit/fixed_deposit_page.dart';
+import '../installment/installment_page.dart';
+import '../receipt/receipt_diy_providers.dart' show diyToolbarConfigProvider;
+import '../records/record_editor_page.dart';
+import '../stats/asset_trend_page.dart';
 import 'asset_editor_page.dart';
 import 'asset_flow_section.dart';
 import 'credit_section.dart';
+
+Future<void> _pushRouteOrModal(
+  BuildContext context,
+  String path,
+  Widget Function() modalBuilder, {
+  double maxWidth = 560,
+  double maxHeight = 700,
+  bool replaceIfPageCanPop = false,
+  bool embeddedInPane = false,
+}) {
+  final route = ModalRoute.of(context);
+  final useImperativeModal =
+      (route != null && (route is PopupRoute || route.settings is! Page)) ||
+      GoRouter.maybeOf(context) == null;
+  if (!useImperativeModal) {
+    if (replaceIfPageCanPop &&
+        !embeddedInPane &&
+        (GoRouter.maybeOf(context)?.canPop() ?? false)) {
+      return Future<void>.sync(() => context.pushReplacement(path));
+    }
+    return context.push<void>(path);
+  }
+  return pushDesktopModalOrMaterialRoute<void>(
+    context,
+    maxWidth: maxWidth,
+    maxHeight: maxHeight,
+    child: modalBuilder(),
+  );
+}
 
 final _maxAdjustAmount = Money.parse('88888888888.00');
 
@@ -57,39 +95,159 @@ String creditBalanceLabel(BigInt balance) => balance > BigInt.zero
 /// Account detail (`/assets/:id`): header, actions, credit statements and the
 /// account's bill list with optional running balances.
 class AssetDetailPage extends ConsumerWidget {
-  const AssetDetailPage({super.key, required this.assetId});
+  const AssetDetailPage({
+    super.key,
+    required this.assetId,
+    this.embeddedInPane = false,
+    this.onDeleted,
+  });
+
   final int assetId;
+  final bool embeddedInPane;
+  final VoidCallback? onDeleted;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final asset = ref.watch(assetProvider(assetId));
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(asset.value?.name ?? '账户详情'),
-        actions: [
-          if (asset.value != null)
-            _AssetMenu(asset: asset.value!, key: const Key('asset-menu')),
+    final fallbackAsset = embeddedInPane
+        ? ref
+              .watch(assetsProvider)
+              .value
+              ?.where((x) => x.id == assetId)
+              .firstOrNull
+        : null;
+    final currentAsset = asset.value ?? fallbackAsset;
+    final diyConfig =
+        ref.exists(databaseProvider) || ref.exists(diyToolbarConfigProvider)
+        ? ref.watch(diyToolbarConfigProvider).value
+        : null;
+    final theme = Theme.of(context);
+
+    Widget buildScrollableDetail(Asset a) {
+      final isDefaultAccount =
+          a.status == AssetStatus.active &&
+          a.type != AssetType.debt &&
+          diyConfig != null &&
+          diyConfig.autoSelectDefaultAccount &&
+          diyConfig.defaultAccountId == a.id;
+      return CustomScrollView(
+        slivers: [
+          SliverToBoxAdapter(
+            key: const ValueKey('asset-header'),
+            child: _Header(
+              asset: a,
+              isDefaultAccount: isDefaultAccount,
+              embeddedInPane: embeddedInPane,
+            ),
+          ),
+          if (a.type == AssetType.credit)
+            SliverToBoxAdapter(
+              key: const ValueKey('asset-credit-section'),
+              child: CreditSection(asset: a),
+            ),
+          AssetFlowSection(key: const ValueKey('asset-flow-section'), asset: a),
+          SliverToBoxAdapter(
+            key: const ValueKey('asset-bottom-pad'),
+            child: SizedBox(height: embeddedInPane ? 64 : 96),
+          ),
         ],
-      ),
-      body: asyncBody(asset, (a) {
+      );
+    }
+
+    final Widget detailBody;
+    if (embeddedInPane && currentAsset != null) {
+      detailBody = buildScrollableDetail(currentAsset);
+    } else {
+      detailBody = asyncBody(asset, (a) {
         if (a == null) return const Center(child: Text('账户不存在或已删除'));
-        return CustomScrollView(
-          slivers: [
-            SliverToBoxAdapter(child: _Header(asset: a)),
-            if (a.type == AssetType.credit)
-              SliverToBoxAdapter(child: CreditSection(asset: a)),
-            AssetFlowSection(asset: a),
-            const SliverToBoxAdapter(child: SizedBox(height: 96)),
+        return buildScrollableDetail(a);
+      });
+    }
+
+    if (embeddedInPane) {
+      return Material(
+        color: theme.colorScheme.surface,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SizedBox(
+              height: 52,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 8, 0),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        currentAsset?.name ?? '账户详情',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    if (currentAsset != null)
+                      _AssetMenu(
+                        asset: currentAsset,
+                        key: const Key('asset-menu'),
+                        embeddedInPane: true,
+                        onDeleted: onDeleted,
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            Divider(
+              height: 1,
+              thickness: 0.6,
+              color: theme.colorScheme.outlineVariant.withValues(alpha: 0.45),
+            ),
+            Expanded(child: detailBody),
           ],
-        );
-      }),
+        ),
+      );
+    }
+
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    final isDesktopModal =
+        isDesktop &&
+        ModalRoute.of(context) is PopupRoute &&
+        Navigator.of(context).canPop();
+
+    return DesktopModalEscapeScope(
+      enabled: isDesktopModal,
+      child: Scaffold(
+        appBar: AppBar(
+          leading: isDesktopModal ? const CloseButton() : null,
+          title: Text(asset.value?.name ?? '账户详情'),
+          actions: [
+            if (asset.value != null)
+              _AssetMenu(asset: asset.value!, key: const Key('asset-menu')),
+          ],
+        ),
+        body: isDesktop
+            ? Align(
+                alignment: Alignment.topCenter,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 820),
+                  child: detailBody,
+                ),
+              )
+            : detailBody,
+      ),
     );
   }
 }
 
 class _Header extends StatelessWidget {
-  const _Header({required this.asset});
+  const _Header({
+    required this.asset,
+    this.isDefaultAccount = false,
+    this.embeddedInPane = false,
+  });
   final Asset asset;
+  final bool isDefaultAccount;
+  final bool embeddedInPane;
 
   @override
   Widget build(BuildContext context) {
@@ -119,12 +277,27 @@ class _Header extends StatelessWidget {
             fit: BoxFit.scaleDown,
             child: Text('还款', maxLines: 1, softWrap: false),
           ),
-          onPressed: () => context.push(
-            repayRoute(
-              asset,
-              asset.balanceMinor.isNegative ? -asset.balanceMinor : BigInt.zero,
-            ),
-          ),
+          onPressed: () {
+            final repayAmount = asset.balanceMinor.isNegative
+                ? -asset.balanceMinor
+                : BigInt.zero;
+            final from = AssetExtra.parse(asset.extraInfo).repayAssetId;
+            _pushRouteOrModal(
+              context,
+              repayRoute(asset, repayAmount),
+              () => RecordEditorPage(
+                initialType: RecordType.transfer,
+                initialTo: asset.id,
+                initialFrom: from,
+                initialAmount: repayAmount > BigInt.zero
+                    ? formatMinor(repayAmount)
+                    : null,
+                initialRemark: '信用账户还款',
+              ),
+              maxWidth: 900,
+              maxHeight: 740,
+            );
+          },
         ),
       if (asset.type != AssetType.debt)
         OutlinedButton.icon(
@@ -136,7 +309,13 @@ class _Header extends StatelessWidget {
             fit: BoxFit.scaleDown,
             child: Text('记一笔', maxLines: 1, softWrap: false),
           ),
-          onPressed: () => context.push('/record/new?asset=${asset.id}'),
+          onPressed: () => _pushRouteOrModal(
+            context,
+            '/record/new?asset=${asset.id}',
+            () => RecordEditorPage(initialAsset: asset.id),
+            maxWidth: 900,
+            maxHeight: 740,
+          ),
         ),
       if (!credit && asset.type != AssetType.debt)
         OutlinedButton.icon(
@@ -149,7 +328,13 @@ class _Header extends StatelessWidget {
             fit: BoxFit.scaleDown,
             child: Text('定期存款', maxLines: 1, softWrap: false),
           ),
-          onPressed: () => context.push('/deposits?assetId=${asset.id}'),
+          onPressed: () => _pushRouteOrModal(
+            context,
+            '/deposits?assetId=${asset.id}',
+            () => FixedDepositPage(initialAssetId: asset.id),
+            maxWidth: 860,
+            maxHeight: 740,
+          ),
         ),
       if (credit)
         OutlinedButton.icon(
@@ -162,7 +347,13 @@ class _Header extends StatelessWidget {
             fit: BoxFit.scaleDown,
             child: Text('分期管理', maxLines: 1, softWrap: false),
           ),
-          onPressed: () => context.push('/installments'),
+          onPressed: () => _pushRouteOrModal(
+            context,
+            '/installments',
+            () => const InstallmentPage(),
+            maxWidth: 860,
+            maxHeight: 740,
+          ),
         ),
       if (asset.type == AssetType.debt)
         OutlinedButton.icon(
@@ -175,7 +366,15 @@ class _Header extends StatelessWidget {
             fit: BoxFit.scaleDown,
             child: Text('借贷详情', maxLines: 1, softWrap: false),
           ),
-          onPressed: () => context.pushReplacement('/debts/${asset.id}'),
+          onPressed: () => _pushRouteOrModal(
+            context,
+            '/debts/${asset.id}',
+            () => DebtDetailPage(debtId: asset.id),
+            maxWidth: 680,
+            maxHeight: 740,
+            replaceIfPageCanPop: true,
+            embeddedInPane: embeddedInPane,
+          ),
         ),
     ];
 
@@ -217,6 +416,14 @@ class _Header extends StatelessWidget {
                           materialTapTargetSize:
                               MaterialTapTargetSize.shrinkWrap,
                           label: Text(status),
+                        ),
+                      if (isDefaultAccount)
+                        const Chip(
+                          key: Key('asset-detail-default-chip'),
+                          visualDensity: VisualDensity.compact,
+                          materialTapTargetSize:
+                              MaterialTapTargetSize.shrinkWrap,
+                          label: Text('默认账户'),
                         ),
                     ],
                   ),
@@ -289,14 +496,24 @@ String repayRoute(Asset card, BigInt amount) {
 enum _Action { trend, edit, adjust, hide, unhide, settle, unsettle, delete }
 
 class _AssetMenu extends ConsumerStatefulWidget {
-  const _AssetMenu({super.key, required this.asset});
+  const _AssetMenu({
+    super.key,
+    required this.asset,
+    this.embeddedInPane = false,
+    this.onDeleted,
+  });
+
   final Asset asset;
+  final bool embeddedInPane;
+  final VoidCallback? onDeleted;
+
   @override
   ConsumerState<_AssetMenu> createState() => _AssetMenuState();
 }
 
 class _AssetMenuState extends ConsumerState<_AssetMenu> {
   final ids = CommandIds();
+  int _actionSeq = 0;
 
   void _toast(String text) {
     if (!mounted) return;
@@ -309,25 +526,48 @@ class _AssetMenuState extends ConsumerState<_AssetMenu> {
       final service = await ref.read(ledgerServiceProvider.future);
       switch (action) {
         case _Action.trend:
-          if (mounted) await context.push('/stats/trend?assetId=${a.id}');
+          if (mounted) {
+            await _pushRouteOrModal(
+              context,
+              '/stats/trend?assetId=${a.id}',
+              () => AssetTrendPage(initialAssetId: a.id),
+              maxWidth: 860,
+              maxHeight: 740,
+            );
+          }
         case _Action.edit:
-          if (mounted) await context.push('/assets/${a.id}/edit');
+          if (mounted) {
+            await _pushRouteOrModal(
+              context,
+              '/assets/${a.id}/edit',
+              () => AssetEditorPage(assetId: a.id),
+            );
+          }
         case _Action.adjust:
           await _adjust(a);
         case _Action.hide ||
             _Action.unhide ||
             _Action.settle ||
             _Action.unsettle:
-          final status = switch (action) {
-            _Action.hide => AssetStatus.hidden,
-            _Action.settle => AssetStatus.settled,
-            _ => AssetStatus.active,
-          };
-          await service.setAssetStatus(
-            commandId: ids.forPayload(['status', a.id, status]),
-            assetId: a.id,
-            status: status,
-          );
+          final seq = _actionSeq++;
+          if (a.type == AssetType.debt && action == _Action.unsettle) {
+            final debtService = await ref.read(debtServiceProvider.future);
+            await debtService.reopenDebt(
+              commandId: ids.forPayload(['reopen-debt', a.id, seq]),
+              debtId: a.id,
+            );
+          } else {
+            final status = switch (action) {
+              _Action.hide => AssetStatus.hidden,
+              _Action.settle => AssetStatus.settled,
+              _ => AssetStatus.active,
+            };
+            await service.setAssetStatus(
+              commandId: ids.forPayload(['status', a.id, status, seq]),
+              assetId: a.id,
+              status: status,
+            );
+          }
         case _Action.delete:
           if (!mounted) return;
           final ok = await confirm(
@@ -341,7 +581,20 @@ class _AssetMenuState extends ConsumerState<_AssetMenu> {
             commandId: ids.forPayload(['delete', a.id]),
             assetId: a.id,
           );
-          if (mounted) context.pop();
+          if (mounted) {
+            if (widget.embeddedInPane) {
+              widget.onDeleted?.call();
+            } else {
+              final route = ModalRoute.of(context);
+              if (route != null && route.settings is! Page) {
+                await Navigator.of(context).maybePop();
+              } else if (GoRouter.maybeOf(context)?.canPop() ?? false) {
+                context.pop();
+              } else {
+                await Navigator.of(context).maybePop();
+              }
+            }
+          }
       }
     } catch (e) {
       _toast(safeMessage(e));
@@ -371,11 +624,20 @@ class _AssetMenuState extends ConsumerState<_AssetMenu> {
     final db = await ref.read(databaseProvider.future);
     final bookId = await _readCurrentBookId(db);
     final service = LedgerService(db);
+    final seq = _actionSeq++;
+    final opTimeMs = DateTime.now().millisecondsSinceEpoch;
     await service.adjustBalance(
-      commandId: ids.forPayload(['adjust', asset.id, target.toJson()]),
+      commandId: ids.forPayload([
+        'adjust',
+        asset.id,
+        target.toJson(),
+        opTimeMs,
+        seq,
+      ]),
       assetId: asset.id,
       target: target,
       bookId: bookId,
+      recordTime: opTimeMs,
     );
   }
 
@@ -442,22 +704,31 @@ class _AdjustBalanceDialogState extends State<_AdjustBalanceDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    Widget field = TextField(
+      key: const Key('adjust-amount'),
+      controller: _controller,
+      autofocus: true,
+      keyboardType: const TextInputType.numberWithOptions(
+        decimal: true,
+        signed: true,
+      ),
+      decoration: InputDecoration(
+        border: isDesktop ? const OutlineInputBorder() : null,
+        helperText: widget.isCredit
+            ? '填当前实际欠款（溢存款填负数）；会生成一条“余额变更”记录'
+            : '会生成一条“余额变更”记录',
+      ),
+    );
+    if (isDesktop) {
+      field = ConstrainedBox(
+        constraints: const BoxConstraints(minWidth: 360, maxWidth: 420),
+        child: field,
+      );
+    }
     return AlertDialog(
       title: Text('调整“${widget.assetName}”${widget.isCredit ? '欠款' : '余额'}'),
-      content: TextField(
-        key: const Key('adjust-amount'),
-        controller: _controller,
-        autofocus: true,
-        keyboardType: const TextInputType.numberWithOptions(
-          decimal: true,
-          signed: true,
-        ),
-        decoration: InputDecoration(
-          helperText: widget.isCredit
-              ? '填当前实际欠款（溢存款填负数）；会生成一条“余额变更”记录'
-              : '会生成一条“余额变更”记录',
-        ),
-      ),
+      content: field,
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context),

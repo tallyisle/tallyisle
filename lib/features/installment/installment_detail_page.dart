@@ -1,6 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
+import '../../app/adaptive.dart';
 import '../../app/providers.dart';
 import '../../core/money.dart';
 import '../../data/db/database.dart';
@@ -8,6 +12,7 @@ import '../../data/repo/installment_queries.dart';
 import '../../domain/model/codes.dart';
 import '../../domain/rules/installment_rules.dart';
 import '../common/common.dart';
+import '../common/desktop_modal_page.dart';
 import '../records/record_detail_page.dart';
 import '../records/record_editor_page.dart'
     show amountInputFormatters, parseAmount;
@@ -170,7 +175,19 @@ class _InstallmentDetailPageState extends ConsumerState<InstallmentDetailPage> {
         deleteGeneratedRecords: decision.deleteRecords,
       );
       if (mounted) {
-        Navigator.of(context).pop();
+        setState(() => _busy = false);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          final route = ModalRoute.of(context);
+          if (route != null && route.settings is! Page) {
+            unawaited(Navigator.of(context).maybePop());
+          } else if (GoRouter.maybeOf(context)?.canPop() ?? false) {
+            context.pop();
+          } else {
+            unawaited(Navigator.of(context).maybePop());
+          }
+        });
+        return;
       }
     } catch (e) {
       _showSnack(safeMessage(e));
@@ -184,15 +201,17 @@ class _InstallmentDetailPageState extends ConsumerState<InstallmentDetailPage> {
       widget.onRecordTap!(recordId);
       return;
     }
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => RecordDetailPage(recordId: recordId),
+    unawaited(
+      pushDesktopModalOrMaterialRoute<void>(
+        context,
+        child: RecordDetailPage(recordId: recordId),
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    final isDesktop = DesktopAdaptive.isDesktop(context);
     final detailAsync = ref.watch(
       installmentDetailProvider(widget.installmentId),
     );
@@ -205,96 +224,108 @@ class _InstallmentDetailPageState extends ConsumerState<InstallmentDetailPage> {
     final categories =
         ref.watch(categoriesProvider(bookId)).value ?? const <RecordCategory>[];
 
-    return Scaffold(
-      key: const Key('installment_detail_page'),
-      appBar: AppBar(
-        title: Text(loaded?.summary.installment.name ?? '分期详情'),
-        actions: [
-          if (loaded != null) ...[
-            IconButton(
-              key: const Key('edit_installment_button'),
-              tooltip: '编辑分期',
-              onPressed: _busy
-                  ? null
-                  : () => Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: (_) => InstallmentEditorPage(
-                          installmentId: loaded.summary.installment.id,
+    return PopScope(
+      canPop: !_busy,
+      child: DesktopModalEscapeScope(
+        enabled: isDesktop,
+        child: Scaffold(
+          key: const Key('installment_detail_page'),
+          appBar: AppBar(
+            leading:
+                isDesktop &&
+                    ModalRoute.of(context) is PopupRoute &&
+                    Navigator.of(context).canPop()
+                ? const CloseButton()
+                : null,
+            scrolledUnderElevation: isDesktop ? 0 : null,
+            title: Text(loaded?.summary.installment.name ?? '分期详情'),
+            actions: [
+              if (loaded != null) ...[
+                IconButton(
+                  key: const Key('edit_installment_button'),
+                  tooltip: '编辑分期',
+                  onPressed: _busy
+                      ? null
+                      : () => pushDesktopModalOrMaterialRoute<Object?>(
+                          context,
+                          child: InstallmentEditorPage(
+                            installmentId: loaded.summary.installment.id,
+                          ),
                         ),
+                  icon: const Icon(Icons.edit_outlined),
+                ),
+                IconButton(
+                  key: const Key('delete_installment_button'),
+                  tooltip: '删除分期',
+                  onPressed: _busy ? null : () => _deleteInstallment(loaded),
+                  icon: const Icon(Icons.delete_outline),
+                ),
+              ],
+            ],
+          ),
+          body: asyncBody(detailAsync, (detail) {
+            if (detail == null) {
+              return const Center(child: Text('分期计划不存在或已删除'));
+            }
+            final summary = detail.summary;
+            final inst = summary.installment;
+            final progress = summary.progress;
+            final nextItem = !summary.isFinished
+                ? summary.schedule[progress.nextPeriod - 1]
+                : null;
+
+            return Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 680),
+                child: ListView(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+                  children: [
+                    _DetailSummaryCard(
+                      summary: summary,
+                      assets: assets,
+                      books: books,
+                      categories: categories,
+                      allTags: allTags,
+                      busy: _busy,
+                      onPostNext: nextItem == null
+                          ? null
+                          : () => _postSinglePeriod(
+                              summary,
+                              nextItem,
+                              isRepost: false,
+                            ),
+                      onEarlySettle: summary.isFinished
+                          ? null
+                          : () => _earlySettle(summary),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      '分期还款计划（${inst.periods} 期）',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
                       ),
                     ),
-              icon: const Icon(Icons.edit_outlined),
-            ),
-            IconButton(
-              key: const Key('delete_installment_button'),
-              tooltip: '删除分期',
-              onPressed: _busy ? null : () => _deleteInstallment(loaded),
-              icon: const Icon(Icons.delete_outline),
-            ),
-          ],
-        ],
+                    const SizedBox(height: 8),
+                    for (final item in summary.schedule)
+                      _PeriodScheduleCard(
+                        item: item,
+                        summary: summary,
+                        records: detail.recordsForPeriod(item.period),
+                        categories: categories,
+                        busy: _busy,
+                        onPost: () =>
+                            _postSinglePeriod(summary, item, isRepost: false),
+                        onRepost: () =>
+                            _postSinglePeriod(summary, item, isRepost: true),
+                        onRecordTap: _openRecord,
+                      ),
+                  ],
+                ),
+              ),
+            );
+          }),
+        ),
       ),
-      body: asyncBody(detailAsync, (detail) {
-        if (detail == null) {
-          return const Center(child: Text('分期计划不存在或已删除'));
-        }
-        final summary = detail.summary;
-        final inst = summary.installment;
-        final progress = summary.progress;
-        final nextItem = !summary.isFinished
-            ? summary.schedule[progress.nextPeriod - 1]
-            : null;
-
-        return Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 680),
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-              children: [
-                _DetailSummaryCard(
-                  summary: summary,
-                  assets: assets,
-                  books: books,
-                  categories: categories,
-                  allTags: allTags,
-                  busy: _busy,
-                  onPostNext: nextItem == null
-                      ? null
-                      : () => _postSinglePeriod(
-                          summary,
-                          nextItem,
-                          isRepost: false,
-                        ),
-                  onEarlySettle: summary.isFinished
-                      ? null
-                      : () => _earlySettle(summary),
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  '分期还款计划（${inst.periods} 期）',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                for (final item in summary.schedule)
-                  _PeriodScheduleCard(
-                    item: item,
-                    summary: summary,
-                    records: detail.recordsForPeriod(item.period),
-                    categories: categories,
-                    busy: _busy,
-                    onPost: () =>
-                        _postSinglePeriod(summary, item, isRepost: false),
-                    onRepost: () =>
-                        _postSinglePeriod(summary, item, isRepost: true),
-                    onRecordTap: _openRecord,
-                  ),
-              ],
-            ),
-          ),
-        );
-      }),
     );
   }
 }
@@ -421,7 +452,9 @@ class _DetailSummaryCard extends StatelessWidget {
                   for (final name in tagNames)
                     Chip(
                       label: Text(name, style: theme.textTheme.labelSmall),
-                      visualDensity: VisualDensity.compact,
+                      visualDensity: DesktopAdaptive.isDesktop(context)
+                          ? null
+                          : VisualDensity.compact,
                     ),
                 ],
               ),
@@ -612,7 +645,7 @@ class _PeriodScheduleCard extends StatelessWidget {
               for (final r in records)
                 ListTile(
                   key: Key('posted_record_${r.recordId}'),
-                  dense: true,
+                  dense: DesktopAdaptive.isDesktop(context) ? null : true,
                   contentPadding: EdgeInsets.zero,
                   leading: Icon(
                     r.type == RecordType.fee
@@ -733,9 +766,9 @@ class _EarlySettleDialogState extends State<_EarlySettleDialog> {
   }
 
   @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: const Text('提前结清分期'),
-    content: SingleChildScrollView(
+  Widget build(BuildContext context) {
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    final body = SingleChildScrollView(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -769,23 +802,35 @@ class _EarlySettleDialogState extends State<_EarlySettleDialog> {
               prefixText: '¥ ',
               errorText: _error,
               border: const OutlineInputBorder(),
+              contentPadding: isDesktop
+                  ? const EdgeInsets.symmetric(horizontal: 12, vertical: 16)
+                  : null,
             ),
           ),
         ],
       ),
-    ),
-    actions: [
-      TextButton(
-        onPressed: () => Navigator.of(context).pop(),
-        child: const Text('取消'),
-      ),
-      FilledButton(
-        key: const Key('confirm_early_settle_button'),
-        onPressed: _confirm,
-        child: const Text('确认结清'),
-      ),
-    ],
-  );
+    );
+    return AlertDialog(
+      title: const Text('提前结清分期'),
+      content: isDesktop
+          ? ConstrainedBox(
+              constraints: const BoxConstraints(minWidth: 380, maxWidth: 420),
+              child: body,
+            )
+          : body,
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          key: const Key('confirm_early_settle_button'),
+          onPressed: _confirm,
+          child: const Text('确认结清'),
+        ),
+      ],
+    );
+  }
 }
 
 class _DeleteInstallmentDialog extends StatefulWidget {
@@ -808,9 +853,9 @@ class _DeleteInstallmentDialogState extends State<_DeleteInstallmentDialog> {
   bool _deleteRecords = false;
 
   @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: const Text('删除分期计划？'),
-    content: Column(
+  Widget build(BuildContext context) {
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    final body = Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -826,19 +871,28 @@ class _DeleteInstallmentDialogState extends State<_DeleteInstallmentDialog> {
           ),
         ],
       ],
-    ),
-    actions: [
-      TextButton(
-        onPressed: () => Navigator.of(context).pop(),
-        child: const Text('取消'),
-      ),
-      FilledButton(
-        key: const Key('confirm_delete_installment_button'),
-        onPressed: () => Navigator.of(
-          context,
-        ).pop((confirmed: true, deleteRecords: _deleteRecords)),
-        child: const Text('删除'),
-      ),
-    ],
-  );
+    );
+    return AlertDialog(
+      title: const Text('删除分期计划？'),
+      content: isDesktop
+          ? ConstrainedBox(
+              constraints: const BoxConstraints(minWidth: 380, maxWidth: 420),
+              child: body,
+            )
+          : body,
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          key: const Key('confirm_delete_installment_button'),
+          onPressed: () => Navigator.of(
+            context,
+          ).pop((confirmed: true, deleteRecords: _deleteRecords)),
+          child: const Text('删除'),
+        ),
+      ],
+    );
+  }
 }

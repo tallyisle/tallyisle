@@ -29,6 +29,9 @@ final categoryStatsDimensionProvider =
       CategoryStatsDimensionNotifier.new,
     );
 
+/// Alias for period mode granularity (`month` / `year` / `custom`).
+typedef CategoryStatsPeriodMode = StatRangeKind;
+
 /// Granularity notifier (Month / Year / Custom).
 final class CategoryStatsRangeKindNotifier extends Notifier<StatRangeKind> {
   @override
@@ -40,6 +43,8 @@ final categoryStatsRangeKindProvider =
     NotifierProvider<CategoryStatsRangeKindNotifier, StatRangeKind>(
       CategoryStatsRangeKindNotifier.new,
     );
+
+final categoryStatsPeriodModeProvider = categoryStatsRangeKindProvider;
 
 /// Period offset from current month or year.
 final class CategoryStatsOffsetNotifier extends Notifier<int> {
@@ -346,3 +351,105 @@ final categoryStatsResultProvider = Provider<AsyncValue<CategoryStatsResult>>((
 
   return AsyncValue.data(result);
 });
+
+// ---------------------------------------------------------------------------
+// Stats Hub (/stats) Category Overview Card providers (anchored to offset = 0)
+// ---------------------------------------------------------------------------
+
+final _statsHubCurrentMonthPeriodProvider = FutureProvider<BillingPeriod>((
+  ref,
+) async {
+  final book = await ref.watch(currentBookProvider.future);
+  final startDay = book?.startDay ?? 1;
+  return BillingPeriod.containing(DateTime.now(), startDay);
+});
+
+final _statsHubCategoryFilterProvider = FutureProvider<AnalyzeFilter>((
+  ref,
+) async {
+  final currentBookId = await ref.watch(currentBookIdProvider.future);
+  final period = await ref.watch(_statsHubCurrentMonthPeriodProvider.future);
+
+  return AnalyzeFilter(
+    bookIds: [currentBookId],
+    startMs: period.startMs,
+    endMs: period.endMs,
+    includeExcludeBudget: true,
+    dimension: StatDimension.expense,
+    rangeKind: StatRangeKind.month,
+    outlierSmoothing: OutlierSmoothing.none,
+  );
+});
+
+final _statsHubCategoryRecordsProvider = StreamProvider<List<LedgerRecord>>((
+  ref,
+) async* {
+  final q = await ref.watch(categoryStatsQueriesProvider.future);
+  final filter = await ref.watch(_statsHubCategoryFilterProvider.future);
+  yield* q.watchRecords(filter);
+});
+
+final _statsHubCategoryMetasProvider = StreamProvider<Map<int, CategoryMeta>>((
+  ref,
+) async* {
+  final q = await ref.watch(categoryStatsQueriesProvider.future);
+  final currentBookId = await ref.watch(currentBookIdProvider.future);
+  yield* q.watchCategories([currentBookId]).map((list) {
+    final map = <int, CategoryMeta>{};
+    for (final c in list) {
+      map[c.id] = categoryMetaOf(c);
+    }
+    return map;
+  });
+});
+
+/// Current-month (`offset = 0`) category statistics overview for `StatsPage`,
+/// isolated from subpage period offsets, granularity switches, and drawer filters.
+final statsHubCategoryOverviewProvider =
+    Provider<AsyncValue<CategoryStatsResult>>((ref) {
+      final filterAsync = ref.watch(_statsHubCategoryFilterProvider);
+      final periodAsync = ref.watch(_statsHubCurrentMonthPeriodProvider);
+      final recordsAsync = ref.watch(_statsHubCategoryRecordsProvider);
+      final categoriesAsync = ref.watch(_statsHubCategoryMetasProvider);
+
+      if (filterAsync.isLoading ||
+          periodAsync.isLoading ||
+          recordsAsync.isLoading ||
+          categoriesAsync.isLoading) {
+        return const AsyncValue.loading();
+      }
+
+      if (filterAsync.hasError) {
+        return AsyncValue.error(filterAsync.error!, filterAsync.stackTrace!);
+      }
+      if (periodAsync.hasError) {
+        return AsyncValue.error(periodAsync.error!, periodAsync.stackTrace!);
+      }
+      if (recordsAsync.hasError) {
+        return AsyncValue.error(recordsAsync.error!, recordsAsync.stackTrace!);
+      }
+      if (categoriesAsync.hasError) {
+        return AsyncValue.error(
+          categoriesAsync.error!,
+          categoriesAsync.stackTrace!,
+        );
+      }
+
+      final filter = filterAsync.value!;
+      final period = periodAsync.value!;
+      final records = recordsAsync.value!;
+      final categories = categoriesAsync.value!;
+      final entries = records.map((r) => categoryStatEntryOf(r)).toList();
+
+      final result = aggregateCategoryStats(
+        entries: entries,
+        categories: categories,
+        period: period,
+        dimension: filter.dimension,
+        rangeKind: StatRangeKind.month,
+        includeExcludeBudget: true,
+        outlierSmoothing: OutlierSmoothing.none,
+      );
+
+      return AsyncValue.data(result);
+    });

@@ -79,7 +79,8 @@ List<AssetDelta> balanceEffects(EntryFacts r) {
       add(r.toAssetId, amount);
     case RecordType.reimbursable:
       // decision: the paying account is from_asset_id (original column unconfirmed).
-      add(r.fromAssetId, -r.moneyMinor);
+      // Use assetAmount (`curr.am ?? money`) for cross-currency consistency.
+      add(r.fromAssetId, -amount);
     case RecordType.balanceAdjust:
       add(r.fromAssetId, r.moneyMinor);
     case RecordType.borrowIn:

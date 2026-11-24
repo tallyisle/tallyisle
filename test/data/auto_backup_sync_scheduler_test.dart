@@ -323,6 +323,13 @@ void main() {
 
         // Wait until both 180ms (cloud) and 300ms (local) quiet windows finish
         await Future<void>.delayed(const Duration(milliseconds: 360));
+        for (
+          var attempt = 0;
+          attempt < 24 && (cloudOutcomes.isEmpty || localCreated.isEmpty);
+          attempt++
+        ) {
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+        }
 
         // Exactly ONE cloud push (revision 1) and ONE local backup containing all 3 records!
         expect(s3.putCountsByKey['TallyIsle/sync/head.json'], 1);

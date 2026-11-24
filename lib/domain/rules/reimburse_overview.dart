@@ -2,6 +2,7 @@ import '../../core/money.dart';
 import '../ledger/record_extra.dart';
 import '../ledger/record_relations.dart';
 import '../model/codes.dart';
+import 'asset_overview.dart';
 
 /// Pure input fact for a `type == RecordType.reimbursable` (`3`) bill.
 final class ReimburseBillInput {
@@ -184,11 +185,23 @@ ReimburseAmountPreview computeReimbursePreview({
 
 /// Computes [ReimburseOverview] from [bills] (`type == RecordType.reimbursable`)
 /// and optional [liveReceipts] (`type == RecordType.reimburseReceipt`).
+///
+/// When [rates] is provided, top-level totals (`pendingTotalMinor`,
+/// `reimbursedTotalMinor`, `totalOriginMinor`) are converted to
+/// [baseCurrencyCode].
 ReimburseOverview computeReimburseOverview(
   Iterable<ReimburseBillInput> bills, {
   Map<String, ReimburseReceiptInput>? liveReceipts,
   String baseCurrencyCode = 'CNY',
+  RateTable? rates,
 }) {
+  final base = normalizeCurrency(baseCurrencyCode) ?? 'CNY';
+
+  BigInt toBase(BigInt minor, String code) {
+    if (rates == null || code == base) return minor;
+    return rates.convert(minor, code, base);
+  }
+
   // Index reverse links (`riobid`) from live receipts if provided so receipts
   // linked via `rel_info.lreimbursei.riobid` reconcile cleanly even if missing
   // from a parent's child array.
@@ -216,6 +229,36 @@ ReimburseOverview computeReimburseOverview(
     if (bill.type != RecordType.reimbursable) continue;
 
     final rel = _parseRelationsSafe(bill.relInfo);
+    final snap = _parseCurrencySafe(bill.extraInfo);
+    final currencyCode = _resolveCurrencyCode(
+      snap: snap,
+      fallbackCurrencyCode: bill.fallbackCurrencyCode,
+      baseCurrencyCode: base,
+    );
+
+    final rawOriginMinor =
+        (snap != null && snap.isValid && snap.assetNet != null)
+        ? snap.assetNet!
+        : bill.moneyMinor;
+
+    // Deduct linked refunds so refunded reimbursable bills reduce pending
+    // amounts rather than overstating what still awaits reimbursement.
+    final seenRefundIds = <String>{};
+    var refundedMinor = BigInt.zero;
+    for (final refund in rel.refunds?.children ?? const <LinkedBill>[]) {
+      final id = refund.billId.trim();
+      if (id.isNotEmpty && !seenRefundIds.add(id)) continue;
+      final rAmt =
+          (normalizeCurrency(refund.assetCode) == currencyCode &&
+              refund.assetAmount != null)
+          ? refund.assetAmount!.abs()
+          : refund.amount.abs();
+      refundedMinor += rAmt;
+    }
+    final effectiveOriginMinor = rawOriginMinor > refundedMinor
+        ? rawOriginMinor - refundedMinor
+        : BigInt.zero;
+
     final children = rel.reimbursements?.children ?? const <LinkedBill>[];
     final seenReceiptIds = <String>{};
     final receiptIds = <String>[];
@@ -229,9 +272,19 @@ ReimburseOverview computeReimburseOverview(
       final live = (liveReceipts != null && id.isNotEmpty)
           ? liveReceipts[id]
           : null;
-      final receiptMinor = live != null
-          ? live.moneyMinor.abs()
-          : link.amount.abs();
+      final BigInt receiptMinor;
+      if (live != null) {
+        final liveSnap = _parseCurrencySafe(live.extraInfo);
+        receiptMinor =
+            (liveSnap != null && liveSnap.isValid && liveSnap.assetNet != null)
+            ? liveSnap.assetNet!.abs()
+            : live.moneyMinor.abs();
+      } else if (normalizeCurrency(link.assetCode) == currencyCode &&
+          link.assetAmount != null) {
+        receiptMinor = link.assetAmount!.abs();
+      } else {
+        receiptMinor = link.amount.abs();
+      }
       reimbursedMinor += receiptMinor;
       if (id.isNotEmpty) {
         receiptIds.add(id);
@@ -243,7 +296,14 @@ ReimburseOverview computeReimburseOverview(
       for (final receipt in reverseList) {
         final id = receipt.recordId.trim();
         if (id.isNotEmpty && seenReceiptIds.add(id)) {
-          reimbursedMinor += receipt.moneyMinor.abs();
+          final liveSnap = _parseCurrencySafe(receipt.extraInfo);
+          final receiptMinor =
+              (liveSnap != null &&
+                  liveSnap.isValid &&
+                  liveSnap.assetNet != null)
+              ? liveSnap.assetNet!.abs()
+              : receipt.moneyMinor.abs();
+          reimbursedMinor += receiptMinor;
           receiptIds.add(id);
         }
       }
@@ -252,11 +312,6 @@ ReimburseOverview computeReimburseOverview(
     final fundingAssetId = bill.fromAssetId != noRef
         ? bill.fromAssetId
         : bill.assetId;
-    final currencyCode = _resolveCurrencyCode(
-      extraInfo: bill.extraInfo,
-      fallbackCurrencyCode: bill.fallbackCurrencyCode,
-      baseCurrencyCode: baseCurrencyCode,
-    );
 
     final item = ReimburseBillItem(
       recordId: bill.recordId,
@@ -267,19 +322,19 @@ ReimburseOverview computeReimburseOverview(
       fundingAssetId: fundingAssetId,
       remark: bill.remark,
       currencyCode: currencyCode,
-      originMinor: bill.moneyMinor,
+      originMinor: effectiveOriginMinor,
       reimbursedMinor: reimbursedMinor,
       receiptIds: receiptIds,
     );
 
-    totalOriginMinor += item.originMinor;
-    reimbursedTotalMinor += item.reimbursedMinor;
+    totalOriginMinor += toBase(item.originMinor, item.currencyCode);
+    reimbursedTotalMinor += toBase(item.reimbursedMinor, item.currencyCode);
 
     if (item.isSettled) {
       settled.add(item);
     } else {
       pending.add(item);
-      pendingTotalMinor += item.remainingMinor;
+      pendingTotalMinor += toBase(item.remainingMinor, item.currencyCode);
     }
   }
 
@@ -311,24 +366,25 @@ RecordRelations _parseRelationsSafe(String? relInfo) {
   }
 }
 
+CurrencySnapshot? _parseCurrencySafe(String? extraInfo) {
+  try {
+    return RecordExtra.parse(extraInfo).currency;
+  } on Object {
+    return null;
+  }
+}
+
 String _resolveCurrencyCode({
-  required String? extraInfo,
+  required CurrencySnapshot? snap,
   required String? fallbackCurrencyCode,
   required String baseCurrencyCode,
 }) {
-  try {
-    final snap = RecordExtra.parse(extraInfo).currency;
-    final sc = snap?.sourceCode.trim();
-    if (sc != null && sc.isNotEmpty) {
-      return sc.toUpperCase();
-    }
-  } on Object {
-    // Fall back cleanly if extra_info is malformed.
-  }
-  final fb = fallbackCurrencyCode?.trim();
-  if (fb != null && fb.isNotEmpty) {
-    return fb.toUpperCase();
-  }
-  final base = baseCurrencyCode.trim();
-  return base.isEmpty ? 'CNY' : base.toUpperCase();
+  // Funding account currency (`ac`) governs booked balance & settlement.
+  final ac = normalizeCurrency(snap?.assetCode);
+  if (ac != null) return ac;
+  final fb = normalizeCurrency(fallbackCurrencyCode);
+  if (fb != null) return fb;
+  final sc = normalizeCurrency(snap?.sourceCode);
+  if (sc != null) return sc;
+  return normalizeCurrency(baseCurrencyCode) ?? 'CNY';
 }

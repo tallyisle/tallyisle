@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../app/adaptive.dart';
 import '../../app/providers.dart';
 import '../../core/failure.dart';
 import '../../domain/rules/data_health_rules.dart';
+import '../common/desktop_modal_page.dart';
 import 'settings_providers.dart';
 
 const _uuid = Uuid();
@@ -36,26 +38,33 @@ class _DataHealthPageState extends ConsumerState<DataHealthPage> {
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('确认执行一键校准修复'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('将严格依据现有真实账单流水，在单个数据库事务内完成以下安全修复：'),
-            const SizedBox(height: 12),
-            if (report.ordinaryRepairs.isNotEmpty)
-              Text('• 普通/储蓄/投资账户缓存余额校准：${report.ordinaryRepairs.length} 项'),
-            if (report.debtRepairs.isNotEmpty)
-              Text('• 借贷账户剩余本金与结清状态重算：${report.debtRepairs.length} 项'),
-            if (report.orphanTagRepairs.isNotEmpty)
-              Text('• 清理指向缺失记录或标签的孤立关联：${report.orphanTagRepairs.length} 项'),
-            const SizedBox(height: 12),
-            Text(
-              '承诺：绝不修改或删除任何账单流水记录，绝不改动信用账户余额或授信额度。',
-              style: Theme.of(dialogContext).textTheme.bodySmall?.copyWith(
-                color: Theme.of(dialogContext).colorScheme.onSurfaceVariant,
-              ),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 440),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('将严格依据现有真实账单流水，在单个数据库事务内完成以下安全修复：'),
+                const SizedBox(height: 12),
+                if (report.ordinaryRepairs.isNotEmpty)
+                  Text('• 普通/储蓄/投资账户缓存余额校准：${report.ordinaryRepairs.length} 项'),
+                if (report.debtRepairs.isNotEmpty)
+                  Text('• 借贷账户剩余本金与结清状态重算：${report.debtRepairs.length} 项'),
+                if (report.orphanTagRepairs.isNotEmpty)
+                  Text(
+                    '• 清理指向缺失记录或标签的孤立关联：${report.orphanTagRepairs.length} 项',
+                  ),
+                const SizedBox(height: 12),
+                Text(
+                  '承诺：绝不修改或删除任何账单流水记录，绝不改动信用账户余额或授信额度。',
+                  style: Theme.of(dialogContext).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(dialogContext).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
         actions: [
           TextButton(
@@ -96,238 +105,258 @@ class _DataHealthPageState extends ConsumerState<DataHealthPage> {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('数据体检'),
-        actions: [
-          IconButton(
-            key: const Key('data_health_recheck_button'),
-            tooltip: '重新体检',
-            onPressed: _repairing ? null : _recheck,
-            icon: const Icon(Icons.refresh),
-          ),
-        ],
-      ),
-      body: reportAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (err, _) => Center(
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.error_outline, size: 48, color: scheme.error),
-                const SizedBox(height: 12),
-                Text('体检读取失败：$err', textAlign: TextAlign.center),
-                const SizedBox(height: 16),
-                FilledButton.tonalIcon(
-                  onPressed: _recheck,
-                  icon: const Icon(Icons.refresh),
-                  label: const Text('重试'),
-                ),
-              ],
-            ),
-          ),
-        ),
-        data: (report) {
-          final healthy = report.isHealthy;
-          final bannerBg = healthy
-              ? scheme.secondaryContainer
-              : (report.errorCount > 0
-                    ? scheme.errorContainer
-                    : scheme.tertiaryContainer);
-          final bannerFg = healthy
-              ? scheme.onSecondaryContainer
-              : (report.errorCount > 0
-                    ? scheme.onErrorContainer
-                    : scheme.onTertiaryContainer);
+    final isDesktop = DesktopAdaptive.isDesktop(context);
+    final isPopupModal = isDesktop && ModalRoute.of(context) is PopupRoute;
 
-          return ListView(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-            children: [
-              Card(
-                key: const Key('data_health_status_banner'),
-                elevation: 0,
-                color: bannerBg,
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Icon(
-                        healthy
-                            ? Icons.verified_user_outlined
-                            : Icons.warning_amber_rounded,
-                        size: 32,
-                        color: bannerFg,
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              healthy
-                                  ? '账本数据健康'
-                                  : '发现 ${report.errorCount} 项错误 · ${report.warningCount} 项警告',
-                              style: theme.textTheme.titleMedium?.copyWith(
-                                color: bannerFg,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              healthy
-                                  ? '已核对 ${report.checkedAssetCount} 个账户、${report.checkedRecordCount} 条流水与 ${report.checkedTagRecordCount} 条标签关联，所有派生余额与引用均一致。'
-                                  : '已扫描 ${report.checkedAssetCount} 个账户与 ${report.checkedRecordCount} 条流水；其中 ${report.repairableCount} 项派生偏差支持一键安全校准。',
-                              style: theme.textTheme.bodyMedium?.copyWith(
-                                color: bannerFg,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              Row(
+    return DesktopModalEscapeScope(
+      enabled: isPopupModal,
+      child: Scaffold(
+        appBar: AppBar(
+          leading: isPopupModal ? const CloseButton() : null,
+          scrolledUnderElevation: isDesktop ? 0 : null,
+          title: const Text('数据体检'),
+          actions: [
+            IconButton(
+              key: const Key('data_health_recheck_button'),
+              tooltip: '重新体检',
+              onPressed: _repairing ? null : _recheck,
+              icon: const Icon(Icons.refresh),
+            ),
+          ],
+        ),
+        body: reportAsync.when(
+          loading: () => const Center(child: CircularProgressIndicator()),
+          error: (err, _) => Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Expanded(
-                    child: _MetricTile(
-                      label: '已检账户',
-                      value: '${report.checkedAssetCount}',
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: _MetricTile(
-                      label: '已检流水',
-                      value: '${report.checkedRecordCount}',
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: _MetricTile(
-                      label: '可自动修复',
-                      value: '${report.repairableCount}',
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: _MetricTile(
-                      label: '提示信息',
-                      value: '${report.infoCount}',
-                    ),
+                  Icon(Icons.error_outline, size: 48, color: scheme.error),
+                  const SizedBox(height: 12),
+                  Text('体检读取失败：$err', textAlign: TextAlign.center),
+                  const SizedBox(height: 16),
+                  FilledButton.tonalIcon(
+                    onPressed: _recheck,
+                    icon: const Icon(Icons.refresh),
+                    label: const Text('重试'),
                   ),
                 ],
               ),
-              const SizedBox(height: 12),
-              Card(
-                elevation: 0,
-                color: scheme.surfaceContainerHighest.withValues(alpha: 0.55),
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Icon(
-                        Icons.info_outline,
-                        size: 20,
-                        color: scheme.onSurfaceVariant,
+            ),
+          ),
+          data: (report) {
+            final healthy = report.isHealthy;
+            final bannerBg = healthy
+                ? scheme.secondaryContainer
+                : (report.errorCount > 0
+                      ? scheme.errorContainer
+                      : scheme.tertiaryContainer);
+            final bannerFg = healthy
+                ? scheme.onSecondaryContainer
+                : (report.errorCount > 0
+                      ? scheme.onErrorContainer
+                      : scheme.onTertiaryContainer);
+
+            final listView = ListView(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+              children: [
+                Card(
+                  key: const Key('data_health_status_banner'),
+                  elevation: 0,
+                  color: bannerBg,
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(
+                          healthy
+                              ? Icons.verified_user_outlined
+                              : Icons.warning_amber_rounded,
+                          size: 32,
+                          color: bannerFg,
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                healthy
+                                    ? '账本数据健康'
+                                    : '发现 ${report.errorCount} 项错误 · ${report.warningCount} 项警告',
+                                style: theme.textTheme.titleMedium?.copyWith(
+                                  color: bannerFg,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                healthy
+                                    ? '已核对 ${report.checkedAssetCount} 个账户、${report.checkedRecordCount} 条流水与 ${report.checkedTagRecordCount} 条标签关联，所有派生余额与引用均一致。'
+                                    : '已扫描 ${report.checkedAssetCount} 个账户与 ${report.checkedRecordCount} 条流水；其中 ${report.repairableCount} 项派生偏差支持一键安全校准。',
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  color: bannerFg,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _MetricTile(
+                        label: '已检账户',
+                        value: '${report.checkedAssetCount}',
                       ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          '核对口径：普通/储蓄/投资账户核对「期初金额 + 流水变动」；借贷账户重算本金与结清状态；信用账户的授信额度绝不计入余额，建卡期初欠款仅作提示、绝不自动覆盖。',
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: scheme.onSurfaceVariant,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _MetricTile(
+                        label: '已检流水',
+                        value: '${report.checkedRecordCount}',
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _MetricTile(
+                        label: '可自动修复',
+                        value: '${report.repairableCount}',
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _MetricTile(
+                        label: '提示信息',
+                        value: '${report.infoCount}',
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Card(
+                  elevation: 0,
+                  color: scheme.surfaceContainerHighest.withValues(alpha: 0.55),
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(
+                          Icons.info_outline,
+                          size: 20,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            '核对口径：普通/储蓄/投资账户核对「期初金额 + 流水变动」；借贷账户重算本金与结清状态；信用账户的授信额度绝不计入余额，建卡期初欠款仅作提示、绝不自动覆盖。',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: scheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (report.repairableCount > 0) ...[
+                      FilledButton.icon(
+                        key: const Key('data_health_repair_button'),
+                        onPressed: _repairing
+                            ? null
+                            : () => _confirmAndRepair(report),
+                        icon: _repairing
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.build_circle_outlined),
+                        label: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text(
+                            '一键修复可自动校准项 (${report.repairableCount})',
+                            maxLines: 1,
+                            softWrap: false,
                           ),
                         ),
                       ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  if (report.repairableCount > 0) ...[
-                    FilledButton.icon(
-                      key: const Key('data_health_repair_button'),
-                      onPressed: _repairing
-                          ? null
-                          : () => _confirmAndRepair(report),
-                      icon: _repairing
-                          ? const SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.build_circle_outlined),
-                      label: FittedBox(
-                        fit: BoxFit.scaleDown,
-                        child: Text(
-                          '一键修复可自动校准项 (${report.repairableCount})',
-                          maxLines: 1,
-                          softWrap: false,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                  ],
-                  OutlinedButton.icon(
-                    onPressed: _repairing ? null : _recheck,
-                    icon: const Icon(Icons.refresh),
-                    label: const FittedBox(
-                      fit: BoxFit.scaleDown,
-                      child: Text('重新体检', maxLines: 1, softWrap: false),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              if (report.issues.isEmpty)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 28),
-                  child: Column(
-                    children: [
-                      Icon(
-                        Icons.task_alt,
-                        size: 48,
-                        color: scheme.primary.withValues(alpha: 0.8),
-                      ),
                       const SizedBox(height: 8),
-                      Text(
-                        '未发现任何异常或提示项',
-                        style: theme.textTheme.bodyLarge?.copyWith(
-                          color: scheme.onSurfaceVariant,
-                        ),
-                      ),
                     ],
-                  ),
-                )
-              else ...[
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: Text(
-                    '诊断明细（共 ${report.issues.length} 项）',
-                    style: theme.textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w700,
+                    OutlinedButton.icon(
+                      onPressed: _repairing ? null : _recheck,
+                      icon: const Icon(Icons.refresh),
+                      label: const FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text('重新体检', maxLines: 1, softWrap: false),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                if (report.issues.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 28),
+                    child: Column(
+                      children: [
+                        Icon(
+                          Icons.task_alt,
+                          size: 48,
+                          color: scheme.primary.withValues(alpha: 0.8),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          '未发现任何异常或提示项',
+                          style: theme.textTheme.bodyLarge?.copyWith(
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                else ...[
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Text(
+                      '诊断明细（共 ${report.issues.length} 项）',
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ),
-                ),
-                for (var i = 0; i < report.issues.length; i++)
-                  _IssueCard(
-                    key: Key('data_health_issue_$i'),
-                    issue: report.issues[i],
-                  ),
+                  for (var i = 0; i < report.issues.length; i++)
+                    _IssueCard(
+                      key: Key('data_health_issue_$i'),
+                      issue: report.issues[i],
+                    ),
+                ],
               ],
-            ],
-          );
-        },
+            );
+
+            if (isDesktop) {
+              return Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 820),
+                  child: listView,
+                ),
+              );
+            }
+            return listView;
+          },
+        ),
       ),
     );
   }

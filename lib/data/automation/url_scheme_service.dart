@@ -16,7 +16,7 @@ import '../db/database.dart';
 import '../db/failures.dart';
 import '../ledger/ledger_service.dart';
 
-/// Outcome of executing a `tallyisle://` or `yyjz://` URI (`F-033`).
+/// Outcome of executing a `tallyisle://` URI (`F-033`).
 final class UrlSchemeExecutionResult {
   const UrlSchemeExecutionResult({
     required this.rawUri,
@@ -64,7 +64,7 @@ final class UrlSchemeService {
     return executeUri(pending, commandId: effectiveCommandId);
   }
 
-  /// Parses and executes a `tallyisle://` or `yyjz://` URI (`F-033`).
+  /// Parses and executes a `tallyisle://` URI (`F-033`).
   ///
   /// - Navigation & `showsheet` URIs return `targetRoute` (and switch `current_book_id`
   ///   when a valid `book` parameter is supplied).
