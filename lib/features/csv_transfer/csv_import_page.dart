@@ -38,10 +38,12 @@ class CsvImportPage extends ConsumerStatefulWidget {
 class _CsvImportPageState extends ConsumerState<CsvImportPage> {
   final _commandIds = CommandIds();
 
+  SelectedBytes? _selectedFile;
   CsvImportPreview? _preview;
   String? _parseError;
   int? _selectedBookId;
   bool _restoreFileBooks = true;
+  bool _autoCreateMissingAccounts = false;
   bool _loadingPreview = false;
   bool _committing = false;
 
@@ -78,7 +80,15 @@ class _CsvImportPageState extends ConsumerState<CsvImportPage> {
           ? await pickFn()
           : await ref
                 .read(csvFileAccessProvider)
-                .pickBytes(allowedExtensions: const ['csv', 'xlsx', 'xls']);
+                .pickBytes(
+                  allowedExtensions: const [
+                    'csv',
+                    'xlsx',
+                    'xls',
+                    'json',
+                    'zip',
+                  ],
+                );
       if (!mounted) return;
       await _previewSelectedFile(selected);
     } on Failure catch (f) {
@@ -96,8 +106,12 @@ class _CsvImportPageState extends ConsumerState<CsvImportPage> {
     }
   }
 
-  Future<void> _previewSelectedFile(SelectedBytes file) async {
+  Future<void> _previewSelectedFile(
+    SelectedBytes file, {
+    bool? autoCreateOverride,
+  }) async {
     setState(() {
+      _selectedFile = file;
       _loadingPreview = true;
       _parseError = null;
     });
@@ -112,11 +126,17 @@ class _CsvImportPageState extends ConsumerState<CsvImportPage> {
         fileName: file.name,
         bytes: file.bytes,
         targetBookId: targetBookId,
+        autoCreateMissingAccounts: autoCreateOverride,
       );
       if (!mounted) return;
       setState(() {
         _preview = preview;
-        _restoreFileBooks = preview.hasBookColumn;
+        if (autoCreateOverride == null) {
+          _restoreFileBooks = preview.hasBookColumn;
+          _autoCreateMissingAccounts = preview.defaultAutoCreateAccounts;
+        } else {
+          _autoCreateMissingAccounts = autoCreateOverride;
+        }
         _selectedBookId ??= targetBookId;
       });
     } on Failure catch (f) {
@@ -133,6 +153,16 @@ class _CsvImportPageState extends ConsumerState<CsvImportPage> {
       });
     } finally {
       if (mounted) setState(() => _loadingPreview = false);
+    }
+  }
+
+  void _onToggleAutoCreateAccounts(bool value) {
+    if (_loadingPreview || _committing) return;
+    final file = _selectedFile;
+    if (file != null) {
+      unawaited(_previewSelectedFile(file, autoCreateOverride: value));
+    } else {
+      setState(() => _autoCreateMissingAccounts = value);
     }
   }
 
@@ -184,23 +214,31 @@ class _CsvImportPageState extends ConsumerState<CsvImportPage> {
         preview.validRows.length,
         targetBookId,
         _restoreFileBooks,
+        _autoCreateMissingAccounts,
       ]);
       final result = await service.commitImport(
         commandId: cmdId,
         preview: preview,
         selectedBookId: targetBookId,
         restoreFileBooks: _restoreFileBooks,
+        autoCreateMissingAccounts: _autoCreateMissingAccounts,
       );
       if (!mounted) return;
       setState(() {
         _preview = null;
+        _selectedFile = null;
         _parseError = null;
       });
+      final extraSummary = <String>[
+        if (result.createdBookCount > 0) '新建账本 ${result.createdBookCount} 个',
+        if (result.createdAccountCount > 0)
+          '新建账户 ${result.createdAccountCount} 个',
+      ];
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
             '成功导入 ${result.importedBillCount} 笔账单'
-            '${result.createdBookCount > 0 ? '（新建账本 ${result.createdBookCount} 个）' : ''}',
+            '${extraSummary.isNotEmpty ? '（${extraSummary.join('，')}）' : ''}',
           ),
           action: SnackBarAction(label: '导入记录', onPressed: _openImportBatches),
         ),
@@ -328,12 +366,13 @@ class _CsvImportPageState extends ConsumerState<CsvImportPage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      '支持微信、支付宝、标准 CSV 与模板表格',
+                      '支持钱迹、好好记账、微信、支付宝、标准 CSV 与模板表格',
                       style: Theme.of(context).textTheme.titleMedium,
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      '支持 .csv、.xlsx、.xls 格式（单文件最大 6MB），自动识别 UTF-8 / GBK / UTF-16LE 编码。'
+                      '支持 .csv、.xlsx、.xls、.json、.zip 格式（单文件最大 64MB），'
+                      '自动识别 UTF-8 / GBK / UTF-16LE 编码及内嵌/压缩包账单图片。'
                       '导入后可在「导入记录」中随时一键撤销整个批次。',
                       style: Theme.of(context).textTheme.bodyMedium,
                     ),
@@ -440,10 +479,12 @@ class _CsvImportPageState extends ConsumerState<CsvImportPage> {
                 books: books,
                 targetBookId: targetBookId,
                 restoreFileBooks: _restoreFileBooks,
+                autoCreateMissingAccounts: _autoCreateMissingAccounts,
                 busy: busy,
                 onBookChanged: (id) => setState(() => _selectedBookId = id),
                 onRestoreBooksChanged: (v) =>
                     setState(() => _restoreFileBooks = v),
+                onAutoCreateAccountsChanged: _onToggleAutoCreateAccounts,
                 onConfirm: targetBookId == null
                     ? null
                     : () => _commitImport(targetBookId),
@@ -469,9 +510,11 @@ class _PreviewCard extends StatelessWidget {
     required this.books,
     required this.targetBookId,
     required this.restoreFileBooks,
+    required this.autoCreateMissingAccounts,
     required this.busy,
     required this.onBookChanged,
     required this.onRestoreBooksChanged,
+    required this.onAutoCreateAccountsChanged,
     required this.onConfirm,
   });
 
@@ -479,9 +522,11 @@ class _PreviewCard extends StatelessWidget {
   final List<AccountBook> books;
   final int? targetBookId;
   final bool restoreFileBooks;
+  final bool autoCreateMissingAccounts;
   final bool busy;
   final ValueChanged<int> onBookChanged;
   final ValueChanged<bool> onRestoreBooksChanged;
+  final ValueChanged<bool> onAutoCreateAccountsChanged;
   final VoidCallback? onConfirm;
 
   @override
@@ -542,8 +587,11 @@ class _PreviewCard extends StatelessWidget {
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
-                  '未匹配账户：${preview.unknownAssets.join('、')}\n'
-                  '收支账单将以「不选账户」导入（不会自动新建账户或变动余额）；转账缺失/未知账户已归入失败行。',
+                  autoCreateMissingAccounts
+                      ? '未匹配账户：${preview.unknownAssets.join('、')}\n'
+                            '已开启「自动创建缺失账户」，导入时将自动新建对应账户/借贷项目并按流水计算余额。'
+                      : '未匹配账户：${preview.unknownAssets.join('、')}\n'
+                            '收支账单将以「不选账户」导入（不会自动新建账户或变动余额）；转账缺失/未知账户已归入失败行。',
                   style: TextStyle(color: colorScheme.onTertiaryContainer),
                 ),
               ),
@@ -579,8 +627,16 @@ class _PreviewCard extends StatelessWidget {
                   ),
                 ),
               ),
+            const SizedBox(height: 8),
+            SwitchListTile(
+              key: const Key('auto_create_accounts_switch'),
+              contentPadding: EdgeInsets.zero,
+              title: const Text('自动创建缺失账户'),
+              subtitle: const Text('开启后自动新建未匹配的资金/信用账户与借贷对象，并智能匹配银行图标与币种'),
+              value: autoCreateMissingAccounts,
+              onChanged: busy ? null : onAutoCreateAccountsChanged,
+            ),
             if (preview.hasBookColumn) ...[
-              const SizedBox(height: 8),
               SwitchListTile(
                 key: const Key('restore_file_books_switch'),
                 contentPadding: EdgeInsets.zero,

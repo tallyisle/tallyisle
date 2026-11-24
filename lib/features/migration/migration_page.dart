@@ -73,7 +73,10 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
     });
   }
 
-  Future<void> _refreshProviders() => invalidateAllAfterDatabaseReplace(ref);
+  Future<void> _refreshProviders() async {
+    await invalidateAllAfterDatabaseReplace(ref);
+    ref.invalidate(migrationLocalSummaryProvider);
+  }
 
   Future<PennyPickedFile?> _pickPennyFile() async {
     final picker = ref.read(pennyFilePickerProvider);
@@ -273,6 +276,39 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
     }
   }
 
+  Future<void> _pickAndImportHaohaoDb() async {
+    if (_inFlow) return;
+    _inFlow = true;
+    final sessionId = ++_pickSession;
+    _setBusy(true);
+    try {
+      final fileAccess = ref.read(migrationFileAccessProvider);
+      final selected = await fileAccess.pickBytes(
+        allowedExtensions: const ['db', 'zip', 'sqlite', 'sqlite3'],
+      );
+      final service = await ref.read(crossMigrationServiceProvider.future);
+      final preview = await service.inspectHaohaoDb(
+        fileName: selected.name,
+        bytes: selected.bytes,
+      );
+      if (!mounted) return;
+      await _confirmAndApplyPreview(
+        service: service,
+        preview: preview,
+        sessionId: sessionId,
+        dialogKey: const Key('haohao_db_confirm_dialog'),
+      );
+    } on Failure catch (f) {
+      if (f.code == FailureCode.cancelled) return;
+      _setStatus(f.message, isError: true);
+    } catch (e) {
+      _setStatus(safeMessage(e), isError: true);
+    } finally {
+      _inFlow = false;
+      _setBusy(false);
+    }
+  }
+
   Future<void> _confirmAndApplyPreview({
     required CrossMigrationService service,
     required MigrationPreview preview,
@@ -303,9 +339,11 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
     if (mounted) {
       await _refreshProviders();
     }
-    final kindLabel = preview.sourceKind == MigrationSourceKind.yi2a
-        ? '原版 iOS 迁移包导入完成'
-        : '原版局域网备份恢复完成';
+    final kindLabel = switch (preview.sourceKind) {
+      MigrationSourceKind.yi2a => '原版 iOS 迁移包导入完成',
+      MigrationSourceKind.haohaoDb => '好好记账数据库整库迁入完成',
+      MigrationSourceKind.lanBackup => '原版局域网备份恢复完成',
+    };
     _setStatus(
       '$kindLabel：共恢复 ${applied.bookCount} 个账本、${applied.assetCount} 个账户、${applied.recordCount} 条账单',
       isError: false,
@@ -595,42 +633,217 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
               const SizedBox(height: 20),
 
               // Section 2: Electronic bills & extensible third-party bookkeeping imports
-              const _MigrationSectionHeader(
-                icon: Icons.table_chart_outlined,
-                title: '电子账单与更多记账软件导入',
-              ),
-              const SizedBox(height: 8),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const _MigrationSectionHeader(
+                    icon: Icons.table_chart_outlined,
+                    title: '电子账单与更多记账软件导入',
+                  ),
+                  const SizedBox(height: 8),
 
-              // Working shortcut card for WeChat Pay / Alipay / standard CSV incremental import
-              Card(
-                key: const Key('third_party_csv_shortcut_card'),
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        '微信支付 / 支付宝 / 标准 CSV 表格导入',
-                        style: theme.textTheme.titleMedium,
-                      ),
-                      const SizedBox(height: 6),
-                      const Text(
-                        '支持微信支付账单、支付宝交易明细及 14/15 列标准 CSV/Excel 表格解析转换；'
-                        '采用增量方式并入所选账本（不清空现有数据），并支持按导入批次查看明细或一键撤回。',
-                      ),
-                      const SizedBox(height: 12),
-                      Row(
+                  // Working shortcut card for WeChat Pay / Alipay / standard CSV incremental import
+                  Card(
+                    key: const Key('third_party_csv_shortcut_card'),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Expanded(
-                            child: FilledButton.tonalIcon(
-                              key: const Key('go_csv_import_button'),
-                              style: const ButtonStyle(
-                                padding: WidgetStatePropertyAll(
-                                  EdgeInsets.symmetric(
-                                    horizontal: 10,
-                                    vertical: 10,
+                          Text(
+                            '微信支付 / 支付宝 / 标准 CSV 表格导入',
+                            style: theme.textTheme.titleMedium,
+                          ),
+                          const SizedBox(height: 6),
+                          const Text(
+                            '支持微信支付账单、支付宝交易明细及 14/15 列标准 CSV/Excel 表格解析转换；'
+                            '采用增量方式并入所选账本（不清空现有数据），并支持按导入批次查看明细或一键撤回。',
+                          ),
+                          const SizedBox(height: 12),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: FilledButton.tonalIcon(
+                                  key: const Key('go_csv_import_button'),
+                                  style: const ButtonStyle(
+                                    padding: WidgetStatePropertyAll(
+                                      EdgeInsets.symmetric(
+                                        horizontal: 10,
+                                        vertical: 10,
+                                      ),
+                                    ),
+                                  ),
+                                  onPressed: _busy ? null : _openCsvImport,
+                                  icon: const Icon(
+                                    Icons.upload_file_outlined,
+                                    size: 18,
+                                  ),
+                                  label: const FittedBox(
+                                    fit: BoxFit.scaleDown,
+                                    child: Text(
+                                      '前往表格账单导入',
+                                      maxLines: 1,
+                                      softWrap: false,
+                                    ),
                                   ),
                                 ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: OutlinedButton.icon(
+                                  key: const Key('go_import_batches_button'),
+                                  style: const ButtonStyle(
+                                    padding: WidgetStatePropertyAll(
+                                      EdgeInsets.symmetric(
+                                        horizontal: 10,
+                                        vertical: 10,
+                                      ),
+                                    ),
+                                  ),
+                                  onPressed: _busy ? null : _openImportBatches,
+                                  icon: const Icon(
+                                    Icons.history_edu_outlined,
+                                    size: 18,
+                                  ),
+                                  label: const FittedBox(
+                                    fit: BoxFit.scaleDown,
+                                    child: Text(
+                                      '导入批次管理',
+                                      maxLines: 1,
+                                      softWrap: false,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+
+                  // Dedicated card: 好好记账 (Haohaojizhang) sheet incremental import & .db full migration
+                  Card(
+                    key: const Key('migration_haohao_import_card'),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('好好记账导入', style: theme.textTheme.titleMedium),
+                          const SizedBox(height: 6),
+                          const Text(
+                            '支持导出的 Excel/CSV 表格与带图 ZIP 增量并入所选账本；'
+                            '也支持选择 account_record*.db 备份文件（或未加密 .zip）单事务整库迁入，'
+                            '完整还原账本、信用/借贷账户、二级分类、预算、周期/分期与存钱计划，并保留本机随手记便签。',
+                          ),
+                          const SizedBox(height: 12),
+                          LayoutBuilder(
+                            builder: (ctx, constraints) {
+                              final sheetBtn = OutlinedButton.icon(
+                                key: const Key(
+                                  'migration_open_haohao_sheet_button',
+                                ),
+                                style: const ButtonStyle(
+                                  padding: WidgetStatePropertyAll(
+                                    EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                      vertical: 10,
+                                    ),
+                                  ),
+                                ),
+                                onPressed: _busy ? null : _openCsvImport,
+                                icon: const Icon(
+                                  Icons.table_rows_outlined,
+                                  size: 18,
+                                ),
+                                label: const FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  child: Text(
+                                    '表格 / 带图 ZIP 增量导入',
+                                    maxLines: 1,
+                                    softWrap: false,
+                                  ),
+                                ),
+                              );
+                              final dbBtn = FilledButton.icon(
+                                key: const Key(
+                                  'migration_pick_haohao_db_button',
+                                ),
+                                style: const ButtonStyle(
+                                  padding: WidgetStatePropertyAll(
+                                    EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                      vertical: 10,
+                                    ),
+                                  ),
+                                ),
+                                onPressed: _busy
+                                    ? null
+                                    : _pickAndImportHaohaoDb,
+                                icon: const Icon(
+                                  Icons.storage_outlined,
+                                  size: 18,
+                                ),
+                                label: const FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  child: Text(
+                                    '选择 .db 备份整库迁入',
+                                    maxLines: 1,
+                                    softWrap: false,
+                                  ),
+                                ),
+                              );
+                              if (constraints.maxWidth < 460) {
+                                return Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  children: [
+                                    sheetBtn,
+                                    const SizedBox(height: 8),
+                                    dbBtn,
+                                  ],
+                                );
+                              }
+                              return Row(
+                                children: [
+                                  Expanded(child: sheetBtn),
+                                  const SizedBox(width: 10),
+                                  Expanded(child: dbBtn),
+                                ],
+                              );
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+
+                  // Dedicated card: 钱迹 (Qianji) incremental import
+                  Card(
+                    key: const Key('migration_qianji_import_card'),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '钱迹（Qianji）导入',
+                            style: theme.textTheme.titleMedium,
+                          ),
+                          const SizedBox(height: 6),
+                          const Text(
+                            '支持 CSV / Excel (.xlsx) / JSON 账单增量并入所选账本，'
+                            '自动创建缺失账户、精准映射报销/退款/手续费/优惠券，并支持按批次一键撤回。',
+                          ),
+                          const SizedBox(height: 12),
+                          SizedBox(
+                            width: double.infinity,
+                            child: FilledButton.tonalIcon(
+                              key: const Key(
+                                'migration_open_qianji_import_button',
                               ),
                               onPressed: _busy ? null : _openCsvImport,
                               icon: const Icon(
@@ -640,88 +853,61 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
                               label: const FittedBox(
                                 fit: BoxFit.scaleDown,
                                 child: Text(
-                                  '前往表格账单导入',
+                                  '导入 CSV / Excel / JSON 账单',
                                   maxLines: 1,
                                   softWrap: false,
                                 ),
                               ),
                             ),
                           ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: OutlinedButton.icon(
-                              key: const Key('go_import_batches_button'),
-                              style: const ButtonStyle(
-                                padding: WidgetStatePropertyAll(
-                                  EdgeInsets.symmetric(
-                                    horizontal: 10,
-                                    vertical: 10,
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+
+                  // Purely informational extensible adapter note (zero buttons)
+                  Card(
+                    key: const Key('third_party_extensible_note_card'),
+                    color: theme.colorScheme.surfaceContainerHighest.withValues(
+                      alpha: 0.5,
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Icon(
+                                Icons.extension_outlined,
+                                size: 20,
+                                color: theme.colorScheme.onSurfaceVariant,
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  '更多第三方记账软件扩展说明',
+                                  style: theme.textTheme.titleSmall?.copyWith(
+                                    fontWeight: FontWeight.w600,
                                   ),
                                 ),
                               ),
-                              onPressed: _busy ? null : _openImportBatches,
-                              icon: const Icon(
-                                Icons.history_edu_outlined,
-                                size: 18,
-                              ),
-                              label: const FittedBox(
-                                fit: BoxFit.scaleDown,
-                                child: Text(
-                                  '导入批次管理',
-                                  maxLines: 1,
-                                  softWrap: false,
-                                ),
-                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            '来自更多记账软件（如随手记、鲨鱼记账等）导出的 CSV/Excel 账单，当前可对照「标准 CSV 模板」映射表头后直接增量入账，'
+                            '并支持按导入批次核对与整批撤回；更多专版解析适配器也将在此分组持续扩展。',
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
                             ),
                           ),
                         ],
                       ),
-                    ],
+                    ),
                   ),
-                ),
-              ),
-              const SizedBox(height: 12),
-
-              // Purely informational extensible adapter note (zero buttons)
-              Card(
-                key: const Key('third_party_extensible_note_card'),
-                color: theme.colorScheme.surfaceContainerHighest.withValues(
-                  alpha: 0.5,
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(
-                            Icons.extension_outlined,
-                            size: 20,
-                            color: theme.colorScheme.onSurfaceVariant,
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              '更多第三方记账软件扩展说明',
-                              style: theme.textTheme.titleSmall?.copyWith(
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        '来自其他记账软件（如钱迹等）导出的 CSV/Excel 账单，当前可对照「标准 CSV 模板」映射表头后直接增量入账，'
-                        '并支持按导入批次核对与整批撤回；后续专版解析适配器也将在此分组持续扩展。',
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+                ],
               ),
             ],
           ),
@@ -873,37 +1059,79 @@ class _MigrationConfirmDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final isYi2a = preview.sourceKind == MigrationSourceKind.yi2a;
-    final title = isYi2a ? '确认导入原版 iOS 迁移数据' : '确认恢复原版局域网备份';
+    final isHaohaoDb = preview.sourceKind == MigrationSourceKind.haohaoDb;
+    final title = switch (preview.sourceKind) {
+      MigrationSourceKind.yi2a => '确认导入原版 iOS 迁移数据',
+      MigrationSourceKind.haohaoDb => '确认整库迁入好好记账备份',
+      MigrationSourceKind.lanBackup => '确认恢复原版局域网备份',
+    };
 
     return AlertDialog(
       title: Text(title),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('文件：${preview.fileName}'),
-          if (!isYi2a && preview.entryName != preview.fileName)
-            Text('数据库条目：${preview.entryName}'),
-          if (preview.usedHistoricalPassword) const Text('解密状态：已自动匹配原版历史加密口令'),
-          const SizedBox(height: 10),
-          Text(
-            '预检概况：账本 ${preview.bookCount} 个、账户 ${preview.assetCount} 个、账单 ${preview.recordCount} 条',
-            key: const Key('migration_preview_counts'),
-          ),
-          if (preview.assetBookRefCount > 0 || preview.statStoryCount > 0)
-            Text(
-              '附加关联：专属资产关联 ${preview.assetBookRefCount} 条、统计故事 ${preview.statStoryCount} 条',
-              key: const Key('migration_preview_extra_counts'),
-            ),
-          const SizedBox(height: 10),
-          Text(
-            isYi2a
-                ? '确认后将在单一数据库事务内替换 19 张跨端业务表（若异常立即完整回滚），本地已有的便签、汇率与自动映射规则不会被清空。'
-                : '确认后将在单一数据库事务内恢复账本数据；若执行异常将完整回滚，且本地已有的便签与自定义汇率不会被清空。',
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-        ],
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('文件：${preview.fileName}'),
+            if (!isYi2a && preview.entryName != preview.fileName)
+              Text('数据库条目：${preview.entryName}'),
+            if (preview.usedHistoricalPassword)
+              const Text('解密状态：已自动匹配原版历史加密口令'),
+            const SizedBox(height: 10),
+            if (isHaohaoDb) ...[
+              Text(
+                '预检概况：账本 ${preview.bookCount} 个、账户 ${preview.assetCount} 个、'
+                '分类 ${preview.categoryCount} 个、账单 ${preview.recordCount} 条、'
+                '预算 ${preview.budgetCount} 项、计划 ${preview.planCount} 项',
+                key: const Key('migration_preview_counts'),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                '明细：分期 ${preview.installmentCount} · 周期 ${preview.periodCount} · '
+                '存钱计划 ${preview.savingsPlanCount} · 标签 ${preview.tagCount} · '
+                '模板 ${preview.templateCount}',
+                key: const Key('haohao_preview_detail_counts'),
+                style: theme.textTheme.bodySmall,
+              ),
+              const SizedBox(height: 10),
+              Container(
+                key: const Key('haohao_overwrite_warning'),
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.errorContainer,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  '覆盖警告：确认迁入将在单一数据库事务内原子替换本地账本、账户、分类、账单、预算与计划业务表（若异常立即完整回滚）；'
+                  '本机已有的「随手记」便签（note）与自定义汇率将 100% 保留，缺失外币币种会自动补充。',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onErrorContainer,
+                  ),
+                ),
+              ),
+            ] else ...[
+              Text(
+                '预检概况：账本 ${preview.bookCount} 个、账户 ${preview.assetCount} 个、账单 ${preview.recordCount} 条',
+                key: const Key('migration_preview_counts'),
+              ),
+              if (preview.assetBookRefCount > 0 || preview.statStoryCount > 0)
+                Text(
+                  '附加关联：专属资产关联 ${preview.assetBookRefCount} 条、统计故事 ${preview.statStoryCount} 条',
+                  key: const Key('migration_preview_extra_counts'),
+                ),
+              const SizedBox(height: 10),
+              Text(
+                isYi2a
+                    ? '确认后将在单一数据库事务内替换 19 张跨端业务表（若异常立即完整回滚），本地已有的便签、汇率与自动映射规则不会被清空。'
+                    : '确认后将在单一数据库事务内恢复账本数据；若执行异常将完整回滚，且本地已有的便签与自定义汇率不会被清空。',
+                style: theme.textTheme.bodySmall,
+              ),
+            ],
+          ],
+        ),
       ),
       actions: [
         TextButton(
@@ -914,7 +1142,7 @@ class _MigrationConfirmDialog extends StatelessWidget {
         FilledButton(
           key: const Key('migration_confirm_submit'),
           onPressed: () => Navigator.of(context).pop(true),
-          child: const Text('确认恢复'),
+          child: Text(isHaohaoDb ? '确认整库迁入' : '确认恢复'),
         ),
       ],
     );

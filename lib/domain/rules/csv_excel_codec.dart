@@ -5,8 +5,27 @@ import 'dart:typed_data';
 
 import '../../core/failure.dart';
 
-/// Strict 6 MiB upload cap (`0x600000` = 6,291,456 bytes, `docs/modules/csv-excel.md` §2.2).
-const int maxImportFileBytes = 6 * 1024 * 1024;
+/// Strict 64 MiB upload cap (`64 * 1024 * 1024` = 67,108,864 bytes).
+const int maxImportFileBytes = 64 * 1024 * 1024;
+
+/// Maximum uncompressed bytes unpacked from `.xlsx`, `.xls`, or `.zip` archives.
+const int maxUncompressedArchiveBytes = 128 * 1024 * 1024;
+
+/// Maximum number of archive entries allowed in a `.xlsx` or `.zip` container.
+const int maxArchiveEntryCount = 10000;
+
+/// Maximum images attached to a single imported bill row.
+const int maxEmbeddedImagesPerRow = 9;
+
+/// Validates raw import file size (`<= 64 MiB`) and non-emptiness.
+void guardImportFileBytes(Uint8List bytes) {
+  if (bytes.length > maxImportFileBytes) {
+    throw const Failure(FailureCode.validation, '文件大小不能超过64M');
+  }
+  if (bytes.isEmpty) {
+    throw const Failure(FailureCode.validation, '文件内容为空');
+  }
+}
 
 /// Actionable guidance when a bank/web HTML table is disguised with `.xls` extension (§6.1).
 const String htmlDisguisedExcelGuidance =
@@ -53,14 +72,9 @@ DecodedSpreadsheet decodeSpreadsheetFile({
   required String fileName,
   required Uint8List bytes,
 }) {
-  if (bytes.length > maxImportFileBytes) {
-    throw const Failure(FailureCode.validation, '文件大小不能超过6M');
-  }
-  if (bytes.isEmpty) {
-    throw const Failure(FailureCode.validation, '文件内容为空');
-  }
+  guardImportFileBytes(bytes);
 
-  final ext = _extractExtension(fileName);
+  final ext = extractFileExtension(fileName);
   if (ext != 'csv' && ext != 'xlsx' && ext != 'xls') {
     throw const Failure(FailureCode.validation, '不支持的文件格式，仅支持 .csv、.xlsx、.xls');
   }
@@ -90,7 +104,8 @@ DecodedSpreadsheet decodeSpreadsheetFile({
   }
 }
 
-String _extractExtension(String fileName) {
+/// Extracts lowercase file extension without dot (defaults to `'csv'` if none).
+String extractFileExtension(String fileName) {
   final trimmed = fileName.trim();
   final slashIdx = math.max(
     trimmed.lastIndexOf('/'),
@@ -505,7 +520,379 @@ Uint8List encodeCsvBytes(List<List<String>> rows, {bool utf8WithBom = true}) {
 // Self-Contained Pure-Dart .xlsx Reader (ZIP + OOXML XML, EX-07 cell trim)
 // ---------------------------------------------------------------------------
 
-const int _maxUncompressedExcelBytes = 32 * 1024 * 1024;
+const int _maxUncompressedExcelBytes = maxUncompressedArchiveBytes;
+
+/// Unpacked third-party `.zip` bundle containing one spreadsheet/JSON bill file
+/// and optional bundled attachment images indexed by relative path & basename.
+final class ZipSpreadsheetBundle {
+  const ZipSpreadsheetBundle({
+    required this.tableFileName,
+    required this.tableExtension,
+    required this.tableBytes,
+    required this.imagesByPath,
+    required this.imagesByBasename,
+  });
+
+  final String tableFileName;
+  final String tableExtension;
+  final Uint8List tableBytes;
+  final Map<String, Uint8List> imagesByPath;
+  final Map<String, Uint8List> imagesByBasename;
+
+  /// Resolves an image reference from a CSV/XLSX/JSON cell against bundled
+  /// images by normalized relative path, suffix path, or basename.
+  Uint8List? resolveImage(String rawRef) {
+    var cleaned = rawRef.trim();
+    if (cleaned.isEmpty) return null;
+    if (cleaned.toLowerCase().startsWith('file://')) {
+      cleaned = cleaned.substring(7);
+    }
+    final qIdx = cleaned.indexOf('?');
+    if (qIdx >= 0) {
+      cleaned = cleaned.substring(0, qIdx);
+    }
+    cleaned = cleaned.replaceAll(r'\', '/').trim();
+    while (cleaned.startsWith('./')) {
+      cleaned = cleaned.substring(2);
+    }
+    cleaned = cleaned.replaceFirst(RegExp(r'^/+'), '');
+    if (cleaned.isEmpty) return null;
+
+    final direct = imagesByPath[cleaned] ?? imagesByPath[cleaned.toLowerCase()];
+    if (direct != null) return direct;
+
+    final lowerCleaned = cleaned.toLowerCase();
+    for (final entry in imagesByPath.entries) {
+      final keyLower = entry.key.toLowerCase();
+      if (keyLower == lowerCleaned || keyLower.endsWith('/$lowerCleaned')) {
+        return entry.value;
+      }
+    }
+
+    final slashIdx = cleaned.lastIndexOf('/');
+    final base = slashIdx >= 0 ? cleaned.substring(slashIdx + 1) : cleaned;
+    if (base.isEmpty) return null;
+    return imagesByBasename[base] ?? imagesByBasename[base.toLowerCase()];
+  }
+}
+
+const Set<String> _supportedBundleImageExts = {
+  'jpg',
+  'jpeg',
+  'png',
+  'webp',
+  'gif',
+  'bmp',
+  'heic',
+};
+
+/// Safely unpacks a `.zip` export bundle (enforcing `<= 10,000` entries and
+/// `<= 128 MiB` total uncompressed bytes), locates the primary `.xlsx` / `.xls` /
+/// `.csv` (or `.json`) bill table, and indexes bundled images by normalized
+/// relative path and basename.
+ZipSpreadsheetBundle extractZipSpreadsheetBundle(Uint8List zipBytes) {
+  if (zipBytes.isEmpty) {
+    throw const Failure(FailureCode.validation, '文件内容为空');
+  }
+  final entries = _readZipEntries(zipBytes, containerLabel: '.zip');
+  if (entries.isEmpty) {
+    throw const Failure(FailureCode.validation, 'ZIP 压缩包内容为空');
+  }
+  // Guard against passing a raw OOXML .xlsx directly as a .zip bundle without tables.
+  if (entries.containsKey('xl/workbook.xml') &&
+      entries.containsKey('[Content_Types].xml')) {
+    return ZipSpreadsheetBundle(
+      tableFileName: 'workbook.xlsx',
+      tableExtension: 'xlsx',
+      tableBytes: zipBytes,
+      imagesByPath: const {},
+      imagesByBasename: const {},
+    );
+  }
+
+  final tableCandidates = <(String, String, Uint8List)>[];
+  final imagesByPath = <String, Uint8List>{};
+  final imagesByBasename = <String, Uint8List>{};
+
+  for (final entry in entries.entries) {
+    final path = entry.key;
+    if (path.startsWith('__MACOSX/')) continue;
+    final slashIdx = path.lastIndexOf('/');
+    final base = slashIdx >= 0 ? path.substring(slashIdx + 1) : path;
+    if (base.isEmpty || base.startsWith('._') || base == '.DS_Store') {
+      continue;
+    }
+    final dotIdx = base.lastIndexOf('.');
+    if (dotIdx <= 0 || dotIdx == base.length - 1) continue;
+    final ext = base.substring(dotIdx + 1).toLowerCase();
+
+    if (ext == 'xlsx' || ext == 'xls' || ext == 'csv' || ext == 'json') {
+      tableCandidates.add((path, ext, entry.value));
+    } else if (_supportedBundleImageExts.contains(ext) &&
+        entry.value.isNotEmpty) {
+      imagesByPath[path] = entry.value;
+      imagesByPath.putIfAbsent(path.toLowerCase(), () => entry.value);
+      imagesByBasename.putIfAbsent(base, () => entry.value);
+      imagesByBasename.putIfAbsent(base.toLowerCase(), () => entry.value);
+    }
+  }
+
+  if (tableCandidates.isEmpty) {
+    throw const Failure(
+      FailureCode.validation,
+      'ZIP 压缩包中未找到可识别的账单文件（.xlsx、.xls、.csv 或 .json）',
+    );
+  }
+
+  int extPriority(String ext) => switch (ext) {
+    'xlsx' => 0,
+    'xls' => 1,
+    'csv' => 2,
+    'json' => 3,
+    _ => 4,
+  };
+
+  tableCandidates.sort((a, b) {
+    final pCmp = extPriority(a.$2).compareTo(extPriority(b.$2));
+    if (pCmp != 0) return pCmp;
+    final depthA = '/'.allMatches(a.$1).length;
+    final depthB = '/'.allMatches(b.$1).length;
+    if (depthA != depthB) return depthA.compareTo(depthB);
+    return b.$3.length.compareTo(a.$3.length);
+  });
+
+  final chosen = tableCandidates.first;
+  return ZipSpreadsheetBundle(
+    tableFileName: chosen.$1,
+    tableExtension: chosen.$2,
+    tableBytes: chosen.$3,
+    imagesByPath: imagesByPath,
+    imagesByBasename: imagesByBasename,
+  );
+}
+
+/// Extracts OOXML embedded worksheet images for [sheetNo] (1-based, default `1`),
+/// keyed by 0-based worksheet row index (`0` = header row, `1` = first data row),
+/// preserving anchor column/offset order and capping at 9 images per row.
+Map<int, List<Uint8List>> extractXlsxEmbeddedImagesByRow(
+  Uint8List xlsxBytes, {
+  int sheetNo = 1,
+}) {
+  final allSheets = extractXlsxEmbeddedImagesBySheetAndRow(xlsxBytes);
+  return allSheets[sheetNo] ?? const <int, List<Uint8List>>{};
+}
+
+/// Extracts OOXML embedded worksheet images across all worksheets in [xlsxBytes],
+/// keyed by `sheetNo` (1-based) -> `rowIndex` (0-based) -> image byte list (max 9).
+Map<int, Map<int, List<Uint8List>>> extractXlsxEmbeddedImagesBySheetAndRow(
+  Uint8List xlsxBytes,
+) {
+  final archive = _readZipEntries(xlsxBytes);
+  if (archive.isEmpty) return const {};
+  final orderedSheets = _resolveWorkbookSheets(archive);
+  if (orderedSheets.isEmpty) return const {};
+
+  final result = <int, Map<int, List<Uint8List>>>{};
+  for (var i = 0; i < orderedSheets.length; i++) {
+    final (_, sheetPath) = orderedSheets[i];
+    final sheetBytes = archive[sheetPath];
+    if (sheetBytes == null) continue;
+    final sheetXml = utf8.decode(sheetBytes, allowMalformed: true);
+    final rowMap = _extractSheetDrawingImages(
+      archive: archive,
+      sheetPath: sheetPath,
+      sheetXml: sheetXml,
+      allowSingleDrawingFallback: orderedSheets.length == 1,
+    );
+    if (rowMap.isNotEmpty) {
+      result[i + 1] = rowMap;
+    }
+  }
+  return result;
+}
+
+Map<int, List<Uint8List>> _extractSheetDrawingImages({
+  required Map<String, Uint8List> archive,
+  required String sheetPath,
+  required String sheetXml,
+  required bool allowSingleDrawingFallback,
+}) {
+  final sheetRelsPath = _relsPathForPart(sheetPath);
+  final sheetRelsBytes = archive[sheetRelsPath];
+  final drawingPaths = <String>[];
+
+  if (sheetRelsBytes != null) {
+    final relsMap = _parseOoxmlRelationships(
+      utf8.decode(sheetRelsBytes, allowMalformed: true),
+      basePartPath: sheetPath,
+    );
+    final drawingTagRe = RegExp(r'<(?:\w+:)?drawing\b([^>]*)/?>');
+    for (final m in drawingTagRe.allMatches(sheetXml)) {
+      final attrs = m.group(1) ?? '';
+      final rId = _xmlAttr(attrs, 'r:id') ?? _xmlAttr(attrs, 'id');
+      final target = rId == null ? null : relsMap[rId]?.$1;
+      if (target != null &&
+          archive.containsKey(target) &&
+          !drawingPaths.contains(target)) {
+        drawingPaths.add(target);
+      }
+    }
+    if (drawingPaths.isEmpty) {
+      for (final entry in relsMap.values) {
+        final (target, relType) = entry;
+        if ((relType.endsWith('/drawing') ||
+                target.contains('/drawings/drawing')) &&
+            archive.containsKey(target) &&
+            !drawingPaths.contains(target)) {
+          drawingPaths.add(target);
+        }
+      }
+    }
+  } else if (allowSingleDrawingFallback &&
+      archive.containsKey('xl/drawings/drawing1.xml')) {
+    drawingPaths.add('xl/drawings/drawing1.xml');
+  }
+
+  if (drawingPaths.isEmpty) return const {};
+
+  final anchors =
+      <({int row, int col, int colOff, int order, Uint8List bytes})>[];
+  var seq = 0;
+
+  final anchorRe = RegExp(
+    r'<(?:\w+:)?(twoCellAnchor|oneCellAnchor)\b[^>]*>([\s\S]*?)</(?:\w+:)?\1>',
+  );
+  final fromRe = RegExp(r'<(?:\w+:)?from\b[^>]*>([\s\S]*?)</(?:\w+:)?from>');
+  final rowTagRe = RegExp(r'<(?:\w+:)?row\b[^>]*>\s*(\d+)\s*</(?:\w+:)?row>');
+  final colTagRe = RegExp(r'<(?:\w+:)?col\b[^>]*>\s*(\d+)\s*</(?:\w+:)?col>');
+  final colOffTagRe = RegExp(
+    r'<(?:\w+:)?colOff\b[^>]*>\s*(-?\d+)\s*</(?:\w+:)?colOff>',
+  );
+  final blipRe = RegExp(r'<(?:\w+:)?blip\b([^>]*)/?>');
+
+  for (final drawingPath in drawingPaths) {
+    final drawingBytes = archive[drawingPath];
+    if (drawingBytes == null) continue;
+    final drawingRelsBytes = archive[_relsPathForPart(drawingPath)];
+    if (drawingRelsBytes == null) continue;
+
+    final mediaRels = _parseOoxmlRelationships(
+      utf8.decode(drawingRelsBytes, allowMalformed: true),
+      basePartPath: drawingPath,
+    );
+    final drawingXml = utf8.decode(drawingBytes, allowMalformed: true);
+
+    for (final am in anchorRe.allMatches(drawingXml)) {
+      final anchorBody = am.group(2) ?? '';
+      final fromBody = fromRe.firstMatch(anchorBody)?.group(1);
+      if (fromBody == null) continue;
+      final rowIdx = int.tryParse(
+        rowTagRe.firstMatch(fromBody)?.group(1) ?? '',
+      );
+      if (rowIdx == null || rowIdx < 0) continue;
+      final colIdx =
+          int.tryParse(colTagRe.firstMatch(fromBody)?.group(1) ?? '') ?? 0;
+      final colOff =
+          int.tryParse(colOffTagRe.firstMatch(fromBody)?.group(1) ?? '') ?? 0;
+
+      for (final bm in blipRe.allMatches(anchorBody)) {
+        final bAttrs = bm.group(1) ?? '';
+        final embedId =
+            _xmlAttr(bAttrs, 'r:embed') ?? _xmlAttr(bAttrs, 'embed');
+        if (embedId == null) continue;
+        final mediaTarget = mediaRels[embedId]?.$1;
+        if (mediaTarget == null) continue;
+        final imgBytes = archive[mediaTarget];
+        if (imgBytes != null && imgBytes.isNotEmpty) {
+          anchors.add((
+            row: rowIdx,
+            col: colIdx,
+            colOff: colOff,
+            order: seq++,
+            bytes: imgBytes,
+          ));
+        }
+      }
+    }
+  }
+
+  if (anchors.isEmpty) return const {};
+  anchors.sort((a, b) {
+    final rCmp = a.row.compareTo(b.row);
+    if (rCmp != 0) return rCmp;
+    final cCmp = a.col.compareTo(b.col);
+    if (cCmp != 0) return cCmp;
+    final oCmp = a.colOff.compareTo(b.colOff);
+    if (oCmp != 0) return oCmp;
+    return a.order.compareTo(b.order);
+  });
+
+  final grouped = <int, List<Uint8List>>{};
+  for (final item in anchors) {
+    final list = grouped.putIfAbsent(item.row, () => <Uint8List>[]);
+    if (list.length < maxEmbeddedImagesPerRow) {
+      list.add(item.bytes);
+    }
+  }
+  return grouped;
+}
+
+String _relsPathForPart(String partPath) {
+  final slashIdx = partPath.lastIndexOf('/');
+  if (slashIdx < 0) return '_rels/$partPath.rels';
+  final dir = partPath.substring(0, slashIdx);
+  final name = partPath.substring(slashIdx + 1);
+  return '$dir/_rels/$name.rels';
+}
+
+Map<String, (String, String)> _parseOoxmlRelationships(
+  String relsXml, {
+  required String basePartPath,
+}) {
+  final result = <String, (String, String)>{};
+  final relTagRe = RegExp(r'<(?:\w+:)?Relationship\b([^>]*)/?>');
+  for (final m in relTagRe.allMatches(relsXml)) {
+    final attrs = m.group(1) ?? '';
+    final id = _xmlAttr(attrs, 'Id');
+    final target = _xmlAttr(attrs, 'Target');
+    final type = _xmlAttr(attrs, 'Type') ?? '';
+    if (id == null || target == null || target.trim().isEmpty) continue;
+    final targetMode = _xmlAttr(attrs, 'TargetMode')?.toLowerCase();
+    if (targetMode == 'external') continue;
+    final resolved = _resolveOoxmlTarget(basePartPath, _unescapeXml(target));
+    if (resolved.isNotEmpty) {
+      result[id] = (resolved, type);
+    }
+  }
+  return result;
+}
+
+String _resolveOoxmlTarget(String basePartPath, String rawTarget) {
+  final cleanTarget = rawTarget.replaceAll(r'\', '/').trim();
+  if (cleanTarget.isEmpty) return '';
+  final List<String> segments;
+  if (cleanTarget.startsWith('/')) {
+    segments = cleanTarget.substring(1).split('/');
+  } else {
+    final slashIdx = basePartPath.lastIndexOf('/');
+    final baseDir = slashIdx >= 0 ? basePartPath.substring(0, slashIdx) : '';
+    segments = [
+      if (baseDir.isNotEmpty) ...baseDir.split('/'),
+      ...cleanTarget.split('/'),
+    ];
+  }
+  final normalized = <String>[];
+  for (final seg in segments) {
+    if (seg.isEmpty || seg == '.') continue;
+    if (seg == '..') {
+      if (normalized.isEmpty) return '';
+      normalized.removeLast();
+    } else {
+      normalized.add(seg);
+    }
+  }
+  return normalized.join('/');
+}
 
 List<TableSheet> parseXlsxBytes(Uint8List bytes) {
   final archive = _readZipEntries(bytes);
@@ -553,9 +940,27 @@ List<TableSheet> parseXlsxBytes(Uint8List bytes) {
   return sheets;
 }
 
-Map<String, Uint8List> _readZipEntries(Uint8List bytes) {
+String _decodeZipEntryName(Uint8List rawBytes, int flags) {
+  if ((flags & 0x0800) != 0) {
+    return utf8.decode(rawBytes, allowMalformed: true);
+  }
+  try {
+    return const Utf8Decoder(allowMalformed: false).convert(rawBytes);
+  } on FormatException {
+    try {
+      return GbkCodec.decode(rawBytes, allowMalformed: false);
+    } on FormatException {
+      return utf8.decode(rawBytes, allowMalformed: true);
+    }
+  }
+}
+
+Map<String, Uint8List> _readZipEntries(
+  Uint8List bytes, {
+  String containerLabel = '.xlsx',
+}) {
   if (bytes.length < 22) {
-    throw const Failure(FailureCode.validation, '无效的 .xlsx 压缩容器');
+    throw Failure(FailureCode.validation, '无效的 $containerLabel 压缩容器');
   }
   final bd = ByteData.sublistView(bytes);
   final minEocdPos = math.max(0, bytes.length - 65557);
@@ -567,29 +972,33 @@ Map<String, Uint8List> _readZipEntries(Uint8List bytes) {
     }
   }
   if (eocdPos < 0) {
-    throw const Failure(FailureCode.validation, '无效的 .xlsx 文件（缺少 ZIP 目录尾）');
+    throw Failure(FailureCode.validation, '无效的 $containerLabel 文件（缺少 ZIP 目录尾）');
   }
 
   final totalEntries = bd.getUint16(eocdPos + 10, Endian.little);
+  if (totalEntries > maxArchiveEntryCount) {
+    throw Failure(FailureCode.validation, '$containerLabel 压缩包条目数量超出安全上限');
+  }
   final cdSize = bd.getUint32(eocdPos + 12, Endian.little);
   final cdOffset = bd.getUint32(eocdPos + 16, Endian.little);
   if (cdOffset + cdSize > eocdPos) {
-    throw const Failure(FailureCode.validation, '.xlsx 压缩目录已损坏');
+    throw Failure(FailureCode.validation, '$containerLabel 压缩目录已损坏');
   }
 
   final entries = <String, Uint8List>{};
   final rawInflate = ZLibCodec(raw: true);
-  var totalUncompressed = 0;
+  var declaredUncompressed = 0;
+  var actualUncompressed = 0;
   var ptr = cdOffset;
 
   for (var i = 0; i < totalEntries && ptr + 46 <= eocdPos; i++) {
     final sig = bd.getUint32(ptr, Endian.little);
     if (sig != 0x02014b50) {
-      throw const Failure(FailureCode.validation, '.xlsx 压缩目录条目损坏');
+      throw Failure(FailureCode.validation, '$containerLabel 压缩目录条目损坏');
     }
     final flags = bd.getUint16(ptr + 8, Endian.little);
     if ((flags & 0x01) != 0) {
-      throw const Failure(FailureCode.validation, '暂不支持带密码加密的 .xlsx 文件');
+      throw Failure(FailureCode.validation, '暂不支持带密码加密的 $containerLabel 文件');
     }
     final method = bd.getUint16(ptr + 10, Endian.little);
     final compSize = bd.getUint32(ptr + 20, Endian.little);
@@ -600,58 +1009,128 @@ Map<String, Uint8List> _readZipEntries(Uint8List bytes) {
     final localOffset = bd.getUint32(ptr + 42, Endian.little);
 
     if (ptr + 46 + nameLen > eocdPos) {
-      throw const Failure(FailureCode.validation, '.xlsx 条目名称超出边界');
+      throw Failure(FailureCode.validation, '$containerLabel 条目名称超出边界');
     }
-    final rawName = utf8.decode(
+    final rawName = _decodeZipEntryName(
       Uint8List.sublistView(bytes, ptr + 46, ptr + 46 + nameLen),
-      allowMalformed: true,
+      flags,
     );
     ptr += 46 + nameLen + extraLen + commentLen;
 
-    // Normalize archive path and skip directories / non-xl resources if huge.
+    // Normalize archive path and skip directories or path traversal entries.
     final normName = rawName
         .replaceAll(r'\', '/')
         .replaceFirst(RegExp(r'^/+'), '');
-    if (normName.isEmpty || normName.endsWith('/') || normName.contains('..')) {
+    if (normName.isEmpty ||
+        normName.endsWith('/') ||
+        normName.split('/').contains('..')) {
       continue;
     }
 
-    totalUncompressed += uncompSize;
-    if (totalUncompressed > _maxUncompressedExcelBytes) {
-      throw const Failure(FailureCode.validation, '.xlsx 解压体积超出安全上限');
+    declaredUncompressed += uncompSize;
+    if (uncompSize > maxUncompressedArchiveBytes ||
+        declaredUncompressed > maxUncompressedArchiveBytes) {
+      throw Failure(FailureCode.validation, '$containerLabel 解压体积超出安全上限');
     }
 
     if (localOffset + 30 > bytes.length ||
         bd.getUint32(localOffset, Endian.little) != 0x04034b50) {
-      throw const Failure(FailureCode.validation, '.xlsx 本地文件头损坏');
+      throw Failure(FailureCode.validation, '$containerLabel 本地文件头损坏');
     }
     final localNameLen = bd.getUint16(localOffset + 26, Endian.little);
     final localExtraLen = bd.getUint16(localOffset + 28, Endian.little);
     final dataStart = localOffset + 30 + localNameLen + localExtraLen;
     final dataEnd = dataStart + compSize;
     if (dataStart < 0 || dataEnd > bytes.length) {
-      throw const Failure(FailureCode.validation, '.xlsx 压缩数据越界');
+      throw Failure(FailureCode.validation, '$containerLabel 压缩数据越界');
     }
 
     final slice = Uint8List.sublistView(bytes, dataStart, dataEnd);
     if (method == 0) {
+      actualUncompressed += slice.length;
+      if (actualUncompressed > maxUncompressedArchiveBytes) {
+        throw Failure(FailureCode.validation, '$containerLabel 解压体积超出安全上限');
+      }
       entries[normName] = Uint8List.fromList(slice);
     } else if (method == 8) {
+      final boundedSink = _BoundedInflateSink(
+        maxEntryBytes: maxUncompressedArchiveBytes,
+        maxTotalBytes: maxUncompressedArchiveBytes,
+        initialTotalBytes: actualUncompressed,
+        containerLabel: containerLabel,
+      );
       try {
-        final inflated = rawInflate.decode(slice);
-        if (inflated.length > _maxUncompressedExcelBytes) {
-          throw const Failure(FailureCode.validation, '.xlsx 解压体积超出安全上限');
+        final inSink = rawInflate.decoder.startChunkedConversion(boundedSink);
+        const chunkSize = 32 * 1024;
+        for (var off = 0; off < slice.length; off += chunkSize) {
+          final end = math.min(off + chunkSize, slice.length);
+          inSink.addSlice(slice, off, end, end == slice.length);
         }
-        entries[normName] = Uint8List.fromList(inflated);
+        if (slice.isEmpty) {
+          inSink.close();
+        }
+        actualUncompressed = boundedSink.totalBytes;
+        entries[normName] = boundedSink.builder.takeBytes();
       } catch (e) {
         if (e is Failure) rethrow;
-        throw const Failure(FailureCode.validation, '.xlsx 压缩流损坏');
+        throw Failure(FailureCode.validation, '$containerLabel 压缩流损坏');
       }
     } else {
-      throw Failure(FailureCode.validation, '.xlsx 使用了不支持的压缩算法 ($method)');
+      throw Failure(
+        FailureCode.validation,
+        '$containerLabel 使用了不支持的压缩算法 ($method)',
+      );
     }
   }
   return entries;
+}
+
+final class _BoundedInflateSink extends ByteConversionSinkBase {
+  _BoundedInflateSink({
+    required this.maxEntryBytes,
+    required this.maxTotalBytes,
+    required int initialTotalBytes,
+    required this.containerLabel,
+  }) : totalBytes = initialTotalBytes;
+
+  final int maxEntryBytes;
+  final int maxTotalBytes;
+  final String containerLabel;
+  int entryBytes = 0;
+  int totalBytes;
+  final BytesBuilder builder = BytesBuilder(copy: false);
+
+  void _recordAndCheck(int length) {
+    entryBytes += length;
+    totalBytes += length;
+    if (entryBytes > maxEntryBytes || totalBytes > maxTotalBytes) {
+      throw Failure(FailureCode.validation, '$containerLabel 解压体积超出安全上限');
+    }
+  }
+
+  @override
+  void add(List<int> chunk) {
+    if (chunk.isEmpty) return;
+    _recordAndCheck(chunk.length);
+    builder.add(chunk);
+  }
+
+  @override
+  void addSlice(List<int> chunk, int start, int end, bool isLast) {
+    final len = end - start;
+    if (len > 0) {
+      _recordAndCheck(len);
+      if (chunk is Uint8List) {
+        builder.add(Uint8List.sublistView(chunk, start, end));
+      } else {
+        builder.add(chunk.sublist(start, end));
+      }
+    }
+    if (isLast) close();
+  }
+
+  @override
+  void close() {}
 }
 
 List<(String, String)> _resolveWorkbookSheets(Map<String, Uint8List> archive) {
