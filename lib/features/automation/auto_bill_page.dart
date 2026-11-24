@@ -256,6 +256,8 @@ class _AutoBillPageState extends ConsumerState<AutoBillPage> {
         .toList(growable: false);
 
     final isDesktop = DesktopAdaptive.isDesktop(context);
+    final accessibilitySupported =
+        !isDesktop && (statusAsync.value?.supported ?? false);
     const tabBar = TabBar(
       tabs: [
         Tab(key: Key('auto_bill_tab_drafts'), text: '待确认草稿'),
@@ -278,6 +280,7 @@ class _AutoBillPageState extends ConsumerState<AutoBillPage> {
             children: [
               _DraftsTabView(
                 draftsAsync: draftsAsync,
+                accessibilitySupported: accessibilitySupported,
                 categories: categories,
                 assets: fundingAssets,
                 onPasteParse: _showPastePaymentDialog,
@@ -470,7 +473,7 @@ class _AccessibilityStatusCard extends StatelessWidget {
                   Text(
                     status.supported
                         ? '仅在本地提取支付通知/结果页金额生成待确认草稿，不上传任何账单数据。'
-                        : '当前平台不支持 Android 无障碍服务，可直接粘贴支付通知或短信文本生成草稿。',
+                        : '无障碍自动抓取仅支持 Android 系统；当前平台可直接粘贴支付通知或短信文本生成草稿。',
                     style: theme.textTheme.bodySmall,
                   ),
                 ],
@@ -496,6 +499,7 @@ class _AccessibilityStatusCard extends StatelessWidget {
 class _DraftsTabView extends StatelessWidget {
   const _DraftsTabView({
     required this.draftsAsync,
+    required this.accessibilitySupported,
     required this.categories,
     required this.assets,
     required this.onPasteParse,
@@ -506,6 +510,7 @@ class _DraftsTabView extends StatelessWidget {
   });
 
   final AsyncValue<List<AutoBillDraft>> draftsAsync;
+  final bool accessibilitySupported;
   final List<RecordCategory> categories;
   final List<Asset> assets;
   final VoidCallback onPasteParse;
@@ -569,7 +574,9 @@ class _DraftsTabView extends StatelessWidget {
               padding: const EdgeInsets.symmetric(vertical: 48),
               child: Center(
                 child: Text(
-                  '暂无待确认草稿\n开启无障碍识别或粘贴微信/支付宝/银行短信即可生成草稿',
+                  accessibilitySupported
+                      ? '暂无待确认草稿\n开启无障碍识别或粘贴微信/支付宝/银行短信即可生成草稿'
+                      : '暂无待确认草稿\n粘贴微信/支付宝通知或银行短信即可生成草稿',
                   textAlign: TextAlign.center,
                   style: theme.textTheme.bodyMedium?.copyWith(
                     color: theme.colorScheme.outline,

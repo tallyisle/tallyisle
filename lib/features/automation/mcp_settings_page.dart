@@ -447,7 +447,11 @@ class _McpSettingsPageState extends ConsumerState<McpSettingsPage> {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    '适用于 Claude Code、Cursor、Cherry Studio、Cline 等支持 Streamable HTTP 的 MCP 客户端。',
+                    isDesktop
+                        ? '适用于 Claude Code、Cursor、Cherry Studio、Cline 等支持 Streamable HTTP 的 MCP 客户端。'
+                        : (DesktopAdaptive.isOhos(context)
+                              ? '适用于 Claude Code、Cursor、Cherry Studio、Cline 等支持 Streamable HTTP 的 MCP 客户端。在 HarmonyOS 设备运行时请保持帐屿处于前台，电脑端远程连接请开启局域网接入 (0.0.0.0)。'
+                              : '适用于 Claude Code、Cursor、Cherry Studio、Cline 等支持 Streamable HTTP 的 MCP 客户端。移动设备运行时请保持帐屿处于前台，电脑端远程连接请开启局域网接入 (0.0.0.0)。'),
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: scheme.onSurfaceVariant,
                     ),

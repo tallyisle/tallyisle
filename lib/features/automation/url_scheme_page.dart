@@ -132,7 +132,12 @@ class _UrlSchemePageState extends ConsumerState<UrlSchemePage> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     final isDesktop = DesktopAdaptive.isDesktop(context);
+    final isOhos = DesktopAdaptive.isOhos(context);
+    final badgeLabel = isOhos
+        ? 'HarmonyOS 原生已接入'
+        : (isDesktop ? '在线调试与协议解析' : '系统级协议已接入');
     final listView = ListView(
       padding: const EdgeInsets.all(16),
       children: [
@@ -144,22 +149,47 @@ class _UrlSchemePageState extends ConsumerState<UrlSchemePage> {
               children: [
                 Row(
                   children: [
-                    Icon(Icons.link, color: theme.colorScheme.primary),
+                    Icon(Icons.link, color: scheme.primary),
                     const SizedBox(width: 8),
                     Expanded(
-                      child: Text(
-                        '外部协议支持',
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
+                      child: Wrap(
+                        spacing: 8,
+                        runSpacing: 4,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          Text(
+                            '外部协议支持',
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          Container(
+                            key: const Key('url_scheme_platform_badge'),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: scheme.primaryContainer,
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Text(
+                              badgeLabel,
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: scheme.onPrimaryContainer,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ],
                 ),
                 const SizedBox(height: 8),
                 const Text(
-                  '帐屿支持外部协议头 tallyisle://，'
-                  '可通过快捷指令、桌面自动化脚本或外部应用一键跳转页面或直接静默记账。',
+                  '帐屿支持外部协议头 tallyisle://（Android / iOS / HarmonyOS 系统级协议唤起均已原生接入），'
+                  '可通过快捷指令、用机场景自动化、桌面自动化脚本或外部应用一键跳转页面或直接静默记账。',
                 ),
               ],
             ),

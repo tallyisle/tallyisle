@@ -87,5 +87,12 @@ void main() {
     await File(
       'windows/runner/resources/app_icon.ico',
     ).writeAsBytes([...header.buffer.asUint8List(), ...image]);
+    for (final ohosPath in [
+      'ohos/AppScope/resources/base/media/app_icon.png',
+      'ohos/entry/src/main/resources/base/media/icon.png',
+      'ohos/entry/src/ohosTest/resources/base/media/icon.png',
+    ]) {
+      await write(ohosPath, 192);
+    }
   });
 }

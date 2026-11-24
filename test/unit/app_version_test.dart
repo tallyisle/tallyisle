@@ -28,4 +28,43 @@ void main() {
     expect(appDisplayVersion, appVersionName);
     expect(appVersionLabel, '$appVersionName (Build $appBuildNumber)');
   });
+
+  test(
+    'ohos/AppScope/app.json5 matches appVersionName and appBuildNumber when present',
+    () {
+      final appJson5 = File('ohos/AppScope/app.json5');
+      if (!appJson5.existsSync()) {
+        return;
+      }
+      final content = appJson5.readAsStringSync();
+      final nameMatch = RegExp(
+        r'"versionName"\s*:\s*"([^"]+)"',
+      ).firstMatch(content);
+      final codeMatch = RegExp(
+        r'"versionCode"\s*:\s*(\d+)',
+      ).firstMatch(content);
+      expect(
+        nameMatch,
+        isNotNull,
+        reason: 'ohos/AppScope/app.json5 is missing `versionName`',
+      );
+      expect(
+        codeMatch,
+        isNotNull,
+        reason: 'ohos/AppScope/app.json5 is missing `versionCode`',
+      );
+      expect(
+        nameMatch!.group(1),
+        appVersionName,
+        reason:
+            'Run `bash tool/bump_version.sh <X.Y.Z>` instead of editing by hand',
+      );
+      expect(
+        int.parse(codeMatch!.group(1)!),
+        appBuildNumber,
+        reason:
+            'Run `bash tool/bump_version.sh <X.Y.Z>` instead of editing by hand',
+      );
+    },
+  );
 }

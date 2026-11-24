@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Bumps the TallyIsle release version (ADR-019) in both single sources:
+# Bumps the TallyIsle release version (ADR-019) in all version sources:
 #   - pubspec.yaml                 `version: X.Y.Z+BUILD`
 #   - lib/core/app_version.dart    `appVersionName` / `appBuildNumber`
+#   - ohos/AppScope/app.json5      `versionName` / `versionCode` (if present)
 #
 # Usage:
 #   bash tool/bump_version.sh 0.2.1          # build number = current + 1
@@ -16,6 +17,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PUBSPEC="$ROOT/pubspec.yaml"
 DART_FILE="$ROOT/lib/core/app_version.dart"
+OHOS_APP_JSON5="$ROOT/ohos/AppScope/app.json5"
 
 current_name="$(sed -n "s/^const String appVersionName = '\([^']*\)';/\1/p" "$DART_FILE")"
 current_build="$(sed -n 's/^const int appBuildNumber = \([0-9][0-9]*\);/\1/p' "$DART_FILE")"
@@ -29,6 +31,11 @@ fi
 if [[ "${1:-}" == "--show" ]]; then
   echo "app_version.dart : $current_name+$current_build"
   echo "pubspec.yaml     : $pubspec_version"
+  if [[ -f "$OHOS_APP_JSON5" ]]; then
+    ohos_name="$(sed -n 's/.*"versionName":[[:space:]]*"\([^"]*\)".*/\1/p' "$OHOS_APP_JSON5")"
+    ohos_code="$(sed -n 's/.*"versionCode":[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$OHOS_APP_JSON5")"
+    echo "ohos/app.json5   : $ohos_name+$ohos_code"
+  fi
   exit 0
 fi
 
@@ -59,6 +66,10 @@ fi
 sed -i "s/^version:.*/version: $new_name+$new_build/" "$PUBSPEC"
 sed -i "s/^const String appVersionName = '[^']*';/const String appVersionName = '$new_name';/" "$DART_FILE"
 sed -i "s/^const int appBuildNumber = [0-9][0-9]*;/const int appBuildNumber = $new_build;/" "$DART_FILE"
+if [[ -f "$OHOS_APP_JSON5" ]]; then
+  sed -i "s/\(\"versionCode\":[[:space:]]*\)[0-9][0-9]*/\1$new_build/" "$OHOS_APP_JSON5"
+  sed -i "s/\(\"versionName\":[[:space:]]*\)\"[^\"]*\"/\1\"$new_name\"/" "$OHOS_APP_JSON5"
+fi
 
 echo "Bumped $current_name+$current_build -> $new_name+$new_build"
 echo "Next: bash tool/check.sh && bash tool/build_android.sh, then commit 'Bump version to $new_name+$new_build'"

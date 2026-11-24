@@ -74,6 +74,58 @@ void main() {
     });
 
     test(
+      '.github/workflows/build-ohos.yml and tool/ohos installers use pure-ASCII .hap filenames',
+      () {
+        final ohosFiles = <String>[
+          '.github/workflows/build-ohos.yml',
+          'tool/ohos/install-hap-windows.bat',
+          'tool/ohos/install-hap-unix.sh',
+        ];
+        final hapTokenPattern = RegExp(r'([^\s"\x27`「」()<>]+\.hap)');
+
+        for (final path in ohosFiles) {
+          final file = File(path);
+          if (!file.existsSync()) {
+            continue;
+          }
+          final content = file.readAsStringSync();
+          expect(
+            content,
+            contains('TallyIsle-HarmonyOS-signed-debug.hap'),
+            reason: '$path must reference TallyIsle-HarmonyOS-signed-debug.hap',
+          );
+          if (path == '.github/workflows/build-ohos.yml') {
+            expect(
+              content,
+              contains('TallyIsle-HarmonyOS-unsigned.hap'),
+              reason: '$path must reference TallyIsle-HarmonyOS-unsigned.hap',
+            );
+            expect(
+              content,
+              contains('TallyIsle-HarmonyOS-*.hap'),
+              reason: '$path must stage TallyIsle-HarmonyOS-*.hap',
+            );
+          }
+          for (final match in hapTokenPattern.allMatches(content)) {
+            final token = match.group(1)!;
+            expect(
+              _pureAsciiPattern.hasMatch(token),
+              isTrue,
+              reason:
+                  '.hap artifact path/filename in $path must be pure ASCII: $token',
+            );
+            expect(
+              _cjkPattern.hasMatch(token),
+              isFalse,
+              reason:
+                  '.hap artifact path/filename in $path must not contain CJK: $token',
+            );
+          }
+        }
+      },
+    );
+
+    test(
       'Android automation_strings.xml splits default English and values-zh Chinese',
       () {
         final defaultXml = _readRepoFile(

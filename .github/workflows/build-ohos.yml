@@ -1,0 +1,302 @@
+name: Build HarmonyOS NEXT HAP
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-ohos-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+
+env:
+  UPSTREAM_FLUTTER_VERSION: '3.47.7'
+  OHOS_FLUTTER_COMMIT: '650641656fef1d0578f0bc1ed8f7a35087fc99f3'
+  OHOS_CLT_VERSION: '6.0.1.251'
+  OHOS_CLT_URL: 'https://huggingface.co/csukuangfj/harmonyos-commandline-tools/resolve/main/commandline-tools-linux-x64-6.0.1.251.zip'
+  SQLITE_AMALGAMATION_URL: 'https://sqlite.org/2026/sqlite-amalgamation-3540000.zip'
+  SQLITE_AMALGAMATION_DIR: 'sqlite-amalgamation-3540000'
+
+jobs:
+  verify-ohos:
+    name: Format, Analyze & Test (OHOS)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Seed upstream Flutter 3.47.7 git objects
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.UPSTREAM_FLUTTER_VERSION }}
+          channel: 'stable'
+          cache: true
+
+      - name: Bootstrap CPF-Flutter 3.47.7+ohos-0.0.1-pre
+        run: |
+          UPSTREAM_ROOT="$(dirname "$(dirname "$(command -v flutter)")")"
+          OHOS_FLUTTER="$RUNNER_TEMP/flutter-ohos"
+          rm -rf "$OHOS_FLUTTER"
+          mkdir -p "$OHOS_FLUTTER"
+          cp -a "$UPSTREAM_ROOT/.git" "$OHOS_FLUTTER/.git"
+          cd "$OHOS_FLUTTER"
+          git config core.sparseCheckout true
+          git sparse-checkout set --no-cone '/*' '!/engine/'
+          git remote set-url origin https://gitcode.com/cpf-flutter/flutter_flutter.git
+          git fetch --depth 1 --retry 3 origin "$OHOS_FLUTTER_COMMIT" || \
+            git fetch --depth 1 origin "$OHOS_FLUTTER_COMMIT"
+          git checkout -f FETCH_HEAD
+          mkdir -p "$RUNNER_TEMP/hmos-sdk-stub/default"
+          printf '{"data":{"apiVersion":"21"}}\n' > "$RUNNER_TEMP/hmos-sdk-stub/default/sdk-pkg.json"
+          echo "FLUTTER_ROOT=$OHOS_FLUTTER" >> "$GITHUB_ENV"
+          echo "HOS_SDK_HOME=$RUNNER_TEMP/hmos-sdk-stub" >> "$GITHUB_ENV"
+          echo "$OHOS_FLUTTER/bin" >> "$GITHUB_PATH"
+
+      - name: Verify CPF-Flutter version
+        run: flutter --version
+
+      - name: Apply HarmonyOS pubspec overrides
+        run: python3 tool/ohos/apply_ohos_pubspec.py --apply
+
+      - name: Resolve dependencies
+        run: flutter pub get --enforce-lockfile
+
+      - name: Check formatting
+        run: dart format --output=none --set-exit-if-changed lib test
+
+      - name: Static analysis
+        run: flutter analyze
+
+      - name: Run unit, data & widget tests
+        run: flutter test
+
+  build-hap:
+    name: Build & Sign HarmonyOS HAP
+    runs-on: ubuntu-latest
+    needs: verify-ohos
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Cache HarmonyOS Command Line Tools
+        id: cache-ohos-clt
+        uses: actions/cache@v4
+        with:
+          path: ~/command-line-tools
+          key: ohos-clt-linux-x64-${{ env.OHOS_CLT_VERSION }}
+
+      - name: Install HarmonyOS Command Line Tools (${{ env.OHOS_CLT_VERSION }})
+        if: steps.cache-ohos-clt.outputs.cache-hit != 'true'
+        run: |
+          curl -fSL --retry 3 "$OHOS_CLT_URL" -o "$RUNNER_TEMP/ohos-clt.zip"
+          unzip -q "$RUNNER_TEMP/ohos-clt.zip" -d "$HOME"
+          rm -f "$RUNNER_TEMP/ohos-clt.zip"
+
+      - name: Configure HarmonyOS SDK & toolchain environment
+        run: |
+          CLT_HOME="$HOME/command-line-tools"
+          chmod +x "$CLT_HOME/bin/"* \
+                   "$CLT_HOME/tool/node/bin/"* \
+                   "$CLT_HOME/sdk/default/openharmony/toolchains/hdc" \
+                   "$CLT_HOME/sdk/default/openharmony/toolchains/lib/binary-sign-tool" \
+                   "$CLT_HOME/sdk/default/openharmony/native/llvm/bin/"* 2>/dev/null || true
+          echo "DEVECO_SDK_HOME=$CLT_HOME/sdk" >> "$GITHUB_ENV"
+          echo "HOS_SDK_HOME=$CLT_HOME/sdk" >> "$GITHUB_ENV"
+          echo "NODE_HOME=$CLT_HOME/tool/node" >> "$GITHUB_ENV"
+          echo "$CLT_HOME/bin" >> "$GITHUB_PATH"
+          echo "$CLT_HOME/tool/node/bin" >> "$GITHUB_PATH"
+          echo "$CLT_HOME/sdk/default/openharmony/toolchains" >> "$GITHUB_PATH"
+
+      - name: Seed upstream Flutter 3.47.7 git objects
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.UPSTREAM_FLUTTER_VERSION }}
+          channel: 'stable'
+          cache: true
+
+      - name: Bootstrap CPF-Flutter 3.47.7+ohos-0.0.1-pre
+        run: |
+          UPSTREAM_ROOT="$(dirname "$(dirname "$(command -v flutter)")")"
+          OHOS_FLUTTER="$RUNNER_TEMP/flutter-ohos"
+          rm -rf "$OHOS_FLUTTER"
+          mkdir -p "$OHOS_FLUTTER"
+          cp -a "$UPSTREAM_ROOT/.git" "$OHOS_FLUTTER/.git"
+          cd "$OHOS_FLUTTER"
+          git config core.sparseCheckout true
+          git sparse-checkout set --no-cone '/*' '!/engine/'
+          git remote set-url origin https://gitcode.com/cpf-flutter/flutter_flutter.git
+          git fetch --depth 1 origin "$OHOS_FLUTTER_COMMIT"
+          git checkout -f FETCH_HEAD
+          echo "FLUTTER_ROOT=$OHOS_FLUTTER" >> "$GITHUB_ENV"
+          echo "$OHOS_FLUTTER/bin" >> "$GITHUB_PATH"
+
+      - name: Compile SQLite 3.54.0 (arm64-v8a) with OpenHarmony NDK
+        run: |
+          SQLITE_WORK="$RUNNER_TEMP/sqlite-build"
+          mkdir -p "$SQLITE_WORK" ohos/entry/libs/arm64-v8a
+          curl -fSL --retry 3 "$SQLITE_AMALGAMATION_URL" -o "$SQLITE_WORK/sqlite.zip"
+          unzip -q "$SQLITE_WORK/sqlite.zip" -d "$SQLITE_WORK"
+
+          OHOS_NATIVE="$DEVECO_SDK_HOME/default/openharmony/native"
+          "$OHOS_NATIVE/llvm/bin/clang" \
+            --target=aarch64-linux-ohos \
+            --sysroot="$OHOS_NATIVE/sysroot" \
+            -shared -fPIC -O2 -pthread \
+            -Wl,-soname,libsqlite3.so \
+            -Wl,-Bsymbolic \
+            -DSQLITE_ENABLE_DBSTAT_VTAB \
+            -DSQLITE_ENABLE_FTS5 \
+            -DSQLITE_ENABLE_RTREE \
+            -DSQLITE_ENABLE_MATH_FUNCTIONS \
+            -DSQLITE_DQS=0 \
+            -DSQLITE_DEFAULT_MEMSTATUS=0 \
+            -DSQLITE_TEMP_STORE=2 \
+            -DSQLITE_MAX_EXPR_DEPTH=0 \
+            -DSQLITE_STRICT_SUBTYPE=1 \
+            -DSQLITE_OMIT_AUTHORIZATION \
+            -DSQLITE_OMIT_DECLTYPE \
+            -DSQLITE_OMIT_DEPRECATED \
+            -DSQLITE_OMIT_PROGRESS_CALLBACK \
+            -DSQLITE_OMIT_SHARED_CACHE \
+            -DSQLITE_OMIT_TCL_VARIABLE \
+            -DSQLITE_OMIT_TRACE \
+            -DSQLITE_USE_ALLOCA \
+            -DSQLITE_ENABLE_SESSION \
+            -DSQLITE_ENABLE_PREUPDATE_HOOK \
+            -DSQLITE_UNTESTABLE \
+            -DSQLITE_HAVE_ISNAN \
+            -DSQLITE_HAVE_LOCALTIME_R \
+            -DSQLITE_HAVE_LOCALTIME_S \
+            -DSQLITE_HAVE_MALLOC_USABLE_SIZE \
+            -DSQLITE_HAVE_STRCHRNUL \
+            -DSQLITE_ENABLE_BATCH_ATOMIC_WRITE \
+            "$SQLITE_WORK/$SQLITE_AMALGAMATION_DIR/sqlite3.c" \
+            -lm \
+            -o ohos/entry/libs/arm64-v8a/libsqlite3.so
+
+          "$OHOS_NATIVE/llvm/bin/llvm-strip" --strip-unneeded ohos/entry/libs/arm64-v8a/libsqlite3.so
+          "$OHOS_NATIVE/llvm/bin/llvm-nm" -D ohos/entry/libs/arm64-v8a/libsqlite3.so | grep -q "sqlite3_open_v2"
+          ls -lh ohos/entry/libs/arm64-v8a/libsqlite3.so
+
+      - name: Apply HarmonyOS pubspec overrides
+        run: python3 tool/ohos/apply_ohos_pubspec.py --apply
+
+      - name: Resolve Dart & OHOS plugin dependencies
+        run: flutter pub get --enforce-lockfile
+
+      - name: Precache OHOS engine & patch embedding HAR for SDK 21
+        run: |
+          flutter precache --ohos
+          python3 tool/ohos/patch_flutter_har.py "$FLUTTER_ROOT/bin/cache/artifacts/engine"
+
+      - name: Build HarmonyOS Release HAP (arm64-v8a)
+        run: |
+          mkdir -p build/ohos/hap
+          flutter build hap --release --no-codesign --target-platform ohos-arm64
+          UNSIGNED_HAP="ohos/entry/build/default/outputs/default/entry-default-unsigned.hap"
+          if [ ! -f "$UNSIGNED_HAP" ]; then
+            UNSIGNED_HAP="build/ohos/hap/entry-default-unsigned.hap"
+          fi
+          test -f "$UNSIGNED_HAP"
+          cp "$UNSIGNED_HAP" "TallyIsle-HarmonyOS-unsigned.hap"
+
+      - name: Sign HAP with DevEco Debug Credentials (Method A, optional)
+        env:
+          OHOS_P12_BASE64: ${{ secrets.OHOS_P12_BASE64 }}
+          OHOS_CER_BASE64: ${{ secrets.OHOS_CER_BASE64 }}
+          OHOS_P7B_BASE64: ${{ secrets.OHOS_P7B_BASE64 }}
+          OHOS_KEY_ALIAS: ${{ secrets.OHOS_KEY_ALIAS }}
+          OHOS_KEY_PWD: ${{ secrets.OHOS_KEY_PWD }}
+          OHOS_KEYSTORE_PWD: ${{ secrets.OHOS_KEYSTORE_PWD }}
+        run: |
+          if [ -n "$OHOS_P12_BASE64" ] && \
+             [ -n "$OHOS_CER_BASE64" ] && \
+             [ -n "$OHOS_P7B_BASE64" ] && \
+             [ -n "$OHOS_KEY_ALIAS" ] && \
+             [ -n "$OHOS_KEY_PWD" ] && \
+             [ -n "$OHOS_KEYSTORE_PWD" ]; then
+            SIGN_DIR="$RUNNER_TEMP/ohos_sign"
+            mkdir -p "$SIGN_DIR"
+            chmod 700 "$SIGN_DIR"
+            printf '%s' "$OHOS_P12_BASE64" | tr -d '[:space:]' | base64 --decode > "$SIGN_DIR/debug.p12"
+            printf '%s' "$OHOS_CER_BASE64" | tr -d '[:space:]' | base64 --decode > "$SIGN_DIR/debug.cer"
+            printf '%s' "$OHOS_P7B_BASE64" | tr -d '[:space:]' | base64 --decode > "$SIGN_DIR/debug.p7b"
+
+            java -jar "$DEVECO_SDK_HOME/default/openharmony/toolchains/lib/hap-sign-tool.jar" sign-app \
+              -mode localSign \
+              -keyAlias "$OHOS_KEY_ALIAS" \
+              -keyPwd "$OHOS_KEY_PWD" \
+              -appCertFile "$SIGN_DIR/debug.cer" \
+              -profileFile "$SIGN_DIR/debug.p7b" \
+              -inForm zip \
+              -inFile "TallyIsle-HarmonyOS-unsigned.hap" \
+              -signAlg SHA256withECDSA \
+              -keystoreFile "$SIGN_DIR/debug.p12" \
+              -keystorePwd "$OHOS_KEYSTORE_PWD" \
+              -outFile "TallyIsle-HarmonyOS-signed-debug.hap" \
+              -compatibleVersion 12 \
+              -signCode 1
+
+            test -f "TallyIsle-HarmonyOS-signed-debug.hap"
+            echo "### HarmonyOS NEXT 构建与自动签名完成" >> "$GITHUB_STEP_SUMMARY"
+            echo "- 已生成可直接真机安装的签名包：\`TallyIsle-HarmonyOS-signed-debug.hap\`" >> "$GITHUB_STEP_SUMMARY"
+            echo "- 下载产物压缩包解压后，连接鸿蒙手机双击 \`install-hap-windows.bat\`（或运行 \`bash install-hap-unix.sh\`）即可一键安装。" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "### HarmonyOS NEXT 构建完成（未配置调试签名 Secrets）" >> "$GITHUB_STEP_SUMMARY"
+            echo "- 已生成未签名安装包：\`TallyIsle-HarmonyOS-unsigned.hap\`" >> "$GITHUB_STEP_SUMMARY"
+            echo "- 如需云端自动生成可直装真机的签名包，请在仓库 Settings -> Secrets and variables -> Actions 中配置 \`OHOS_P12_BASE64\`、\`OHOS_CER_BASE64\`、\`OHOS_P7B_BASE64\`、\`OHOS_KEY_ALIAS\`、\`OHOS_KEY_PWD\`、\`OHOS_KEYSTORE_PWD\`。" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Shred temporary signing materials
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/ohos_sign"
+
+      - name: Stage one-click installer scripts alongside HAP
+        run: |
+          mkdir -p dist-ohos
+          cp TallyIsle-HarmonyOS-*.hap dist-ohos/
+          cp tool/ohos/install-hap-windows.bat dist-ohos/
+          cp tool/ohos/install-hap-unix.sh dist-ohos/
+
+      - name: Upload HarmonyOS HAP artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: TallyIsle-HarmonyOS-HAP
+          path: dist-ohos/*
+          if-no-files-found: error
+
+  release-ohos:
+    name: Publish HarmonyOS HAP to GitHub Release
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs:
+      - build-hap
+    permissions:
+      contents: write
+    steps:
+      - name: Download HarmonyOS HAP artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: TallyIsle-HarmonyOS-HAP
+          path: dist-ohos
+
+      - name: Upload HarmonyOS HAP to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist-ohos/TallyIsle-HarmonyOS-*.hap
+          generate_release_notes: true
