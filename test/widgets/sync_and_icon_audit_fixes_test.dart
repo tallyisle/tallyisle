@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:drift/drift.dart' show driftRuntimeOptions;
 import 'package:drift/native.dart';
@@ -30,6 +31,7 @@ import 'package:tallyisle/features/csv_transfer/csv_import_page.dart';
 import 'package:tallyisle/features/csv_transfer/import_batches_page.dart';
 import 'package:tallyisle/features/me/me_page.dart';
 import 'package:tallyisle/features/migration/migration_page.dart';
+import 'package:tallyisle/features/migration/migration_providers.dart';
 import 'package:tallyisle/platform/files.dart';
 
 Future<void> _settle(WidgetTester tester) async {
@@ -332,12 +334,23 @@ void main() {
           ],
         );
 
+        const sampleYiyuCsv =
+            '日期,类型,账本,一级分类,二级分类,金额,账户,账户2,备注,标签,手续费,优惠,不计预算,不计收支\n'
+            '2026-11-20 12:30,支出,默认账本,餐饮,,28.50,,,双栏测试午饭,,0,0,0,0\n';
+        final fakeFiles = FileAccess(
+          onPickBytes: (_) async => SelectedBytes(
+            'dual_pane_yiyu.csv',
+            Uint8List.fromList(utf8.encode(sampleYiyuCsv)),
+          ),
+        );
+
         await tester.pumpWidget(
           ProviderScope(
             retry: (_, _) => null,
             overrides: [
               databaseProvider.overrideWith((ref) async => db),
               desktopModeOverrideProvider.overrideWithValue(true),
+              migrationFileAccessProvider.overrideWithValue(fakeFiles),
             ],
             child: DesktopAdaptiveScope(
               isDesktop: true,
@@ -347,10 +360,10 @@ void main() {
         );
         await _settle(tester);
 
-        // 1. Inside genuine MePage dual-pane: tapping `go_csv_import_button` switches section to `/import/csv`
+        // 1. Inside genuine MePage dual-pane: tapping `migration_open_yiyu_sheet_button` picks a file and switches section to `/import/csv` directly into preview
         expect(find.byKey(const Key('migration_page')), findsOneWidget);
         await tester.scrollUntilVisible(
-          find.byKey(const Key('go_csv_import_button')),
+          find.byKey(const Key('migration_open_yiyu_sheet_button')),
           180,
           scrollable: find.descendant(
             of: find.byKey(const Key('migration_page')),
@@ -358,7 +371,9 @@ void main() {
           ),
         );
         await _settle(tester);
-        await tester.tap(find.byKey(const Key('go_csv_import_button')));
+        await tester.tap(
+          find.byKey(const Key('migration_open_yiyu_sheet_button')),
+        );
         await _settle(tester);
         expect(
           router
@@ -369,6 +384,8 @@ void main() {
           '/import/csv',
         );
         expect(find.byKey(const Key('csv_import_page')), findsOneWidget);
+        expect(find.byKey(const Key('import_preview_card')), findsOneWidget);
+        expect(find.textContaining('dual_pane_yiyu.csv'), findsOneWidget);
 
         // 2. Now open MigrationPage inside a desktop PopupRoute modal over `/me?section=%2Fimport%2Fcsv`!
         final meCtx = tester.element(find.byType(MePage));
@@ -389,17 +406,11 @@ void main() {
 
         final modalBatchesBtn = find.descendant(
           of: modalSurface,
-          matching: find.byKey(const Key('go_import_batches_button')),
-        );
-        await tester.scrollUntilVisible(
-          modalBatchesBtn,
-          180,
-          scrollable: find.descendant(
-            of: modalSurface,
-            matching: find.byType(Scrollable),
+          matching: find.byKey(
+            const Key('migration_open_import_batches_action'),
           ),
         );
-        await _settle(tester);
+        expect(modalBatchesBtn, findsOneWidget);
         await tester.tap(modalBatchesBtn);
         await _settle(tester);
 
@@ -429,7 +440,7 @@ void main() {
         await _settle(tester);
 
         // 3. Push `MigrationPage` via imperative `MaterialPageRoute` (`settings is! Page`)
-        // on mobile inside a `GoRouter` app: tapping `go_import_batches_button`
+        // on mobile inside a `GoRouter` app: tapping `migration_open_import_batches_action`
         // pushes `ImportBatchesPage` on top of the imperative route instead of
         // calling `router.push('/import/batches')` underneath!
         tester.view.physicalSize = const Size(390, 760);
@@ -439,6 +450,7 @@ void main() {
             overrides: [
               databaseProvider.overrideWith((ref) async => db),
               desktopModeOverrideProvider.overrideWithValue(false),
+              migrationFileAccessProvider.overrideWithValue(fakeFiles),
             ],
             child: DesktopAdaptiveScope(
               isDesktop: false,
@@ -456,16 +468,9 @@ void main() {
         );
         await _settle(tester);
 
-        await tester.scrollUntilVisible(
-          find.byKey(const Key('go_import_batches_button')),
-          180,
-          scrollable: find.descendant(
-            of: find.byKey(const Key('migration_page')),
-            matching: find.byType(Scrollable),
-          ),
+        await tester.tap(
+          find.byKey(const Key('migration_open_import_batches_action')),
         );
-        await _settle(tester);
-        await tester.tap(find.byKey(const Key('go_import_batches_button')));
         await _settle(tester);
 
         expect(router.routerDelegate.currentConfiguration.uri.path, '/me');

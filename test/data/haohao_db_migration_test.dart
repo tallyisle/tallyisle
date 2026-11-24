@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:drift/drift.dart' hide isNotNull, isNull;
@@ -1073,8 +1074,28 @@ void main() {
         addTearDown(disposeCleanly);
 
         final dbBytes = _buildFullHaohaoDbBytes(tempWorkDir);
+        const sampleHaohaoCsv =
+            '日期,金额,账本,类型,分类,子分类,备注,账户,转入账户\n'
+            '2026-11-10 09:30,18.00,日常账本,支出,餐饮,早餐,测试早餐,现金,\n';
+        const sampleQianjiCsv =
+            'ID,时间,账本,分类,二级分类,类型,金额,币种,账户1,账户2,备注,已报销,手续费,优惠券,记账者,账单标记,标签,账单图片,关联账单\n'
+            '1,2026-11-10 12:00:00,日常账本,餐饮,,支出,35.00,CNY,现金,,测试午饭,0,0,0,,,,,\n';
         final fakeFiles = FileAccess(
-          onPickBytes: (_) async => SelectedBytes('account_record.db', dbBytes),
+          onPickBytes: (exts) async {
+            if (exts != null && exts.contains('db')) {
+              return SelectedBytes('account_record.db', dbBytes);
+            }
+            if (exts != null && exts.contains('json')) {
+              return SelectedBytes(
+                'qianji.csv',
+                Uint8List.fromList(utf8.encode(sampleQianjiCsv)),
+              );
+            }
+            return SelectedBytes(
+              'haohao.csv',
+              Uint8List.fromList(utf8.encode(sampleHaohaoCsv)),
+            );
+          },
         );
 
         await tester.pumpWidget(
@@ -1090,7 +1111,7 @@ void main() {
         );
         await settle(tester);
 
-        // Scroll to Haohao card on narrow 360x640 mobile and verify sheet button navigates to CsvImportPage
+        // Scroll to Haohao card on narrow 360x640 mobile and verify 1-step sheet pick navigates directly into CsvImportPage preview
         await tester.dragUntilVisible(
           find.byKey(const Key('migration_haohao_import_card')),
           find.byType(ListView),
@@ -1108,22 +1129,24 @@ void main() {
         );
         await settle(tester);
         expect(find.byType(CsvImportPage), findsOneWidget);
+        expect(find.byKey(const Key('import_preview_card')), findsOneWidget);
         await tester.tap(find.byType(BackButton));
         await settle(tester);
 
-        // Scroll to Qianji card and verify button navigates to CsvImportPage
+        // Scroll to Qianji card and verify 1-step button navigates directly into CsvImportPage preview
         await tester.dragUntilVisible(
           find.byKey(const Key('migration_open_qianji_import_button')),
           find.byType(ListView),
           const Offset(0, -140),
         );
         await settle(tester);
-        expect(find.text('钱迹（Qianji）导入'), findsOneWidget);
+        expect(find.text('钱迹导入'), findsOneWidget);
         await tester.tap(
           find.byKey(const Key('migration_open_qianji_import_button')),
         );
         await settle(tester);
         expect(find.byType(CsvImportPage), findsOneWidget);
+        expect(find.byKey(const Key('import_preview_card')), findsOneWidget);
         await tester.tap(find.byType(BackButton));
         await settle(tester);
 
@@ -1135,8 +1158,10 @@ void main() {
         await settle(tester);
 
         // Trigger Haohao `.db` full-database atomic migration via preview dialog
-        await tester.ensureVisible(
+        await tester.dragUntilVisible(
           find.byKey(const Key('migration_pick_haohao_db_button')),
+          find.byType(ListView),
+          const Offset(0, -140),
         );
         await settle(tester);
         await tester.tap(

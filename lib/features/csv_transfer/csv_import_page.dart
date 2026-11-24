@@ -50,14 +50,14 @@ class _CsvImportPageState extends ConsumerState<CsvImportPage> {
   @override
   void initState() {
     super.initState();
-    final initial = widget.initialFile;
-    if (initial != null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
-          unawaited(_previewSelectedFile(initial));
-        }
-      });
-    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final pending = ref.read(pendingCsvImportFileProvider.notifier).consume();
+      final initial = widget.initialFile ?? pending;
+      if (initial != null) {
+        unawaited(_previewSelectedFile(initial));
+      }
+    });
   }
 
   int? _effectiveBookId(List<AccountBook> books, int? currentBookId) {
@@ -366,7 +366,7 @@ class _CsvImportPageState extends ConsumerState<CsvImportPage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      '支持钱迹、好好记账、微信、支付宝、标准 CSV 与模板表格',
+                      '微信支付、支付宝与标准 CSV / Excel 账单导入',
                       style: Theme.of(context).textTheme.titleMedium,
                     ),
                     const SizedBox(height: 8),

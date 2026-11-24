@@ -219,7 +219,7 @@ void main() {
       await _settle(tester);
       expect(find.byKey(const Key('migration_page')), findsOneWidget);
       expect(
-        find.byKey(const Key('legacy_import_penny_button')),
+        find.byKey(const Key('migration_pick_yiyu_backup_button')),
         findsOneWidget,
       );
       await _goBack(tester);

@@ -9,6 +9,30 @@ import '../../platform/files.dart';
 /// Injectable OS file chooser / save / share boundary for CSV & Excel transfer.
 final csvFileAccessProvider = Provider<FileAccess>((_) => const FileAccess());
 
+/// One-shot handoff queue for a file already picked on another page (such as
+/// `MigrationPage`) so `CsvImportPage` immediately enters preview in 1 step
+/// regardless of navigation mechanism (`MeEmbeddedNavigationScope`, `GoRouter`,
+/// or imperative/modal routes).
+class PendingCsvImportFileNotifier extends Notifier<SelectedBytes?> {
+  @override
+  SelectedBytes? build() => null;
+
+  void setFile(SelectedBytes file) {
+    state = file;
+  }
+
+  SelectedBytes? consume() {
+    final pending = state;
+    state = null;
+    return pending;
+  }
+}
+
+final pendingCsvImportFileProvider =
+    NotifierProvider<PendingCsvImportFileNotifier, SelectedBytes?>(
+      PendingCsvImportFileNotifier.new,
+    );
+
 final csvExcelServiceProvider = FutureProvider<CsvExcelService>(
   (ref) async => CsvExcelService(await ref.watch(databaseProvider.future)),
 );

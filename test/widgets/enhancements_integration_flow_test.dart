@@ -23,7 +23,9 @@ import 'package:tallyisle/domain/rules/s3_sigv4_rules.dart';
 import 'package:tallyisle/domain/rules/tally_backup.dart';
 import 'package:tallyisle/features/backup/backup_providers.dart';
 import 'package:tallyisle/features/currencies/currency_rate_providers.dart';
+import 'package:tallyisle/features/migration/migration_providers.dart';
 import 'package:tallyisle/features/reminder/reminder_providers.dart';
+import 'package:tallyisle/platform/files.dart';
 import 'package:tallyisle/platform/notifications.dart';
 
 final class _LoopbackS3Server {
@@ -565,6 +567,15 @@ void main() {
 
       var rateClientFactoryCalls = 0;
       var backupClientFactoryCalls = 0;
+      const sampleYiyuCsv =
+          '日期,类型,账本,一级分类,二级分类,金额,账户,账户2,备注,标签,手续费,优惠,不计预算,不计收支\n'
+          '2026-11-11 12:30,支出,默认账本,餐饮,,24.00,,,集成测试午饭,,0,0,0,0\n';
+      final fakeMigrationFiles = FileAccess(
+        onPickBytes: (_) async => SelectedBytes(
+          'e2e_yiyu.csv',
+          Uint8List.fromList(utf8.encode(sampleYiyuCsv)),
+        ),
+      );
 
       await tester.pumpWidget(
         ProviderScope(
@@ -572,6 +583,7 @@ void main() {
           overrides: [
             databaseProvider.overrideWith((ref) async => db),
             reminderSchedulerProvider.overrideWithValue(scheduler),
+            migrationFileAccessProvider.overrideWithValue(fakeMigrationFiles),
             backupLocalDirectoryOverrideProvider.overrideWithValue(
               () async => Directory(p.join(tempRoot.path, 'local')),
             ),
@@ -619,59 +631,82 @@ void main() {
         find.byKey(const Key('migration_unity_banner_card')),
         findsOneWidget,
       );
-      expect(find.text('一羽记账备份全量迁入'), findsOneWidget);
       expect(
-        find.byKey(const Key('legacy_import_penny_button')),
+        find.byKey(const Key('migration_open_import_batches_action')),
         findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('migration_yiyu_import_card')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('migration_open_yiyu_sheet_button')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('migration_pick_yiyu_backup_button')),
+        findsOneWidget,
+      );
+      expect(find.text('一羽记账备份全量迁入'), findsNothing);
+      expect(find.text('电子账单与更多记账软件导入'), findsNothing);
+      expect(
+        find.byKey(const Key('third_party_csv_shortcut_card')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const Key('third_party_extensible_note_card')),
+        findsNothing,
       );
       expect(find.byKey(const Key('export_ya2i_save_button')), findsNothing);
       expect(find.byKey(const Key('export_ya2i_share_button')), findsNothing);
       expect(find.textContaining('导出 .ya2i'), findsNothing);
 
       await tester.dragUntilVisible(
-        find.byKey(const Key('migration_import_yi2a_button')),
+        find.byKey(const Key('migration_haohao_import_card')),
         find.byType(ListView),
         const Offset(0, -140),
       );
       await _settle(tester);
       expect(
-        find.byKey(const Key('migration_import_yi2a_button')),
+        find.byKey(const Key('migration_haohao_import_card')),
         findsOneWidget,
       );
 
       await tester.dragUntilVisible(
-        find.byKey(const Key('migration_restore_lan_button')),
+        find.byKey(const Key('migration_qianji_import_card')),
         find.byType(ListView),
         const Offset(0, -140),
       );
       await _settle(tester);
       expect(
-        find.byKey(const Key('migration_restore_lan_button')),
+        find.byKey(const Key('migration_qianji_import_card')),
         findsOneWidget,
       );
+      expect(find.text('钱迹导入'), findsOneWidget);
 
+      // Verify AppBar 导入记录 navigation -> /import/batches and back
+      await tester.tap(
+        find.byKey(const Key('migration_open_import_batches_action')),
+      );
+      await _settle(tester);
+      expect(find.byKey(const Key('import_batches_page')), findsOneWidget);
+      await _goBack(tester);
+      expect(find.byKey(const Key('migration_page')), findsOneWidget);
+
+      // Verify 1-step file pick from 一羽记账导入 -> /import/csv preview and back
       await tester.dragUntilVisible(
-        find.byKey(const Key('third_party_extensible_note_card')),
+        find.byKey(const Key('migration_open_yiyu_sheet_button')),
         find.byType(ListView),
-        const Offset(0, -160),
+        const Offset(0, 180),
       );
       await _settle(tester);
-      expect(find.text('电子账单与更多记账软件导入'), findsOneWidget);
-      expect(
-        find.byKey(const Key('third_party_csv_shortcut_card')),
-        findsOneWidget,
+      await tester.tap(
+        find.byKey(const Key('migration_open_yiyu_sheet_button')),
       );
-      expect(
-        find.byKey(const Key('third_party_extensible_note_card')),
-        findsOneWidget,
-      );
-
-      // Verify shortcut navigation from 第三方数据导入 -> /import/csv and back
-      await tester.ensureVisible(find.byKey(const Key('go_csv_import_button')));
-      await _settle(tester);
-      await tester.tap(find.byKey(const Key('go_csv_import_button')));
       await _settle(tester);
       expect(find.byKey(const Key('csv_import_page')), findsOneWidget);
+      expect(find.byKey(const Key('import_preview_card')), findsOneWidget);
+      expect(find.textContaining('e2e_yiyu.csv'), findsOneWidget);
       await _goBack(tester);
       expect(find.byKey(const Key('migration_page')), findsOneWidget);
 
