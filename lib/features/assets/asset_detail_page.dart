@@ -11,6 +11,9 @@ import '../../data/db/database.dart';
 import '../../data/ledger/ledger_service.dart';
 import '../../domain/ledger/asset_json.dart';
 import '../../domain/model/codes.dart';
+import '../../domain/rules/asset_overview.dart';
+import '../../domain/rules/credit_cycle.dart';
+import '../../domain/rules/currency_rates.dart';
 import '../common/catalog_icons.dart';
 import '../common/common.dart';
 import '../common/desktop_modal_page.dart';
@@ -19,10 +22,13 @@ import '../debt/debt_providers.dart' show debtServiceProvider;
 import '../deposit/fixed_deposit_page.dart';
 import '../installment/installment_page.dart';
 import '../receipt/receipt_diy_providers.dart' show diyToolbarConfigProvider;
+import '../records/record_detail_page.dart';
 import '../records/record_editor_page.dart';
 import '../stats/asset_trend_page.dart';
 import 'asset_editor_page.dart';
+import 'asset_flow_providers.dart';
 import 'asset_flow_section.dart';
+import 'credit_providers.dart';
 import 'credit_section.dart';
 
 Future<void> _pushRouteOrModal(
@@ -92,9 +98,10 @@ String creditBalanceLabel(BigInt balance) => balance > BigInt.zero
     ? '溢存款 ${formatMinor(balance)}'
     : '欠款 ${formatMinor(-balance)}';
 
-/// Account detail (`/assets/:id`): header, actions, credit statements and the
-/// account's bill list with optional running balances.
-class AssetDetailPage extends ConsumerWidget {
+/// Account detail (`/assets/:id`): unified dual-metric compact header card,
+/// pinned sticky control bar (`流水明细 | 账期账单` + `对账模式`), scroll-linked
+/// balance reveal in title bar, flow list, and credit statements.
+class AssetDetailPage extends ConsumerStatefulWidget {
   const AssetDetailPage({
     super.key,
     required this.assetId,
@@ -107,7 +114,175 @@ class AssetDetailPage extends ConsumerWidget {
   final VoidCallback? onDeleted;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<AssetDetailPage> createState() => _AssetDetailPageState();
+}
+
+class _AssetDetailPageState extends ConsumerState<AssetDetailPage> {
+  static const double _collapseScrollThreshold = 116.0;
+
+  final ScrollController _scrollController = ScrollController();
+  bool _headerCollapsed = false;
+  int _activeTab = 0; // 0 = 流水明细, 1 = 账期账单
+  bool _reconMode = false;
+  CreditStatementPeriod? _periodFilter;
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController.addListener(_handleScroll);
+    _scheduleResetCreditYear();
+  }
+
+  @override
+  void didUpdateWidget(covariant AssetDetailPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.assetId != widget.assetId) {
+      _headerCollapsed = false;
+      _activeTab = 0;
+      _reconMode = false;
+      _periodFilter = null;
+      if (_scrollController.hasClients) {
+        _scrollController.jumpTo(0);
+      }
+      _scheduleResetCreditYear();
+    }
+  }
+
+  void _scheduleResetCreditYear() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final currentYear = DateTime.now().year;
+      if (ref.read(creditSelectedYearProvider) != currentYear) {
+        ref.read(creditSelectedYearProvider.notifier).reset();
+      }
+    });
+  }
+
+  void _handleScroll() {
+    if (!_scrollController.hasClients) return;
+    final nextCollapsed = _scrollController.offset > _collapseScrollThreshold;
+    if (nextCollapsed != _headerCollapsed) {
+      setState(() => _headerCollapsed = nextCollapsed);
+    }
+  }
+
+  @override
+  void dispose() {
+    _scrollController
+      ..removeListener(_handleScroll)
+      ..dispose();
+    super.dispose();
+  }
+
+  Future<void> _openCreditRepay(
+    BuildContext context,
+    Asset card,
+    BigInt repayAmount,
+  ) {
+    final from = AssetExtra.parse(card.extraInfo).repayAssetId;
+    return _pushRouteOrModal(
+      context,
+      repayRoute(card, repayAmount),
+      () => RecordEditorPage(
+        initialType: RecordType.transfer,
+        initialTo: card.id,
+        initialFrom: from,
+        initialAmount: repayAmount > BigInt.zero
+            ? formatMinor(repayAmount)
+            : null,
+        initialRemark: '信用账户还款',
+      ),
+      maxWidth: 900,
+      maxHeight: 740,
+    );
+  }
+
+  Future<void> _openEditAsset(BuildContext context, int assetId) {
+    return _pushRouteOrModal(
+      context,
+      '/assets/$assetId/edit',
+      () => AssetEditorPage(assetId: assetId),
+    );
+  }
+
+  Future<void> _openRecordDetail(BuildContext context, String recordId) {
+    return _pushRouteOrModal(
+      context,
+      '/record/$recordId',
+      () => RecordDetailPage(recordId: recordId),
+      maxWidth: 560,
+      maxHeight: 740,
+    );
+  }
+
+  Widget _buildTitleRow(
+    BuildContext context,
+    Asset? asset, {
+    required bool isPaneBar,
+  }) {
+    final theme = Theme.of(context);
+    final titleStyle = isPaneBar
+        ? theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)
+        : null;
+
+    if (!_headerCollapsed || asset == null) {
+      return Text(
+        asset?.name ?? '账户详情',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: titleStyle,
+      );
+    }
+
+    final balanceSummary = asset.type == AssetType.credit
+        ? creditBalanceLabel(asset.balanceMinor)
+        : '余额 ${formatMinor(asset.balanceMinor)}';
+
+    return Row(
+      mainAxisSize: isPaneBar ? MainAxisSize.max : MainAxisSize.min,
+      children: [
+        Flexible(
+          child: Text(
+            asset.name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: titleStyle,
+          ),
+        ),
+        const SizedBox(width: 8),
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 148),
+          child: Container(
+            key: const Key('asset-collapsed-balance-pill'),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.surfaceContainerHighest.withValues(
+                alpha: 0.75,
+              ),
+              borderRadius: BorderRadius.circular(999),
+            ),
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                balanceSummary,
+                maxLines: 1,
+                softWrap: false,
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final assetId = widget.assetId;
+    final embeddedInPane = widget.embeddedInPane;
     final asset = ref.watch(assetProvider(assetId));
     final fallbackAsset = embeddedInPane
         ? ref
@@ -124,28 +299,83 @@ class AssetDetailPage extends ConsumerWidget {
     final theme = Theme.of(context);
 
     Widget buildScrollableDetail(Asset a) {
+      final isCredit = a.type == AssetType.credit;
+      final effectiveTab = isCredit ? _activeTab : 0;
       final isDefaultAccount =
           a.status == AssetStatus.active &&
           a.type != AssetType.debt &&
           diyConfig != null &&
           diyConfig.autoSelectDefaultAccount &&
           diyConfig.defaultAccountId == a.id;
+
+      final recordsList = ref.watch(assetRecordsProvider(a.id)).value;
+      final totalRecordCount = recordsList?.length ?? 0;
+
+      final pendingBanner = isCredit
+          ? ref.watch(creditPendingBannerProvider(a)).value
+          : null;
+
       return CustomScrollView(
+        controller: _scrollController,
         slivers: [
           SliverToBoxAdapter(
             key: const ValueKey('asset-header'),
-            child: _Header(
+            child: _UnifiedAssetHeaderCard(
               asset: a,
               isDefaultAccount: isDefaultAccount,
+              totalRecordCount: totalRecordCount,
               embeddedInPane: embeddedInPane,
+              onCreditRepay: (amount) => _openCreditRepay(context, a, amount),
             ),
           ),
-          if (a.type == AssetType.credit)
+          if (isCredit && pendingBanner != null)
+            SliverToBoxAdapter(
+              key: const ValueKey('asset-credit-pending-banner'),
+              child: CreditPendingBanner(
+                asset: a,
+                banner: pendingBanner,
+                onRepay: (amount) => _openCreditRepay(context, a, amount),
+              ),
+            ),
+          SliverPersistentHeader(
+            pinned: true,
+            delegate: _StickyDetailControlBarDelegate(
+              isCredit: isCredit,
+              activeTab: effectiveTab,
+              totalRecordCount: totalRecordCount,
+              hasPendingRepayment: pendingBanner != null,
+              reconMode: _reconMode,
+              colorScheme: theme.colorScheme,
+              textTheme: theme.textTheme,
+              onTabChanged: (tab) => setState(() => _activeTab = tab),
+              onReconChanged: (v) => setState(() => _reconMode = v),
+            ),
+          ),
+          if (isCredit && effectiveTab == 1)
             SliverToBoxAdapter(
               key: const ValueKey('asset-credit-section'),
-              child: CreditSection(asset: a),
+              child: CreditSection(
+                asset: a,
+                selectedPeriod: _periodFilter,
+                onConfigureTap: () => _openEditAsset(context, a.id),
+                onRepayAmount: (amount) => _openCreditRepay(context, a, amount),
+                onSelectPeriod: (period) {
+                  setState(() {
+                    _periodFilter = period;
+                    _activeTab = 0;
+                  });
+                },
+              ),
+            )
+          else
+            AssetFlowSection(
+              key: const ValueKey('asset-flow-section'),
+              asset: a,
+              reconMode: _reconMode,
+              periodFilter: isCredit ? _periodFilter : null,
+              onClearPeriodFilter: () => setState(() => _periodFilter = null),
+              onOpenRecord: (recordId) => _openRecordDetail(context, recordId),
             ),
-          AssetFlowSection(key: const ValueKey('asset-flow-section'), asset: a),
           SliverToBoxAdapter(
             key: const ValueKey('asset-bottom-pad'),
             child: SizedBox(height: embeddedInPane ? 64 : 96),
@@ -177,13 +407,10 @@ class AssetDetailPage extends ConsumerWidget {
                 child: Row(
                   children: [
                     Expanded(
-                      child: Text(
-                        currentAsset?.name ?? '账户详情',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w600,
-                        ),
+                      child: _buildTitleRow(
+                        context,
+                        currentAsset,
+                        isPaneBar: true,
                       ),
                     ),
                     if (currentAsset != null)
@@ -191,7 +418,7 @@ class AssetDetailPage extends ConsumerWidget {
                         asset: currentAsset,
                         key: const Key('asset-menu'),
                         embeddedInPane: true,
-                        onDeleted: onDeleted,
+                        onDeleted: widget.onDeleted,
                       ),
                   ],
                 ),
@@ -219,7 +446,7 @@ class AssetDetailPage extends ConsumerWidget {
       child: Scaffold(
         appBar: AppBar(
           leading: isDesktopModal ? const CloseButton() : null,
-          title: Text(asset.value?.name ?? '账户详情'),
+          title: _buildTitleRow(context, asset.value, isPaneBar: false),
           actions: [
             if (asset.value != null)
               _AssetMenu(asset: asset.value!, key: const Key('asset-menu')),
@@ -239,40 +466,122 @@ class AssetDetailPage extends ConsumerWidget {
   }
 }
 
-class _Header extends StatelessWidget {
-  const _Header({
+/// Unified 4-row dual-metric compact header card shared by both Fund Accounts
+/// (`资金账户`) and Credit Accounts (`信用账户`) so switching accounts in
+/// mobile or PC master-detail has zero layout jump or visual disconnect.
+class _UnifiedAssetHeaderCard extends ConsumerWidget {
+  const _UnifiedAssetHeaderCard({
     required this.asset,
+    required this.totalRecordCount,
     this.isDefaultAccount = false,
     this.embeddedInPane = false,
+    required this.onCreditRepay,
   });
+
   final Asset asset;
+  final int totalRecordCount;
   final bool isDefaultAccount;
   final bool embeddedInPane;
+  final ValueChanged<BigInt> onCreditRepay;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
     final credit = asset.type == AssetType.credit;
+    final debt = asset.type == AssetType.debt;
     final info = credit ? CreditInfo.parse(asset.creditInfo) : null;
+    final extra = credit ? AssetExtra.parse(asset.extraInfo) : null;
+
     final status = switch (asset.status) {
       AssetStatus.hidden => '已隐藏',
       AssetStatus.settled => '已结清',
       _ => null,
     };
+    final countedInNetWorth = debt
+        ? asset.isEffectiveAsset == 0
+        : asset.isEffectiveAsset == 1;
     final accountTypeLabel = credit
         ? '信用账户'
-        : asset.type == AssetType.debt
+        : debt
         ? '借贷账户'
         : '资金账户';
+
+    // Credit limit & interest-free calculations (synchronous fallback avoids
+    // loading spinner flashes when switching cards in desktop split view).
+    SharedLimitResult? sharedLimit;
+    var ifcDays = 0;
+    var hasActiveTemp = false;
+    var totalInstallments = BigInt.zero;
+    if (credit && info != null && extra != null) {
+      final now = DateTime.now();
+      final nowMs = now.millisecondsSinceEpoch;
+      hasActiveTemp = extra.activeTempAmount(nowMs) > BigInt.zero;
+      totalInstallments = calculateTotalUncreditedInstallments(
+        info.installments,
+      );
+      ifcDays = calculateInterestFreeDays(creditInfo: info, today: now);
+      final asyncShared = ref.watch(creditSharedLimitProvider(asset)).value;
+      if (asyncShared != null) {
+        sharedLimit = asyncShared;
+      } else {
+        final singleLimit =
+            asset.initMoneyMinor + extra.activeTempAmount(nowMs);
+        final dispBal = calculateCardDisplayBalance(
+          asset.balanceMinor,
+          info.installments,
+        );
+        sharedLimit = SharedLimitResult(
+          effectiveTotalLimit: singleLimit,
+          usableLimit: singleLimit + dispBal,
+          groupDisplayBalance: dispBal,
+          isShared: info.sharedLimitAssetId != null,
+          isPrimary: info.sharedLimitAssetId == null,
+        );
+      }
+    }
+
+    // Current-month inflow/outflow & foreign currency conversion for Fund Accounts.
+    var monthInflow = BigInt.zero;
+    var monthOutflow = BigInt.zero;
+    String? fxBaseSummary;
+    if (!credit && !debt) {
+      final now = DateTime.now();
+      final groups = ref.watch(assetMonthGroupsProvider(asset.id));
+      final currMonth = groups
+          .where((g) => g.year == now.year && g.month == now.month)
+          .firstOrNull;
+      if (currMonth != null) {
+        monthInflow = currMonth.inflow;
+        monthOutflow = currMonth.outflow;
+      }
+
+      final normCurr = normalizeCurrency(asset.currency);
+      if (normCurr != null && normCurr != baseCurrency) {
+        final currencies = ref.watch(currenciesProvider).value ?? const [];
+        final rates = RateTable({
+          for (final c in currencies) c.code: c.rateToAnchor,
+        });
+        final converted = rates.convert(
+          asset.balanceMinor,
+          normCurr,
+          baseCurrency,
+        );
+        fxBaseSummary = '折合 $baseCurrency ${formatMinor(converted)}';
+      }
+    }
 
     final actionButtons = <Widget>[
       if (credit)
         FilledButton.icon(
           key: const Key('credit-repay'),
           style: FilledButton.styleFrom(
-            padding: const EdgeInsets.symmetric(horizontal: 8),
+            visualDensity: VisualDensity.compact,
+            minimumSize: const Size(0, 36),
+            padding: const EdgeInsets.symmetric(horizontal: 10),
           ),
-          icon: const Icon(Icons.payments_outlined, size: 18),
+          icon: const Icon(Icons.payments_outlined, size: 17),
           label: const FittedBox(
             fit: BoxFit.scaleDown,
             child: Text('还款', maxLines: 1, softWrap: false),
@@ -281,49 +590,60 @@ class _Header extends StatelessWidget {
             final repayAmount = asset.balanceMinor.isNegative
                 ? -asset.balanceMinor
                 : BigInt.zero;
-            final from = AssetExtra.parse(asset.extraInfo).repayAssetId;
-            _pushRouteOrModal(
-              context,
-              repayRoute(asset, repayAmount),
-              () => RecordEditorPage(
-                initialType: RecordType.transfer,
-                initialTo: asset.id,
-                initialFrom: from,
-                initialAmount: repayAmount > BigInt.zero
-                    ? formatMinor(repayAmount)
-                    : null,
-                initialRemark: '信用账户还款',
-              ),
-              maxWidth: 900,
-              maxHeight: 740,
-            );
+            onCreditRepay(repayAmount);
           },
         ),
-      if (asset.type != AssetType.debt)
-        OutlinedButton.icon(
-          style: OutlinedButton.styleFrom(
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-          ),
-          icon: const Icon(Icons.edit_note, size: 18),
-          label: const FittedBox(
-            fit: BoxFit.scaleDown,
-            child: Text('记一笔', maxLines: 1, softWrap: false),
-          ),
-          onPressed: () => _pushRouteOrModal(
-            context,
-            '/record/new?asset=${asset.id}',
-            () => RecordEditorPage(initialAsset: asset.id),
-            maxWidth: 900,
-            maxHeight: 740,
-          ),
-        ),
-      if (!credit && asset.type != AssetType.debt)
+      if (!debt)
+        credit
+            ? OutlinedButton.icon(
+                key: const Key('asset-detail-new-record'),
+                style: OutlinedButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  minimumSize: const Size(0, 36),
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                ),
+                icon: const Icon(Icons.edit_note, size: 17),
+                label: const FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text('记一笔', maxLines: 1, softWrap: false),
+                ),
+                onPressed: () => _pushRouteOrModal(
+                  context,
+                  '/record/new?asset=${asset.id}',
+                  () => RecordEditorPage(initialAsset: asset.id),
+                  maxWidth: 900,
+                  maxHeight: 740,
+                ),
+              )
+            : FilledButton.icon(
+                key: const Key('asset-detail-new-record'),
+                style: FilledButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  minimumSize: const Size(0, 36),
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                ),
+                icon: const Icon(Icons.edit_note, size: 17),
+                label: const FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text('记一笔', maxLines: 1, softWrap: false),
+                ),
+                onPressed: () => _pushRouteOrModal(
+                  context,
+                  '/record/new?asset=${asset.id}',
+                  () => RecordEditorPage(initialAsset: asset.id),
+                  maxWidth: 900,
+                  maxHeight: 740,
+                ),
+              ),
+      if (!credit && !debt)
         OutlinedButton.icon(
           key: const Key('asset-detail-deposits'),
           style: OutlinedButton.styleFrom(
-            padding: const EdgeInsets.symmetric(horizontal: 8),
+            visualDensity: VisualDensity.compact,
+            minimumSize: const Size(0, 36),
+            padding: const EdgeInsets.symmetric(horizontal: 10),
           ),
-          icon: const Icon(Icons.lock_clock_outlined, size: 18),
+          icon: const Icon(Icons.lock_clock_outlined, size: 17),
           label: const FittedBox(
             fit: BoxFit.scaleDown,
             child: Text('定期存款', maxLines: 1, softWrap: false),
@@ -340,9 +660,11 @@ class _Header extends StatelessWidget {
         OutlinedButton.icon(
           key: const Key('asset-detail-installments'),
           style: OutlinedButton.styleFrom(
-            padding: const EdgeInsets.symmetric(horizontal: 8),
+            visualDensity: VisualDensity.compact,
+            minimumSize: const Size(0, 36),
+            padding: const EdgeInsets.symmetric(horizontal: 10),
           ),
-          icon: const Icon(Icons.calendar_view_month_outlined, size: 18),
+          icon: const Icon(Icons.calendar_view_month_outlined, size: 17),
           label: const FittedBox(
             fit: BoxFit.scaleDown,
             child: Text('分期管理', maxLines: 1, softWrap: false),
@@ -355,13 +677,15 @@ class _Header extends StatelessWidget {
             maxHeight: 740,
           ),
         ),
-      if (asset.type == AssetType.debt)
-        OutlinedButton.icon(
+      if (debt)
+        FilledButton.icon(
           key: const Key('asset-detail-debt'),
-          style: OutlinedButton.styleFrom(
+          style: FilledButton.styleFrom(
+            visualDensity: VisualDensity.compact,
+            minimumSize: const Size(0, 36),
             padding: const EdgeInsets.symmetric(horizontal: 12),
           ),
-          icon: const Icon(Icons.swap_horiz_outlined, size: 18),
+          icon: const Icon(Icons.swap_horiz_outlined, size: 17),
           label: const FittedBox(
             fit: BoxFit.scaleDown,
             child: Text('借贷详情', maxLines: 1, softWrap: false),
@@ -378,13 +702,18 @@ class _Header extends StatelessWidget {
         ),
     ];
 
+    final remarkText = asset.remark != null && asset.remark!.trim().isNotEmpty
+        ? asset.remark!.trim()
+        : null;
+
     return Card(
-      margin: const EdgeInsets.all(16),
+      margin: const EdgeInsets.fromLTRB(16, 10, 16, 8),
       child: Padding(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // Row 1: Avatar + Identity Tags + Optional Interest-Free Badge
             Row(
               children: [
                 AssetIconAvatar(
@@ -393,37 +722,39 @@ class _Header extends StatelessWidget {
                   name: asset.name,
                   assetType: asset.type,
                   subType: asset.subType,
-                  size: 40,
+                  size: 36,
                 ),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Wrap(
-                    spacing: 8,
-                    runSpacing: 6,
+                    spacing: 6,
+                    runSpacing: 4,
                     crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
-                      Text(accountTypeLabel, style: theme.textTheme.labelLarge),
-                      if (asset.currency != null)
-                        Chip(
-                          visualDensity: VisualDensity.compact,
-                          materialTapTargetSize:
-                              MaterialTapTargetSize.shrinkWrap,
-                          label: Text(asset.currency!),
+                      Text(
+                        accountTypeLabel,
+                        style: theme.textTheme.labelLarge?.copyWith(
+                          fontWeight: FontWeight.w600,
                         ),
-                      if (status != null)
-                        Chip(
-                          visualDensity: VisualDensity.compact,
-                          materialTapTargetSize:
-                              MaterialTapTargetSize.shrinkWrap,
-                          label: Text(status),
-                        ),
+                      ),
+                      if (asset.currency != null &&
+                          asset.currency!.trim().isNotEmpty)
+                        _HeaderMetaPill(label: asset.currency!.trim()),
+                      if (status != null) _HeaderMetaPill(label: status),
+                      if (!countedInNetWorth)
+                        const _HeaderMetaPill(label: '不计入总资产'),
                       if (isDefaultAccount)
-                        const Chip(
-                          key: Key('asset-detail-default-chip'),
-                          visualDensity: VisualDensity.compact,
-                          materialTapTargetSize:
-                              MaterialTapTargetSize.shrinkWrap,
-                          label: Text('默认账户'),
+                        _HeaderMetaPill(
+                          key: const Key('asset-detail-default-chip'),
+                          label: '默认账户',
+                          bgColor: scheme.secondaryContainer,
+                          fgColor: scheme.onSecondaryContainer,
+                        ),
+                      if (credit && ifcDays > 0)
+                        _HeaderMetaPill(
+                          label: '今日享 $ifcDays 天免息期',
+                          bgColor: scheme.primaryContainer,
+                          fgColor: scheme.onPrimaryContainer,
                         ),
                     ],
                   ),
@@ -431,35 +762,175 @@ class _Header extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 12),
-            Text(
-              credit ? creditBalanceLabel(asset.balanceMinor) : '余额',
-              style: theme.textTheme.labelMedium,
-            ),
-            if (!credit)
-              FittedBox(
-                fit: BoxFit.scaleDown,
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  formatMinor(asset.balanceMinor),
-                  key: const Key('asset-detail-balance'),
-                  maxLines: 1,
-                  softWrap: false,
-                  style: theme.textTheme.headlineMedium,
-                ),
+
+            // Row 2: Symmetrical Dual-Column Core Metrics
+            if (credit && sharedLimit != null)
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    flex: 11,
+                    child: _HeaderMetricBlock(
+                      label: asset.balanceMinor > BigInt.zero
+                          ? '当前溢存款'
+                          : '当前欠款',
+                      valueKey: const Key('credit-current-debt'),
+                      value: formatMinor(asset.balanceMinor.abs()),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    flex: 11,
+                    child: _HeaderMetricBlock(
+                      label: sharedLimit.isShared ? '共享剩余额度' : '可用额度',
+                      valueKey: const Key('credit-usable-limit'),
+                      value: formatMinor(sharedLimit.usableLimit),
+                    ),
+                  ),
+                ],
+              )
+            else if (!debt)
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    flex: 11,
+                    child: _HeaderMetricBlock(
+                      label: '当前余额',
+                      valueKey: const Key('asset-detail-balance'),
+                      value: formatMinor(asset.balanceMinor),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    flex: 11,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '本月流入 / 流出',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.labelMedium?.copyWith(
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Container(
+                          height: 30,
+                          alignment: Alignment.centerLeft,
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            alignment: Alignment.centerLeft,
+                            child: Row(
+                              key: const Key('asset-detail-month-flow'),
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  '+${formatMinor(monthInflow)}',
+                                  style: theme.textTheme.titleMedium?.copyWith(
+                                    fontWeight: FontWeight.w700,
+                                    color: isDark
+                                        ? Colors.green.shade300
+                                        : Colors.green.shade700,
+                                  ),
+                                ),
+                                Text(
+                                  ' / ',
+                                  style: theme.textTheme.titleSmall?.copyWith(
+                                    color: scheme.outline,
+                                  ),
+                                ),
+                                Text(
+                                  '-${formatMinor(monthOutflow)}',
+                                  style: theme.textTheme.titleMedium?.copyWith(
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              )
+            else
+              _HeaderMetricBlock(
+                label: '当前余额',
+                valueKey: const Key('asset-detail-balance'),
+                value: formatMinor(asset.balanceMinor),
               ),
-            if (credit) ...[
-              const SizedBox(height: 4),
-              Text(
-                '额度 ${formatMinor(asset.initMoneyMinor)}'
-                ' · 账单日 ${creditDayLabel(info!.billDay)}'
-                ' · 还款日 ${info.repaymentAfterBillDay ? '账单日后 ${info.repaymentDay} 天' : creditDayLabel(info.repaymentDay)}',
-                style: theme.textTheme.bodySmall,
+
+            const SizedBox(height: 8),
+
+            // Row 3: Compact Single-Line Metadata Summary
+            if (credit && info != null && sharedLimit != null)
+              Wrap(
+                spacing: 12,
+                runSpacing: 2,
+                children: [
+                  Text(
+                    '${hasActiveTemp ? '总额度(含临额)' : '总额度'} ${formatMinor(sharedLimit.effectiveTotalLimit)}',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                  Text(
+                    info.configured
+                        ? '账单日 ${creditDayLabel(info.billDay)} · 还款日 ${info.repaymentAfterBillDay ? '账单日后 ${info.repaymentDay} 天' : creditDayLabel(info.repaymentDay)}'
+                        : '尚未设置账单日与还款日',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                  if (totalInstallments > BigInt.zero)
+                    Text(
+                      '分期未入账 ${formatMinor(totalInstallments)}',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: scheme.error,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  if (remarkText != null)
+                    Text(
+                      remarkText,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                      ),
+                    ),
+                ],
+              )
+            else
+              Wrap(
+                spacing: 12,
+                runSpacing: 2,
+                children: [
+                  if (fxBaseSummary != null)
+                    Text(
+                      fxBaseSummary,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                      ),
+                    ),
+                  Text(
+                    '累计 $totalRecordCount 笔流水',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                  if (remarkText != null)
+                    Text(
+                      remarkText,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                      ),
+                    ),
+                ],
               ),
-            ],
-            if (asset.remark != null && asset.remark!.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              Text(asset.remark!, style: theme.textTheme.bodySmall),
-            ],
+
+            // Row 4: Unified Primary + Secondary Action Buttons
             if (actionButtons.isNotEmpty) ...[
               const SizedBox(height: 12),
               Row(
@@ -473,6 +944,353 @@ class _Header extends StatelessWidget {
             ],
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _HeaderMetaPill extends StatelessWidget {
+  const _HeaderMetaPill({
+    super.key,
+    required this.label,
+    this.bgColor,
+    this.fgColor,
+  });
+
+  final String label;
+  final Color? bgColor;
+  final Color? fgColor;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: bgColor ?? scheme.surfaceContainerHighest.withValues(alpha: 0.7),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        maxLines: 1,
+        softWrap: false,
+        style: theme.textTheme.labelSmall?.copyWith(
+          color: fgColor ?? scheme.onSurfaceVariant,
+          fontWeight: FontWeight.w500,
+        ),
+      ),
+    );
+  }
+}
+
+class _HeaderMetricBlock extends StatelessWidget {
+  const _HeaderMetricBlock({
+    required this.label,
+    required this.value,
+    this.valueKey,
+  });
+
+  final String label;
+  final String value;
+  final Key? valueKey;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: theme.textTheme.labelMedium?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Container(
+          height: 30,
+          alignment: Alignment.centerLeft,
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              value,
+              key: valueKey,
+              maxLines: 1,
+              softWrap: false,
+              style: theme.textTheme.headlineSmall?.copyWith(
+                fontWeight: FontWeight.w700,
+                height: 1.2,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Pinned 48dp single-row control bar shared across Fund and Credit accounts:
+/// - Left: `[流水明细 | 账期账单]` capsule on credit accounts; tonal
+///   `明细 · N 笔` badge at the exact same height & visual weight on fund accounts.
+/// - Right: pixel-aligned `对账模式` toggle (on flow view).
+class _StickyDetailControlBarDelegate extends SliverPersistentHeaderDelegate {
+  const _StickyDetailControlBarDelegate({
+    required this.isCredit,
+    required this.activeTab,
+    required this.totalRecordCount,
+    required this.hasPendingRepayment,
+    required this.reconMode,
+    required this.colorScheme,
+    required this.textTheme,
+    required this.onTabChanged,
+    required this.onReconChanged,
+  });
+
+  final bool isCredit;
+  final int activeTab;
+  final int totalRecordCount;
+  final bool hasPendingRepayment;
+  final bool reconMode;
+  final ColorScheme colorScheme;
+  final TextTheme textTheme;
+  final ValueChanged<int> onTabChanged;
+  final ValueChanged<bool> onReconChanged;
+
+  @override
+  double get minExtent => 48.0;
+
+  @override
+  double get maxExtent => 48.0;
+
+  @override
+  Widget build(
+    BuildContext context,
+    double shrinkOffset,
+    bool overlapsContent,
+  ) {
+    final showReconControl = !isCredit || activeTab == 0;
+
+    return Material(
+      key: const Key('asset-sticky-control-bar'),
+      color: colorScheme.surface,
+      child: Container(
+        height: 48.0,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        decoration: BoxDecoration(
+          border: Border(
+            bottom: BorderSide(
+              color: colorScheme.outlineVariant.withValues(
+                alpha: overlapsContent || shrinkOffset > 0 ? 0.65 : 0.35,
+              ),
+              width: 0.6,
+            ),
+          ),
+        ),
+        child: Row(
+          children: [
+            Flexible(
+              child: isCredit
+                  ? _CreditSectionTabs(
+                      activeTab: activeTab,
+                      hasPendingRepayment: hasPendingRepayment,
+                      onTabChanged: onTabChanged,
+                    )
+                  : Container(
+                      height: 34,
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                      decoration: BoxDecoration(
+                        color: colorScheme.surfaceContainerHighest.withValues(
+                          alpha: 0.5,
+                        ),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.receipt_long_outlined,
+                            size: 15,
+                            color: colorScheme.onSurfaceVariant,
+                          ),
+                          const SizedBox(width: 6),
+                          Flexible(
+                            child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Text(
+                                '明细 · $totalRecordCount 笔',
+                                maxLines: 1,
+                                softWrap: false,
+                                style: textTheme.labelLarge?.copyWith(
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+            ),
+            const SizedBox(width: 8),
+            if (showReconControl)
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    '对账模式',
+                    style: textTheme.labelMedium?.copyWith(
+                      color: reconMode
+                          ? colorScheme.primary
+                          : colorScheme.onSurfaceVariant,
+                      fontWeight: reconMode ? FontWeight.w600 : FontWeight.w500,
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  SizedBox(
+                    height: 32,
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Switch(
+                        key: const Key('reconciliation-switch'),
+                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        value: reconMode,
+                        onChanged: onReconChanged,
+                      ),
+                    ),
+                  ),
+                ],
+              )
+            else
+              Text(
+                '按账单周期汇总',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: textTheme.labelSmall?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  bool shouldRebuild(covariant _StickyDetailControlBarDelegate oldDelegate) {
+    return isCredit != oldDelegate.isCredit ||
+        activeTab != oldDelegate.activeTab ||
+        totalRecordCount != oldDelegate.totalRecordCount ||
+        hasPendingRepayment != oldDelegate.hasPendingRepayment ||
+        reconMode != oldDelegate.reconMode ||
+        colorScheme != oldDelegate.colorScheme ||
+        textTheme != oldDelegate.textTheme;
+  }
+}
+
+class _CreditSectionTabs extends StatelessWidget {
+  const _CreditSectionTabs({
+    required this.activeTab,
+    required this.hasPendingRepayment,
+    required this.onTabChanged,
+  });
+
+  final int activeTab;
+  final bool hasPendingRepayment;
+  final ValueChanged<int> onTabChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
+
+    Widget segment({
+      required Key key,
+      required int index,
+      required String label,
+      bool showBadgeDot = false,
+    }) {
+      final selected = activeTab == index;
+      final bg = selected
+          ? (isDark ? scheme.secondaryContainer : scheme.surface)
+          : Colors.transparent;
+      final fg = selected
+          ? (isDark ? scheme.onSecondaryContainer : scheme.onSurface)
+          : scheme.onSurfaceVariant;
+
+      return Flexible(
+        child: Material(
+          color: bg,
+          elevation: selected && !isDark ? 0.5 : 0,
+          borderRadius: BorderRadius.circular(8),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            key: key,
+            onTap: () => onTabChanged(index),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              child: Center(
+                widthFactor: 1.0,
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        label,
+                        maxLines: 1,
+                        softWrap: false,
+                        style: theme.textTheme.labelLarge?.copyWith(
+                          color: fg,
+                          fontWeight: selected
+                              ? FontWeight.w600
+                              : FontWeight.w500,
+                        ),
+                      ),
+                      if (showBadgeDot) ...[
+                        const SizedBox(width: 4),
+                        Container(
+                          key: const Key('credit-tab-pending-dot'),
+                          width: 6,
+                          height: 6,
+                          decoration: BoxDecoration(
+                            color: scheme.error,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      height: 34,
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest.withValues(alpha: 0.6),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          segment(key: const Key('credit-tab-flows'), index: 0, label: '流水明细'),
+          const SizedBox(width: 2),
+          segment(
+            key: const Key('credit-tab-statements'),
+            index: 1,
+            label: '账期账单',
+            showBadgeDot: hasPendingRepayment,
+          ),
+        ],
       ),
     );
   }

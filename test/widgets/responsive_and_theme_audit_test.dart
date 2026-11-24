@@ -25,6 +25,7 @@ import 'package:tallyisle/domain/rules/billing_period.dart';
 import 'package:tallyisle/domain/rules/budget_rules.dart';
 import 'package:tallyisle/domain/rules/periodic_records.dart';
 import 'package:tallyisle/domain/rules/template_card_rules.dart';
+import 'package:tallyisle/features/assets/asset_detail_page.dart';
 import 'package:tallyisle/features/automation/automation_providers.dart';
 import 'package:tallyisle/features/automation/desktop_widgets_page.dart';
 import 'package:tallyisle/features/automation/mcp_settings_page.dart';
@@ -91,6 +92,8 @@ double _wcagContrastRatio(Color fg, Color bg) {
 final class _AuditHarness {
   _AuditHarness({
     required this.db,
+    required this.bankAssetId,
+    required this.creditAssetId,
     required this.tempRoot,
     required this.localBackupDir,
     required this.attachmentsDir,
@@ -100,6 +103,8 @@ final class _AuditHarness {
   });
 
   final AppDatabase db;
+  final int bankAssetId;
+  final int creditAssetId;
   final Directory tempRoot;
   final Directory localBackupDir;
   final Directory attachmentsDir;
@@ -109,6 +114,8 @@ final class _AuditHarness {
 
   static Future<_AuditHarness> create(WidgetTester tester) async {
     late AppDatabase db;
+    late int bankAssetId;
+    late int creditAssetId;
     late Directory tempRoot;
     late Directory localBackupDir;
     late Directory attachmentsDir;
@@ -132,18 +139,18 @@ final class _AuditHarness {
       final shoppingCat = categories.firstWhere((c) => c.name == '购物');
       final salaryCat = categories.firstWhere((c) => c.name == '工资');
 
-      final bankAssetId = await ledger.createAsset(
+      bankAssetId = await ledger.createAsset(
         commandId: 'audit-asset-bank',
         name: '招商储蓄卡',
         initial: Money.parse('12800.00'),
       );
-      await ledger.createAsset(
+      creditAssetId = await ledger.createAsset(
         commandId: 'audit-asset-credit',
         name: '招商信用卡',
         type: AssetType.credit,
         initial: Money.parse('-680.50'),
         limit: Money.parse('30000.00'),
-        creditInfo: '{"billDay":10,"repaymentDay":25,"repaymentType":0}',
+        creditInfo: '{"bill_day":10,"repayment_day":25,"bill_day_count":true}',
       );
 
       await currency.saveCurrency(
@@ -223,6 +230,18 @@ final class _AuditHarness {
           categoryId: salaryCat.id,
           assetId: bankAssetId,
           remark: '本月薪资入账',
+        ),
+      );
+      await ledger.saveRecord(
+        commandId: 'audit-rec-crd-1',
+        draft: RecordDraft(
+          type: RecordType.expense,
+          money: Money.parse('368.00'),
+          bookId: 1,
+          recordTime: todayNoonMs - 1800000,
+          categoryId: shoppingCat.id,
+          assetId: creditAssetId,
+          remark: '数码用品采购',
         ),
       );
 
@@ -320,6 +339,8 @@ final class _AuditHarness {
 
     return _AuditHarness(
       db: db,
+      bankAssetId: bankAssetId,
+      creditAssetId: creditAssetId,
       tempRoot: tempRoot,
       localBackupDir: localBackupDir,
       attachmentsDir: attachmentsDir,
@@ -1008,6 +1029,75 @@ void main() {
               findsOneWidget,
               reason: 'McpSettingsPage enable switch must be rendered ($ctx)',
             );
+          },
+        );
+      } finally {
+        await harness.dispose(tester);
+      }
+    },
+  );
+
+  testWidgets(
+    'AssetDetailPage (Fund & Credit, Flows & Statements tabs): zero overflow across 360x640, 390x844, 960x800 in Light & Dark @ 1.2x',
+    (tester) async {
+      final harness = await _AuditHarness.create(tester);
+      try {
+        await _runPageAuditMatrix(
+          tester,
+          pageName: 'AssetDetailPage(Fund)',
+          harness: harness,
+          pageBuilder: () => AssetDetailPage(assetId: harness.bankAssetId),
+          onViewportReady: (tester, viewport, brightness, theme, ctx) async {
+            if (!ctx.contains('[scroll=')) {
+              expect(
+                find.byKey(const Key('asset-detail-balance')),
+                findsOneWidget,
+                reason: 'Fund account balance must be visible ($ctx)',
+              );
+              expect(
+                find.byKey(const Key('asset-detail-month-flow')),
+                findsOneWidget,
+                reason: 'Fund account month flow must be visible ($ctx)',
+              );
+              expect(
+                find.byKey(const Key('reconciliation-switch')),
+                findsOneWidget,
+                reason: 'Pinned reconciliation switch must be visible ($ctx)',
+              );
+            }
+          },
+        );
+
+        await _runPageAuditMatrix(
+          tester,
+          pageName: 'AssetDetailPage(Credit)',
+          harness: harness,
+          pageBuilder: () => AssetDetailPage(assetId: harness.creditAssetId),
+          onViewportReady: (tester, viewport, brightness, theme, ctx) async {
+            if (!ctx.contains('[scroll=')) {
+              expect(
+                find.byKey(const Key('credit-current-debt')),
+                findsOneWidget,
+                reason: 'Credit current debt must be visible ($ctx)',
+              );
+              expect(
+                find.byKey(const Key('credit-usable-limit')),
+                findsOneWidget,
+                reason: 'Credit usable limit must be visible ($ctx)',
+              );
+              expect(
+                find.byKey(const Key('credit-tab-statements')),
+                findsOneWidget,
+                reason: 'Credit statements tab must be visible ($ctx)',
+              );
+              // Switch to statements tab and verify zero overflow at 1.2x scale!
+              await tester.tap(find.byKey(const Key('credit-tab-statements')));
+              await _settleClean(tester, ctx: '$ctx+StatementsTab');
+              expect(find.textContaining('期账单'), findsWidgets);
+              // Switch back to flows tab so scroll audit walks flow rows too.
+              await tester.tap(find.byKey(const Key('credit-tab-flows')));
+              await _settleClean(tester, ctx: '$ctx+BackToFlows');
+            }
           },
         );
       } finally {

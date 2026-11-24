@@ -842,7 +842,13 @@ void main() {
         await tester.enterText(find.byKey(const Key('adjust-amount')), '260');
         await tester.tap(find.byKey(const Key('adjust-save')));
         await _settle(tester);
-        expect(find.text('欠款 260.00'), findsWidgets);
+        expect(find.text('当前欠款'), findsOneWidget);
+        expect(
+          tester
+              .widget<Text>(find.byKey(const Key('credit-current-debt')))
+              .data,
+          '260.00',
+        );
 
         // Open Edit from AssetDetailPage -> shows '编辑信用账户' without hanging
         await tester.tap(find.byKey(const Key('asset-menu')));

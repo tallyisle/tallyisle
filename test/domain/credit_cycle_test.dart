@@ -716,5 +716,89 @@ void main() {
       );
       expect(days, 51);
     });
+
+    test(
+      'filterVisibleCreditStatements folds unstarted future empty periods while keeping active unissued & pre-recorded future periods',
+      () {
+        final info = CreditInfo({
+          'bill_day': 10,
+          'repayment_day': 28,
+          'repayment_day_after_bd': false,
+          'bill_day_count': true,
+        });
+        final today = DateTime(2026, 4, 20);
+        final statements = calculateCreditStatements(
+          creditInfo: info,
+          cardBalanceMinor: -y(600),
+          records: [
+            CreditCardRecord(
+              id: 'CURR_ACTIVE',
+              recordTime: DateTime(2026, 4, 15, 12).millisecondsSinceEpoch,
+              type: RecordType.expense,
+              moneyMinor: y(200),
+              assetId: 1,
+            ),
+            CreditCardRecord(
+              id: 'ISSUED_4',
+              recordTime: DateTime(2026, 4, 5, 12).millisecondsSinceEpoch,
+              type: RecordType.expense,
+              moneyMinor: y(400),
+              assetId: 1,
+            ),
+            // Pre-recorded future bill in Period 8 (07-11 .. 08-10)
+            CreditCardRecord(
+              id: 'FUTURE_8',
+              recordTime: DateTime(2026, 7, 20, 12).millisecondsSinceEpoch,
+              type: RecordType.expense,
+              moneyMinor: y(88),
+              assetId: 1,
+            ),
+          ],
+          cardId: 1,
+          selectedYear: 2026,
+          today: today,
+        );
+
+        // Periods 6, 7, 9, 10, 11, 12 are future & empty (6 periods).
+        // Period 8 has a pre-recorded bill; Period 5 is active unissued; 1..4 are issued.
+        final folded = filterVisibleCreditStatements(
+          statements: statements,
+          today: today,
+        );
+        expect(folded.futureEmptyCount, 6);
+        expect(folded.visible.map((s) => s.period.periodIndex).toList(), <int>[
+          8,
+          5,
+          4,
+          3,
+          2,
+          1,
+        ]);
+
+        final expanded = filterVisibleCreditStatements(
+          statements: statements,
+          today: today,
+          includeFutureEmpty: true,
+        );
+        expect(expanded.futureEmptyCount, 6);
+        expect(expanded.visible.length, 12);
+
+        // Past year (2025): zero future empty periods.
+        final pastStatements = calculateCreditStatements(
+          creditInfo: info,
+          cardBalanceMinor: BigInt.zero,
+          records: const [],
+          cardId: 1,
+          selectedYear: 2025,
+          today: today,
+        );
+        final pastFolded = filterVisibleCreditStatements(
+          statements: pastStatements,
+          today: today,
+        );
+        expect(pastFolded.futureEmptyCount, 0);
+        expect(pastFolded.visible.length, 12);
+      },
+    );
   });
 }

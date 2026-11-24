@@ -700,7 +700,17 @@ void main() {
       );
 
       // Click '招行信用卡' in left tree -> right pane seamlessly switches to credit card flows
-      // & credit limit/repayment actions, resets _reconMode cleanly (B-15), and shows '欠款 320.00' once toggled on!
+      // & unified dual-metric header with zero vertical jump on sticky bar, resets _reconMode cleanly (B-15),
+      // and shows '欠款 320.00' immediately on first screen once toggled on!
+      final fundStickyTop = tester
+          .getTopLeft(
+            find.descendant(
+              of: detailPane,
+              matching: find.byKey(const Key('asset-sticky-control-bar')),
+            ),
+          )
+          .dy;
+
       await tester.tap(find.byKey(const Key('asset-招行信用卡')));
       await _settle(tester);
       expect(tester.takeException(), isNull);
@@ -718,33 +728,51 @@ void main() {
         ),
         findsOneWidget,
       );
-      final detailScrollable = find
-          .descendant(of: detailPane, matching: find.byType(Scrollable))
-          .first;
+
+      final creditStickyTop = tester
+          .getTopLeft(
+            find.descendant(
+              of: detailPane,
+              matching: find.byKey(const Key('asset-sticky-control-bar')),
+            ),
+          )
+          .dy;
+      // Verify visual skeleton alignment: Fund vs Credit header heights align tightly!
+      expect((creditStickyTop - fundStickyTop).abs(), lessThanOrEqualTo(6.0));
+
       final creditReconSwitch = find.descendant(
         of: detailPane,
         matching: find.byKey(const Key('reconciliation-switch')),
       );
-      await tester.scrollUntilVisible(
-        creditReconSwitch,
-        240,
-        scrollable: detailScrollable,
-      );
-      await _settle(tester);
+      expect(creditReconSwitch.hitTestable(), findsOneWidget);
       expect(tester.widget<Switch>(creditReconSwitch).value, isFalse);
       await tester.tap(creditReconSwitch);
       await _settle(tester);
-      await tester.scrollUntilVisible(
+      expect(
         find.descendant(of: detailPane, matching: find.text('-320.00')),
-        240,
-        scrollable: detailScrollable,
+        findsOneWidget,
       );
-      await _settle(tester);
       expect(
         find.descendant(of: detailPane, matching: find.text('欠款 320.00')),
         findsWidgets,
       );
       expect(find.textContaining('欠款 -'), findsNothing);
+
+      // Switch to '账期账单' tab inside 1280x800 right detail pane -> renders 2-column grid!
+      await tester.tap(
+        find.descendant(
+          of: detailPane,
+          matching: find.byKey(const Key('credit-tab-statements')),
+        ),
+      );
+      await _settle(tester);
+      expect(
+        find.descendant(
+          of: detailPane,
+          matching: find.byKey(const Key('credit-statements-two-column-grid')),
+        ),
+        findsOneWidget,
+      );
 
       // Switch back to '招行储蓄卡' and adjust balance from right pane's asset-menu -> updates both panes!
       await tester.tap(find.byKey(const Key('asset-招行储蓄卡')));

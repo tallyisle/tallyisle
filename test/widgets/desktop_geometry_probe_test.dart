@@ -1417,9 +1417,26 @@ void main() {
         ('HomePage', () => const HomePage(), null),
         ('AssetsPage', () => const AssetsPage(), null),
         (
+          'AssetDetailPage(Fund)',
+          () => AssetDetailPage(assetId: ids.bankAssetId),
+          null,
+        ),
+        (
           'AssetDetailPage(Credit)',
           () => AssetDetailPage(assetId: ids.creditAssetId),
-          null,
+          (scene) async {
+            final stmtTab = find.byKey(const Key('credit-tab-statements'));
+            if (stmtTab.evaluate().isNotEmpty) {
+              await tester.tap(stmtTab);
+              await _settleProbe(tester, violations, '$scene+StatementsTab');
+              _probeCurrentTree(
+                tester,
+                scene: '$scene+StatementsTab',
+                viewport: const Size(1280, 800),
+                violations: violations,
+              );
+            }
+          },
         ),
         (
           'RecordDetailPage',

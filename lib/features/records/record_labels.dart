@@ -28,12 +28,23 @@ String categoryName(List<RecordCategory> categories, int id) {
 
 /// Adds the entered foreign amount ("USD 100.00") when a bill was recorded in
 /// another currency than the one it was booked in.
+///
+/// When [omitRedundantAssetId] is provided (e.g. inside that account's own
+/// detail page), single-account records omit repeating that account's name in
+/// [RecordLabel.subtitle], while dual-account transfers/loans still display
+/// `转出户 → 转入户`.
 RecordLabel recordLabel(
   LedgerRecord r,
   List<RecordCategory> categories,
-  List<Asset> assets,
-) {
-  final label = _recordLabel(r, categories, assets);
+  List<Asset> assets, {
+  int? omitRedundantAssetId,
+}) {
+  final label = _recordLabel(
+    r,
+    categories,
+    assets,
+    omitRedundantAssetId: omitRedundantAssetId,
+  );
   final CurrencySnapshot? snap;
   try {
     snap = RecordExtra.parse(r.extraInfo).currency;
@@ -66,11 +77,27 @@ String _pairAssets(List<Asset> assets, int fromId, int toId) {
   return '';
 }
 
+String _singleAssetSubtitle(
+  List<Asset> assets,
+  int id, {
+  required bool allowNoAccountLabel,
+  int? omitRedundantAssetId,
+}) {
+  if (omitRedundantAssetId != null && id == omitRedundantAssetId) {
+    return '';
+  }
+  if (id == noRef) {
+    return allowNoAccountLabel ? assetName(assets, id) : '';
+  }
+  return assetName(assets, id);
+}
+
 RecordLabel _recordLabel(
   LedgerRecord r,
   List<RecordCategory> categories,
-  List<Asset> assets,
-) {
+  List<Asset> assets, {
+  int? omitRedundantAssetId,
+}) {
   final amount = formatMinor(r.moneyMinor);
   if ((r.type == RecordType.expense || r.type == RecordType.income) &&
       r.moneyMinor < BigInt.zero) {
@@ -78,7 +105,12 @@ RecordLabel _recordLabel(
     return RecordLabel(
       '退款 · ${categoryName(categories, r.recordCatId)}',
       [
-        if (r.assetId != noRef) assetName(assets, r.assetId),
+        _singleAssetSubtitle(
+          assets,
+          r.assetId,
+          allowNoAccountLabel: false,
+          omitRedundantAssetId: omitRedundantAssetId,
+        ),
         r.remark,
       ].where((s) => s.isNotEmpty).join(' · '),
       '${r.type == RecordType.expense ? '+' : '-'}${formatMinor(-r.moneyMinor)}',
@@ -89,7 +121,12 @@ RecordLabel _recordLabel(
       return RecordLabel(
         categoryName(categories, r.recordCatId),
         [
-          if (r.assetId != noRef) assetName(assets, r.assetId),
+          _singleAssetSubtitle(
+            assets,
+            r.assetId,
+            allowNoAccountLabel: false,
+            omitRedundantAssetId: omitRedundantAssetId,
+          ),
           r.remark,
         ].where((s) => s.isNotEmpty).join(' · '),
         '-$amount',
@@ -98,7 +135,12 @@ RecordLabel _recordLabel(
       return RecordLabel(
         categoryName(categories, r.recordCatId),
         [
-          if (r.assetId != noRef) assetName(assets, r.assetId),
+          _singleAssetSubtitle(
+            assets,
+            r.assetId,
+            allowNoAccountLabel: false,
+            omitRedundantAssetId: omitRedundantAssetId,
+          ),
           r.remark,
         ].where((s) => s.isNotEmpty).join(' · '),
         '+$amount',
@@ -114,7 +156,12 @@ RecordLabel _recordLabel(
       return RecordLabel(
         '手续费',
         [
-          assetName(assets, r.assetId),
+          _singleAssetSubtitle(
+            assets,
+            r.assetId,
+            allowNoAccountLabel: true,
+            omitRedundantAssetId: omitRedundantAssetId,
+          ),
           r.remark,
         ].where((s) => s.isNotEmpty).join(' · '),
         '-$amount',
@@ -123,7 +170,12 @@ RecordLabel _recordLabel(
       return RecordLabel(
         '${categoryName(categories, r.recordCatId)}（报销）',
         [
-          if (r.fromAssetId != noRef) assetName(assets, r.fromAssetId),
+          _singleAssetSubtitle(
+            assets,
+            r.fromAssetId,
+            allowNoAccountLabel: false,
+            omitRedundantAssetId: omitRedundantAssetId,
+          ),
           r.remark,
         ].where((s) => s.isNotEmpty).join(' · '),
         '-$amount',
@@ -132,7 +184,12 @@ RecordLabel _recordLabel(
       return RecordLabel(
         '报销收款',
         [
-          assetName(assets, r.assetId),
+          _singleAssetSubtitle(
+            assets,
+            r.assetId,
+            allowNoAccountLabel: true,
+            omitRedundantAssetId: omitRedundantAssetId,
+          ),
           r.remark,
         ].where((s) => s.isNotEmpty).join(' · '),
         '+$amount',
@@ -142,7 +199,12 @@ RecordLabel _recordLabel(
       return RecordLabel(
         '${categoryName(categories, r.recordCatId)}（预收·${settled ? '已结算' : '待结算'}）',
         [
-          if (r.assetId != noRef) assetName(assets, r.assetId),
+          _singleAssetSubtitle(
+            assets,
+            r.assetId,
+            allowNoAccountLabel: false,
+            omitRedundantAssetId: omitRedundantAssetId,
+          ),
           r.remark,
         ].where((s) => s.isNotEmpty).join(' · '),
         '+$amount',
@@ -152,7 +214,12 @@ RecordLabel _recordLabel(
       return RecordLabel(
         '${categoryName(categories, r.recordCatId)}（预支·${settled ? '已结算' : '待结算'}）',
         [
-          if (r.assetId != noRef) assetName(assets, r.assetId),
+          _singleAssetSubtitle(
+            assets,
+            r.assetId,
+            allowNoAccountLabel: false,
+            omitRedundantAssetId: omitRedundantAssetId,
+          ),
           r.remark,
         ].where((s) => s.isNotEmpty).join(' · '),
         '-$amount',
@@ -161,7 +228,12 @@ RecordLabel _recordLabel(
       return RecordLabel(
         '余额调整',
         [
-          if (r.fromAssetId != noRef) assetName(assets, r.fromAssetId),
+          _singleAssetSubtitle(
+            assets,
+            r.fromAssetId,
+            allowNoAccountLabel: false,
+            omitRedundantAssetId: omitRedundantAssetId,
+          ),
           r.remark,
         ].where((s) => s.isNotEmpty).join(' · '),
         '${r.moneyMinor < BigInt.zero ? '' : '+'}${formatMinor(r.moneyMinor)}',
@@ -200,7 +272,12 @@ RecordLabel _recordLabel(
       return RecordLabel(
         RecordType.names[r.type] ?? '分期本金',
         [
-          if (r.assetId != noRef) assetName(assets, r.assetId),
+          _singleAssetSubtitle(
+            assets,
+            r.assetId,
+            allowNoAccountLabel: false,
+            omitRedundantAssetId: omitRedundantAssetId,
+          ),
           r.remark,
         ].where((s) => s.isNotEmpty).join(' · '),
         '-$amount',
@@ -209,7 +286,12 @@ RecordLabel _recordLabel(
       return RecordLabel(
         RecordType.names[r.type] ?? '定存收益',
         [
-          if (r.assetId != noRef) assetName(assets, r.assetId),
+          _singleAssetSubtitle(
+            assets,
+            r.assetId,
+            allowNoAccountLabel: false,
+            omitRedundantAssetId: omitRedundantAssetId,
+          ),
           r.remark,
         ].where((s) => s.isNotEmpty).join(' · '),
         '+$amount',

@@ -594,6 +594,53 @@ List<CreditStatementItem> calculateCreditStatements({
     ..sort((a, b) => b.period.periodIndex.compareTo(a.period.periodIndex));
 }
 
+/// Whether [item] is an unstarted future statement period with zero activity
+/// as of [today].
+///
+/// Any period whose [CreditStatementPeriod.start] calendar day is on or before
+/// [today] (including the active unissued cycle) or that already contains bills
+/// or non-zero amounts is NOT considered future-empty.
+bool isFutureEmptyCreditStatement(CreditStatementItem item, DateTime today) {
+  if (item.isIssued) return false;
+  final todayDate = DateTime(today.year, today.month, today.day);
+  final startDate = DateTime(
+    item.period.start.year,
+    item.period.start.month,
+    item.period.start.day,
+  );
+  if (!todayDate.isBefore(startDate)) return false;
+  return item.billCount == 0 &&
+      item.statementAmount == BigInt.zero &&
+      item.repaidAmount == BigInt.zero &&
+      item.remainingAmount == BigInt.zero &&
+      item.installmentAmount == BigInt.zero;
+}
+
+/// Filters [statements] by hiding future unstarted empty periods unless
+/// [includeFutureEmpty] is `true`, returning both the displayed list and the
+/// total count of future-empty periods in [statements].
+({List<CreditStatementItem> visible, int futureEmptyCount})
+filterVisibleCreditStatements({
+  required List<CreditStatementItem> statements,
+  required DateTime today,
+  bool includeFutureEmpty = false,
+}) {
+  var futureEmptyCount = 0;
+  final filtered = <CreditStatementItem>[];
+  for (final item in statements) {
+    final isFutureEmpty = isFutureEmptyCreditStatement(item, today);
+    if (isFutureEmpty) {
+      futureEmptyCount++;
+      if (includeFutureEmpty) {
+        filtered.add(item);
+      }
+    } else {
+      filtered.add(item);
+    }
+  }
+  return (visible: filtered, futureEmptyCount: futureEmptyCount);
+}
+
 /// Pending repayment banner info (R5).
 final class CreditPendingBannerInfo {
   const CreditPendingBannerInfo({
