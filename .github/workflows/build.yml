@@ -69,14 +69,28 @@ jobs:
           channel: 'stable'
           cache: true
 
-      - name: Configure Android keystore (optional)
+      - name: Configure Android keystore
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          REQUIRE_FIXED_KEYSTORE: ${{ github.repository == 'tallyisle/tallyisle' && github.event_name != 'pull_request' }}
+          EXPECTED_SHA256: '21:6E:EE:81:15:50:F8:7E:E3:0B:C1:88:C4:34:49:B4:67:75:5B:0A:EB:4E:3C:F6:03:EE:B4:BF:7E:ED:64:C3'
         run: |
+          set -euo pipefail
           if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then
             mkdir -p "$HOME/.android"
-            printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$HOME/.android/debug.keystore"
+            printf '%s' "$ANDROID_KEYSTORE_BASE64" | tr -d '[:space:]' | base64 --decode > "$HOME/.android/debug.keystore"
+            ACTUAL_KEYSTORE_SHA256="$(keytool -list -v -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey | sed -n 's/^[[:space:]]*SHA256:[[:space:]]*//p' | head -n 1)"
+            if [ "$ACTUAL_KEYSTORE_SHA256" != "$EXPECTED_SHA256" ]; then
+              echo "::error::Decoded ANDROID_KEYSTORE_BASE64 SHA-256 ($ACTUAL_KEYSTORE_SHA256) does not match expected ($EXPECTED_SHA256)."
+              exit 1
+            fi
             echo "ANDROID_USER_HOME=$HOME/.android" >> "$GITHUB_ENV"
+            echo "VERIFY_ANDROID_SIGNING=1" >> "$GITHUB_ENV"
+          elif [ "$REQUIRE_FIXED_KEYSTORE" = "true" ]; then
+            echo "::error::ANDROID_KEYSTORE_BASE64 secret is empty on official tallyisle/tallyisle non-PR build. Refusing to fall back to an ephemeral debug keystore."
+            exit 1
+          else
+            echo "::notice::ANDROID_KEYSTORE_BASE64 not set (PR/fork build); using default ephemeral debug keystore."
           fi
 
       - name: Resolve dependencies
@@ -91,6 +105,28 @@ jobs:
         run: |
           flutter build apk --debug --target-platform android-arm64
           cp build/app/outputs/flutter-apk/app-debug.apk TallyIsle-Android-debug.apk
+
+      - name: Verify Android APK signing fingerprint
+        if: env.VERIFY_ANDROID_SIGNING == '1'
+        env:
+          EXPECTED_SHA256: '21:6E:EE:81:15:50:F8:7E:E3:0B:C1:88:C4:34:49:B4:67:75:5B:0A:EB:4E:3C:F6:03:EE:B4:BF:7E:ED:64:C3'
+        run: |
+          set -euo pipefail
+          EXPECTED_SHA256_HEX="$(printf '%s' "$EXPECTED_SHA256" | tr -d ':' | tr '[:upper:]' '[:lower:]')"
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          APKSIGNER="$(find "$SDK_ROOT/build-tools" -maxdepth 2 -name apksigner -type f 2>/dev/null | sort -V | tail -n 1 || true)"
+          if [ -z "$APKSIGNER" ]; then
+            echo "::error::apksigner not found under $SDK_ROOT/build-tools; cannot verify APK v2/v3 signing certificate."
+            exit 1
+          fi
+          for apk in TallyIsle-Android-release.apk TallyIsle-Android-debug.apk; do
+            ACTUAL_SHA256_HEX="$("$APKSIGNER" verify --print-certs "$apk" | sed -n 's/^Signer #1 certificate SHA-256 digest:[[:space:]]*//p' | head -n 1 | tr '[:upper:]' '[:lower:]')"
+            echo "$apk -> Signer #1 SHA-256: $ACTUAL_SHA256_HEX"
+            if [ "$ACTUAL_SHA256_HEX" != "$EXPECTED_SHA256_HEX" ]; then
+              echo "::error::$apk signing SHA-256 ($ACTUAL_SHA256_HEX) does not match expected ($EXPECTED_SHA256_HEX)."
+              exit 1
+            fi
+          done
 
       - name: Upload Android artifacts
         uses: actions/upload-artifact@v4

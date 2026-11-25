@@ -264,6 +264,20 @@ void main() {
         );
         expect(buildYml, contains('sha256sum * > SHA256SUMS.txt'));
         expect(buildYml, contains('softprops/action-gh-release@v2'));
+        expect(buildYml, contains('ANDROID_KEYSTORE_BASE64'));
+        expect(
+          buildYml,
+          contains(
+            "github.repository == 'tallyisle/tallyisle' && github.event_name != 'pull_request'",
+          ),
+        );
+        expect(
+          buildYml,
+          contains(
+            '21:6E:EE:81:15:50:F8:7E:E3:0B:C1:88:C4:34:49:B4:67:75:5B:0A:EB:4E:3C:F6:03:EE:B4:BF:7E:ED:64:C3',
+          ),
+        );
+        expect(buildYml, contains('apksigner'));
 
         for (final asset in _expectedOhosYmlAssets) {
           expect(
