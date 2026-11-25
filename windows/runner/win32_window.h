@@ -90,7 +90,21 @@ class Win32Window {
   // Update the window frame's theme to match the system theme.
   static void UpdateTheme(HWND const window);
 
+  // Updates cached normal bounds and maximized state from |hwnd|.
+  void UpdateCachedWindowState(HWND hwnd) noexcept;
+
+  // Persists cached window bounds and state to %APPDATA%\TallyIsle\TallyIsle\window_state.ini.
+  void SaveWindowState() const noexcept;
+
   bool quit_on_close_ = false;
+  bool start_maximized_ = false;
+  bool is_maximized_ = false;
+  bool has_shown_ = false;
+  bool has_saved_position_ = false;
+  int normal_client_width_ = 1280;
+  int normal_client_height_ = 800;
+  int normal_outer_x_ = 0;
+  int normal_outer_y_ = 0;
 
   // window handle for top level window.
   HWND window_handle_ = nullptr;
