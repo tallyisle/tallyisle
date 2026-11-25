@@ -873,7 +873,7 @@ class _BackupPageState extends ConsumerState<BackupPage>
       borderColor = scheme.secondary.withValues(alpha: isDark ? 0.45 : 0.28);
       fgColor = scheme.onSecondaryContainer;
       icon = Icons.folder_special_outlined;
-      messageText = '外部安全目录：${binding.displayPath}（卸载 App 不丢失）';
+      messageText = '外部安全目录：${binding.displayPath}';
       actions = <Widget>[
         if (canOpenFolder)
           OutlinedButton(

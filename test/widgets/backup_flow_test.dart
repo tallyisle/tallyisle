@@ -947,10 +947,8 @@ void main() {
       await tester.tap(createBtn);
       await settle(tester);
       expect(tester.takeException(), isNull);
-      expect(
-        find.textContaining('外部安全目录：内部存储/Download/TallyBackups（卸载 App 不丢失）'),
-        findsOneWidget,
-      );
+      expect(find.text('外部安全目录：内部存储/Download/TallyBackups'), findsOneWidget);
+      expect(find.textContaining('卸载 App 不丢失'), findsNothing);
       expect(
         find.byKey(const Key('change_external_backup_dir_button')),
         findsOneWidget,
