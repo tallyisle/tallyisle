@@ -437,17 +437,36 @@ void main() {
         final abilities = module['abilities']! as List<Object?>;
         final entryAbility = abilities.single! as Map<String, Object?>;
         final skills = entryAbility['skills']! as List<Object?>;
-        final schemes = <String>[];
+        final deepLinkSchemes = <String>[];
+        final shareUtds = <String>[];
         for (final skill in skills) {
-          final uris =
-              (skill! as Map<String, Object?>)['uris'] as List<Object?>?;
+          final skillMap = skill! as Map<String, Object?>;
+          final actions =
+              (skillMap['actions'] as List<Object?>?)?.cast<String>() ??
+              const <String>[];
+          final uris = skillMap['uris'] as List<Object?>?;
           if (uris == null) continue;
           for (final uri in uris) {
-            final scheme = (uri! as Map<String, Object?>)['scheme'] as String?;
-            if (scheme != null) schemes.add(scheme);
+            final uriMap = uri! as Map<String, Object?>;
+            final scheme = uriMap['scheme'] as String?;
+            if (actions.contains('ohos.want.action.sendData')) {
+              expect(scheme, 'file');
+              final utd = uriMap['utd'] as String?;
+              if (utd != null) shareUtds.add(utd);
+            } else if (scheme != null) {
+              deepLinkSchemes.add(scheme);
+            }
           }
         }
-        expect(schemes, const <String>['tallyisle']);
+        expect(deepLinkSchemes, const <String>['tallyisle']);
+        expect(
+          shareUtds,
+          containsAll(const <String>[
+            'general.image',
+            'general.text',
+            'general.plain-text',
+          ]),
+        );
 
         final permissions = (module['requestPermissions']! as List<Object?>)
             .map((e) => (e! as Map<String, Object?>)['name'] as String)

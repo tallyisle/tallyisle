@@ -539,7 +539,9 @@ export class AutomationBridge implements MethodCallHandler {
   private async runOfflineOcr(bytes: Uint8Array): Promise<string> {
     let imageSource: image.ImageSource | null = null;
     let pixelMap: image.PixelMap | null = null;
+    let ocrInitialized: boolean = false;
     try {
+      ocrInitialized = await textRecognition.init();
       const buffer: ArrayBuffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
       const source: image.ImageSource = image.createImageSource(buffer);
       imageSource = source;
@@ -561,9 +563,19 @@ export class AutomationBridge implements MethodCallHandler {
       const visionInfo: textRecognition.VisionInfo = {
         pixelMap: decoded,
       };
-      const recognized: textRecognition.TextRecognitionResult = await textRecognition.recognizeText(visionInfo);
+      const configuration: textRecognition.TextRecognitionConfiguration = {
+        isDirectionDetectionSupported: true,
+      };
+      const recognized: textRecognition.TextRecognitionResult = await textRecognition.recognizeText(visionInfo, configuration);
       return recognized.value;
     } finally {
+      if (ocrInitialized) {
+        try {
+          await textRecognition.release();
+        } catch (releaseErr) {
+          Log.e(TAG, 'Failed to release OCR engine: ' + JSON.stringify(releaseErr));
+        }
+      }
       const mapToRelease: image.PixelMap | null = pixelMap;
       if (mapToRelease != null) {
         await mapToRelease.release();

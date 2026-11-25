@@ -114,18 +114,27 @@ jobs:
           set -euo pipefail
           EXPECTED_SHA256_HEX="$(printf '%s' "$EXPECTED_SHA256" | tr -d ':' | tr '[:upper:]' '[:lower:]')"
           SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
-          APKSIGNER="$(find "$SDK_ROOT/build-tools" -maxdepth 2 -name apksigner -type f 2>/dev/null | sort -V | tail -n 1 || true)"
+          APKSIGNER="$(find "$SDK_ROOT/build-tools" -maxdepth 2 -name apksigner \( -type f -o -type l \) 2>/dev/null | sort -V | tail -n 1 || true)"
           if [ -z "$APKSIGNER" ]; then
             echo "::error::apksigner not found under $SDK_ROOT/build-tools; cannot verify APK v2/v3 signing certificate."
             exit 1
           fi
+          echo "Using apksigner: $APKSIGNER"
           for apk in TallyIsle-Android-release.apk TallyIsle-Android-debug.apk; do
-            ACTUAL_SHA256_HEX="$("$APKSIGNER" verify --print-certs "$apk" | sed -n 's/^Signer #1 certificate SHA-256 digest:[[:space:]]*//p' | head -n 1 | tr '[:upper:]' '[:lower:]')"
-            echo "$apk -> Signer #1 SHA-256: $ACTUAL_SHA256_HEX"
-            if [ "$ACTUAL_SHA256_HEX" != "$EXPECTED_SHA256_HEX" ]; then
-              echo "::error::$apk signing SHA-256 ($ACTUAL_SHA256_HEX) does not match expected ($EXPECTED_SHA256_HEX)."
+            VERIFY_OUT="$("$APKSIGNER" verify --print-certs "$apk")"
+            printf '%s\n' "$VERIFY_OUT"
+            SIGNER_DIGESTS="$(printf '%s\n' "$VERIFY_OUT" | grep -v '^Source Stamp' | sed -n 's/^.*certificate SHA-256 digest:[[:space:]]*//p' | tr -d ':\r ' | tr '[:upper:]' '[:lower:]' | sort -u)"
+            echo "$apk -> Signer SHA-256: $SIGNER_DIGESTS"
+            if [ -z "$SIGNER_DIGESTS" ]; then
+              echo "::error::$apk produced no signer SHA-256 digest lines from apksigner."
               exit 1
             fi
+            while IFS= read -r digest; do
+              if [ "$digest" != "$EXPECTED_SHA256_HEX" ]; then
+                echo "::error::$apk signing SHA-256 ($digest) does not match expected ($EXPECTED_SHA256_HEX)."
+                exit 1
+              fi
+            done <<< "$SIGNER_DIGESTS"
           done
 
       - name: Upload Android artifacts
