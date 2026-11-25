@@ -165,6 +165,13 @@ class _CsvExportPageState extends ConsumerState<CsvExportPage> {
           padding: const EdgeInsets.all(16),
           children: [
             Card(
+              margin: EdgeInsets.symmetric(vertical: 4),
+              elevation: 0,
+              surfaceTintColor: Colors.transparent,
+              clipBehavior: Clip.antiAlias,
+              shape: _tonalCardShape,
+              color: _tonalCardColor(Theme.of(context)),
+
               child: Padding(
                 padding: const EdgeInsets.all(16),
                 child: Column(
@@ -283,7 +290,7 @@ class _CsvExportPageState extends ConsumerState<CsvExportPage> {
                       ),
                       const SizedBox(height: 8),
                     ],
-                    const Divider(height: 24),
+                    const SizedBox(height: 16),
                     SwitchListTile(
                       key: const Key('export_include_currency_switch'),
                       contentPadding: EdgeInsets.zero,
@@ -393,3 +400,14 @@ class _CsvExportPageState extends ConsumerState<CsvExportPage> {
     );
   }
 }
+
+Color _tonalCardColor(ThemeData theme) {
+  final scheme = theme.colorScheme;
+  return theme.brightness == Brightness.dark
+      ? scheme.surfaceContainerLow
+      : Color.lerp(scheme.surfaceContainerLow, scheme.surfaceContainer, 0.55)!;
+}
+
+const _tonalCardShape = RoundedRectangleBorder(
+  borderRadius: BorderRadius.all(Radius.circular(16)),
+);

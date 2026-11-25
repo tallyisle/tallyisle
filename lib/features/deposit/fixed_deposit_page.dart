@@ -293,7 +293,12 @@ class _DepositSummaryCard extends StatelessWidget {
     final theme = Theme.of(context);
     return Card(
       key: const Key('deposit_summary_card'),
-      elevation: 1,
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      clipBehavior: Clip.antiAlias,
+      color: _tonalCardColor(Theme.of(context)),
+      shape: _tonalCardShape,
+      margin: EdgeInsets.zero,
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Row(
@@ -439,6 +444,12 @@ class _DepositEntryCard extends StatelessWidget {
 
     return Card(
       key: Key('deposit_card_${entry.asset.id}_${entry.index}'),
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      clipBehavior: Clip.antiAlias,
+      color: _tonalCardColor(Theme.of(context)),
+      shape: _tonalCardShape,
+      margin: EdgeInsets.zero,
       child: InkWell(
         onTap: onEdit,
         borderRadius: BorderRadius.circular(12),
@@ -583,3 +594,15 @@ class _DepositEntryCard extends StatelessWidget {
     );
   }
 }
+
+/// Borderless soft tonal card surface (16dp) shared by this feature's cards.
+Color _tonalCardColor(ThemeData theme) {
+  final scheme = theme.colorScheme;
+  return theme.brightness == Brightness.dark
+      ? scheme.surfaceContainerLow
+      : Color.lerp(scheme.surfaceContainerLow, scheme.surfaceContainer, 0.55)!;
+}
+
+const RoundedRectangleBorder _tonalCardShape = RoundedRectangleBorder(
+  borderRadius: BorderRadius.all(Radius.circular(16)),
+);

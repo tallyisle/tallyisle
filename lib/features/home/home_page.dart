@@ -406,10 +406,10 @@ class HomePendingDraftsBanner extends StatelessWidget {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 6, 16, 4),
+      padding: const EdgeInsets.fromLTRB(16, 6, 16, 8),
       child: Material(
         color: scheme.secondaryContainer,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(kTallyCardRadius),
         clipBehavior: Clip.antiAlias,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -599,33 +599,28 @@ class _HomeBody extends ConsumerWidget {
     List<RecordCategory> categories,
     List<Asset> assets,
   ) {
-    final widgets = <Widget>[];
-    String? day;
-    for (final r in records) {
-      final time = DateTime.fromMillisecondsSinceEpoch(r.recordTime);
-      final key = formatDate(time);
-      if (key != day) {
-        day = key;
-        widgets.add(
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
-            child: Text(key, style: Theme.of(context).textTheme.labelLarge),
-          ),
-        );
-      }
-      final info = _resolveRecordDisplayInfo(r, categories, assets);
-      widgets.add(
-        _HomeRecordTile(
-          record: r,
-          label: info.label,
-          categoryName: info.categoryName,
-          categoryIcon: info.categoryIcon,
-          parentCategoryIcon: info.parentCategoryIcon,
-          categoryColor: info.categoryColor,
+    return <Widget>[
+      const SizedBox(height: 4),
+      for (final group in groupRecordsByDay(records))
+        TallyDailyRecordCard(
+          day: group.day,
+          records: group.records,
+          children: [
+            for (final r in group.records)
+              () {
+                final info = _resolveRecordDisplayInfo(r, categories, assets);
+                return _HomeRecordTile(
+                  record: r,
+                  label: info.label,
+                  categoryName: info.categoryName,
+                  categoryIcon: info.categoryIcon,
+                  parentCategoryIcon: info.parentCategoryIcon,
+                  categoryColor: info.categoryColor,
+                );
+              }(),
+          ],
         ),
-      );
-    }
-    return widgets;
+    ];
   }
 }
 
@@ -852,36 +847,31 @@ class _DesktopHomeBody extends ConsumerWidget {
     List<RecordCategory> categories,
     List<Asset> assets,
   ) {
-    final widgets = <Widget>[];
-    String? day;
-    for (final r in records) {
-      final time = DateTime.fromMillisecondsSinceEpoch(r.recordTime);
-      final key = formatDate(time);
-      if (key != day) {
-        day = key;
-        widgets.add(
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
-            child: Text(key, style: Theme.of(context).textTheme.labelLarge),
-          ),
-        );
-      }
-      final info = _resolveRecordDisplayInfo(r, categories, assets);
-      widgets.add(
-        _DesktopHomeRecordTile(
-          record: r,
-          label: info.label,
-          categoryName: info.categoryName,
-          categoryIcon: info.categoryIcon,
-          parentCategoryIcon: info.parentCategoryIcon,
-          categoryColor: info.categoryColor,
-          selected: selectedRecordId == r.recordId,
-          onOpenDetail: () => onOpenRecordDetail(r.recordId),
-          onDelete: () => onDeleteRecord(r),
+    return <Widget>[
+      const SizedBox(height: 4),
+      for (final group in groupRecordsByDay(records))
+        TallyDailyRecordCard(
+          day: group.day,
+          records: group.records,
+          children: [
+            for (final r in group.records)
+              () {
+                final info = _resolveRecordDisplayInfo(r, categories, assets);
+                return _DesktopHomeRecordTile(
+                  record: r,
+                  label: info.label,
+                  categoryName: info.categoryName,
+                  categoryIcon: info.categoryIcon,
+                  parentCategoryIcon: info.parentCategoryIcon,
+                  categoryColor: info.categoryColor,
+                  selected: selectedRecordId == r.recordId,
+                  onOpenDetail: () => onOpenRecordDetail(r.recordId),
+                  onDelete: () => onDeleteRecord(r),
+                );
+              }(),
+          ],
         ),
-      );
-    }
-    return widgets;
+    ];
   }
 }
 
@@ -928,11 +918,8 @@ class _DesktopExpandedOverviewHeader extends ConsumerWidget {
 
     final periodStrip = Container(
       decoration: BoxDecoration(
-        color: scheme.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: scheme.outlineVariant.withValues(alpha: 0.45),
-        ),
+        color: tallyCardColorFromScheme(scheme),
+        borderRadius: BorderRadius.circular(kTallyNestedRadius),
       ),
       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
       child: Row(
@@ -1091,10 +1078,9 @@ class _DesktopAssetSummaryPill extends StatelessWidget {
 
     return Material(
       key: const Key('home-asset-summary-banner'),
-      color: scheme.surfaceContainerLow,
+      color: tallyCardColorFromScheme(scheme),
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: scheme.outlineVariant.withValues(alpha: 0.45)),
+        borderRadius: BorderRadius.circular(kTallyNestedRadius),
       ),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
@@ -1377,7 +1363,7 @@ class _DesktopHomeRecordTileState
               : Colors.transparent);
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
       child: MouseRegion(
         onEnter: (_) => setState(() => _hovered = true),
         onExit: (_) => setState(() => _hovered = false),
@@ -1605,7 +1591,7 @@ class _SummaryCard extends StatelessWidget {
       ),
     );
     return Card(
-      margin: const EdgeInsets.all(16),
+      margin: const EdgeInsets.fromLTRB(16, 10, 16, 6),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 20),
         child: Row(
@@ -1637,7 +1623,7 @@ class _HomeAssetSummaryBanner extends StatelessWidget {
       key: const Key('home-asset-summary-banner'),
       margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
       child: InkWell(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(kTallyCardRadius),
         onTap: onTap,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),

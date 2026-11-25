@@ -8,6 +8,7 @@ import '../../core/money.dart';
 import '../../domain/model/codes.dart';
 import '../../domain/rules/asset_overview.dart' show normalizeCurrency;
 import '../../domain/rules/asset_trend.dart';
+import '../budget/budget_widgets.dart' show tonalCardColor, tonalNestedColor;
 import 'asset_trend_providers.dart';
 
 /// Asset trend analysis page (F-030 / docs/modules/asset-trend.md).
@@ -160,7 +161,7 @@ class _AssetTrendPageState extends ConsumerState<AssetTrendPage> {
                     constraints: const BoxConstraints(maxWidth: 1440),
                     child: Padding(
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 20,
+                        horizontal: 16,
                         vertical: 8,
                       ),
                       child: Row(
@@ -193,7 +194,6 @@ class _AssetTrendPageState extends ConsumerState<AssetTrendPage> {
                     ),
                   ),
                 ),
-                const Divider(height: 1),
                 Expanded(
                   child: Center(
                     child: ConstrainedBox(
@@ -205,12 +205,7 @@ class _AssetTrendPageState extends ConsumerState<AssetTrendPage> {
                           Expanded(
                             flex: 48,
                             child: ListView(
-                              padding: const EdgeInsets.fromLTRB(
-                                20,
-                                14,
-                                12,
-                                24,
-                              ),
+                              padding: const EdgeInsets.fromLTRB(16, 14, 8, 24),
                               children: [
                                 distributionWidget,
                                 const SizedBox(height: 16),
@@ -222,12 +217,7 @@ class _AssetTrendPageState extends ConsumerState<AssetTrendPage> {
                           Expanded(
                             flex: 52,
                             child: ListView(
-                              padding: const EdgeInsets.fromLTRB(
-                                12,
-                                14,
-                                20,
-                                24,
-                              ),
+                              padding: const EdgeInsets.fromLTRB(8, 14, 16, 24),
                               children: [flowTableWidget],
                             ),
                           ),
@@ -378,6 +368,12 @@ class _AssetTrendPageState extends ConsumerState<AssetTrendPage> {
     final theme = Theme.of(context);
     final originalSymbol = currencySymbolOf(account.currency);
     return Card(
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      clipBehavior: Clip.antiAlias,
+      color: tonalCardColor(context),
+      margin: EdgeInsets.zero,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         child: Row(
@@ -462,6 +458,12 @@ class _AssetTrendPageState extends ConsumerState<AssetTrendPage> {
 
     return Card(
       key: const Key('trend-card-distribution'),
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      clipBehavior: Clip.antiAlias,
+      color: tonalCardColor(context),
+      margin: EdgeInsets.zero,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -617,6 +619,12 @@ class _AssetTrendPageState extends ConsumerState<AssetTrendPage> {
 
     return Card(
       key: const Key('trend-card-chart'),
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      clipBehavior: Clip.antiAlias,
+      color: tonalCardColor(context),
+      margin: EdgeInsets.zero,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -746,6 +754,12 @@ class _AssetTrendPageState extends ConsumerState<AssetTrendPage> {
 
     return Card(
       key: const Key('trend-card-flow'),
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      clipBehavior: Clip.antiAlias,
+      color: tonalCardColor(context),
+      margin: EdgeInsets.zero,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -770,7 +784,7 @@ class _AssetTrendPageState extends ConsumerState<AssetTrendPage> {
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
                 itemCount: rows.length,
-                separatorBuilder: (_, __) => const Divider(height: 16),
+                separatorBuilder: (_, __) => const SizedBox(height: 8),
                 itemBuilder: (context, index) {
                   final row = rows[index];
                   final formattedBal = formatTrendBalance(
@@ -781,7 +795,7 @@ class _AssetTrendPageState extends ConsumerState<AssetTrendPage> {
                   final inflowStr = Money.minor(row.inflowMinor).decimal;
                   final outflowStr = Money.minor(row.outflowMinor).decimal;
 
-                  return Row(
+                  final rowContent = Row(
                     children: [
                       Expanded(
                         child: Column(
@@ -858,6 +872,17 @@ class _AssetTrendPageState extends ConsumerState<AssetTrendPage> {
                         ),
                       ),
                     ],
+                  );
+                  return Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 10,
+                    ),
+                    decoration: BoxDecoration(
+                      color: tonalNestedColor(context),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: rowContent,
                   );
                 },
               ),
@@ -937,7 +962,6 @@ class _AssetTrendPageState extends ConsumerState<AssetTrendPage> {
               Navigator.pop(pickerContext);
             },
           ),
-          const Divider(),
 
           // 2. 内置分类
           const Padding(
@@ -1004,7 +1028,6 @@ class _AssetTrendPageState extends ConsumerState<AssetTrendPage> {
               Navigator.pop(pickerContext);
             },
           ),
-          const Divider(),
 
           // 3. 自定义分组
           if (customGroups.isNotEmpty) ...[
@@ -1029,7 +1052,6 @@ class _AssetTrendPageState extends ConsumerState<AssetTrendPage> {
                   Navigator.pop(pickerContext);
                 },
               ),
-            const Divider(),
           ],
 
           // 4. 单个账户（含隐藏账户）
@@ -1477,10 +1499,12 @@ class AssetTrendOverviewCard extends ConsumerWidget {
 
     return Card(
       key: const Key('trend-overview-card'),
-      elevation: 1,
-      margin: EdgeInsets.zero,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
       clipBehavior: Clip.antiAlias,
+      color: tonalCardColor(context),
+      margin: EdgeInsets.zero,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: InkWell(
         onTap: onTap,
         child: Padding(

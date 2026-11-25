@@ -530,11 +530,6 @@ class _AssetDetailPageState extends ConsumerState<AssetDetailPage> {
                 ),
               ),
             ),
-            Divider(
-              height: 1,
-              thickness: 0.6,
-              color: theme.colorScheme.outlineVariant.withValues(alpha: 0.45),
-            ),
             Expanded(child: detailBody),
           ],
         ),
@@ -812,8 +807,21 @@ class _UnifiedAssetHeaderCard extends ConsumerWidget {
         ? asset.remark!.trim()
         : null;
 
+    final cardColor = isDark
+        ? scheme.surfaceContainerLow
+        : Color.lerp(
+            scheme.surfaceContainerLow,
+            scheme.surfaceContainer,
+            0.55,
+          )!;
+
     return Card(
       margin: const EdgeInsets.fromLTRB(16, 10, 16, 8),
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      color: cardColor,
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
         child: Column(

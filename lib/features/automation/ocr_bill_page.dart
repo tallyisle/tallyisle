@@ -377,7 +377,7 @@ class _OcrBillPageState extends ConsumerState<OcrBillPage> {
           onConfigure: () => _openConfigDialog(config, aiConfig),
         ),
         const SizedBox(height: 12),
-        Card(
+        _TonalCard(
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
@@ -608,7 +608,7 @@ class _OcrProviderStatusCard extends StatelessWidget {
         '${provider.capability.reason}；可点击右侧配置自定义 HTTP OCR 或 AI 大模型接口$aiSuffix。',
     };
 
-    return Card(
+    return _TonalCard(
       key: const Key('ocr_provider_status_card'),
       child: Padding(
         padding: const EdgeInsets.all(14),
@@ -911,7 +911,7 @@ class _OcrConfigDialogState extends ConsumerState<_OcrConfigDialog> {
                   ),
                 ),
               ],
-              const Divider(height: 24),
+              const SizedBox(height: 16),
               SwitchListTile(
                 key: const Key('ocr_ai_enable_switch'),
                 contentPadding: EdgeInsets.zero,
@@ -1030,7 +1030,7 @@ class _CandidateReviewCard extends StatelessWidget {
         : null;
 
     final isDesktop = DesktopAdaptive.isDesktop(context);
-    return Card(
+    return _TonalCard(
       key: Key('ocr_candidate_${candidate.index}'),
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -1288,4 +1288,33 @@ class _EditCandidateDialogState extends State<_EditCandidateDialog> {
       ),
     ],
   );
+}
+
+/// 无边框柔和色调卡片（16dp 圆角）。
+class _TonalCard extends StatelessWidget {
+  const _TonalCard({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: 4),
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      clipBehavior: Clip.antiAlias,
+      color: isDark
+          ? scheme.surfaceContainerLow
+          : Color.lerp(
+              scheme.surfaceContainerLow,
+              scheme.surfaceContainer,
+              0.55,
+            )!,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: child,
+    );
+  }
 }

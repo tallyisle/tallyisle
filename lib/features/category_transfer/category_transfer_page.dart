@@ -400,6 +400,28 @@ class _CategoryTransferPageState extends ConsumerState<CategoryTransferPage>
     );
   }
 
+  Color _tonalCardColor(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return theme.brightness == Brightness.dark
+        ? scheme.surfaceContainerLow
+        : Color.lerp(
+            scheme.surfaceContainerLow,
+            scheme.surfaceContainer,
+            0.55,
+          )!;
+  }
+
+  Widget _tonalCard(BuildContext context, {required Widget child}) => Card(
+    margin: EdgeInsets.zero,
+    elevation: 0,
+    surfaceTintColor: Colors.transparent,
+    color: _tonalCardColor(context),
+    clipBehavior: Clip.antiAlias,
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+    child: child,
+  );
+
   Widget _buildJsonTab(List<AccountBook> books, int selectedBookId) {
     final catsAsync = ref.watch(allCategoriesProvider(selectedBookId));
     final fileAccess = ref.watch(categoryTransferFileAccessProvider);
@@ -435,7 +457,8 @@ class _CategoryTransferPageState extends ConsumerState<CategoryTransferPage>
             final incSub = visible
                 .where((c) => c.type == 1 && c.parentCatId != -1)
                 .length;
-            return Card(
+            return _tonalCard(
+              context,
               child: Padding(
                 padding: const EdgeInsets.all(16),
                 child: Column(
@@ -460,13 +483,17 @@ class _CategoryTransferPageState extends ConsumerState<CategoryTransferPage>
           ),
           error: (e, _) => Text(safeMessage(e)),
         ),
-        SwitchListTile(
-          key: const Key('cat-json-include-hidden'),
-          title: const Text('导出时包含已隐藏分类'),
-          value: _jsonIncludeHidden,
-          onChanged: _busy
-              ? null
-              : (v) => setState(() => _jsonIncludeHidden = v),
+        const SizedBox(height: 12),
+        _tonalCard(
+          context,
+          child: SwitchListTile(
+            key: const Key('cat-json-include-hidden'),
+            title: const Text('导出时包含已隐藏分类'),
+            value: _jsonIncludeHidden,
+            onChanged: _busy
+                ? null
+                : (v) => setState(() => _jsonIncludeHidden = v),
+          ),
         ),
         const SizedBox(height: 12),
         FilledButton.icon(
@@ -492,21 +519,35 @@ class _CategoryTransferPageState extends ConsumerState<CategoryTransferPage>
             ),
           ),
         ],
-        const Divider(height: 32),
-        Text('从本地导入分类方案', style: Theme.of(context).textTheme.titleMedium),
-        const SizedBox(height: 8),
-        const Text('支持导入帐屿导出的两级分类 .json 文件。同名同类型分类将自动复用合并，不会产生重复分类。'),
-        const SizedBox(height: 12),
-        FilledButton.tonalIcon(
-          key: const Key('cat-import-pick-btn'),
-          onPressed: _busy
-              ? null
-              : () => _pickAndImport(selectedBookId, selectedBook.name),
-          icon: const Icon(Icons.upload_file_outlined),
-          label: Text(
-            '选择 JSON 文件导入到「${selectedBook.name}」',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
+        const SizedBox(height: 16),
+        _tonalCard(
+          context,
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  '从本地导入分类方案',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 8),
+                const Text('支持导入帐屿导出的两级分类 .json 文件。同名同类型分类将自动复用合并，不会产生重复分类。'),
+                const SizedBox(height: 12),
+                FilledButton.tonalIcon(
+                  key: const Key('cat-import-pick-btn'),
+                  onPressed: _busy
+                      ? null
+                      : () => _pickAndImport(selectedBookId, selectedBook.name),
+                  icon: const Icon(Icons.upload_file_outlined),
+                  label: Text(
+                    '选择 JSON 文件导入到「${selectedBook.name}」',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ],
@@ -562,33 +603,42 @@ class _CategoryTransferPageState extends ConsumerState<CategoryTransferPage>
           enabled: !_busy,
           onChanged: (id) => setState(() => _copyTargetBookId = id),
         ),
-        const SizedBox(height: 8),
-        SwitchListTile(
-          key: const Key('cat-copy-include-hidden'),
-          title: const Text('包含已隐藏分类'),
-          value: _copyIncludeHidden,
-          onChanged: _busy
-              ? null
-              : (v) => setState(() => _copyIncludeHidden = v),
+        const SizedBox(height: 12),
+        _tonalCard(
+          context,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SwitchListTile(
+                key: const Key('cat-copy-include-hidden'),
+                title: const Text('包含已隐藏分类'),
+                value: _copyIncludeHidden,
+                onChanged: _busy
+                    ? null
+                    : (v) => setState(() => _copyIncludeHidden = v),
+              ),
+              SwitchListTile(
+                key: const Key('cat-copy-subset-toggle'),
+                title: const Text('仅复制勾选的指定分类'),
+                subtitle: const Text('关闭时复制源账本全部可用分类'),
+                value: _copySelectSubset,
+                onChanged: _busy
+                    ? null
+                    : (v) => setState(() => _copySelectSubset = v),
+              ),
+            ],
+          ),
         ),
-        SwitchListTile(
-          key: const Key('cat-copy-subset-toggle'),
-          title: const Text('仅复制勾选的指定分类'),
-          subtitle: const Text('关闭时复制源账本全部可用分类'),
-          value: _copySelectSubset,
-          onChanged: _busy
-              ? null
-              : (v) => setState(() => _copySelectSubset = v),
-        ),
-        if (_copySelectSubset)
+        if (_copySelectSubset) ...[
+          const SizedBox(height: 12),
           sourceCatsAsync.when(
             data: (cats) {
               final byId = {for (final c in cats) c.id: c};
               final visible = _copyIncludeHidden
                   ? cats
                   : cats.where((c) => !c.isHide).toList();
-              return Card(
-                margin: const EdgeInsets.symmetric(vertical: 8),
+              return _tonalCard(
+                context,
                 child: Column(
                   children: [
                     for (final c in visible)
@@ -614,6 +664,7 @@ class _CategoryTransferPageState extends ConsumerState<CategoryTransferPage>
             loading: () => const LinearProgressIndicator(),
             error: (e, _) => Text(safeMessage(e)),
           ),
+        ],
         const SizedBox(height: 16),
         FilledButton.icon(
           key: const Key('cat-copy-submit-btn'),
@@ -718,8 +769,9 @@ class _CategoryTransferPageState extends ConsumerState<CategoryTransferPage>
             ),
             const SizedBox(height: 16),
             if (typedCats.length < 2)
-              const Card(
-                child: Padding(
+              _tonalCard(
+                context,
+                child: const Padding(
                   padding: EdgeInsets.all(16),
                   child: Text('当前类型下不足两个分类，无法执行分类间迁移。'),
                 ),
@@ -756,22 +808,32 @@ class _CategoryTransferPageState extends ConsumerState<CategoryTransferPage>
                     ? null
                     : (id) => setState(() => _migrateTargetCatId = id),
               ),
-              if (effectiveSource != null && effectiveSource.parentCatId == -1)
-                SwitchListTile(
-                  key: const Key('cat-migrate-include-subs'),
-                  title: const Text('包含源分类下的全部二级子分类'),
-                  value: _migrateIncludeSubs,
-                  onChanged: _busy
-                      ? null
-                      : (v) => setState(() => _migrateIncludeSubs = v),
+              const SizedBox(height: 12),
+              _tonalCard(
+                context,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (effectiveSource != null &&
+                        effectiveSource.parentCatId == -1)
+                      SwitchListTile(
+                        key: const Key('cat-migrate-include-subs'),
+                        title: const Text('包含源分类下的全部二级子分类'),
+                        value: _migrateIncludeSubs,
+                        onChanged: _busy
+                            ? null
+                            : (v) => setState(() => _migrateIncludeSubs = v),
+                      ),
+                    SwitchListTile(
+                      key: const Key('cat-migrate-delete-source'),
+                      title: const Text('迁移完成后删除源分类'),
+                      value: _migrateDeleteSource,
+                      onChanged: _busy
+                          ? null
+                          : (v) => setState(() => _migrateDeleteSource = v),
+                    ),
+                  ],
                 ),
-              SwitchListTile(
-                key: const Key('cat-migrate-delete-source'),
-                title: const Text('迁移完成后删除源分类'),
-                value: _migrateDeleteSource,
-                onChanged: _busy
-                    ? null
-                    : (v) => setState(() => _migrateDeleteSource = v),
               ),
               const SizedBox(height: 16),
               FilledButton.icon(

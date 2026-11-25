@@ -773,6 +773,12 @@ class _TemplateCardTile extends StatelessWidget {
     ];
 
     return Card(
+      margin: EdgeInsets.zero,
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      clipBehavior: Clip.antiAlias,
+      shape: _tonalCardShape,
+      color: _tonalCardColor(Theme.of(context)),
       key: Key('template_card_${template.id}'),
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
@@ -841,7 +847,7 @@ class _TemplateCardTile extends StatelessWidget {
                   ],
                 ),
               ],
-              const Divider(height: 16),
+              const SizedBox(height: 10),
               Row(
                 children: [
                   const Text('秒记'),
@@ -899,3 +905,14 @@ class _TemplateCardTile extends StatelessWidget {
     );
   }
 }
+
+Color _tonalCardColor(ThemeData theme) {
+  final scheme = theme.colorScheme;
+  return theme.brightness == Brightness.dark
+      ? scheme.surfaceContainerLow
+      : Color.lerp(scheme.surfaceContainerLow, scheme.surfaceContainer, 0.55)!;
+}
+
+const _tonalCardShape = RoundedRectangleBorder(
+  borderRadius: BorderRadius.all(Radius.circular(16)),
+);

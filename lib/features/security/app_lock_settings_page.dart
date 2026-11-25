@@ -207,6 +207,11 @@ class _AppLockSettingsPageState extends ConsumerState<AppLockSettingsPage> {
             children: [
               Card(
                 margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                elevation: 0,
+                surfaceTintColor: Colors.transparent,
+                clipBehavior: Clip.antiAlias,
+                shape: _softCardShape,
+                color: _softCardColor(theme),
                 child: Column(
                   children: [
                     SwitchListTile(
@@ -228,7 +233,6 @@ class _AppLockSettingsPageState extends ConsumerState<AppLockSettingsPage> {
                                 : _openDisableDialog(config),
                     ),
                     if (config.isConfigured) ...[
-                      const Divider(height: 1),
                       ListTile(
                         key: const Key('app_lock_change_pin_tile'),
                         leading: const Icon(Icons.password_outlined),
@@ -240,7 +244,6 @@ class _AppLockSettingsPageState extends ConsumerState<AppLockSettingsPage> {
                         enabled: !_busy,
                         onTap: () => _openChangePinDialog(config),
                       ),
-                      const Divider(height: 1),
                       ListTile(
                         key: const Key('app_lock_lock_now_button'),
                         leading: const Icon(Icons.phonelink_lock_outlined),
@@ -269,6 +272,11 @@ class _AppLockSettingsPageState extends ConsumerState<AppLockSettingsPage> {
               ),
               Card(
                 margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                elevation: 0,
+                surfaceTintColor: Colors.transparent,
+                clipBehavior: Clip.antiAlias,
+                shape: _softCardShape,
+                color: _softCardColor(theme),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -286,7 +294,6 @@ class _AppLockSettingsPageState extends ConsumerState<AppLockSettingsPage> {
                             ? (v) => _toggleBiometric(config, bio, v)
                             : null,
                       ),
-                      const Divider(height: 1),
                     ],
                     Padding(
                       padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
@@ -786,4 +793,15 @@ class _VerifyCurrentPinDialogState extends State<_VerifyCurrentPinDialog> {
       ],
     );
   }
+}
+
+final _softCardShape = RoundedRectangleBorder(
+  borderRadius: BorderRadius.circular(16),
+);
+
+Color _softCardColor(ThemeData theme) {
+  final scheme = theme.colorScheme;
+  return theme.brightness == Brightness.dark
+      ? scheme.surfaceContainerLow
+      : Color.lerp(scheme.surfaceContainerLow, scheme.surfaceContainer, 0.55)!;
 }

@@ -437,7 +437,7 @@ class _ReimbursePageState extends ConsumerState<ReimbursePage>
     return Column(
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 12, 4),
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
           child: Row(
             children: [
               if (_batchMode)
@@ -488,7 +488,7 @@ class _ReimbursePageState extends ConsumerState<ReimbursePage>
         ),
         Expanded(
           child: ListView.separated(
-            padding: const EdgeInsets.fromLTRB(12, 4, 12, 24),
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
             itemCount: rows.length,
             separatorBuilder: (_, _) => const SizedBox(height: 8),
             itemBuilder: (context, index) {
@@ -528,7 +528,7 @@ class _ReimbursePageState extends ConsumerState<ReimbursePage>
     }
 
     return ListView.separated(
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 24),
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
       itemCount: rows.length,
       separatorBuilder: (_, _) => const SizedBox(height: 8),
       itemBuilder: (context, index) {
@@ -541,6 +541,13 @@ class _ReimbursePageState extends ConsumerState<ReimbursePage>
       },
     );
   }
+}
+
+Color _reimburseCardColor(ThemeData theme) {
+  final scheme = theme.colorScheme;
+  return theme.brightness == Brightness.dark
+      ? scheme.surfaceContainerLow
+      : Color.lerp(scheme.surfaceContainerLow, scheme.surfaceContainer, 0.55)!;
 }
 
 class _SummaryDashboardCard extends StatelessWidget {
@@ -556,7 +563,7 @@ class _SummaryDashboardCard extends StatelessWidget {
     final overview = view.overview;
 
     return Container(
-      margin: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+      margin: const EdgeInsets.fromLTRB(16, 8, 16, 4),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       decoration: BoxDecoration(
         gradient: LinearGradient(
@@ -568,7 +575,6 @@ class _SummaryDashboardCard extends StatelessWidget {
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: cs.primary.withValues(alpha: 0.16)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -734,10 +740,10 @@ class _PendingBillCard extends StatelessWidget {
     return Material(
       color: selected
           ? cs.primaryContainer.withValues(alpha: 0.35)
-          : cs.surfaceContainerLow,
-      borderRadius: BorderRadius.circular(14),
+          : _reimburseCardColor(theme),
+      borderRadius: BorderRadius.circular(16),
       child: InkWell(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(16),
         onTap: onRowTap,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
@@ -908,10 +914,10 @@ class _SettledBillCard extends StatelessWidget {
         : const Color(0xFF2E7D32);
 
     return Material(
-      color: cs.surfaceContainerLow,
-      borderRadius: BorderRadius.circular(14),
+      color: _reimburseCardColor(theme),
+      borderRadius: BorderRadius.circular(16),
       child: InkWell(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(16),
         onTap: onTap,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),

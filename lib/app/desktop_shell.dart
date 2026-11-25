@@ -871,13 +871,7 @@ class _ExpandedDesktopSidebar extends StatelessWidget {
             ),
           ),
         ),
-        Divider(
-          height: 1,
-          thickness: 0.6,
-          indent: 12,
-          endIndent: 12,
-          color: scheme.outlineVariant.withValues(alpha: 0.45),
-        ),
+        const SizedBox(height: 8),
         Padding(
           padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
           child: Column(
@@ -1076,13 +1070,7 @@ class _CompactDesktopRail extends StatelessWidget {
             ),
           ),
         ),
-        Divider(
-          height: 1,
-          thickness: 0.6,
-          indent: 12,
-          endIndent: 12,
-          color: scheme.outlineVariant.withValues(alpha: 0.45),
-        ),
+        const SizedBox(height: 8),
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 6),
           child: Column(

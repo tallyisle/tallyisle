@@ -172,6 +172,12 @@ class _DebtPageState extends ConsumerState<DebtPage> {
                 children: [
                   Card(
                     key: const Key('debt_summary_card'),
+                    elevation: 0,
+                    surfaceTintColor: Colors.transparent,
+                    clipBehavior: Clip.antiAlias,
+                    color: _tonalCardColor(Theme.of(context)),
+                    shape: _tonalCardShape,
+                    margin: EdgeInsets.zero,
                     child: Padding(
                       padding: const EdgeInsets.symmetric(
                         vertical: 16,
@@ -419,6 +425,11 @@ class _DebtItemCard extends StatelessWidget {
 
     return Card(
       key: Key('debt_item_${debt.id}'),
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      clipBehavior: Clip.antiAlias,
+      color: _tonalCardColor(Theme.of(context)),
+      shape: _tonalCardShape,
       margin: const EdgeInsets.symmetric(vertical: 6),
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
@@ -488,3 +499,15 @@ class _DebtItemCard extends StatelessWidget {
     );
   }
 }
+
+/// Borderless soft tonal card surface (16dp) shared by this feature's cards.
+Color _tonalCardColor(ThemeData theme) {
+  final scheme = theme.colorScheme;
+  return theme.brightness == Brightness.dark
+      ? scheme.surfaceContainerLow
+      : Color.lerp(scheme.surfaceContainerLow, scheme.surfaceContainer, 0.55)!;
+}
+
+const RoundedRectangleBorder _tonalCardShape = RoundedRectangleBorder(
+  borderRadius: BorderRadius.all(Radius.circular(16)),
+);

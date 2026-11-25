@@ -8,6 +8,8 @@ import '../../app/providers.dart';
 import '../../core/failure.dart';
 import '../../core/money.dart';
 
+export 'tally_card.dart';
+
 const _uuid = Uuid();
 
 String safeMessage(Object error) =>

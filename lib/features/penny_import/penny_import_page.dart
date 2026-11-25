@@ -202,141 +202,170 @@ class _PennyImportPageState extends ConsumerState<PennyImportPage> {
     return Scaffold(
       key: const Key('penny_import_page'),
       appBar: AppBar(title: const Text('导入原版备份')),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('从一羽记账备份文件恢复', style: theme.textTheme.titleMedium),
-                  const SizedBox(height: 8),
-                  Text(
-                    '支持导入原版导出的 .penny 加密备份文件（兼容历史 .yy 备份）。'
-                    '恢复过程在独立暂存校验通过后以单一数据库事务执行，若文件损坏或为空不会改动本地已有数据。',
-                    style: theme.textTheme.bodyMedium,
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    '• 替换范围：账本、分类、账户、账单、预算、分期、周期、提醒、标签、模板、愿望、存钱计划及备注词库共 20 张业务表。\n'
-                    '• 保全范围：本地已有的便签与自定义币种汇率配置完整保留。',
-                    style: theme.textTheme.bodySmall,
-                  ),
-                  const SizedBox(height: 16),
-                  SizedBox(
-                    width: double.infinity,
-                    child: FilledButton.icon(
-                      key: const Key('select_penny_file_button'),
-                      onPressed: _busy ? null : _selectAndImportFile,
-                      icon: const Icon(Icons.upload_file, size: 18),
-                      label: const FittedBox(
-                        fit: BoxFit.scaleDown,
-                        child: Text(
-                          '选择 .penny / .yy 备份文件',
-                          maxLines: 1,
-                          softWrap: false,
-                        ),
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 760),
+          child: ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              Card(
+                margin: EdgeInsets.symmetric(vertical: 4),
+                elevation: 0,
+                surfaceTintColor: Colors.transparent,
+                clipBehavior: Clip.antiAlias,
+                shape: _tonalCardShape,
+                color: _tonalCardColor(Theme.of(context)),
+
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('从一羽记账备份文件恢复', style: theme.textTheme.titleMedium),
+                      const SizedBox(height: 8),
+                      Text(
+                        '支持导入原版导出的 .penny 加密备份文件（兼容历史 .yy 备份）。'
+                        '恢复过程在独立暂存校验通过后以单一数据库事务执行，若文件损坏或为空不会改动本地已有数据。',
+                        style: theme.textTheme.bodyMedium,
                       ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          if (_busy) ...[
-            const SizedBox(height: 16),
-            Card(
-              key: const Key('penny_importing_indicator'),
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Row(
-                  children: [
-                    const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2.5),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(child: Text(_busyMessage ?? '正在处理…')),
-                  ],
-                ),
-              ),
-            ),
-          ],
-          if (_errorMessage != null) ...[
-            const SizedBox(height: 16),
-            Card(
-              key: const Key('penny_import_error_card'),
-              color: theme.colorScheme.errorContainer,
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(
-                      Icons.error_outline,
-                      color: theme.colorScheme.onErrorContainer,
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        _errorMessage!,
-                        style: TextStyle(
-                          color: theme.colorScheme.onErrorContainer,
-                        ),
+                      const SizedBox(height: 8),
+                      Text(
+                        '• 替换范围：账本、分类、账户、账单、预算、分期、周期、提醒、标签、模板、愿望、存钱计划及备注词库共 20 张业务表。\n'
+                        '• 保全范围：本地已有的便签与自定义币种汇率配置完整保留。',
+                        style: theme.textTheme.bodySmall,
                       ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-          if (_lastResult != null) ...[
-            const SizedBox(height: 16),
-            Card(
-              key: const Key('penny_import_result_card'),
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(
-                          Icons.check_circle,
-                          color: theme.colorScheme.primary,
-                        ),
-                        const SizedBox(width: 8),
-                        Text('恢复成功', style: theme.textTheme.titleMedium),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      '已切换至账本「${_lastResult!.preview.targetBookName}」（ID: ${_lastResult!.targetBookId}）。\n'
-                      '共恢复 ${_lastResult!.preview.bookCount} 个账本、'
-                      '${_lastResult!.preview.assetCount} 个账户、'
-                      '${_lastResult!.preview.recordCount} 条账单、'
-                      '${_lastResult!.preview.remarkCount} 条历史备注。',
-                    ),
-                    if (Navigator.of(context).canPop()) ...[
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 16),
                       SizedBox(
                         width: double.infinity,
-                        child: OutlinedButton(
-                          key: const Key('penny_back_button'),
-                          onPressed: () => Navigator.of(context).pop(true),
-                          child: const Text('返回'),
+                        child: FilledButton.icon(
+                          key: const Key('select_penny_file_button'),
+                          onPressed: _busy ? null : _selectAndImportFile,
+                          icon: const Icon(Icons.upload_file, size: 18),
+                          label: const FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text(
+                              '选择 .penny / .yy 备份文件',
+                              maxLines: 1,
+                              softWrap: false,
+                            ),
+                          ),
                         ),
                       ),
                     ],
-                  ],
+                  ),
                 ),
               ),
-            ),
-          ],
-        ],
+              if (_busy) ...[
+                const SizedBox(height: 16),
+                Card(
+                  margin: EdgeInsets.symmetric(vertical: 4),
+                  elevation: 0,
+                  surfaceTintColor: Colors.transparent,
+                  clipBehavior: Clip.antiAlias,
+                  shape: _tonalCardShape,
+                  color: _tonalCardColor(Theme.of(context)),
+                  key: const Key('penny_importing_indicator'),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Row(
+                      children: [
+                        const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2.5),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(child: Text(_busyMessage ?? '正在处理…')),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+              if (_errorMessage != null) ...[
+                const SizedBox(height: 16),
+                Card(
+                  margin: EdgeInsets.symmetric(vertical: 4),
+                  elevation: 0,
+                  surfaceTintColor: Colors.transparent,
+                  clipBehavior: Clip.antiAlias,
+                  shape: _tonalCardShape,
+                  key: const Key('penny_import_error_card'),
+                  color: theme.colorScheme.errorContainer,
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(
+                          Icons.error_outline,
+                          color: theme.colorScheme.onErrorContainer,
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            _errorMessage!,
+                            style: TextStyle(
+                              color: theme.colorScheme.onErrorContainer,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+              if (_lastResult != null) ...[
+                const SizedBox(height: 16),
+                Card(
+                  margin: EdgeInsets.symmetric(vertical: 4),
+                  elevation: 0,
+                  surfaceTintColor: Colors.transparent,
+                  clipBehavior: Clip.antiAlias,
+                  shape: _tonalCardShape,
+                  color: _tonalCardColor(Theme.of(context)),
+                  key: const Key('penny_import_result_card'),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.check_circle,
+                              color: theme.colorScheme.primary,
+                            ),
+                            const SizedBox(width: 8),
+                            Text('恢复成功', style: theme.textTheme.titleMedium),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          '已切换至账本「${_lastResult!.preview.targetBookName}」（ID: ${_lastResult!.targetBookId}）。\n'
+                          '共恢复 ${_lastResult!.preview.bookCount} 个账本、'
+                          '${_lastResult!.preview.assetCount} 个账户、'
+                          '${_lastResult!.preview.recordCount} 条账单、'
+                          '${_lastResult!.preview.remarkCount} 条历史备注。',
+                        ),
+                        if (Navigator.of(context).canPop()) ...[
+                          const SizedBox(height: 12),
+                          SizedBox(
+                            width: double.infinity,
+                            child: OutlinedButton(
+                              key: const Key('penny_back_button'),
+                              onPressed: () => Navigator.of(context).pop(true),
+                              child: const Text('返回'),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -367,3 +396,14 @@ class _PreviewRow extends StatelessWidget {
     );
   }
 }
+
+Color _tonalCardColor(ThemeData theme) {
+  final scheme = theme.colorScheme;
+  return theme.brightness == Brightness.dark
+      ? scheme.surfaceContainerLow
+      : Color.lerp(scheme.surfaceContainerLow, scheme.surfaceContainer, 0.55)!;
+}
+
+const _tonalCardShape = RoundedRectangleBorder(
+  borderRadius: BorderRadius.all(Radius.circular(16)),
+);

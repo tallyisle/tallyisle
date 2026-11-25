@@ -55,7 +55,11 @@ class AboutHelpPage extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
       children: [
         Card(
+          margin: EdgeInsets.zero,
           elevation: 0,
+          surfaceTintColor: Colors.transparent,
+          clipBehavior: Clip.antiAlias,
+          shape: _aboutCardShape,
           color: scheme.primaryContainer.withValues(alpha: 0.45),
           child: Padding(
             padding: const EdgeInsets.all(20),
@@ -129,7 +133,12 @@ class AboutHelpPage extends StatelessWidget {
         const SizedBox(height: 16),
         const _AboutSectionHeader(title: '项目与开源'),
         Card(
+          margin: EdgeInsets.zero,
+          elevation: 0,
+          surfaceTintColor: Colors.transparent,
           clipBehavior: Clip.antiAlias,
+          shape: _aboutCardShape,
+          color: _aboutCardColor(theme),
           child: Column(
             children: [
               ListTile(
@@ -167,7 +176,6 @@ class AboutHelpPage extends StatelessWidget {
                 onTap: () =>
                     unawaited(_openExternalLink(context, tallyIsleRepoUrl)),
               ),
-              const Divider(height: 1),
               ListTile(
                 key: const Key('about_github_issues_tile'),
                 leading: const Icon(Icons.bug_report_outlined),
@@ -203,7 +211,6 @@ class AboutHelpPage extends StatelessWidget {
                 onTap: () =>
                     unawaited(_openExternalLink(context, tallyIsleIssuesUrl)),
               ),
-              const Divider(height: 1),
               ListTile(
                 key: const Key('about_licenses_tile'),
                 leading: const Icon(Icons.description_outlined),
@@ -223,7 +230,13 @@ class AboutHelpPage extends StatelessWidget {
         ),
         const SizedBox(height: 16),
         const _AboutSectionHeader(title: '隐私与免费承诺'),
-        const Card(
+        Card(
+          margin: EdgeInsets.zero,
+          elevation: 0,
+          surfaceTintColor: Colors.transparent,
+          clipBehavior: Clip.antiAlias,
+          shape: _aboutCardShape,
+          color: _aboutCardColor(theme),
           child: Column(
             children: [
               ListTile(
@@ -233,7 +246,6 @@ class AboutHelpPage extends StatelessWidget {
                   '所有账本、流水、资产、预算、心愿、备忘与安全锁配置默认保存在设备本地数据库中，不接入任何官方服务器，不收集任何遥测或隐私数据；云同步与在线汇率仅在您主动开启并配置自有服务时按需连接。',
                 ),
               ),
-              Divider(height: 1),
               ListTile(
                 leading: Icon(Icons.verified_outlined),
                 title: Text('全功能永久免费 · 无会员门控'),
@@ -241,7 +253,6 @@ class AboutHelpPage extends StatelessWidget {
                   '无需注册或登录账号，无广告、无订阅付费墙。多账本、多币种、信用账户账期、定期存款计息、预算结转、存钱计划、数据体检及备份导出等全部功能完整开放。',
                 ),
               ),
-              Divider(height: 1),
               ListTile(
                 leading: Icon(Icons.calculate_outlined),
                 title: Text('整数精确记账'),
@@ -254,11 +265,18 @@ class AboutHelpPage extends StatelessWidget {
         ),
         const SizedBox(height: 16),
         const _AboutSectionHeader(title: '常见问题解答'),
-        const Card(
+        Card(
+          margin: EdgeInsets.zero,
+          elevation: 0,
+          surfaceTintColor: Colors.transparent,
           clipBehavior: Clip.antiAlias,
+          shape: _aboutCardShape,
+          color: _aboutCardColor(theme),
           child: Column(
             children: [
               ExpansionTile(
+                shape: Border(),
+                collapsedShape: Border(),
                 key: Key('faq_cloud_sync_usage_tile'),
                 leading: Icon(Icons.cloud_sync_outlined),
                 title: Text('多端云同步适用于什么场景？可以多台设备同时离线记账吗？'),
@@ -272,8 +290,9 @@ class AboutHelpPage extends StatelessWidget {
                   ),
                 ],
               ),
-              Divider(height: 1),
               ExpansionTile(
+                shape: Border(),
+                collapsedShape: Border(),
                 leading: Icon(Icons.credit_card_outlined),
                 title: Text('信用账户的“授信额度”与当前余额有什么关系？'),
                 childrenPadding: EdgeInsets.fromLTRB(16, 0, 16, 16),
@@ -283,8 +302,9 @@ class AboutHelpPage extends StatelessWidget {
                   ),
                 ],
               ),
-              Divider(height: 1),
               ExpansionTile(
+                shape: Border(),
+                collapsedShape: Border(),
                 leading: Icon(Icons.health_and_safety_outlined),
                 title: Text('“数据体检”的一键修复会改动我的账单流水吗？'),
                 childrenPadding: EdgeInsets.fromLTRB(16, 0, 16, 16),
@@ -294,8 +314,9 @@ class AboutHelpPage extends StatelessWidget {
                   ),
                 ],
               ),
-              Divider(height: 1),
               ExpansionTile(
+                shape: Border(),
+                collapsedShape: Border(),
                 leading: Icon(Icons.lock_outline),
                 title: Text('忘记应用安全锁数字密码怎么办？'),
                 childrenPadding: EdgeInsets.fromLTRB(16, 0, 16, 16),
@@ -305,8 +326,9 @@ class AboutHelpPage extends StatelessWidget {
                   ),
                 ],
               ),
-              Divider(height: 1),
               ExpansionTile(
+                shape: Border(),
+                collapsedShape: Border(),
                 leading: Icon(Icons.save_alt_outlined),
                 title: Text('如何备份、导出或迁移我的账本数据？'),
                 childrenPadding: EdgeInsets.fromLTRB(16, 0, 16, 16),
@@ -341,6 +363,17 @@ class AboutHelpPage extends StatelessWidget {
       ),
     );
   }
+}
+
+final _aboutCardShape = RoundedRectangleBorder(
+  borderRadius: BorderRadius.circular(16),
+);
+
+Color _aboutCardColor(ThemeData theme) {
+  final scheme = theme.colorScheme;
+  return theme.brightness == Brightness.dark
+      ? scheme.surfaceContainerLow
+      : Color.lerp(scheme.surfaceContainerLow, scheme.surfaceContainer, 0.55)!;
 }
 
 class _AboutSectionHeader extends StatelessWidget {

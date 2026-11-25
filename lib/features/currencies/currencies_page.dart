@@ -208,30 +208,57 @@ class _CurrenciesPageState extends ConsumerState<CurrenciesPage> {
             return a.code.compareTo(b.code);
           });
         final used = {for (final c in list) c.code};
+        final theme = Theme.of(context);
+        final scheme = theme.colorScheme;
+        final cardColor = theme.brightness == Brightness.dark
+            ? scheme.surfaceContainerLow
+            : Color.lerp(
+                scheme.surfaceContainerLow,
+                scheme.surfaceContainer,
+                0.55,
+              )!;
         final listView = ListView(
           children: [
             _buildOnlineRateCard(context, settings),
-            for (final c in sorted)
-              ListTile(
-                key: Key('currency-${c.code}'),
-                leading: CircleAvatar(child: Text(c.symbol.characters.first)),
-                title: Text('${c.name}（${c.code}）'),
-                subtitle: Text(
-                  c.code == baseCurrency
-                      ? '本位币'
-                      : '1 ${c.code} = ${priceFromRateToAnchor(c.rateToAnchor)} CNY'
-                            '${c.rateRefreshTime > 0 ? ' · 更新于 ${formatDate(DateTime.fromMillisecondsSinceEpoch(c.rateRefreshTime))}' : ''}',
+            if (sorted.isNotEmpty)
+              Card(
+                margin: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+                elevation: 0,
+                surfaceTintColor: Colors.transparent,
+                color: cardColor,
+                clipBehavior: Clip.antiAlias,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
                 ),
-                trailing: c.code == baseCurrency
-                    ? null
-                    : IconButton(
-                        tooltip: '删除',
-                        icon: const Icon(Icons.delete_outline),
-                        onPressed: () => _delete(c),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    for (final c in sorted)
+                      ListTile(
+                        key: Key('currency-${c.code}'),
+                        leading: CircleAvatar(
+                          child: Text(c.symbol.characters.first),
+                        ),
+                        title: Text('${c.name}（${c.code}）'),
+                        subtitle: Text(
+                          c.code == baseCurrency
+                              ? '本位币'
+                              : '1 ${c.code} = ${priceFromRateToAnchor(c.rateToAnchor)} CNY'
+                                    '${c.rateRefreshTime > 0 ? ' · 更新于 ${formatDate(DateTime.fromMillisecondsSinceEpoch(c.rateRefreshTime))}' : ''}',
+                        ),
+                        trailing: c.code == baseCurrency
+                            ? null
+                            : IconButton(
+                                tooltip: '删除',
+                                icon: const Icon(Icons.delete_outline),
+                                onPressed: () => _delete(c),
+                              ),
+                        onTap: c.code == baseCurrency
+                            ? null
+                            : () => _edit(existing: c, used: used),
                       ),
-                onTap: c.code == baseCurrency
-                    ? null
-                    : () => _edit(existing: c, used: used),
+                  ],
+                ),
               ),
             SizedBox(height: isDesktop ? 24 : 96),
           ],
@@ -252,6 +279,18 @@ class _CurrenciesPageState extends ConsumerState<CurrenciesPage> {
     OnlineRateSettings settings,
   ) {
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
+    final cardColor = isDark
+        ? scheme.surfaceContainerLow
+        : Color.lerp(
+            scheme.surfaceContainerLow,
+            scheme.surfaceContainer,
+            0.55,
+          )!;
+    final nestedColor = isDark
+        ? scheme.surfaceContainerHigh.withValues(alpha: 0.65)
+        : scheme.surfaceContainerHighest.withValues(alpha: 0.45);
     final lastSyncText = settings.lastSyncedAtMs > 0
         ? '上次同步：${formatDateTime(DateTime.fromMillisecondsSinceEpoch(settings.lastSyncedAtMs))}'
               '${settings.lastSyncSource.isNotEmpty ? ' · 来源：${settings.lastSyncSource}' : ''}'
@@ -262,6 +301,11 @@ class _CurrenciesPageState extends ConsumerState<CurrenciesPage> {
 
     return Card(
       margin: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      color: cardColor,
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -287,85 +331,106 @@ class _CurrenciesPageState extends ConsumerState<CurrenciesPage> {
                 ),
               ),
             ),
-          if (settings.enabled) ...[
-            const Divider(height: 1),
-            SwitchListTile(
-              key: const Key('online-rate-auto-switch'),
-              title: const Text('自动同步（每 24 小时）'),
-              subtitle: const Text('距上次成功同步满 24 小时后自动静默刷新已添加的外币汇率'),
-              value: settings.autoSyncOnLaunch,
-              onChanged: _syncing
-                  ? null
-                  : (autoSync) => _saveOnlineSettings(
-                      settings.copyWith(autoSyncOnLaunch: autoSync),
-                    ),
-            ),
+          if (settings.enabled)
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(sourceSummary, style: theme.textTheme.bodySmall),
-                  const SizedBox(height: 2),
-                  Text(
-                    lastSyncText,
-                    key: const Key('online-rate-last-sync-status'),
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: FilledButton.icon(
-                      key: const Key('online-rate-sync-now'),
-                      onPressed: _syncing ? null : _syncNow,
-                      style: FilledButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(horizontal: 10),
-                      ),
-                      icon: _syncing
-                          ? const SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.sync, size: 18),
-                      label: FittedBox(
-                        fit: BoxFit.scaleDown,
-                        child: Text(
-                          _syncing ? '同步中…' : '立即同步汇率',
-                          maxLines: 1,
-                          softWrap: false,
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      key: const Key('online-rate-source-btn'),
-                      onPressed: _syncing
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+              child: Material(
+                color: nestedColor,
+                borderRadius: BorderRadius.circular(12),
+                clipBehavior: Clip.antiAlias,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    SwitchListTile(
+                      key: const Key('online-rate-auto-switch'),
+                      title: const Text('自动同步（每 24 小时）'),
+                      subtitle: const Text('距上次成功同步满 24 小时后自动静默刷新已添加的外币汇率'),
+                      value: settings.autoSyncOnLaunch,
+                      onChanged: _syncing
                           ? null
-                          : () => _configureCustomSource(settings),
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(horizontal: 10),
-                      ),
-                      icon: const Icon(Icons.tune, size: 18),
-                      label: const FittedBox(
-                        fit: BoxFit.scaleDown,
-                        child: Text('自定义汇率源', maxLines: 1, softWrap: false),
+                          : (autoSync) => _saveOnlineSettings(
+                              settings.copyWith(autoSyncOnLaunch: autoSync),
+                            ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(sourceSummary, style: theme.textTheme.bodySmall),
+                          const SizedBox(height: 2),
+                          Text(
+                            lastSyncText,
+                            key: const Key('online-rate-last-sync-status'),
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                  ),
-                ],
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: FilledButton.icon(
+                              key: const Key('online-rate-sync-now'),
+                              onPressed: _syncing ? null : _syncNow,
+                              style: FilledButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                ),
+                              ),
+                              icon: _syncing
+                                  ? const SizedBox(
+                                      width: 16,
+                                      height: 16,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    )
+                                  : const Icon(Icons.sync, size: 18),
+                              label: FittedBox(
+                                fit: BoxFit.scaleDown,
+                                child: Text(
+                                  _syncing ? '同步中…' : '立即同步汇率',
+                                  maxLines: 1,
+                                  softWrap: false,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              key: const Key('online-rate-source-btn'),
+                              onPressed: _syncing
+                                  ? null
+                                  : () => _configureCustomSource(settings),
+                              style: OutlinedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                ),
+                              ),
+                              icon: const Icon(Icons.tune, size: 18),
+                              label: const FittedBox(
+                                fit: BoxFit.scaleDown,
+                                child: Text(
+                                  '自定义汇率源',
+                                  maxLines: 1,
+                                  softWrap: false,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
-          ],
         ],
       ),
     );

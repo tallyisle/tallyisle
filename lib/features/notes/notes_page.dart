@@ -221,8 +221,13 @@ class _NoteCard extends StatelessWidget {
     final snippet = buildNoteSnippet(note.content);
 
     return Card(
-      key: Key('note_card_${note.id}'),
+      margin: EdgeInsets.zero,
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
       clipBehavior: Clip.antiAlias,
+      shape: _tonalCardShape,
+      color: _tonalCardColor(Theme.of(context)),
+      key: Key('note_card_${note.id}'),
       child: InkWell(
         onTap: onTap,
         child: Padding(
@@ -274,3 +279,14 @@ class _NoteCard extends StatelessWidget {
     );
   }
 }
+
+Color _tonalCardColor(ThemeData theme) {
+  final scheme = theme.colorScheme;
+  return theme.brightness == Brightness.dark
+      ? scheme.surfaceContainerLow
+      : Color.lerp(scheme.surfaceContainerLow, scheme.surfaceContainer, 0.55)!;
+}
+
+const _tonalCardShape = RoundedRectangleBorder(
+  borderRadius: BorderRadius.all(Radius.circular(16)),
+);

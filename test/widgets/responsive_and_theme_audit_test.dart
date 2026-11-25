@@ -718,8 +718,8 @@ void main() {
               seenPinKeys.add(kind.wireKey);
               final cardRect = tester.getRect(sectionFinder);
               final pinRect = tester.getRect(pinFinder);
-              // M3 Card has default 4dp margin per side + 16dp inner Padding = 20dp per side (40dp total).
-              final expectedContentWidth = cardRect.width - 40.0;
+              // Global CardThemeData margin is EdgeInsets.zero, so only the 16dp inner Padding per side remains (32dp total).
+              final expectedContentWidth = cardRect.width - 32.0;
               expect(
                 (pinRect.width - expectedContentWidth).abs(),
                 lessThanOrEqualTo(2.0),

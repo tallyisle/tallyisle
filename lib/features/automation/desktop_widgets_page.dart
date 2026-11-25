@@ -178,6 +178,12 @@ class _DesktopWidgetsPageState extends ConsumerState<DesktopWidgetsPage> {
               if (isOhos)
                 Card(
                   key: const Key('widget_ohos_guide_card'),
+                  margin: EdgeInsets.zero,
+                  elevation: 0,
+                  surfaceTintColor: Colors.transparent,
+                  clipBehavior: Clip.antiAlias,
+                  color: _tonalCardColor(theme),
+                  shape: _tonalCardShape,
                   child: Padding(
                     padding: const EdgeInsets.all(16),
                     child: Column(
@@ -200,6 +206,12 @@ class _DesktopWidgetsPageState extends ConsumerState<DesktopWidgetsPage> {
               else
                 Card(
                   key: const Key('widget_add_guide_card'),
+                  margin: EdgeInsets.zero,
+                  elevation: 0,
+                  surfaceTintColor: Colors.transparent,
+                  clipBehavior: Clip.antiAlias,
+                  color: _tonalCardColor(theme),
+                  shape: _tonalCardShape,
                   child: Padding(
                     padding: const EdgeInsets.all(16),
                     child: Column(
@@ -252,6 +264,12 @@ class _WidgetPreviewSection extends StatelessWidget {
 
     return Card(
       key: Key('widget_section_${kind.wireKey}'),
+      margin: EdgeInsets.zero,
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      clipBehavior: Clip.antiAlias,
+      color: _tonalCardColor(theme),
+      shape: _tonalCardShape,
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -285,11 +303,8 @@ class _WidgetPreviewSection extends StatelessWidget {
               decoration: BoxDecoration(
                 color: isDark
                     ? scheme.surfaceContainerHigh.withValues(alpha: 0.65)
-                    : scheme.surfaceContainerLowest,
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(
-                  color: scheme.outlineVariant.withValues(alpha: 0.35),
-                ),
+                    : scheme.surfaceContainerHighest.withValues(alpha: 0.45),
+                borderRadius: BorderRadius.circular(12),
               ),
               child: Center(child: preview),
             ),
@@ -753,4 +768,15 @@ class _BarMetric extends StatelessWidget {
       ),
     ],
   );
+}
+
+final _tonalCardShape = RoundedRectangleBorder(
+  borderRadius: BorderRadius.circular(16),
+);
+
+Color _tonalCardColor(ThemeData theme) {
+  final scheme = theme.colorScheme;
+  return theme.brightness == Brightness.dark
+      ? scheme.surfaceContainerLow
+      : Color.lerp(scheme.surfaceContainerLow, scheme.surfaceContainer, 0.55)!;
 }

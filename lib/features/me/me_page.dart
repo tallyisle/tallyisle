@@ -552,7 +552,7 @@ class _MePageState extends ConsumerState<MePage> {
     final fgTone = Color.lerp(baseTone, scheme.primary, 0.18)!;
     final badgeBg = fgTone.withValues(alpha: isDark ? 0.15 : 0.12);
     final badgeIconColor = isDark ? fgTone.withValues(alpha: 0.92) : fgTone;
-    final headerHorizontal = horizontalPadding + 6;
+    final headerHorizontal = horizontalPadding + 4;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -584,16 +584,6 @@ class _MePageState extends ConsumerState<MePage> {
             child: Column(
               children: [
                 for (var i = 0; i < section.entries.length; i++) ...[
-                  if (i > 0)
-                    Divider(
-                      height: 1,
-                      thickness: 0.5,
-                      indent: 58,
-                      endIndent: 16,
-                      color: scheme.outlineVariant.withValues(
-                        alpha: isDark ? 0.28 : 0.35,
-                      ),
-                    ),
                   _MeMenuRow(
                     entry: section.entries[i],
                     badgeBg: badgeBg,
@@ -720,11 +710,7 @@ class _MePageState extends ConsumerState<MePage> {
                             ),
                           ),
                         ),
-                        Divider(
-                          height: 1,
-                          thickness: 0.6,
-                          color: scheme.outlineVariant.withValues(alpha: 0.4),
-                        ),
+                        const SizedBox(height: 4),
                         Expanded(
                           child: SingleChildScrollView(
                             controller: _directoryScrollController,

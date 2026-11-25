@@ -192,8 +192,13 @@ class _BatchListView extends StatelessWidget {
         );
 
         return Card(
-          key: Key('import_batch_card_${batch.id}'),
+          margin: EdgeInsets.zero,
+          elevation: 0,
+          surfaceTintColor: Colors.transparent,
           clipBehavior: Clip.antiAlias,
+          shape: _tonalCardShape,
+          color: _tonalCardColor(Theme.of(context)),
+          key: Key('import_batch_card_${batch.id}'),
           child: InkWell(
             onTap: isBusy
                 ? null
@@ -358,10 +363,9 @@ class _ImportBatchDetailPageState extends ConsumerState<ImportBatchDetailPage> {
                 ),
               );
             }
-            final list = ListView.separated(
+            final list = ListView.builder(
               padding: const EdgeInsets.all(16),
               itemCount: records.length,
-              separatorBuilder: (_, _) => const Divider(height: 1),
               itemBuilder: (context, index) {
                 final item = records[index];
                 final r = item.record;
@@ -370,21 +374,34 @@ class _ImportBatchDetailPageState extends ConsumerState<ImportBatchDetailPage> {
                 final accountSummary = _accountSummary(item);
                 final bookLabel = item.bookName ?? '默认账本';
 
-                return ListTile(
-                  key: Key('batch_record_tile_${r.recordId}'),
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 4,
+                return Padding(
+                  padding: EdgeInsets.only(
+                    bottom: index == records.length - 1 ? 0 : 8,
                   ),
-                  isThreeLine: r.remark.isNotEmpty,
-                  title: Text(title),
-                  subtitle: Text(
-                    '$bookLabel · $accountSummary · ${formatDateTime(dt)}'
-                    '${r.remark.isEmpty ? '' : '\n${r.remark}'}',
-                  ),
-                  trailing: Text(
-                    '${_amountPrefix(r.type)}${formatMinor(r.moneyMinor)}',
-                    style: Theme.of(context).textTheme.titleMedium,
+                  child: Card(
+                    margin: EdgeInsets.zero,
+                    elevation: 0,
+                    surfaceTintColor: Colors.transparent,
+                    clipBehavior: Clip.antiAlias,
+                    shape: _tonalCardShape,
+                    color: _tonalCardColor(Theme.of(context)),
+                    child: ListTile(
+                      key: Key('batch_record_tile_${r.recordId}'),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 4,
+                      ),
+                      isThreeLine: r.remark.isNotEmpty,
+                      title: Text(title),
+                      subtitle: Text(
+                        '$bookLabel · $accountSummary · ${formatDateTime(dt)}'
+                        '${r.remark.isEmpty ? '' : '\n${r.remark}'}',
+                      ),
+                      trailing: Text(
+                        '${_amountPrefix(r.type)}${formatMinor(r.moneyMinor)}',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                    ),
                   ),
                 );
               },
@@ -457,3 +474,14 @@ Future<bool> _showUndoConfirmDialog(
       ),
     ) ==
     true;
+
+Color _tonalCardColor(ThemeData theme) {
+  final scheme = theme.colorScheme;
+  return theme.brightness == Brightness.dark
+      ? scheme.surfaceContainerLow
+      : Color.lerp(scheme.surfaceContainerLow, scheme.surfaceContainer, 0.55)!;
+}
+
+const _tonalCardShape = RoundedRectangleBorder(
+  borderRadius: BorderRadius.all(Radius.circular(16)),
+);

@@ -369,12 +369,17 @@ class _InstallmentEditorPageState extends ConsumerState<InstallmentEditorPage> {
                     constraints: const BoxConstraints(maxWidth: 640),
                     child: ListView(
                       padding: isDesktop
-                          ? const EdgeInsets.fromLTRB(20, 12, 20, 16)
+                          ? const EdgeInsets.fromLTRB(16, 12, 16, 16)
                           : const EdgeInsets.all(16),
                       children: [
                         if (_error != null) ...[
                           Card(
-                            color: Theme.of(context).colorScheme.errorContainer,
+                            elevation: 0,
+                            surfaceTintColor: Colors.transparent,
+                            clipBehavior: Clip.antiAlias,
+                            color: _tonalCardColor(Theme.of(context)),
+                            shape: _tonalCardShape,
+                            margin: EdgeInsets.zero,
                             child: Padding(
                               padding: const EdgeInsets.all(12),
                               child: Text(
@@ -656,6 +661,11 @@ class _InstallmentEditorPageState extends ConsumerState<InstallmentEditorPage> {
                           const SizedBox(height: 12),
                           Card(
                             key: const Key('installment_credit_options_card'),
+                            elevation: 0,
+                            surfaceTintColor: Colors.transparent,
+                            clipBehavior: Clip.antiAlias,
+                            color: _tonalCardColor(Theme.of(context)),
+                            shape: _tonalCardShape,
                             margin: EdgeInsets.zero,
                             child: Padding(
                               padding: const EdgeInsets.symmetric(
@@ -815,8 +825,12 @@ class _ReadonlyScheduleSummaryCard extends StatelessWidget {
     final theme = Theme.of(context);
     return Card(
       key: const Key('installment_readonly_summary_card'),
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      clipBehavior: Clip.antiAlias,
+      color: _tonalCardColor(Theme.of(context)),
+      shape: _tonalCardShape,
       margin: EdgeInsets.zero,
-      color: theme.colorScheme.surfaceContainerLow,
       child: Padding(
         padding: const EdgeInsets.all(14),
         child: Column(
@@ -867,8 +881,12 @@ class _SchedulePreviewCard extends StatelessWidget {
 
     return Card(
       key: const Key('installment_preview_card'),
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      clipBehavior: Clip.antiAlias,
+      color: _tonalCardColor(Theme.of(context)),
+      shape: _tonalCardShape,
       margin: EdgeInsets.zero,
-      color: theme.colorScheme.surfaceContainerLow,
       child: Padding(
         padding: const EdgeInsets.all(14),
         child: Column(
@@ -891,7 +909,7 @@ class _SchedulePreviewCard extends StatelessWidget {
               ),
             if (schedule.length > 1)
               _PreviewRow(label: '第 ${last.period} 期', item: last),
-            const Divider(height: 16),
+            const SizedBox(height: 12),
             Text(
               '合计应还 ¥${formatMinor(sumPrincipal + sumFee)}（本金 ¥${formatMinor(sumPrincipal)} + 手续费 ¥${formatMinor(sumFee)}）',
               style: theme.textTheme.bodySmall?.copyWith(
@@ -937,3 +955,15 @@ class _PreviewRow extends StatelessWidget {
     );
   }
 }
+
+/// Borderless soft tonal card surface (16dp) shared by this feature's cards.
+Color _tonalCardColor(ThemeData theme) {
+  final scheme = theme.colorScheme;
+  return theme.brightness == Brightness.dark
+      ? scheme.surfaceContainerLow
+      : Color.lerp(scheme.surfaceContainerLow, scheme.surfaceContainer, 0.55)!;
+}
+
+const RoundedRectangleBorder _tonalCardShape = RoundedRectangleBorder(
+  borderRadius: BorderRadius.all(Radius.circular(16)),
+);

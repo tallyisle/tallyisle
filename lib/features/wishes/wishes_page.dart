@@ -230,6 +230,11 @@ class _WishSummaryBanner extends StatelessWidget {
         );
 
     return Card(
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      clipBehavior: Clip.antiAlias,
+      shape: _tonalCardShape,
+      color: _tonalCardColor(Theme.of(context)),
       key: const Key('wish_summary_banner'),
       margin: const EdgeInsets.fromLTRB(16, 12, 16, 4),
       child: Padding(
@@ -407,8 +412,13 @@ class _WishCard extends StatelessWidget {
     };
 
     return Card(
-      key: Key('wish_card_${wish.id}'),
+      margin: EdgeInsets.zero,
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
       clipBehavior: Clip.antiAlias,
+      shape: _tonalCardShape,
+      color: _tonalCardColor(Theme.of(context)),
+      key: Key('wish_card_${wish.id}'),
       child: InkWell(
         onTap: onTap,
         child: Padding(
@@ -561,3 +571,14 @@ class _WishCard extends StatelessWidget {
     );
   }
 }
+
+Color _tonalCardColor(ThemeData theme) {
+  final scheme = theme.colorScheme;
+  return theme.brightness == Brightness.dark
+      ? scheme.surfaceContainerLow
+      : Color.lerp(scheme.surfaceContainerLow, scheme.surfaceContainer, 0.55)!;
+}
+
+const _tonalCardShape = RoundedRectangleBorder(
+  borderRadius: BorderRadius.all(Radius.circular(16)),
+);

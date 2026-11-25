@@ -155,7 +155,7 @@ class _DiyToolbarSettingsPageState
     );
 
     final grouped = Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 1),
       child: Material(
         color: _groupColor(scheme, isDark),
         borderRadius: BorderRadius.vertical(
@@ -163,22 +163,7 @@ class _DiyToolbarSettingsPageState
           bottom: isLast ? radius : Radius.zero,
         ),
         clipBehavior: Clip.antiAlias,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (!isFirst)
-              Divider(
-                height: 1,
-                thickness: 0.5,
-                indent: isDesktop ? 82 : 56,
-                endIndent: 16,
-                color: scheme.outlineVariant.withValues(
-                  alpha: isDark ? 0.28 : 0.35,
-                ),
-              ),
-            tile,
-          ],
-        ),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [tile]),
       ),
     );
 
@@ -229,16 +214,6 @@ class _DiyToolbarSettingsPageState
               mainAxisSize: MainAxisSize.min,
               children: [
                 for (var i = 0; i < fixedItems.length; i++) ...[
-                  if (i > 0)
-                    Divider(
-                      height: 1,
-                      thickness: 0.5,
-                      indent: 56,
-                      endIndent: 16,
-                      color: scheme.outlineVariant.withValues(
-                        alpha: isDark ? 0.28 : 0.35,
-                      ),
-                    ),
                   ListTile(
                     key: ValueKey('diy-row-${fixedItems[i].action.key}'),
                     visualDensity: isDesktop

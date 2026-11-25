@@ -598,7 +598,7 @@ class _BackupHistoryManagementDialogState
                       if (allItems.isNotEmpty)
                         SingleChildScrollView(
                           scrollDirection: Axis.horizontal,
-                          padding: const EdgeInsets.fromLTRB(12, 2, 12, 2),
+                          padding: const EdgeInsets.fromLTRB(16, 2, 16, 2),
                           child: Row(
                             children: [
                               TextButton.icon(
@@ -669,7 +669,7 @@ class _BackupHistoryManagementDialogState
                             ],
                           ),
                         ),
-                      const Divider(height: 1),
+                      const SizedBox(height: 4),
                       Expanded(
                         child: filteredItems.isEmpty
                             ? Center(
@@ -690,9 +690,9 @@ class _BackupHistoryManagementDialogState
                             : ListView.builder(
                                 key: const Key('backup_history_list'),
                                 padding: const EdgeInsets.fromLTRB(
-                                  12,
+                                  16,
                                   8,
-                                  12,
+                                  16,
                                   8,
                                 ),
                                 itemCount: filteredItems.length,
@@ -903,7 +903,7 @@ class _BackupHistoryManagementDialogState
                                 },
                               ),
                       ),
-                      const Divider(height: 1),
+                      const SizedBox(height: 4),
                       Padding(
                         padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
                         child: Row(

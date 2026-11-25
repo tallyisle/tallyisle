@@ -65,10 +65,10 @@ Future<void> showBookSwitcher(
                 ],
               ),
             ),
-            const Divider(height: 1),
             Flexible(
               child: ListView(
                 shrinkWrap: true,
+                padding: const EdgeInsets.only(bottom: 8),
                 children: [
                   for (final b in books)
                     ListTile(
@@ -143,11 +143,10 @@ class _DesktopBookSwitcherDialog extends StatelessWidget {
                 ],
               ),
             ),
-            const Divider(height: 1),
             Flexible(
               child: ListView.builder(
                 shrinkWrap: true,
-                padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
+                padding: const EdgeInsets.fromLTRB(8, 2, 8, 8),
                 itemCount: books.length,
                 itemBuilder: (ctx, index) {
                   final b = books[index];

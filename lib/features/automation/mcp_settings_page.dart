@@ -193,7 +193,7 @@ class _McpSettingsPageState extends ConsumerState<McpSettingsPage> {
             ),
           ],
           const SizedBox(height: 12),
-          Card(
+          _TonalCard(
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: Column(
@@ -216,7 +216,7 @@ class _McpSettingsPageState extends ConsumerState<McpSettingsPage> {
                             ),
                           ),
                   ),
-                  const Divider(height: 24),
+                  const SizedBox(height: 16),
                   Text(
                     '智能体权限档位',
                     style: theme.textTheme.titleSmall?.copyWith(
@@ -288,7 +288,7 @@ class _McpSettingsPageState extends ConsumerState<McpSettingsPage> {
             ),
           ),
           const SizedBox(height: 12),
-          Card(
+          _TonalCard(
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: Column(
@@ -433,7 +433,7 @@ class _McpSettingsPageState extends ConsumerState<McpSettingsPage> {
             ),
           ),
           const SizedBox(height: 12),
-          Card(
+          _TonalCard(
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: Column(
@@ -558,7 +558,7 @@ class _McpStatusCard extends StatelessWidget {
         for (final ip in status.lanIps) 'http://$ip:$effectivePort/mcp',
     ];
 
-    return Card(
+    return _TonalCard(
       key: const Key('mcp_status_card'),
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -780,7 +780,7 @@ class _McpToolsSummaryCard extends StatelessWidget {
         .where((t) => t.tier == McpToolTier.full)
         .toList(growable: false);
 
-    return Card(
+    return _TonalCard(
       key: const Key('mcp_tools_summary_card'),
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -881,4 +881,33 @@ class _McpPortEditDialogState extends State<_McpPortEditDialog> {
       ),
     ],
   );
+}
+
+/// 无边框柔和色调卡片（16dp 圆角）。
+class _TonalCard extends StatelessWidget {
+  const _TonalCard({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: 4),
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      clipBehavior: Clip.antiAlias,
+      color: isDark
+          ? scheme.surfaceContainerLow
+          : Color.lerp(
+              scheme.surfaceContainerLow,
+              scheme.surfaceContainer,
+              0.55,
+            )!,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: child,
+    );
+  }
 }

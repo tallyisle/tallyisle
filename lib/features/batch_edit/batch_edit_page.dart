@@ -397,9 +397,9 @@ class _BatchEditPageState extends ConsumerState<BatchEditPage> {
                 Expanded(
                   child: visibleRecords.isEmpty
                       ? const Center(child: Text('当前条件下暂无可操作的账单'))
-                      : ListView.separated(
+                      : ListView.builder(
+                          padding: const EdgeInsets.symmetric(vertical: 4),
                           itemCount: visibleRecords.length,
-                          separatorBuilder: (_, _) => const Divider(height: 1),
                           itemBuilder: (context, index) {
                             final r = visibleRecords[index];
                             final (title, subtitle, amount) = _describeRecord(
@@ -408,47 +408,71 @@ class _BatchEditPageState extends ConsumerState<BatchEditPage> {
                               assets,
                             );
                             final checked = _selectedIds.contains(r.recordId);
-                            return CheckboxListTile(
-                              key: Key('batch-item-${r.recordId}'),
-                              controlAffinity: ListTileControlAffinity.leading,
-                              value: checked,
-                              onChanged: _busy
-                                  ? null
-                                  : (val) => setState(() {
-                                      if (val == true) {
-                                        _selectedIds.add(r.recordId);
-                                      } else {
-                                        _selectedIds.remove(r.recordId);
-                                      }
-                                    }),
-                              title: Row(
-                                children: [
-                                  Expanded(child: Text(title)),
-                                  Text(
-                                    amount,
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ],
+                            final batchScheme = Theme.of(context).colorScheme;
+                            return Card(
+                              margin: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 3,
                               ),
-                              subtitle: Text(
-                                subtitle,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
+                              elevation: 0,
+                              surfaceTintColor: Colors.transparent,
+                              clipBehavior: Clip.antiAlias,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              color:
+                                  Theme.of(context).brightness ==
+                                      Brightness.dark
+                                  ? batchScheme.surfaceContainerLow
+                                  : Color.lerp(
+                                      batchScheme.surfaceContainerLow,
+                                      batchScheme.surfaceContainer,
+                                      0.55,
+                                    )!,
+                              child: CheckboxListTile(
+                                key: Key('batch-item-${r.recordId}'),
+                                controlAffinity:
+                                    ListTileControlAffinity.leading,
+                                value: checked,
+                                onChanged: _busy
+                                    ? null
+                                    : (val) => setState(() {
+                                        if (val == true) {
+                                          _selectedIds.add(r.recordId);
+                                        } else {
+                                          _selectedIds.remove(r.recordId);
+                                        }
+                                      }),
+                                title: Row(
+                                  children: [
+                                    Expanded(child: Text(title)),
+                                    Text(
+                                      amount,
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                subtitle: Text(
+                                  subtitle,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
                               ),
                             );
                           },
                         ),
                 ),
                 Material(
-                  elevation: 8,
+                  elevation: 0,
+                  surfaceTintColor: Colors.transparent,
                   color: Theme.of(context).colorScheme.surfaceContainerLow,
                   child: SafeArea(
                     top: false,
                     child: Padding(
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
+                        horizontal: 16,
                         vertical: 10,
                       ),
                       child: Row(
@@ -921,7 +945,7 @@ class _BatchEditConfigSheetState extends ConsumerState<_BatchEditConfigSheet> {
               ],
             ),
           ),
-          const Divider(height: 1),
+          const SizedBox(height: 2),
           Flexible(
             child: SingleChildScrollView(
               padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
@@ -932,7 +956,7 @@ class _BatchEditConfigSheetState extends ConsumerState<_BatchEditConfigSheet> {
               ),
             ),
           ),
-          const Divider(height: 1),
+          const SizedBox(height: 2),
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 10, 20, 14),
             child: actionRow,

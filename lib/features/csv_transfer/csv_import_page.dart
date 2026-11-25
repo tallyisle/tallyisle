@@ -360,6 +360,13 @@ class _CsvImportPageState extends ConsumerState<CsvImportPage> {
           padding: const EdgeInsets.all(16),
           children: [
             Card(
+              margin: EdgeInsets.symmetric(vertical: 4),
+              elevation: 0,
+              surfaceTintColor: Colors.transparent,
+              clipBehavior: Clip.antiAlias,
+              shape: _tonalCardShape,
+              color: _tonalCardColor(Theme.of(context)),
+
               child: Padding(
                 padding: const EdgeInsets.all(16),
                 child: Column(
@@ -445,6 +452,11 @@ class _CsvImportPageState extends ConsumerState<CsvImportPage> {
             if (_parseError != null) ...[
               const SizedBox(height: 16),
               Card(
+                margin: EdgeInsets.symmetric(vertical: 4),
+                elevation: 0,
+                surfaceTintColor: Colors.transparent,
+                clipBehavior: Clip.antiAlias,
+                shape: _tonalCardShape,
                 key: const Key('import_error_banner'),
                 color: Theme.of(context).colorScheme.errorContainer,
                 child: Padding(
@@ -535,6 +547,12 @@ class _PreviewCard extends StatelessWidget {
     final failPreview = preview.failRows.take(50).toList(growable: false);
 
     return Card(
+      margin: EdgeInsets.symmetric(vertical: 4),
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      clipBehavior: Clip.antiAlias,
+      shape: _tonalCardShape,
+      color: _tonalCardColor(Theme.of(context)),
       key: const Key('import_preview_card'),
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -647,7 +665,7 @@ class _PreviewCard extends StatelessWidget {
               ),
             ],
             if (failPreview.isNotEmpty) ...[
-              const Divider(height: 24),
+              const SizedBox(height: 16),
               Text(
                 '失败行明细（共 ${preview.failRows.length} 条）',
                 key: const Key('import_fail_rows_section'),
@@ -694,3 +712,14 @@ class _PreviewCard extends StatelessWidget {
     );
   }
 }
+
+Color _tonalCardColor(ThemeData theme) {
+  final scheme = theme.colorScheme;
+  return theme.brightness == Brightness.dark
+      ? scheme.surfaceContainerLow
+      : Color.lerp(scheme.surfaceContainerLow, scheme.surfaceContainer, 0.55)!;
+}
+
+const _tonalCardShape = RoundedRectangleBorder(
+  borderRadius: BorderRadius.all(Radius.circular(16)),
+);

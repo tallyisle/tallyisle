@@ -152,6 +152,7 @@ class _StatsPageState extends ConsumerState<StatsPage> {
     );
     final budgetCard = BudgetSummaryCard(
       enablePeriodControls: true,
+      margin: EdgeInsets.zero,
       onTap: () =>
           _openBudgetPage(initialOffset: ref.read(budgetOffsetProvider)),
     );
@@ -159,24 +160,20 @@ class _StatsPageState extends ConsumerState<StatsPage> {
       onTap: () => context.push('/stats/trend'),
     );
 
+    Widget gutter(Widget card) => Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      child: card,
+    );
+
     final stackedList = ListView(
       key: const Key('stats-hub-list'),
       padding: const EdgeInsets.only(top: 6, bottom: 32),
       children: [
-        annualCard,
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-          child: categoryCard,
-        ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-          child: tagCard,
-        ),
-        budgetCard,
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-          child: trendCard,
-        ),
+        gutter(annualCard),
+        gutter(categoryCard),
+        gutter(tagCard),
+        gutter(budgetCard),
+        gutter(trendCard),
       ],
     );
 
@@ -235,7 +232,7 @@ class _StatsPageState extends ConsumerState<StatsPage> {
       body: isExpandedDesktop
           ? SingleChildScrollView(
               key: const Key('stats-hub-list'),
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               child: Center(
                 child: ConstrainedBox(
                   key: const Key('stats-desktop-grid'),
@@ -247,41 +244,21 @@ class _StatsPageState extends ConsumerState<StatsPage> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Expanded(child: annualCard),
+                          const SizedBox(width: 16),
                           Expanded(child: budgetCard),
                         ],
                       ),
-                      const SizedBox(height: 4),
+                      const SizedBox(height: 16),
                       Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Expanded(
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 16,
-                                vertical: 6,
-                              ),
-                              child: categoryCard,
-                            ),
-                          ),
-                          Expanded(
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 16,
-                                vertical: 6,
-                              ),
-                              child: tagCard,
-                            ),
-                          ),
+                          Expanded(child: categoryCard),
+                          const SizedBox(width: 16),
+                          Expanded(child: tagCard),
                         ],
                       ),
-                      const SizedBox(height: 4),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 6,
-                        ),
-                        child: trendCard,
-                      ),
+                      const SizedBox(height: 16),
+                      trendCard,
                     ],
                   ),
                 ),
@@ -325,9 +302,12 @@ class _TagStatsOverviewCard extends ConsumerWidget {
     final rankingsAsync = ref.watch(statsHubTagRankingsProvider);
 
     return Card(
-      elevation: 1,
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      clipBehavior: Clip.antiAlias,
+      color: tonalCardColor(context),
       margin: EdgeInsets.zero,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: rankingsAsync.when(

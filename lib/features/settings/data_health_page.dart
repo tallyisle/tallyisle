@@ -163,7 +163,11 @@ class _DataHealthPageState extends ConsumerState<DataHealthPage> {
               children: [
                 Card(
                   key: const Key('data_health_status_banner'),
+                  margin: EdgeInsets.zero,
                   elevation: 0,
+                  surfaceTintColor: Colors.transparent,
+                  clipBehavior: Clip.antiAlias,
+                  shape: _softCardShape,
                   color: bannerBg,
                   child: Padding(
                     padding: const EdgeInsets.all(16),
@@ -241,7 +245,11 @@ class _DataHealthPageState extends ConsumerState<DataHealthPage> {
                 ),
                 const SizedBox(height: 12),
                 Card(
+                  margin: EdgeInsets.zero,
                   elevation: 0,
+                  surfaceTintColor: Colors.transparent,
+                  clipBehavior: Clip.antiAlias,
+                  shape: _softCardShape,
                   color: scheme.surfaceContainerHighest.withValues(alpha: 0.55),
                   child: Padding(
                     padding: const EdgeInsets.all(12),
@@ -362,6 +370,17 @@ class _DataHealthPageState extends ConsumerState<DataHealthPage> {
   }
 }
 
+final _softCardShape = RoundedRectangleBorder(
+  borderRadius: BorderRadius.circular(16),
+);
+
+Color _softCardColor(ThemeData theme) {
+  final scheme = theme.colorScheme;
+  return theme.brightness == Brightness.dark
+      ? scheme.surfaceContainerLow
+      : Color.lerp(scheme.surfaceContainerLow, scheme.surfaceContainer, 0.55)!;
+}
+
 class _MetricTile extends StatelessWidget {
   const _MetricTile({required this.label, required this.value});
 
@@ -373,6 +392,11 @@ class _MetricTile extends StatelessWidget {
     final theme = Theme.of(context);
     return Card(
       margin: EdgeInsets.zero,
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      clipBehavior: Clip.antiAlias,
+      shape: _softCardShape,
+      color: _softCardColor(theme),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 6),
         child: Column(
@@ -449,6 +473,11 @@ class _IssueCard extends StatelessWidget {
 
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      clipBehavior: Clip.antiAlias,
+      shape: _softCardShape,
+      color: _softCardColor(Theme.of(context)),
       child: Padding(
         padding: const EdgeInsets.all(14),
         child: Column(

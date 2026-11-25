@@ -15,6 +15,7 @@ import '../common/desktop_modal_page.dart';
 import '../common/year_month_picker_dialog.dart';
 import '../records/record_detail_page.dart';
 import '../records/record_labels.dart';
+import '../budget/budget_widgets.dart' show tonalCardColor;
 import 'tag_stats_providers.dart';
 
 /// Parses a stored tag color string into a Flutter [Color], or `null` if default.
@@ -189,7 +190,12 @@ class _TagRankingsPageState extends ConsumerState<TagRankingsPage> {
     Widget buildSummaryCard(TagRankingsResult rankings, Color accentColor) {
       final isExpense = rankings.bucket == StatBucket.expense;
       return Card(
-        elevation: 1,
+        elevation: 0,
+        surfaceTintColor: Colors.transparent,
+        clipBehavior: Clip.antiAlias,
+        color: tonalCardColor(context),
+        margin: EdgeInsets.zero,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Row(
@@ -325,6 +331,14 @@ class _TagRankingsPageState extends ConsumerState<TagRankingsPage> {
       final isExpense = rankings.bucket == StatBucket.expense;
       if (rankings.items.isEmpty) {
         return Card(
+          elevation: 0,
+          surfaceTintColor: Colors.transparent,
+          clipBehavior: Clip.antiAlias,
+          color: tonalCardColor(context),
+          margin: EdgeInsets.zero,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
             child: Column(
@@ -362,13 +376,18 @@ class _TagRankingsPageState extends ConsumerState<TagRankingsPage> {
         );
       }
       return Card(
-        elevation: 1,
+        elevation: 0,
+        surfaceTintColor: Colors.transparent,
+        clipBehavior: Clip.antiAlias,
+        color: tonalCardColor(context),
+        margin: EdgeInsets.zero,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           child: Column(
             children: [
               for (var i = 0; i < rankings.items.length; i++) ...[
-                if (i > 0) const Divider(height: 1),
+                if (i > 0) const SizedBox(height: 2),
                 _TagRankingRow(
                   item: rankings.items[i],
                   fallbackBarColor: accentColor,
@@ -427,20 +446,19 @@ class _TagRankingsPageState extends ConsumerState<TagRankingsPage> {
                     constraints: const BoxConstraints(maxWidth: 1360),
                     child: Padding(
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 20,
+                        horizontal: 16,
                         vertical: 8,
                       ),
                       child: Row(
                         children: [
                           SizedBox(width: 210, child: bucketSwitch),
-                          const SizedBox(width: 20),
+                          const SizedBox(width: 16),
                           Expanded(child: buildPeriodBar(compactDesktop: true)),
                         ],
                       ),
                     ),
                   ),
                 ),
-                const Divider(height: 1),
                 Expanded(
                   child: viewAsync.when(
                     loading: () => const Center(child: Loading()),
@@ -462,9 +480,9 @@ class _TagRankingsPageState extends ConsumerState<TagRankingsPage> {
                                 flex: 44,
                                 child: ListView(
                                   padding: const EdgeInsets.fromLTRB(
-                                    20,
+                                    16,
                                     14,
-                                    12,
+                                    8,
                                     24,
                                   ),
                                   children: [
@@ -482,9 +500,9 @@ class _TagRankingsPageState extends ConsumerState<TagRankingsPage> {
                                 flex: 56,
                                 child: ListView(
                                   padding: const EdgeInsets.fromLTRB(
-                                    12,
+                                    8,
                                     14,
-                                    20,
+                                    16,
                                     24,
                                   ),
                                   children: [
@@ -901,7 +919,14 @@ class _TagDetailStatsPageState extends ConsumerState<TagDetailStatsPage> {
 
           final summaryCard = Card(
             key: const Key('tag-detail-summary-card'),
-            elevation: 1,
+            elevation: 0,
+            surfaceTintColor: Colors.transparent,
+            clipBehavior: Clip.antiAlias,
+            color: tonalCardColor(context),
+            margin: EdgeInsets.zero,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: Column(
@@ -927,7 +952,7 @@ class _TagDetailStatsPageState extends ConsumerState<TagDetailStatsPage> {
                       ),
                     ],
                   ),
-                  const Divider(height: 20),
+                  const SizedBox(height: 16),
                   Row(
                     children: [
                       Expanded(
@@ -957,7 +982,14 @@ class _TagDetailStatsPageState extends ConsumerState<TagDetailStatsPage> {
               (stats.isGroup && stats.childBreakdowns.isNotEmpty)
               ? Card(
                   key: const Key('tag-detail-children-section'),
-                  elevation: 1,
+                  elevation: 0,
+                  surfaceTintColor: Colors.transparent,
+                  clipBehavior: Clip.antiAlias,
+                  color: tonalCardColor(context),
+                  margin: EdgeInsets.zero,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
                   child: Padding(
                     padding: const EdgeInsets.all(12),
                     child: Column(
@@ -994,7 +1026,14 @@ class _TagDetailStatsPageState extends ConsumerState<TagDetailStatsPage> {
                   stats.incomeCategories.isNotEmpty)
               ? Card(
                   key: const Key('tag-detail-category-section'),
-                  elevation: 1,
+                  elevation: 0,
+                  surfaceTintColor: Colors.transparent,
+                  clipBehavior: Clip.antiAlias,
+                  color: tonalCardColor(context),
+                  margin: EdgeInsets.zero,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
                   child: Padding(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 12,
@@ -1231,6 +1270,14 @@ class _TagDetailStatsPageState extends ConsumerState<TagDetailStatsPage> {
             ),
             if (data.matchingRecords.isEmpty)
               Card(
+                elevation: 0,
+                surfaceTintColor: Colors.transparent,
+                clipBehavior: Clip.antiAlias,
+                color: tonalCardColor(context),
+                margin: EdgeInsets.zero,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
                 child: Padding(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 16,
@@ -1265,7 +1312,7 @@ class _TagDetailStatsPageState extends ConsumerState<TagDetailStatsPage> {
                         constraints: const BoxConstraints(maxWidth: 1360),
                         child: Padding(
                           padding: const EdgeInsets.symmetric(
-                            horizontal: 20,
+                            horizontal: 16,
                             vertical: 8,
                           ),
                           child: Row(
@@ -1284,7 +1331,6 @@ class _TagDetailStatsPageState extends ConsumerState<TagDetailStatsPage> {
                         ),
                       ),
                     ),
-                    const Divider(height: 1),
                     Expanded(
                       child: Center(
                         child: ConstrainedBox(
@@ -1297,9 +1343,9 @@ class _TagDetailStatsPageState extends ConsumerState<TagDetailStatsPage> {
                                 flex: 45,
                                 child: ListView(
                                   padding: const EdgeInsets.fromLTRB(
-                                    20,
+                                    16,
                                     14,
-                                    12,
+                                    8,
                                     24,
                                   ),
                                   children: [
@@ -1320,9 +1366,9 @@ class _TagDetailStatsPageState extends ConsumerState<TagDetailStatsPage> {
                                 flex: 55,
                                 child: ListView(
                                   padding: const EdgeInsets.fromLTRB(
-                                    12,
+                                    8,
                                     14,
-                                    20,
+                                    16,
                                     24,
                                   ),
                                   children: billsSectionWidgets,
@@ -1418,7 +1464,7 @@ class _TagDetailStatsPageState extends ConsumerState<TagDetailStatsPage> {
         currentDay = dayKey;
         widgets.add(
           Padding(
-            padding: const EdgeInsets.fromLTRB(4, 12, 4, 4),
+            padding: const EdgeInsets.fromLTRB(0, 12, 0, 4),
             child: Text(
               dayKey,
               style: theme.textTheme.labelLarge?.copyWith(
@@ -1460,7 +1506,14 @@ class _TagDetailStatsPageState extends ConsumerState<TagDetailStatsPage> {
 
       widgets.add(
         Card(
+          elevation: 0,
+          surfaceTintColor: Colors.transparent,
+          clipBehavior: Clip.antiAlias,
+          color: tonalCardColor(context),
           margin: const EdgeInsets.symmetric(vertical: 3),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
           child: ListTile(
             key: Key('tag-detail-bill-${r.recordId}'),
             leading: RecordTypeIconAvatar(
@@ -1735,7 +1788,12 @@ class _TagProportionOverviewCard extends StatelessWidget {
 
     return Card(
       key: const Key('tag-rankings-donut-card'),
-      elevation: 1,
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      clipBehavior: Clip.antiAlias,
+      color: tonalCardColor(context),
+      margin: EdgeInsets.zero,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(

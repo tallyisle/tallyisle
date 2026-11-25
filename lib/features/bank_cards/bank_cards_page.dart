@@ -591,8 +591,13 @@ class _BankCardTile extends StatelessWidget {
         : formatCardNumberGrouped(card.cardNo);
 
     return Card(
-      key: _scopedKey('bank_card_item_${card.id}'),
+      margin: EdgeInsets.zero,
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
       clipBehavior: Clip.antiAlias,
+      shape: _tonalCardShape,
+      color: _tonalCardColor(Theme.of(context)),
+      key: _scopedKey('bank_card_item_${card.id}'),
       child: Container(
         decoration: tint == null
             ? null
@@ -734,7 +739,7 @@ class _BankCardTile extends StatelessWidget {
                 ],
               ),
             ],
-            const Divider(height: 16),
+            const SizedBox(height: 10),
             Row(
               children: [
                 Expanded(
@@ -798,3 +803,14 @@ class _BankCardTile extends StatelessWidget {
     );
   }
 }
+
+Color _tonalCardColor(ThemeData theme) {
+  final scheme = theme.colorScheme;
+  return theme.brightness == Brightness.dark
+      ? scheme.surfaceContainerLow
+      : Color.lerp(scheme.surfaceContainerLow, scheme.surfaceContainer, 0.55)!;
+}
+
+const _tonalCardShape = RoundedRectangleBorder(
+  borderRadius: BorderRadius.all(Radius.circular(16)),
+);

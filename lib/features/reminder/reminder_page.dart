@@ -148,6 +148,11 @@ class _ReminderPageState extends ConsumerState<ReminderPage>
                 final item = items[index];
                 return Card(
                   key: Key('reminder_item_${item.id}'),
+                  elevation: 0,
+                  surfaceTintColor: Colors.transparent,
+                  clipBehavior: Clip.antiAlias,
+                  color: _tonalCardColor(Theme.of(context)),
+                  shape: _tonalCardShape,
                   margin: EdgeInsets.zero,
                   child: ListTile(
                     contentPadding: const EdgeInsets.fromLTRB(16, 4, 8, 4),
@@ -616,3 +621,15 @@ class _ReminderEditorDialogState extends ConsumerState<_ReminderEditorDialog> {
     );
   }
 }
+
+/// Borderless soft tonal card surface (16dp) shared by this feature's cards.
+Color _tonalCardColor(ThemeData theme) {
+  final scheme = theme.colorScheme;
+  return theme.brightness == Brightness.dark
+      ? scheme.surfaceContainerLow
+      : Color.lerp(scheme.surfaceContainerLow, scheme.surfaceContainer, 0.55)!;
+}
+
+const RoundedRectangleBorder _tonalCardShape = RoundedRectangleBorder(
+  borderRadius: BorderRadius.all(Radius.circular(16)),
+);

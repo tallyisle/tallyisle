@@ -568,11 +568,23 @@ class _TagsPageState extends ConsumerState<TagsPage> {
               )
               .toList();
 
+          final scheme = theme.colorScheme;
+          final cardColor = theme.brightness == Brightness.dark
+              ? scheme.surfaceContainerLow
+              : Color.lerp(
+                  scheme.surfaceContainerLow,
+                  scheme.surfaceContainer,
+                  0.55,
+                )!;
+          final cardShape = RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          );
+
           final scrollView = CustomScrollView(
             slivers: [
               if (groups.isNotEmpty)
                 SliverPadding(
-                  padding: EdgeInsets.only(top: isDesktop ? 8 : 0),
+                  padding: const EdgeInsets.only(top: 8),
                   sliver: SliverReorderableList(
                     key: const ValueKey('tags-groups-reorder-sliver'),
                     itemCount: groups.length,
@@ -754,304 +766,344 @@ class _TagsPageState extends ConsumerState<TagsPage> {
                               child: grpTile,
                             );
 
-                      return Column(
+                      return Card(
                         key: ValueKey('tag-group-block-${grp.tagId}'),
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          wrappedGrpTile,
-                          if (isExpanded && children.isNotEmpty)
-                            ReorderableListView.builder(
-                              key: ValueKey(
-                                'tags-children-reorder-${grp.tagId}',
-                              ),
-                              shrinkWrap: true,
-                              physics: const NeverScrollableScrollPhysics(),
-                              buildDefaultDragHandles: false,
-                              itemCount: children.length,
-                              onReorderStart: (_) {
-                                if (!isDesktop) {
-                                  HapticFeedback.selectionClick();
-                                }
-                              },
-                              proxyDecorator: _buildReorderProxy,
-                              onReorderItem: (oldChildIdx, newChildIdx) =>
-                                  _reorderGroupChildren(
-                                    groupId: grp.tagId,
-                                    groups: groups,
-                                    childrenByGroup: childrenByGroup,
-                                    standalone: standalone,
-                                    oldIndex: oldChildIdx,
-                                    newIndex: newChildIdx,
-                                  ),
-                              itemBuilder: (childCtx, childIndex) {
-                                final child = children[childIndex];
-                                final childColor = parseTagColor(child.color);
-                                final childCount = counts[child.tagId] ?? 0;
-                                final childIcon = Icon(
-                                  child.hidden
-                                      ? Icons.visibility_off_outlined
-                                      : Icons.label,
-                                  color: child.hidden
-                                      ? theme.colorScheme.outline
-                                      : childColor,
-                                );
-                                final childTile = Padding(
-                                  padding: EdgeInsets.only(
-                                    left: isDesktop ? 24 : 28,
-                                  ),
-                                  child: ListTile(
-                                    key: Key('tag-${child.name}'),
-                                    contentPadding: EdgeInsets.only(
-                                      left: isDesktop ? 10 : 16,
-                                      right: 8,
+                        margin: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 5,
+                        ),
+                        elevation: 0,
+                        surfaceTintColor: Colors.transparent,
+                        color: cardColor,
+                        clipBehavior: Clip.antiAlias,
+                        shape: cardShape,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            wrappedGrpTile,
+                            if (isExpanded && children.isNotEmpty)
+                              ReorderableListView.builder(
+                                key: ValueKey(
+                                  'tags-children-reorder-${grp.tagId}',
+                                ),
+                                shrinkWrap: true,
+                                physics: const NeverScrollableScrollPhysics(),
+                                buildDefaultDragHandles: false,
+                                itemCount: children.length,
+                                onReorderStart: (_) {
+                                  if (!isDesktop) {
+                                    HapticFeedback.selectionClick();
+                                  }
+                                },
+                                proxyDecorator: _buildReorderProxy,
+                                onReorderItem: (oldChildIdx, newChildIdx) =>
+                                    _reorderGroupChildren(
+                                      groupId: grp.tagId,
+                                      groups: groups,
+                                      childrenByGroup: childrenByGroup,
+                                      standalone: standalone,
+                                      oldIndex: oldChildIdx,
+                                      newIndex: newChildIdx,
                                     ),
-                                    onTap: () => _openTagStats(child),
-                                    leading: isDesktop
-                                        ? Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              _buildDesktopDragHandle(
-                                                index: childIndex,
-                                                handleKey: Key(
-                                                  'tag-drag-handle-${child.tagId}',
+                                itemBuilder: (childCtx, childIndex) {
+                                  final child = children[childIndex];
+                                  final childColor = parseTagColor(child.color);
+                                  final childCount = counts[child.tagId] ?? 0;
+                                  final childIcon = Icon(
+                                    child.hidden
+                                        ? Icons.visibility_off_outlined
+                                        : Icons.label,
+                                    color: child.hidden
+                                        ? theme.colorScheme.outline
+                                        : childColor,
+                                  );
+                                  final childTile = Padding(
+                                    padding: EdgeInsets.only(
+                                      left: isDesktop ? 24 : 28,
+                                    ),
+                                    child: ListTile(
+                                      key: Key('tag-${child.name}'),
+                                      contentPadding: EdgeInsets.only(
+                                        left: isDesktop ? 10 : 16,
+                                        right: 8,
+                                      ),
+                                      onTap: () => _openTagStats(child),
+                                      leading: isDesktop
+                                          ? Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                _buildDesktopDragHandle(
+                                                  index: childIndex,
+                                                  handleKey: Key(
+                                                    'tag-drag-handle-${child.tagId}',
+                                                  ),
                                                 ),
+                                                const SizedBox(width: 8),
+                                                childIcon,
+                                              ],
+                                            )
+                                          : childIcon,
+                                      title: Wrap(
+                                        spacing: 6,
+                                        runSpacing: 4,
+                                        crossAxisAlignment:
+                                            WrapCrossAlignment.center,
+                                        children: [
+                                          Text(
+                                            child.name,
+                                            style: TextStyle(
+                                              decoration: child.hidden
+                                                  ? TextDecoration.lineThrough
+                                                  : null,
+                                            ),
+                                          ),
+                                          _buildBillCountBadge(
+                                            context,
+                                            child.tagId,
+                                            childCount,
+                                          ),
+                                        ],
+                                      ),
+                                      trailing: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          IconButton(
+                                            key: Key('hide-tag-${child.tagId}'),
+                                            visualDensity:
+                                                VisualDensity.compact,
+                                            icon: Icon(
+                                              child.hidden
+                                                  ? Icons.visibility_outlined
+                                                  : Icons
+                                                        .visibility_off_outlined,
+                                            ),
+                                            tooltip: child.hidden
+                                                ? '取消隐藏'
+                                                : '隐藏',
+                                            onPressed: () => _toggleHide(child),
+                                          ),
+                                          PopupMenuButton<String>(
+                                            key: Key('tag-menu-${child.tagId}'),
+                                            padding: const EdgeInsets.all(4),
+                                            onSelected: (val) {
+                                              if (val == 'stats') {
+                                                _openTagStats(child);
+                                              } else if (val == 'edit') {
+                                                _editTag(child);
+                                              } else if (val == 'delete') {
+                                                _deleteTag(child);
+                                              }
+                                            },
+                                            itemBuilder: (context) => const [
+                                              PopupMenuItem(
+                                                value: 'stats',
+                                                child: Text('查看账单与统计'),
                                               ),
-                                              const SizedBox(width: 8),
-                                              childIcon,
+                                              PopupMenuItem(
+                                                value: 'edit',
+                                                child: Text('编辑'),
+                                              ),
+                                              PopupMenuItem(
+                                                value: 'delete',
+                                                child: Text('删除'),
+                                              ),
                                             ],
-                                          )
-                                        : childIcon,
-                                    title: Wrap(
-                                      spacing: 6,
-                                      runSpacing: 4,
-                                      crossAxisAlignment:
-                                          WrapCrossAlignment.center,
-                                      children: [
-                                        Text(
-                                          child.name,
-                                          style: TextStyle(
-                                            decoration: child.hidden
-                                                ? TextDecoration.lineThrough
-                                                : null,
                                           ),
-                                        ),
-                                        _buildBillCountBadge(
-                                          context,
-                                          child.tagId,
-                                          childCount,
-                                        ),
-                                      ],
+                                        ],
+                                      ),
                                     ),
-                                    trailing: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        IconButton(
-                                          key: Key('hide-tag-${child.tagId}'),
-                                          visualDensity: VisualDensity.compact,
-                                          icon: Icon(
-                                            child.hidden
-                                                ? Icons.visibility_outlined
-                                                : Icons.visibility_off_outlined,
-                                          ),
-                                          tooltip: child.hidden ? '取消隐藏' : '隐藏',
-                                          onPressed: () => _toggleHide(child),
-                                        ),
-                                        PopupMenuButton<String>(
-                                          key: Key('tag-menu-${child.tagId}'),
-                                          padding: const EdgeInsets.all(4),
-                                          onSelected: (val) {
-                                            if (val == 'stats') {
-                                              _openTagStats(child);
-                                            } else if (val == 'edit') {
-                                              _editTag(child);
-                                            } else if (val == 'delete') {
-                                              _deleteTag(child);
-                                            }
-                                          },
-                                          itemBuilder: (context) => const [
-                                            PopupMenuItem(
-                                              value: 'stats',
-                                              child: Text('查看账单与统计'),
-                                            ),
-                                            PopupMenuItem(
-                                              value: 'edit',
-                                              child: Text('编辑'),
-                                            ),
-                                            PopupMenuItem(
-                                              value: 'delete',
-                                              child: Text('删除'),
-                                            ),
-                                          ],
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                );
-                                if (isDesktop) {
-                                  return KeyedSubtree(
+                                  );
+                                  if (isDesktop) {
+                                    return KeyedSubtree(
+                                      key: ValueKey(
+                                        'tag-child-item-${child.tagId}',
+                                      ),
+                                      child: childTile,
+                                    );
+                                  }
+                                  return ReorderableDelayedDragStartListener(
                                     key: ValueKey(
                                       'tag-child-item-${child.tagId}',
                                     ),
+                                    index: childIndex,
                                     child: childTile,
                                   );
-                                }
-                                return ReorderableDelayedDragStartListener(
-                                  key: ValueKey(
-                                    'tag-child-item-${child.tagId}',
-                                  ),
-                                  index: childIndex,
-                                  child: childTile,
-                                );
-                              },
-                            ),
-                          const Divider(height: 1),
-                        ],
+                                },
+                              ),
+                          ],
+                        ),
                       );
                     },
                   ),
                 ),
-              if (standalone.isNotEmpty) ...[
-                if (groups.isNotEmpty)
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
-                      child: Text(
-                        '独立标签',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                          color: theme.colorScheme.onSurfaceVariant,
-                        ),
-                      ),
+              if (standalone.isNotEmpty)
+                SliverToBoxAdapter(
+                  child: Card(
+                    margin: EdgeInsets.fromLTRB(
+                      16,
+                      groups.isEmpty ? 12 : 6,
+                      16,
+                      6,
                     ),
-                  ),
-                SliverPadding(
-                  padding: EdgeInsets.only(
-                    top: groups.isEmpty && isDesktop ? 8 : 0,
-                  ),
-                  sliver: SliverReorderableList(
-                    key: const ValueKey('tags-standalone-reorder-sliver'),
-                    itemCount: standalone.length,
-                    onReorderStart: (_) {
-                      if (!isDesktop) {
-                        HapticFeedback.selectionClick();
-                      }
-                    },
-                    proxyDecorator: _buildReorderProxy,
-                    onReorderItem: (oldSoloIdx, newSoloIdx) =>
-                        _reorderStandalone(
-                          groups: groups,
-                          childrenByGroup: childrenByGroup,
-                          standalone: standalone,
-                          oldIndex: oldSoloIdx,
-                          newIndex: newSoloIdx,
-                        ),
-                    itemBuilder: (context, soloIndex) {
-                      final st = standalone[soloIndex];
-                      final stColor = parseTagColor(st.color);
-                      final stCount = counts[st.tagId] ?? 0;
-                      final stIcon = Icon(
-                        st.hidden
-                            ? Icons.visibility_off_outlined
-                            : (stColor != null
-                                  ? Icons.label
-                                  : Icons.label_outline),
-                        color: st.hidden ? theme.colorScheme.outline : stColor,
-                      );
-                      final stTile = ListTile(
-                        key: Key('tag-${st.name}'),
-                        contentPadding: EdgeInsets.only(
-                          left: isDesktop ? 10 : 16,
-                          right: 8,
-                        ),
-                        onTap: () => _openTagStats(st),
-                        leading: isDesktop
-                            ? Row(
-                                mainAxisSize: MainAxisSize.min,
+                    elevation: 0,
+                    surfaceTintColor: Colors.transparent,
+                    color: cardColor,
+                    clipBehavior: Clip.antiAlias,
+                    shape: cardShape,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        if (groups.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                            child: Text(
+                              '独立标签',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                color: theme.colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ),
+                        ReorderableListView.builder(
+                          key: const ValueKey('tags-standalone-reorder-sliver'),
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          buildDefaultDragHandles: false,
+                          padding: const EdgeInsets.symmetric(vertical: 2),
+                          itemCount: standalone.length,
+                          onReorderStart: (_) {
+                            if (!isDesktop) {
+                              HapticFeedback.selectionClick();
+                            }
+                          },
+                          proxyDecorator: _buildReorderProxy,
+                          onReorderItem: (oldSoloIdx, newSoloIdx) =>
+                              _reorderStandalone(
+                                groups: groups,
+                                childrenByGroup: childrenByGroup,
+                                standalone: standalone,
+                                oldIndex: oldSoloIdx,
+                                newIndex: newSoloIdx,
+                              ),
+                          itemBuilder: (context, soloIndex) {
+                            final st = standalone[soloIndex];
+                            final stColor = parseTagColor(st.color);
+                            final stCount = counts[st.tagId] ?? 0;
+                            final stIcon = Icon(
+                              st.hidden
+                                  ? Icons.visibility_off_outlined
+                                  : (stColor != null
+                                        ? Icons.label
+                                        : Icons.label_outline),
+                              color: st.hidden
+                                  ? theme.colorScheme.outline
+                                  : stColor,
+                            );
+                            final stTile = ListTile(
+                              key: Key('tag-${st.name}'),
+                              contentPadding: EdgeInsets.only(
+                                left: isDesktop ? 10 : 16,
+                                right: 8,
+                              ),
+                              onTap: () => _openTagStats(st),
+                              leading: isDesktop
+                                  ? Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        _buildDesktopDragHandle(
+                                          index: soloIndex,
+                                          handleKey: Key(
+                                            'tag-drag-handle-${st.tagId}',
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        stIcon,
+                                      ],
+                                    )
+                                  : stIcon,
+                              title: Wrap(
+                                spacing: 6,
+                                runSpacing: 4,
+                                crossAxisAlignment: WrapCrossAlignment.center,
                                 children: [
-                                  _buildDesktopDragHandle(
-                                    index: soloIndex,
-                                    handleKey: Key(
-                                      'tag-drag-handle-${st.tagId}',
+                                  Text(
+                                    st.name,
+                                    style: TextStyle(
+                                      decoration: st.hidden
+                                          ? TextDecoration.lineThrough
+                                          : null,
                                     ),
                                   ),
-                                  const SizedBox(width: 8),
-                                  stIcon,
+                                  _buildBillCountBadge(
+                                    context,
+                                    st.tagId,
+                                    stCount,
+                                  ),
                                 ],
-                              )
-                            : stIcon,
-                        title: Wrap(
-                          spacing: 6,
-                          runSpacing: 4,
-                          crossAxisAlignment: WrapCrossAlignment.center,
-                          children: [
-                            Text(
-                              st.name,
-                              style: TextStyle(
-                                decoration: st.hidden
-                                    ? TextDecoration.lineThrough
-                                    : null,
                               ),
-                            ),
-                            _buildBillCountBadge(context, st.tagId, stCount),
-                          ],
-                        ),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            IconButton(
-                              key: Key('hide-tag-${st.tagId}'),
-                              visualDensity: VisualDensity.compact,
-                              icon: Icon(
-                                st.hidden
-                                    ? Icons.visibility_outlined
-                                    : Icons.visibility_off_outlined,
+                              trailing: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  IconButton(
+                                    key: Key('hide-tag-${st.tagId}'),
+                                    visualDensity: VisualDensity.compact,
+                                    icon: Icon(
+                                      st.hidden
+                                          ? Icons.visibility_outlined
+                                          : Icons.visibility_off_outlined,
+                                    ),
+                                    tooltip: st.hidden ? '取消隐藏' : '隐藏',
+                                    onPressed: () => _toggleHide(st),
+                                  ),
+                                  PopupMenuButton<String>(
+                                    key: Key('tag-menu-${st.tagId}'),
+                                    padding: const EdgeInsets.all(4),
+                                    onSelected: (val) {
+                                      if (val == 'stats') {
+                                        _openTagStats(st);
+                                      } else if (val == 'edit') {
+                                        _editTag(st);
+                                      } else if (val == 'delete') {
+                                        _deleteTag(st);
+                                      }
+                                    },
+                                    itemBuilder: (context) => const [
+                                      PopupMenuItem(
+                                        value: 'stats',
+                                        child: Text('查看账单与统计'),
+                                      ),
+                                      PopupMenuItem(
+                                        value: 'edit',
+                                        child: Text('编辑'),
+                                      ),
+                                      PopupMenuItem(
+                                        value: 'delete',
+                                        child: Text('删除'),
+                                      ),
+                                    ],
+                                  ),
+                                ],
                               ),
-                              tooltip: st.hidden ? '取消隐藏' : '隐藏',
-                              onPressed: () => _toggleHide(st),
-                            ),
-                            PopupMenuButton<String>(
-                              key: Key('tag-menu-${st.tagId}'),
-                              padding: const EdgeInsets.all(4),
-                              onSelected: (val) {
-                                if (val == 'stats') {
-                                  _openTagStats(st);
-                                } else if (val == 'edit') {
-                                  _editTag(st);
-                                } else if (val == 'delete') {
-                                  _deleteTag(st);
-                                }
-                              },
-                              itemBuilder: (context) => const [
-                                PopupMenuItem(
-                                  value: 'stats',
-                                  child: Text('查看账单与统计'),
-                                ),
-                                PopupMenuItem(value: 'edit', child: Text('编辑')),
-                                PopupMenuItem(
-                                  value: 'delete',
-                                  child: Text('删除'),
-                                ),
-                              ],
-                            ),
-                          ],
+                            );
+                            if (isDesktop) {
+                              return KeyedSubtree(
+                                key: ValueKey('tag-solo-item-${st.tagId}'),
+                                child: stTile,
+                              );
+                            }
+                            return ReorderableDelayedDragStartListener(
+                              key: ValueKey('tag-solo-item-${st.tagId}'),
+                              index: soloIndex,
+                              child: stTile,
+                            );
+                          },
                         ),
-                      );
-                      if (isDesktop) {
-                        return KeyedSubtree(
-                          key: ValueKey('tag-solo-item-${st.tagId}'),
-                          child: stTile,
-                        );
-                      }
-                      return ReorderableDelayedDragStartListener(
-                        key: ValueKey('tag-solo-item-${st.tagId}'),
-                        index: soloIndex,
-                        child: stTile,
-                      );
-                    },
+                      ],
+                    ),
                   ),
                 ),
-              ],
               SliverToBoxAdapter(child: SizedBox(height: isDesktop ? 16 : 96)),
             ],
           );

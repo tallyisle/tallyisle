@@ -162,6 +162,12 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             children: [
               const _SectionHeader(title: '首页与记账偏好'),
               Card(
+                margin: EdgeInsets.zero,
+                elevation: 0,
+                surfaceTintColor: Colors.transparent,
+                clipBehavior: Clip.antiAlias,
+                color: _softCardColor(theme),
+                shape: _softCardShape,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
@@ -178,7 +184,6 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                               ),
                             ),
                     ),
-                    const Divider(height: 1),
                     SwitchListTile(
                       key: const Key('setting_show_asset_banner_switch'),
                       title: const Text('首页展示净资产概览卡片'),
@@ -192,7 +197,6 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                               ),
                             ),
                     ),
-                    const Divider(height: 1),
                     SwitchListTile(
                       key: const Key('setting_show_budget_card_switch'),
                       title: const Text('首页展示本期预算进度'),
@@ -204,7 +208,6 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                               settings.copyWith(showHomeBudgetCard: val),
                             ),
                     ),
-                    const Divider(height: 1),
                     SwitchListTile(
                       key: const Key('setting_show_record_budget_hint_switch'),
                       title: const Text('记账页显示预算提示'),
@@ -266,7 +269,6 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                           ],
                         ),
                       ),
-                    const Divider(height: 1),
                     Padding(
                       padding: const EdgeInsets.all(16),
                       child: Column(
@@ -344,6 +346,12 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
               const SizedBox(height: 16),
               const _SectionHeader(title: '外观与主题'),
               Card(
+                margin: EdgeInsets.zero,
+                elevation: 0,
+                surfaceTintColor: Colors.transparent,
+                clipBehavior: Clip.antiAlias,
+                color: _softCardColor(theme),
+                shape: _softCardShape,
                 child: Padding(
                   padding: const EdgeInsets.all(16),
                   child: Column(
@@ -425,6 +433,12 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
               const SizedBox(height: 16),
               const _SectionHeader(title: '安全、数据体检与更多'),
               Card(
+                margin: EdgeInsets.zero,
+                elevation: 0,
+                surfaceTintColor: Colors.transparent,
+                clipBehavior: Clip.antiAlias,
+                color: _softCardColor(theme),
+                shape: _softCardShape,
                 child: Column(
                   children: [
                     ListTile(
@@ -439,7 +453,6 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                         page: const AppLockSettingsPage(),
                       ),
                     ),
-                    const Divider(height: 1),
                     ListTile(
                       key: const Key('nav_data_health_tile'),
                       leading: const Icon(Icons.health_and_safety_outlined),
@@ -452,7 +465,6 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                         page: const DataHealthPage(),
                       ),
                     ),
-                    const Divider(height: 1),
                     ListTile(
                       key: const Key('nav_stat_stories_tile'),
                       leading: const Icon(Icons.auto_stories_outlined),
@@ -465,7 +477,6 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                         page: const StatStoriesPage(),
                       ),
                     ),
-                    const Divider(height: 1),
                     ListTile(
                       key: const Key('nav_about_help_tile'),
                       leading: const Icon(Icons.help_outline),
@@ -517,6 +528,17 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   }
 }
 
+final _softCardShape = RoundedRectangleBorder(
+  borderRadius: BorderRadius.circular(16),
+);
+
+Color _softCardColor(ThemeData theme) {
+  final scheme = theme.colorScheme;
+  return theme.brightness == Brightness.dark
+      ? scheme.surfaceContainerLow
+      : Color.lerp(scheme.surfaceContainerLow, scheme.surfaceContainer, 0.55)!;
+}
+
 class _DesktopShortcutsCard extends StatelessWidget {
   const _DesktopShortcutsCard({required this.primaryMod, required this.altMod});
 
@@ -544,12 +566,18 @@ class _DesktopShortcutsCard extends StatelessWidget {
 
     return Card(
       key: const Key('desktop_shortcuts_card'),
+      margin: EdgeInsets.zero,
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      clipBehavior: Clip.antiAlias,
+      color: _softCardColor(theme),
+      shape: _softCardShape,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         child: Column(
           children: [
             for (var i = 0; i < items.length; i++) ...[
-              if (i > 0) const Divider(height: 12, thickness: 0.5),
+              if (i > 0) const SizedBox(height: 6),
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 4),
                 child: Row(
@@ -567,8 +595,14 @@ class _DesktopShortcutsCard extends StatelessWidget {
                         vertical: 3,
                       ),
                       decoration: BoxDecoration(
-                        color: scheme.surfaceContainerHighest,
-                        borderRadius: BorderRadius.circular(6),
+                        color: theme.brightness == Brightness.dark
+                            ? scheme.surfaceContainerHigh.withValues(
+                                alpha: 0.65,
+                              )
+                            : scheme.surfaceContainerHighest.withValues(
+                                alpha: 0.45,
+                              ),
+                        borderRadius: BorderRadius.circular(8),
                       ),
                       child: Text(
                         items[i].keys,

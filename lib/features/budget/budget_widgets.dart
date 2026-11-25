@@ -9,6 +9,24 @@ import '../../domain/rules/budget_rules.dart';
 import '../common/common.dart';
 import 'budget_providers.dart';
 
+/// Borderless tonal fill shared by every 16dp card on budget / stats pages.
+Color tonalCardColor(BuildContext context) {
+  final theme = Theme.of(context);
+  final scheme = theme.colorScheme;
+  return theme.brightness == Brightness.dark
+      ? scheme.surfaceContainerLow
+      : Color.lerp(scheme.surfaceContainerLow, scheme.surfaceContainer, 0.55)!;
+}
+
+/// Fill for a 12dp nested sub-block placed inside a [tonalCardColor] card.
+Color tonalNestedColor(BuildContext context) {
+  final theme = Theme.of(context);
+  final scheme = theme.colorScheme;
+  return theme.brightness == Brightness.dark
+      ? scheme.surfaceContainerHigh.withValues(alpha: 0.65)
+      : scheme.surfaceContainerHighest.withValues(alpha: 0.45);
+}
+
 /// Overview card displayed on Home, Statistics, or Budget management page.
 class BudgetSummaryCard extends ConsumerStatefulWidget {
   const BudgetSummaryCard({
@@ -17,12 +35,21 @@ class BudgetSummaryCard extends ConsumerStatefulWidget {
     this.hideWhenEmpty = false,
     this.enablePeriodControls = false,
     this.fixedOffset,
+    this.margin,
+    this.color,
   });
 
   final VoidCallback? onTap;
   final bool hideWhenEmpty;
   final bool enablePeriodControls;
   final int? fixedOffset;
+
+  /// Outer margin of the card. Defaults to the 16px page gutter; pass
+  /// [EdgeInsets.zero] when the parent already supplies horizontal padding.
+  final EdgeInsetsGeometry? margin;
+
+  /// Optional fill override (e.g. a nested tonal block inside a section card).
+  final Color? color;
 
   @override
   ConsumerState<BudgetSummaryCard> createState() => _BudgetSummaryCardState();
@@ -198,17 +225,31 @@ class _BudgetSummaryCardState extends ConsumerState<BudgetSummaryCard> {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final isDark = theme.brightness == Brightness.dark;
-    const cardMargin = EdgeInsets.symmetric(horizontal: 16, vertical: 6);
+    final cardMargin =
+        widget.margin ??
+        const EdgeInsets.symmetric(horizontal: 16, vertical: 6);
+    final cardColor =
+        widget.color ??
+        (isDark
+            ? scheme.surfaceContainerLow
+            : Color.lerp(
+                scheme.surfaceContainerLow,
+                scheme.surfaceContainer,
+                0.55,
+              )!);
 
     if (overviewAsync.hasError && _cachedOverview == null) {
       return widget.hideWhenEmpty
           ? const SizedBox.shrink()
           : Card(
               key: const Key('budget_summary_card'),
-              elevation: 1,
+              elevation: 0,
+              surfaceTintColor: Colors.transparent,
+              clipBehavior: Clip.antiAlias,
+              color: cardColor,
               margin: cardMargin,
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(16),
               ),
               child: Padding(
                 padding: const EdgeInsets.all(16),
@@ -223,10 +264,13 @@ class _BudgetSummaryCardState extends ConsumerState<BudgetSummaryCard> {
           ? const SizedBox.shrink()
           : Card(
               key: const Key('budget_summary_card'),
-              elevation: 1,
+              elevation: 0,
+              surfaceTintColor: Colors.transparent,
+              clipBehavior: Clip.antiAlias,
+              color: cardColor,
               margin: cardMargin,
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(16),
               ),
               child: const Padding(
                 padding: EdgeInsets.all(16),
@@ -262,13 +306,16 @@ class _BudgetSummaryCardState extends ConsumerState<BudgetSummaryCard> {
       if (widget.enablePeriodControls) {
         return Card(
           key: const Key('budget_summary_card'),
-          elevation: 1,
+          elevation: 0,
+          surfaceTintColor: Colors.transparent,
+          clipBehavior: Clip.antiAlias,
+          color: cardColor,
           margin: cardMargin,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(16),
           ),
           child: InkWell(
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(16),
             onTap: widget.onTap,
             child: Padding(
               padding: const EdgeInsets.all(16),
@@ -333,11 +380,14 @@ class _BudgetSummaryCardState extends ConsumerState<BudgetSummaryCard> {
       // No budget set for selected period (standard non-stepping card)
       return Card(
         key: const Key('budget_summary_card'),
-        elevation: 1,
+        elevation: 0,
+        surfaceTintColor: Colors.transparent,
+        clipBehavior: Clip.antiAlias,
+        color: cardColor,
         margin: cardMargin,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         child: InkWell(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(16),
           onTap: widget.onTap,
           child: Padding(
             padding: const EdgeInsets.all(16),
@@ -403,11 +453,14 @@ class _BudgetSummaryCardState extends ConsumerState<BudgetSummaryCard> {
 
     return Card(
       key: const Key('budget_summary_card'),
-      elevation: 1,
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      clipBehavior: Clip.antiAlias,
+      color: cardColor,
       margin: cardMargin,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: InkWell(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(16),
         onTap: widget.onTap,
         child: Padding(
           padding: const EdgeInsets.all(16),

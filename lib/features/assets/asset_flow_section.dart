@@ -137,194 +137,215 @@ class AssetFlowSection extends ConsumerWidget {
         final catById = <int, RecordCategory>{
           for (final c in categories) c.id: c,
         };
+        final cardColor = isDark
+            ? scheme.surfaceContainerLow
+            : Color.lerp(
+                scheme.surfaceContainerLow,
+                scheme.surfaceContainer,
+                0.55,
+              )!;
 
-        for (final group in groups) {
-          slivers.add(
-            SliverToBoxAdapter(
-              child: Container(
-                color: scheme.surfaceContainerHighest.withValues(alpha: 0.4),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 4,
+        slivers.add(
+          SliverList(
+            delegate: SliverChildBuilderDelegate((context, groupIndex) {
+              final group = groups[groupIndex];
+              return Card(
+                margin: const EdgeInsets.fromLTRB(16, 6, 16, 6),
+                elevation: 0,
+                surfaceTintColor: Colors.transparent,
+                color: cardColor,
+                clipBehavior: Clip.antiAlias,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
                 ),
-                child: Row(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Material(
-                      color: Colors.transparent,
-                      child: InkWell(
-                        key: Key(
-                          'flow-month-header-${group.year}-${group.month}',
-                        ),
-                        borderRadius: BorderRadius.circular(6),
-                        onTap: onChangeMonthFilter == null
-                            ? null
-                            : () async {
-                                final now = DateTime.now();
-                                final picked = await showYearMonthPickerDialog(
-                                  context,
-                                  initialYear: group.year,
-                                  initialMonth: group.month,
-                                  currentYear: now.year,
-                                  currentMonth: now.month,
-                                );
-                                if (picked != null) {
-                                  onChangeMonthFilter!(
-                                    NaturalMonthPeriod(
-                                      year: picked.year,
-                                      month: picked.month,
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 10, 16, 4),
+                      child: Row(
+                        children: [
+                          Material(
+                            color: Colors.transparent,
+                            child: InkWell(
+                              key: Key(
+                                'flow-month-header-${group.year}-${group.month}',
+                              ),
+                              borderRadius: BorderRadius.circular(6),
+                              onTap: onChangeMonthFilter == null
+                                  ? null
+                                  : () async {
+                                      final now = DateTime.now();
+                                      final picked =
+                                          await showYearMonthPickerDialog(
+                                            context,
+                                            initialYear: group.year,
+                                            initialMonth: group.month,
+                                            currentYear: now.year,
+                                            currentMonth: now.month,
+                                          );
+                                      if (picked != null) {
+                                        onChangeMonthFilter!(
+                                          NaturalMonthPeriod(
+                                            year: picked.year,
+                                            month: picked.month,
+                                          ),
+                                        );
+                                      }
+                                    },
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 4,
+                                  vertical: 2,
+                                ),
+                                child: Text(
+                                  '${group.year}年${group.month}月',
+                                  style: theme.textTheme.labelMedium?.copyWith(
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Align(
+                              alignment: Alignment.centerRight,
+                              child: FittedBox(
+                                fit: BoxFit.scaleDown,
+                                child: Text(
+                                  '流入 ${formatMinor(group.inflow)}  流出 ${formatMinor(group.outflow)}',
+                                  maxLines: 1,
+                                  softWrap: false,
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: scheme.onSurfaceVariant,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    for (final r in group.items)
+                      Builder(
+                        builder: (context) {
+                          final label = recordLabel(
+                            r,
+                            categories,
+                            assets,
+                            omitRedundantAssetId: asset.id,
+                          );
+                          final balance = balances[r.recordId];
+                          final reconText = reconMode && balance != null
+                              ? (asset.type == AssetType.credit
+                                    ? creditBalanceLabel(balance)
+                                    : '余额：${formatMinor(balance)}')
+                              : null;
+
+                          final cat = r.recordCatId == noRef
+                              ? null
+                              : catById[r.recordCatId];
+                          final parentCat =
+                              (cat != null &&
+                                  cat.parentCatId != noRef &&
+                                  cat.parentCatId != -1)
+                              ? catById[cat.parentCatId]
+                              : null;
+                          final catDisplayName = cat == null
+                              ? null
+                              : (parentCat != null
+                                    ? '${parentCat.name} · ${cat.name}'
+                                    : cat.name);
+                          final catColor =
+                              (cat?.colorFill != null &&
+                                  cat!.colorFill!.trim().isNotEmpty)
+                              ? cat.colorFill
+                              : parentCat?.colorFill;
+                          final isRefund =
+                              (r.type == RecordType.expense ||
+                                  r.type == RecordType.income) &&
+                              r.moneyMinor < BigInt.zero;
+                          final isPositiveAmount = label.amount.startsWith('+');
+
+                          return ListTile(
+                            key: Key('flow-record-${r.recordId}'),
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 2,
+                            ),
+                            onTap: () {
+                              if (onOpenRecord != null) {
+                                onOpenRecord!(r.recordId);
+                              } else {
+                                context.push('/record/${r.recordId}');
+                              }
+                            },
+                            leading: RecordTypeIconAvatar(
+                              recordType: r.type,
+                              subType: r.subType,
+                              isRefund: isRefund,
+                              categoryName: catDisplayName,
+                              categoryIcon: cat?.icon,
+                              parentCategoryIcon: parentCat?.icon,
+                              categoryColor: catColor,
+                              size: 36,
+                            ),
+                            title: Text(
+                              label.title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            subtitle: Text(
+                              [
+                                formatDateTime(
+                                  DateTime.fromMillisecondsSinceEpoch(
+                                    r.recordTime,
+                                  ),
+                                ),
+                                if (label.subtitle.isNotEmpty) label.subtitle,
+                              ].join(' · '),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            trailing: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                                Text(
+                                  label.amount,
+                                  style: theme.textTheme.titleMedium?.copyWith(
+                                    fontWeight: FontWeight.bold,
+                                    color: isPositiveAmount
+                                        ? (isDark
+                                              ? Colors.green.shade300
+                                              : Colors.green.shade700)
+                                        : null,
+                                  ),
+                                ),
+                                if (reconText != null) ...[
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    reconText,
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      color: scheme.outline,
                                     ),
-                                  );
-                                }
-                              },
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 4,
-                            vertical: 2,
-                          ),
-                          child: Text(
-                            '${group.year}年${group.month}月',
-                            style: theme.textTheme.labelMedium?.copyWith(
-                              fontWeight: FontWeight.bold,
+                                  ),
+                                ],
+                              ],
                             ),
-                          ),
-                        ),
+                          );
+                        },
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Align(
-                        alignment: Alignment.centerRight,
-                        child: FittedBox(
-                          fit: BoxFit.scaleDown,
-                          child: Text(
-                            '流入 ${formatMinor(group.inflow)}  流出 ${formatMinor(group.outflow)}',
-                            maxLines: 1,
-                            softWrap: false,
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: scheme.onSurfaceVariant,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
+                    const SizedBox(height: 4),
                   ],
                 ),
-              ),
-            ),
-          );
-
-          slivers.add(
-            SliverList(
-              delegate: SliverChildBuilderDelegate((context, index) {
-                final r = group.items[index];
-                final label = recordLabel(
-                  r,
-                  categories,
-                  assets,
-                  omitRedundantAssetId: asset.id,
-                );
-                final balance = balances[r.recordId];
-                final reconText = reconMode && balance != null
-                    ? (asset.type == AssetType.credit
-                          ? creditBalanceLabel(balance)
-                          : '余额：${formatMinor(balance)}')
-                    : null;
-
-                final cat = r.recordCatId == noRef
-                    ? null
-                    : catById[r.recordCatId];
-                final parentCat =
-                    (cat != null &&
-                        cat.parentCatId != noRef &&
-                        cat.parentCatId != -1)
-                    ? catById[cat.parentCatId]
-                    : null;
-                final catDisplayName = cat == null
-                    ? null
-                    : (parentCat != null
-                          ? '${parentCat.name} · ${cat.name}'
-                          : cat.name);
-                final catColor =
-                    (cat?.colorFill != null &&
-                        cat!.colorFill!.trim().isNotEmpty)
-                    ? cat.colorFill
-                    : parentCat?.colorFill;
-                final isRefund =
-                    (r.type == RecordType.expense ||
-                        r.type == RecordType.income) &&
-                    r.moneyMinor < BigInt.zero;
-                final isPositiveAmount = label.amount.startsWith('+');
-
-                return ListTile(
-                  key: Key('flow-record-${r.recordId}'),
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 2,
-                  ),
-                  onTap: () {
-                    if (onOpenRecord != null) {
-                      onOpenRecord!(r.recordId);
-                    } else {
-                      context.push('/record/${r.recordId}');
-                    }
-                  },
-                  leading: RecordTypeIconAvatar(
-                    recordType: r.type,
-                    subType: r.subType,
-                    isRefund: isRefund,
-                    categoryName: catDisplayName,
-                    categoryIcon: cat?.icon,
-                    parentCategoryIcon: parentCat?.icon,
-                    categoryColor: catColor,
-                    size: 36,
-                  ),
-                  title: Text(
-                    label.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  subtitle: Text(
-                    [
-                      formatDateTime(
-                        DateTime.fromMillisecondsSinceEpoch(r.recordTime),
-                      ),
-                      if (label.subtitle.isNotEmpty) label.subtitle,
-                    ].join(' · '),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  trailing: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Text(
-                        label.amount,
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
-                          color: isPositiveAmount
-                              ? (isDark
-                                    ? Colors.green.shade300
-                                    : Colors.green.shade700)
-                              : null,
-                        ),
-                      ),
-                      if (reconText != null) ...[
-                        const SizedBox(height: 2),
-                        Text(
-                          reconText,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: scheme.outline,
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                );
-              }, childCount: group.items.length),
-            ),
-          );
-        }
+              );
+            }, childCount: groups.length),
+          ),
+        );
 
         return SliverMainAxisGroup(slivers: slivers);
       },

@@ -181,6 +181,12 @@ class _TrashedNoteCard extends StatelessWidget {
     final snippet = buildNoteSnippet(note.content);
 
     return Card(
+      margin: EdgeInsets.zero,
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      clipBehavior: Clip.antiAlias,
+      shape: _tonalCardShape,
+      color: _tonalCardColor(Theme.of(context)),
       key: Key('trash_note_card_${note.id}'),
       child: Padding(
         padding: const EdgeInsets.all(14),
@@ -258,3 +264,14 @@ class _TrashedNoteCard extends StatelessWidget {
     );
   }
 }
+
+Color _tonalCardColor(ThemeData theme) {
+  final scheme = theme.colorScheme;
+  return theme.brightness == Brightness.dark
+      ? scheme.surfaceContainerLow
+      : Color.lerp(scheme.surfaceContainerLow, scheme.surfaceContainer, 0.55)!;
+}
+
+const _tonalCardShape = RoundedRectangleBorder(
+  borderRadius: BorderRadius.all(Radius.circular(16)),
+);

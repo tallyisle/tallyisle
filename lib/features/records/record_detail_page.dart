@@ -599,49 +599,13 @@ class _RecordDetailPageState extends ConsumerState<RecordDetailPage> {
       return ListView(
         padding: widget.embeddedInPane
             ? const EdgeInsets.fromLTRB(16, 16, 16, 24)
-            : const EdgeInsets.all(24),
+            : const EdgeInsets.fromLTRB(16, 12, 16, 24),
         children: [
-          Row(
-            children: [
-              RecordTypeIconAvatar(
-                recordType: r.type,
-                subType: r.subType,
-                isRefund: isRefund,
-                categoryName: catDisplayName,
-                categoryIcon: cat?.icon,
-                parentCategoryIcon: parentCat?.icon,
-                categoryColor: catColor,
-                size: 46,
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(RecordType.names[r.type] ?? '账单'),
-                    FittedBox(
-                      fit: BoxFit.scaleDown,
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        label.amount,
-                        key: const Key('detail-amount'),
-                        maxLines: 1,
-                        softWrap: false,
-                        style: theme.textTheme.displaySmall,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          ListTile(
-            title: const Text('分类/说明'),
-            trailing: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 180),
+          Card(
+            key: const Key('detail-header-card'),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
               child: Row(
-                mainAxisSize: MainAxisSize.min,
                 children: [
                   RecordTypeIconAvatar(
                     recordType: r.type,
@@ -651,154 +615,235 @@ class _RecordDetailPageState extends ConsumerState<RecordDetailPage> {
                     categoryIcon: cat?.icon,
                     parentCategoryIcon: parentCat?.icon,
                     categoryColor: catColor,
-                    size: 24,
+                    size: 46,
                   ),
-                  const SizedBox(width: 8),
-                  Flexible(
-                    child: Text(label.title, overflow: TextOverflow.ellipsis),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(RecordType.names[r.type] ?? '账单'),
+                        FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            label.amount,
+                            key: const Key('detail-amount'),
+                            maxLines: 1,
+                            softWrap: false,
+                            style: theme.textTheme.displaySmall,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),
             ),
           ),
-          if (r.type == RecordType.transfer) ...[
-            ListTile(
-              title: const Text('转出'),
-              trailing: _buildAccountTrailing(assets, r.fromAssetId),
-            ),
-            ListTile(
-              title: const Text('转入'),
-              trailing: _buildAccountTrailing(assets, r.toAssetId),
-            ),
-          ] else if (r.type == RecordType.borrowIn ||
-              r.type == RecordType.collect ||
-              (r.type == RecordType.debtInterest &&
-                  r.subType == RecordDirection.income)) ...[
-            ListTile(
-              title: const Text('借贷项目'),
-              trailing: _buildAccountTrailing(assets, r.fromAssetId),
-            ),
-            ListTile(
-              title: const Text('资金账户'),
-              trailing: _buildAccountTrailing(assets, r.toAssetId),
-            ),
-          ] else if (r.type == RecordType.lendOut ||
-              r.type == RecordType.repay ||
-              (r.type == RecordType.debtInterest &&
-                  r.subType == RecordDirection.expense)) ...[
-            ListTile(
-              title: const Text('资金账户'),
-              trailing: _buildAccountTrailing(assets, r.fromAssetId),
-            ),
-            ListTile(
-              title: const Text('借贷项目'),
-              trailing: _buildAccountTrailing(assets, r.toAssetId),
-            ),
-          ] else
-            ListTile(
-              title: const Text('账户'),
-              trailing: _buildAccountTrailing(
-                assets,
-                r.type == RecordType.reimbursable ||
-                        r.type == RecordType.balanceAdjust
-                    ? r.fromAssetId
-                    : r.assetId,
+          const SizedBox(height: 10),
+          Card(
+            key: const Key('detail-fields-card'),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  ListTile(
+                    title: const Text('分类/说明'),
+                    trailing: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 180),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          RecordTypeIconAvatar(
+                            recordType: r.type,
+                            subType: r.subType,
+                            isRefund: isRefund,
+                            categoryName: catDisplayName,
+                            categoryIcon: cat?.icon,
+                            parentCategoryIcon: parentCat?.icon,
+                            categoryColor: catColor,
+                            size: 24,
+                          ),
+                          const SizedBox(width: 8),
+                          Flexible(
+                            child: Text(
+                              label.title,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  if (r.type == RecordType.transfer) ...[
+                    ListTile(
+                      title: const Text('转出'),
+                      trailing: _buildAccountTrailing(assets, r.fromAssetId),
+                    ),
+                    ListTile(
+                      title: const Text('转入'),
+                      trailing: _buildAccountTrailing(assets, r.toAssetId),
+                    ),
+                  ] else if (r.type == RecordType.borrowIn ||
+                      r.type == RecordType.collect ||
+                      (r.type == RecordType.debtInterest &&
+                          r.subType == RecordDirection.income)) ...[
+                    ListTile(
+                      title: const Text('借贷项目'),
+                      trailing: _buildAccountTrailing(assets, r.fromAssetId),
+                    ),
+                    ListTile(
+                      title: const Text('资金账户'),
+                      trailing: _buildAccountTrailing(assets, r.toAssetId),
+                    ),
+                  ] else if (r.type == RecordType.lendOut ||
+                      r.type == RecordType.repay ||
+                      (r.type == RecordType.debtInterest &&
+                          r.subType == RecordDirection.expense)) ...[
+                    ListTile(
+                      title: const Text('资金账户'),
+                      trailing: _buildAccountTrailing(assets, r.fromAssetId),
+                    ),
+                    ListTile(
+                      title: const Text('借贷项目'),
+                      trailing: _buildAccountTrailing(assets, r.toAssetId),
+                    ),
+                  ] else
+                    ListTile(
+                      title: const Text('账户'),
+                      trailing: _buildAccountTrailing(
+                        assets,
+                        r.type == RecordType.reimbursable ||
+                                r.type == RecordType.balanceAdjust
+                            ? r.fromAssetId
+                            : r.assetId,
+                      ),
+                    ),
+                  ListTile(
+                    title: const Text('时间'),
+                    trailing: Text(
+                      formatDateTime(
+                        DateTime.fromMillisecondsSinceEpoch(r.recordTime),
+                      ),
+                    ),
+                  ),
+                  if (isAdvance)
+                    _DetailRow(
+                      label: '状态',
+                      value: advanceSettled ? '已结算' : '待结算（暂不计入收支与余额）',
+                    ),
+                  if (tags.isNotEmpty)
+                    ListTile(
+                      title: const Text('标签'),
+                      subtitle: Padding(
+                        padding: const EdgeInsets.only(top: 6),
+                        child: Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
+                          children: [
+                            for (final t in tags)
+                              _buildTagActionChip(context, t),
+                          ],
+                        ),
+                      ),
+                    ),
+                  if (r.discountMinor != null && r.discountMinor! > BigInt.zero)
+                    ListTile(
+                      key: const Key('detail-discount-tile'),
+                      title: const Text('优惠'),
+                      trailing: Text(formatMinor(r.discountMinor!)),
+                    ),
+                  if (r.remark.isNotEmpty)
+                    ListTile(title: const Text('备注'), subtitle: Text(r.remark)),
+                  ...() {
+                    BillLocationInfo? loc;
+                    try {
+                      loc = RecordExtra.parse(r.extraInfo).location;
+                    } on Failure {
+                      loc = null;
+                    }
+                    List<String> attached = const <String>[];
+                    try {
+                      attached = parseRecordImages(r.images);
+                    } on Failure {
+                      attached = const <String>[];
+                    }
+                    return <Widget>[
+                      if (loc != null && !loc.isEmpty)
+                        ListTile(
+                          key: const Key('detail-location-tile'),
+                          title: const Text('地点'),
+                          subtitle: Text(
+                            loc.detailAddress == null
+                                ? loc.displayLabel
+                                : '${loc.displayLabel}（${loc.detailAddress}）',
+                          ),
+                        ),
+                      if (attached.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 8,
+                          ),
+                          child: BillAttachmentStrip(
+                            key: const Key('detail-attachment-strip'),
+                            recordId: r.recordId,
+                            readOnly: true,
+                          ),
+                        ),
+                    ];
+                  }(),
+                ],
               ),
             ),
-          ListTile(
-            title: const Text('时间'),
-            trailing: Text(
-              formatDateTime(DateTime.fromMillisecondsSinceEpoch(r.recordTime)),
-            ),
           ),
-          if (isAdvance)
-            _DetailRow(
-              label: '状态',
-              value: advanceSettled ? '已结算' : '待结算（暂不计入收支与余额）',
-            ),
-          if (tags.isNotEmpty)
-            ListTile(
-              title: const Text('标签'),
-              subtitle: Padding(
-                padding: const EdgeInsets.only(top: 6),
-                child: Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
+          if (r.excludeExIn ||
+              r.excludeBudget ||
+              refunded > BigInt.zero ||
+              r.type == RecordType.reimbursable) ...[
+            const SizedBox(height: 10),
+            Card(
+              key: const Key('detail-links-card'),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    for (final t in tags) _buildTagActionChip(context, t),
+                    if (r.excludeExIn) const ListTile(title: Text('不计入收支')),
+                    if (r.excludeBudget) const ListTile(title: Text('不计入预算')),
+                    if (refunded > BigInt.zero)
+                      ListTile(
+                        title: const Text('已退款'),
+                        trailing: Text(
+                          formatMinor(refunded),
+                          key: const Key('refunded'),
+                        ),
+                      ),
+                    if (r.type == RecordType.reimbursable)
+                      ListTile(
+                        title: const Text('已报销'),
+                        subtitle: Text(
+                          '待报销 ${formatMinor((r.moneyMinor - refunded - reimbursed) < BigInt.zero ? BigInt.zero : r.moneyMinor - refunded - reimbursed)}',
+                        ),
+                        trailing: Text(
+                          formatMinor(reimbursed),
+                          key: const Key('reimbursed'),
+                        ),
+                      ),
                   ],
                 ),
               ),
             ),
-          if (r.discountMinor != null && r.discountMinor! > BigInt.zero)
-            ListTile(
-              key: const Key('detail-discount-tile'),
-              title: const Text('优惠'),
-              trailing: Text(formatMinor(r.discountMinor!)),
-            ),
-          if (r.remark.isNotEmpty)
-            ListTile(title: const Text('备注'), subtitle: Text(r.remark)),
-          ...() {
-            BillLocationInfo? loc;
-            try {
-              loc = RecordExtra.parse(r.extraInfo).location;
-            } on Failure {
-              loc = null;
-            }
-            List<String> attached = const <String>[];
-            try {
-              attached = parseRecordImages(r.images);
-            } on Failure {
-              attached = const <String>[];
-            }
-            return <Widget>[
-              if (loc != null && !loc.isEmpty)
-                ListTile(
-                  key: const Key('detail-location-tile'),
-                  title: const Text('地点'),
-                  subtitle: Text(
-                    loc.detailAddress == null
-                        ? loc.displayLabel
-                        : '${loc.displayLabel}（${loc.detailAddress}）',
-                  ),
-                ),
-              if (attached.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 8,
-                  ),
-                  child: BillAttachmentStrip(
-                    key: const Key('detail-attachment-strip'),
-                    recordId: r.recordId,
-                    readOnly: true,
-                  ),
-                ),
-            ];
-          }(),
-          if (r.excludeExIn) const ListTile(title: Text('不计入收支')),
-          if (r.excludeBudget) const ListTile(title: Text('不计入预算')),
-          if (refunded > BigInt.zero)
-            ListTile(
-              title: const Text('已退款'),
-              trailing: Text(formatMinor(refunded), key: const Key('refunded')),
-            ),
-          if (r.type == RecordType.reimbursable)
-            ListTile(
-              title: const Text('已报销'),
-              subtitle: Text(
-                '待报销 ${formatMinor((r.moneyMinor - refunded - reimbursed) < BigInt.zero ? BigInt.zero : r.moneyMinor - refunded - reimbursed)}',
-              ),
-              trailing: Text(
-                formatMinor(reimbursed),
-                key: const Key('reimbursed'),
-              ),
-            ),
-          if (isChild)
+          ],
+          if (isChild) ...[
+            const SizedBox(height: 12),
             OutlinedButton(
               onPressed: () => unawaited(_openRelatedRecord(childOf)),
               child: const Text('查看原账单'),
             ),
+          ],
           if (error != null)
             Text(error!, style: TextStyle(color: theme.colorScheme.error)),
           const SizedBox(height: 16),
@@ -884,11 +929,6 @@ class _RecordDetailPageState extends ConsumerState<RecordDetailPage> {
                   ],
                 ),
               ),
-            ),
-            Divider(
-              height: 1,
-              thickness: 0.6,
-              color: theme.colorScheme.outlineVariant.withValues(alpha: 0.45),
             ),
             Expanded(child: detailBody),
           ],

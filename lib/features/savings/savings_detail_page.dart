@@ -339,6 +339,12 @@ class _SavingsDetailPageState extends ConsumerState<SavingsDetailPage> {
                 const SizedBox(height: 20),
                 Card(
                   key: const Key('out_of_schedule_section'),
+                  elevation: 0,
+                  surfaceTintColor: Colors.transparent,
+                  clipBehavior: Clip.antiAlias,
+                  color: _tonalCardColor(Theme.of(context)),
+                  shape: _tonalCardShape,
+                  margin: EdgeInsets.zero,
                   child: Padding(
                     padding: const EdgeInsets.all(12),
                     child: Column(
@@ -354,7 +360,7 @@ class _SavingsDetailPageState extends ConsumerState<SavingsDetailPage> {
                           '修改起止日期或周期前的历史已存记录，仍计入已存总额，可随时取消存入。',
                           style: Theme.of(context).textTheme.bodySmall,
                         ),
-                        const Divider(),
+                        const SizedBox(height: 8),
                         for (final rec in detail.schedule.outOfScheduleRecords)
                           ListTile(
                             key: Key('out_of_schedule_record_${rec.id}'),
@@ -821,6 +827,12 @@ class _DetailHeaderCard extends StatelessWidget {
 
     return Card(
       key: const Key('savings_detail_header'),
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      clipBehavior: Clip.antiAlias,
+      color: _tonalCardColor(Theme.of(context)),
+      shape: _tonalCardShape,
+      margin: EdgeInsets.zero,
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -925,6 +937,11 @@ class _ScheduleSlotTile extends StatelessWidget {
 
     return Card(
       key: Key('savings_slot_${slot.slotIndex}'),
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      clipBehavior: Clip.antiAlias,
+      color: _tonalCardColor(Theme.of(context)),
+      shape: _tonalCardShape,
       margin: const EdgeInsets.only(bottom: 8),
       child: ListTile(
         contentPadding: EdgeInsets.symmetric(
@@ -1002,6 +1019,11 @@ class _FreeRecordTile extends StatelessWidget {
     final rec = row.record;
     return Card(
       key: Key('free_record_${rec.id}'),
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      clipBehavior: Clip.antiAlias,
+      color: _tonalCardColor(Theme.of(context)),
+      shape: _tonalCardShape,
       margin: const EdgeInsets.only(bottom: 8),
       child: ListTile(
         title: Text('+$symbol${formatMinor(rec.recordMoneyMinor)}'),
@@ -1020,3 +1042,15 @@ class _FreeRecordTile extends StatelessWidget {
     );
   }
 }
+
+/// Borderless soft tonal card surface (16dp) shared by this feature's cards.
+Color _tonalCardColor(ThemeData theme) {
+  final scheme = theme.colorScheme;
+  return theme.brightness == Brightness.dark
+      ? scheme.surfaceContainerLow
+      : Color.lerp(scheme.surfaceContainerLow, scheme.surfaceContainer, 0.55)!;
+}
+
+const RoundedRectangleBorder _tonalCardShape = RoundedRectangleBorder(
+  borderRadius: BorderRadius.all(Radius.circular(16)),
+);

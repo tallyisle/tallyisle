@@ -486,6 +486,10 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
             child: Card(
+              elevation: 0,
+              surfaceTintColor: Colors.transparent,
+              clipBehavior: Clip.antiAlias,
+              shape: _tonalCardShape,
               key: const Key('migration_status_banner'),
               margin: EdgeInsets.zero,
               color: _statusIsError
@@ -526,6 +530,11 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
             children: [
               // Cross-platform schema unity & third-party import guidance banner
               Card(
+                margin: EdgeInsets.symmetric(vertical: 4),
+                elevation: 0,
+                surfaceTintColor: Colors.transparent,
+                clipBehavior: Clip.antiAlias,
+                shape: _tonalCardShape,
                 key: const Key('migration_unity_banner_card'),
                 color: theme.colorScheme.primaryContainer.withValues(
                   alpha: 0.45,
@@ -569,6 +578,12 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
               // Local data overview card
               summaryAsync.when(
                 data: (summary) => Card(
+                  margin: EdgeInsets.symmetric(vertical: 4),
+                  elevation: 0,
+                  surfaceTintColor: Colors.transparent,
+                  clipBehavior: Clip.antiAlias,
+                  shape: _tonalCardShape,
+                  color: _tonalCardColor(Theme.of(context)),
                   key: const Key('migration_local_summary_card'),
                   child: Padding(
                     padding: const EdgeInsets.all(16),
@@ -592,6 +607,12 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
 
               // 1. Unified card: 一羽记账导入 (CSV incremental import + unified backup auto-dispatch)
               Card(
+                margin: EdgeInsets.symmetric(vertical: 4),
+                elevation: 0,
+                surfaceTintColor: Colors.transparent,
+                clipBehavior: Clip.antiAlias,
+                shape: _tonalCardShape,
+                color: _tonalCardColor(Theme.of(context)),
                 key: const Key('migration_yiyu_import_card'),
                 child: Padding(
                   padding: const EdgeInsets.all(16),
@@ -684,6 +705,12 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
 
               // 2. Dedicated card: 好好记账导入 (sheet/ZIP incremental import & .db full migration)
               Card(
+                margin: EdgeInsets.symmetric(vertical: 4),
+                elevation: 0,
+                surfaceTintColor: Colors.transparent,
+                clipBehavior: Clip.antiAlias,
+                shape: _tonalCardShape,
+                color: _tonalCardColor(Theme.of(context)),
                 key: const Key('migration_haohao_import_card'),
                 child: Padding(
                   padding: const EdgeInsets.all(16),
@@ -778,6 +805,12 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
 
               // 3. Dedicated card: 钱迹导入 (1-step CSV / Excel / JSON incremental import)
               Card(
+                margin: EdgeInsets.symmetric(vertical: 4),
+                elevation: 0,
+                surfaceTintColor: Colors.transparent,
+                clipBehavior: Clip.antiAlias,
+                shape: _tonalCardShape,
+                color: _tonalCardColor(Theme.of(context)),
                 key: const Key('migration_qianji_import_card'),
                 child: Padding(
                   padding: const EdgeInsets.all(16),
@@ -1196,3 +1229,14 @@ class _LanPasswordDialogState extends State<_LanPasswordDialog> {
     );
   }
 }
+
+Color _tonalCardColor(ThemeData theme) {
+  final scheme = theme.colorScheme;
+  return theme.brightness == Brightness.dark
+      ? scheme.surfaceContainerLow
+      : Color.lerp(scheme.surfaceContainerLow, scheme.surfaceContainer, 0.55)!;
+}
+
+const _tonalCardShape = RoundedRectangleBorder(
+  borderRadius: BorderRadius.all(Radius.circular(16)),
+);

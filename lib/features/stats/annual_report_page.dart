@@ -11,6 +11,7 @@ import '../common/common.dart';
 import '../common/desktop_modal_page.dart';
 import '../common/year_month_picker_dialog.dart';
 import '../records/record_detail_page.dart';
+import '../budget/budget_widgets.dart' show tonalCardColor;
 import 'annual_report_providers.dart';
 
 /// Active year notifier for [AnnualReportPage] (`/stats/annual`), synced with
@@ -164,7 +165,6 @@ class _AnnualReportPageState extends ConsumerState<AnnualReportPage> {
         children: [
           // Year Picker & Tab Switcher Bar
           _buildTopControls(selectedYear),
-          const Divider(height: 1),
 
           // Content Area: Synced 2-page PageView (年度账单 ⇄ 年度报告)
           Expanded(
@@ -315,7 +315,7 @@ class _AnnualReportPageState extends ConsumerState<AnnualReportPage> {
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 1400),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             child: Row(
               children: [
                 Flexible(child: yearSelectorRow),
@@ -395,7 +395,11 @@ class _YearlyBillView extends StatelessWidget {
     final isExpandedDesktop = DesktopAdaptive.isExpandedDesktop(context);
 
     final summaryCard = Card(
-      elevation: 2,
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      clipBehavior: Clip.antiAlias,
+      color: tonalCardColor(context),
+      margin: EdgeInsets.zero,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -434,10 +438,7 @@ class _YearlyBillView extends StatelessWidget {
                 ),
               ],
             ),
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 12),
-              child: Divider(height: 1),
-            ),
+            const SizedBox(height: 24),
             Row(
               children: [
                 Expanded(
@@ -471,7 +472,11 @@ class _YearlyBillView extends StatelessWidget {
     );
 
     final trendBarCard = Card(
-      elevation: 1,
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      clipBehavior: Clip.antiAlias,
+      color: tonalCardColor(context),
+      margin: EdgeInsets.zero,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -522,7 +527,11 @@ class _YearlyBillView extends StatelessWidget {
     );
 
     final monthlyTableCard = Card(
-      elevation: 1,
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      clipBehavior: Clip.antiAlias,
+      color: tonalCardColor(context),
+      margin: EdgeInsets.zero,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -727,7 +736,7 @@ class _YearlyBillView extends StatelessWidget {
               Expanded(
                 flex: 46,
                 child: ListView(
-                  padding: const EdgeInsets.fromLTRB(20, 16, 12, 24),
+                  padding: const EdgeInsets.fromLTRB(16, 16, 8, 24),
                   children: [
                     summaryCard,
                     const SizedBox(height: 16),
@@ -739,7 +748,7 @@ class _YearlyBillView extends StatelessWidget {
               Expanded(
                 flex: 54,
                 child: ListView(
-                  padding: const EdgeInsets.fromLTRB(12, 16, 20, 24),
+                  padding: const EdgeInsets.fromLTRB(8, 16, 16, 24),
                   children: [monthlyTableCard],
                 ),
               ),
@@ -872,7 +881,11 @@ class _AnnualReportHighlightView extends StatelessWidget {
 
     // Card 1: 年度记账回顾
     final reviewCard = Card(
-      elevation: 2,
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      clipBehavior: Clip.antiAlias,
+      color: tonalCardColor(context),
+      margin: EdgeInsets.zero,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
         padding: const EdgeInsets.all(20),
@@ -965,7 +978,11 @@ class _AnnualReportHighlightView extends StatelessWidget {
 
     // Card 2: 消费之最与峰值月份
     final peaksCard = Card(
-      elevation: 1,
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      clipBehavior: Clip.antiAlias,
+      color: tonalCardColor(context),
+      margin: EdgeInsets.zero,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
         padding: const EdgeInsets.all(20),
@@ -1155,7 +1172,11 @@ class _AnnualReportHighlightView extends StatelessWidget {
 
     // Card 3: 年度支出构成 Top 榜
     final topCategoryCard = Card(
-      elevation: 1,
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      clipBehavior: Clip.antiAlias,
+      color: tonalCardColor(context),
+      margin: EdgeInsets.zero,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
         padding: const EdgeInsets.all(20),
@@ -1274,7 +1295,11 @@ class _AnnualReportHighlightView extends StatelessWidget {
 
     // Card 4: 账户与优惠
     final assetDiscountCard = Card(
-      elevation: 1,
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      clipBehavior: Clip.antiAlias,
+      color: tonalCardColor(context),
+      margin: EdgeInsets.zero,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
         padding: const EdgeInsets.all(20),
@@ -1342,8 +1367,11 @@ class _AnnualReportHighlightView extends StatelessWidget {
 
     // Card 5: 年度结语卡
     final closingQuoteCard = Card(
-      elevation: 1,
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      clipBehavior: Clip.antiAlias,
       color: scheme.primaryContainer.withValues(alpha: 0.3),
+      margin: EdgeInsets.zero,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
         padding: const EdgeInsets.all(20),
@@ -1377,7 +1405,7 @@ class _AnnualReportHighlightView extends StatelessWidget {
 
     if (isExpandedDesktop) {
       return ListView(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
         children: [
           Center(
             child: ConstrainedBox(
@@ -1680,11 +1708,14 @@ class AnnualReportOverviewCard extends ConsumerWidget {
 
     return Card(
       key: const Key('annual-report-overview-card'),
-      elevation: 1,
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      clipBehavior: Clip.antiAlias,
+      color: tonalCardColor(context),
+      margin: EdgeInsets.zero,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: InkWell(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(16),
         onTap: onTap,
         child: Padding(
           padding: const EdgeInsets.all(16),

@@ -579,10 +579,9 @@ class _DesktopAutoBillBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    return Card(
+    return _TonalCard(
       key: const Key('auto_bill_desktop_banner'),
       margin: EdgeInsets.zero,
-      color: scheme.surfaceContainerLow,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Row(
@@ -652,7 +651,7 @@ class _AndroidAutoBillStatusCard extends StatelessWidget {
       notificationStatus.statusLabel,
     );
 
-    return Card(
+    return _TonalCard(
       key: const Key('auto_bill_status_card'),
       margin: EdgeInsets.zero,
       child: Padding(
@@ -711,7 +710,7 @@ class _AndroidAutoBillStatusCard extends StatelessWidget {
                   ),
               ],
             ),
-            const Divider(height: 12),
+            const SizedBox(height: 12),
             Row(
               children: [
                 const Icon(Icons.accessibility_new, size: 20),
@@ -789,7 +788,7 @@ class _IosAutoBillCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    return Card(
+    return _TonalCard(
       key: const Key('auto_bill_ios_shortcuts_card'),
       margin: EdgeInsets.zero,
       child: Padding(
@@ -928,7 +927,7 @@ class _OhosAutoBillCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    return Card(
+    return _TonalCard(
       key: const Key('auto_bill_status_card'),
       margin: EdgeInsets.zero,
       child: Padding(
@@ -1023,7 +1022,7 @@ class _AutoBillStrategySettingsCard extends StatelessWidget {
         settings.promptMode == AutoBillPromptMode.overlay &&
         !overlayStatus.enabled;
 
-    return Card(
+    return _TonalCard(
       key: const Key('auto_bill_settings_card'),
       margin: EdgeInsets.zero,
       child: Padding(
@@ -1282,7 +1281,7 @@ class _DraftsTabView extends StatelessWidget {
             )
           else
             for (final draft in drafts) ...[
-              Card(
+              _TonalCard(
                 key: Key('auto_bill_draft_${draft.id}'),
                 child: Padding(
                   padding: const EdgeInsets.all(14),
@@ -1481,7 +1480,7 @@ class _RulesTabView extends StatelessWidget {
                       ? scheme.onPrimaryContainer
                       : scheme.onSurfaceVariant;
 
-                  return Card(
+                  return _TonalCard(
                     key: Key('auto_bill_rule_${rule.id}'),
                     child: Padding(
                       padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
@@ -2274,6 +2273,40 @@ class _RuleEditorDialogState extends ConsumerState<_RuleEditorDialog> {
           child: const Text('保存规则'),
         ),
       ],
+    );
+  }
+}
+
+/// 无边框柔和色调卡片（16dp 圆角）。
+class _TonalCard extends StatelessWidget {
+  const _TonalCard({
+    super.key,
+    this.margin = const EdgeInsets.symmetric(vertical: 4),
+    required this.child,
+  });
+
+  final EdgeInsetsGeometry margin;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
+    return Card(
+      margin: margin,
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      clipBehavior: Clip.antiAlias,
+      color: isDark
+          ? scheme.surfaceContainerLow
+          : Color.lerp(
+              scheme.surfaceContainerLow,
+              scheme.surfaceContainer,
+              0.55,
+            )!,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: child,
     );
   }
 }

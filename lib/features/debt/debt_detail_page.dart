@@ -324,6 +324,12 @@ class _DebtDetailPageState extends ConsumerState<DebtDetailPage> {
             children: [
               Card(
                 key: const Key('debt_detail_summary_card'),
+                elevation: 0,
+                surfaceTintColor: Colors.transparent,
+                clipBehavior: Clip.antiAlias,
+                color: _tonalCardColor(Theme.of(context)),
+                shape: _tonalCardShape,
+                margin: EdgeInsets.zero,
                 child: Padding(
                   padding: const EdgeInsets.all(16),
                   child: Column(
@@ -458,7 +464,7 @@ class _DebtDetailPageState extends ConsumerState<DebtDetailPage> {
                       if (m.loanInfo.startDate > 0 ||
                           m.loanInfo.endDate != noRef ||
                           (debt.remark != null && debt.remark!.isNotEmpty)) ...[
-                        const Divider(height: 24),
+                        const SizedBox(height: 12),
                         if (m.loanInfo.startDate > 0)
                           Text(
                             '借款日期：${formatDate(DateTime.fromMillisecondsSinceEpoch(m.loanInfo.startDate))}'
@@ -634,6 +640,11 @@ class _DebtDetailPageState extends ConsumerState<DebtDetailPage> {
 
     return Card(
       key: Key('debt_record_${rec.recordId}'),
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      clipBehavior: Clip.antiAlias,
+      color: _tonalCardColor(Theme.of(context)),
+      shape: _tonalCardShape,
       margin: const EdgeInsets.symmetric(vertical: 4),
       child: ListTile(
         onTap: () => _showEditRecordDialog(view, rec),
@@ -1508,3 +1519,15 @@ class _EditRecordDialogState extends ConsumerState<_EditRecordDialog> {
     );
   }
 }
+
+/// Borderless soft tonal card surface (16dp) shared by this feature's cards.
+Color _tonalCardColor(ThemeData theme) {
+  final scheme = theme.colorScheme;
+  return theme.brightness == Brightness.dark
+      ? scheme.surfaceContainerLow
+      : Color.lerp(scheme.surfaceContainerLow, scheme.surfaceContainer, 0.55)!;
+}
+
+const RoundedRectangleBorder _tonalCardShape = RoundedRectangleBorder(
+  borderRadius: BorderRadius.all(Radius.circular(16)),
+);

@@ -282,13 +282,12 @@ class _RemarksPageState extends ConsumerState<RemarksPage> {
                 Card(
                   margin: const EdgeInsets.fromLTRB(16, 12, 16, 4),
                   elevation: 0,
+                  surfaceTintColor: Colors.transparent,
+                  clipBehavior: Clip.antiAlias,
                   color: remarksEnabled
                       ? cs.primaryContainer.withAlpha(90)
-                      : cs.surfaceContainerLow,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    side: BorderSide(color: cs.outlineVariant.withAlpha(120)),
-                  ),
+                      : _tonalCardColor(Theme.of(context)),
+                  shape: _tonalCardShape,
                   child: SwitchListTile(
                     key: const Key('remarks-feature-toggle'),
                     secondary: Icon(
@@ -434,7 +433,7 @@ class _RemarksPageState extends ConsumerState<RemarksPage> {
                         ),
                       );
                     }
-                    return ListView.separated(
+                    return ListView.builder(
                       padding: EdgeInsets.fromLTRB(
                         16,
                         8,
@@ -442,44 +441,58 @@ class _RemarksPageState extends ConsumerState<RemarksPage> {
                         isDesktop ? 24 : 88,
                       ),
                       itemCount: filtered.length,
-                      separatorBuilder: (_, _) => const Divider(height: 1),
                       itemBuilder: (context, index) {
                         final item = filtered[index];
                         final catLabel = item.recordCatId == noRef
                             ? '通用备注'
                             : (allCatMap[item.recordCatId]?.name ??
                                   '分类 #${item.recordCatId}');
-                        return ListTile(
-                          key: Key('remark_item_${item.id}'),
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 4,
-                            vertical: 2,
+                        return Padding(
+                          padding: EdgeInsets.only(
+                            bottom: index == filtered.length - 1 ? 0 : 8,
                           ),
-                          title: Text(item.content),
-                          subtitle: Text('$catLabel · 使用 ${item.usedTimes} 次'),
-                          onTap: () => _openEditor(
-                            existing: item,
-                            categories: bookCategories,
-                          ),
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              IconButton(
-                                key: Key('edit_remark_${item.id}'),
-                                tooltip: '编辑',
-                                icon: const Icon(Icons.edit_outlined),
-                                onPressed: () => _openEditor(
-                                  existing: item,
-                                  categories: bookCategories,
-                                ),
+                          child: Card(
+                            margin: EdgeInsets.zero,
+                            elevation: 0,
+                            surfaceTintColor: Colors.transparent,
+                            clipBehavior: Clip.antiAlias,
+                            shape: _tonalCardShape,
+                            color: _tonalCardColor(Theme.of(context)),
+                            child: ListTile(
+                              key: Key('remark_item_${item.id}'),
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 2,
                               ),
-                              IconButton(
-                                key: Key('delete_remark_${item.id}'),
-                                tooltip: '删除',
-                                icon: const Icon(Icons.delete_outline),
-                                onPressed: () => _deleteRemark(item),
+                              title: Text(item.content),
+                              subtitle: Text(
+                                '$catLabel · 使用 ${item.usedTimes} 次',
                               ),
-                            ],
+                              onTap: () => _openEditor(
+                                existing: item,
+                                categories: bookCategories,
+                              ),
+                              trailing: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  IconButton(
+                                    key: Key('edit_remark_${item.id}'),
+                                    tooltip: '编辑',
+                                    icon: const Icon(Icons.edit_outlined),
+                                    onPressed: () => _openEditor(
+                                      existing: item,
+                                      categories: bookCategories,
+                                    ),
+                                  ),
+                                  IconButton(
+                                    key: Key('delete_remark_${item.id}'),
+                                    tooltip: '删除',
+                                    icon: const Icon(Icons.delete_outline),
+                                    onPressed: () => _deleteRemark(item),
+                                  ),
+                                ],
+                              ),
+                            ),
                           ),
                         );
                       },
@@ -693,3 +706,14 @@ class _RemarkEditDialogState extends ConsumerState<_RemarkEditDialog> {
     );
   }
 }
+
+Color _tonalCardColor(ThemeData theme) {
+  final scheme = theme.colorScheme;
+  return theme.brightness == Brightness.dark
+      ? scheme.surfaceContainerLow
+      : Color.lerp(scheme.surfaceContainerLow, scheme.surfaceContainer, 0.55)!;
+}
+
+const _tonalCardShape = RoundedRectangleBorder(
+  borderRadius: BorderRadius.all(Radius.circular(16)),
+);

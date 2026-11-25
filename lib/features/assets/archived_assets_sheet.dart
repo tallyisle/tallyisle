@@ -387,20 +387,46 @@ class _ArchivedTabList extends StatelessWidget {
       );
     }
 
-    return ListView.separated(
-      padding: const EdgeInsets.fromLTRB(12, 4, 12, 20),
-      itemCount: items.length,
-      separatorBuilder: (_, _) => const SizedBox(height: 2),
-      itemBuilder: (context, index) {
-        final a = items[index];
-        return _ArchivedAssetRow(
-          asset: a,
-          hiddenAmounts: hiddenAmounts,
-          restoring: restoringIds.contains(a.id),
-          onTap: () => onTapItem(a),
-          onRestore: () => onRestore(a),
-        );
-      },
+    final scheme = theme.colorScheme;
+    final cardColor = theme.brightness == Brightness.dark
+        ? scheme.surfaceContainerLow
+        : Color.lerp(
+            scheme.surfaceContainerLow,
+            scheme.surfaceContainer,
+            0.55,
+          )!;
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 20),
+      children: [
+        Card(
+          margin: EdgeInsets.zero,
+          elevation: 0,
+          surfaceTintColor: Colors.transparent,
+          color: cardColor,
+          clipBehavior: Clip.antiAlias,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                for (final a in items)
+                  _ArchivedAssetRow(
+                    asset: a,
+                    hiddenAmounts: hiddenAmounts,
+                    restoring: restoringIds.contains(a.id),
+                    onTap: () => onTapItem(a),
+                    onRestore: () => onRestore(a),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

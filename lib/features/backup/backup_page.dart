@@ -1183,6 +1183,14 @@ class _BackupPageState extends ConsumerState<BackupPage>
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       Card(
+                        margin: EdgeInsets.zero,
+                        elevation: 0,
+                        surfaceTintColor: Colors.transparent,
+                        clipBehavior: Clip.antiAlias,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        color: _backupCardColor(Theme.of(context)),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
@@ -1211,6 +1219,14 @@ class _BackupPageState extends ConsumerState<BackupPage>
                       ),
                       const SizedBox(height: 12),
                       Card(
+                        margin: EdgeInsets.zero,
+                        elevation: 0,
+                        surfaceTintColor: Colors.transparent,
+                        clipBehavior: Clip.antiAlias,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        color: _backupCardColor(Theme.of(context)),
                         key: const Key('cloud_sync_card'),
                         child: Padding(
                           padding: const EdgeInsets.all(14),
@@ -1414,7 +1430,7 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                   ),
                                 ),
                               ),
-                              const Divider(height: 20),
+                              const SizedBox(height: 12),
                               SwitchListTile(
                                 key: const Key('auto_cloud_sync_switch'),
                                 contentPadding: EdgeInsets.zero,
@@ -1630,6 +1646,14 @@ class _BackupPageState extends ConsumerState<BackupPage>
                       ),
                       const SizedBox(height: 12),
                       Card(
+                        margin: EdgeInsets.zero,
+                        elevation: 0,
+                        surfaceTintColor: Colors.transparent,
+                        clipBehavior: Clip.antiAlias,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        color: _backupCardColor(Theme.of(context)),
                         child: Padding(
                           padding: const EdgeInsets.all(16),
                           child: Column(
@@ -1733,7 +1757,7 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                   ],
                                 ],
                               ),
-                              const Divider(height: 24),
+                              const SizedBox(height: 12),
                               Text(
                                 '本地自动备份策略',
                                 style: Theme.of(context).textTheme.titleSmall,
@@ -1944,7 +1968,7 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                   ),
                                 ),
                               ),
-                              const Divider(height: 24),
+                              const SizedBox(height: 12),
                               localListAsync.when(
                                 loading: () => const Padding(
                                   padding: EdgeInsets.all(12),
@@ -2078,6 +2102,14 @@ class _BackupPageState extends ConsumerState<BackupPage>
                       ),
                       const SizedBox(height: 12),
                       Card(
+                        margin: EdgeInsets.zero,
+                        elevation: 0,
+                        surfaceTintColor: Colors.transparent,
+                        clipBehavior: Clip.antiAlias,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        color: _backupCardColor(Theme.of(context)),
                         child: Padding(
                           padding: const EdgeInsets.all(16),
                           child: Column(
@@ -2175,7 +2207,7 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                       : _toggleAutoBackup,
                                 ),
                               ],
-                              const Divider(height: 24),
+                              const SizedBox(height: 12),
                               if (!isActiveCloudReady)
                                 Padding(
                                   key: const Key('webdav_unconfigured_hint'),
@@ -2325,6 +2357,14 @@ class _BackupPageState extends ConsumerState<BackupPage>
                       if (!isDesktop) ...[
                         const SizedBox(height: 12),
                         Card(
+                          margin: EdgeInsets.zero,
+                          elevation: 0,
+                          surfaceTintColor: Colors.transparent,
+                          clipBehavior: Clip.antiAlias,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          color: _backupCardColor(Theme.of(context)),
                           key: const Key('quick_entry_visibility_card'),
                           child: Padding(
                             padding: const EdgeInsets.all(16),
@@ -2388,4 +2428,11 @@ class _BackupPageState extends ConsumerState<BackupPage>
       ),
     );
   }
+}
+
+Color _backupCardColor(ThemeData theme) {
+  final scheme = theme.colorScheme;
+  return theme.brightness == Brightness.dark
+      ? scheme.surfaceContainerLow
+      : Color.lerp(scheme.surfaceContainerLow, scheme.surfaceContainer, 0.55)!;
 }

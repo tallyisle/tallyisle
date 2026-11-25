@@ -6,6 +6,13 @@ import '../../domain/rules/reconciliation.dart';
 import '../common/common.dart';
 import 'asset_flow_providers.dart';
 
+Color _tonalCardColor(ThemeData theme) {
+  final scheme = theme.colorScheme;
+  return theme.brightness == Brightness.dark
+      ? scheme.surfaceContainerLow
+      : Color.lerp(scheme.surfaceContainerLow, scheme.surfaceContainer, 0.55)!;
+}
+
 /// Natural-month statement summary tab for fund accounts on the account detail
 /// page (parallel to `CreditSection`).
 ///
@@ -45,6 +52,11 @@ class _FundMonthlySectionState extends ConsumerState<FundMonthlySection> {
   @override
   Widget build(BuildContext context) {
     final asset = widget.asset;
+    final theme = Theme.of(context);
+    final cardColor = _tonalCardColor(theme);
+    final cardShape = RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(16),
+    );
     final recordsAsync = ref.watch(assetRecordsProvider(asset.id));
     final statements = ref.watch(fundMonthlyStatementsProvider(asset.id));
 
@@ -58,6 +70,12 @@ class _FundMonthlySectionState extends ConsumerState<FundMonthlySection> {
           ),
         ),
         error: (e, _) => Card(
+          margin: EdgeInsets.zero,
+          elevation: 0,
+          surfaceTintColor: Colors.transparent,
+          color: cardColor,
+          clipBehavior: Clip.antiAlias,
+          shape: cardShape,
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Text('月度账单加载出错: ${safeMessage(e)}'),
@@ -65,8 +83,14 @@ class _FundMonthlySectionState extends ConsumerState<FundMonthlySection> {
         ),
         data: (_) {
           if (statements.isEmpty) {
-            return const Card(
-              child: Padding(
+            return Card(
+              margin: EdgeInsets.zero,
+              elevation: 0,
+              surfaceTintColor: Colors.transparent,
+              color: cardColor,
+              clipBehavior: Clip.antiAlias,
+              shape: cardShape,
+              child: const Padding(
                 padding: EdgeInsets.all(24),
                 child: Center(child: Text('本年度暂无账单数据')),
               ),
@@ -86,13 +110,19 @@ class _FundMonthlySectionState extends ConsumerState<FundMonthlySection> {
             children: [
               if (visible.isEmpty)
                 Card(
+                  margin: EdgeInsets.zero,
+                  elevation: 0,
+                  surfaceTintColor: Colors.transparent,
+                  color: cardColor,
+                  clipBehavior: Clip.antiAlias,
+                  shape: cardShape,
                   child: Padding(
                     padding: const EdgeInsets.all(20),
                     child: Center(
                       child: Text(
                         '本年度暂无流水记录（已收起 $hiddenEmptyCount 个空白月）',
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
                         ),
                       ),
                     ),
@@ -244,16 +274,19 @@ class _FundMonthlyCard extends StatelessWidget {
         ? (isDark ? Colors.green.shade300 : Colors.green.shade700)
         : null;
 
+    final baseColor = _tonalCardColor(theme);
+    final fillColor = selected
+        ? Color.lerp(baseColor, scheme.primaryContainer, 0.45)!
+        : baseColor;
+
     return Card(
       key: Key('fund-statement-card-${p.year}-${p.month}'),
       margin: EdgeInsets.zero,
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      color: fillColor,
       clipBehavior: Clip.antiAlias,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: selected
-            ? BorderSide(color: scheme.primary, width: 1.4)
-            : BorderSide(color: scheme.outlineVariant.withValues(alpha: 0.35)),
-      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: InkWell(
         onTap: onTap,
         child: Padding(

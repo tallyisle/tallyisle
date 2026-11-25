@@ -2874,7 +2874,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                       ],
                     ),
                   ),
-                  const Divider(height: 1),
+                  const SizedBox(height: 4),
                   Flexible(
                     child: ListView(
                       shrinkWrap: true,
@@ -2909,7 +2909,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                             dialogCtx,
                           ).pop(_followAccountCurrencySentinel),
                         ),
-                        const Divider(height: 4, indent: 12, endIndent: 12),
+                        const SizedBox(height: 4),
                         for (final c in currencies)
                           ListTile(
                             key: Key('currency-option-${c.code}'),
@@ -2995,7 +2995,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                             _followAccountCurrencySentinel,
                           ),
                         ),
-                        const Divider(height: 1, indent: 16, endIndent: 16),
+                        const SizedBox(height: 4),
                         for (final c in currencies)
                           ListTile(
                             key: Key('currency-option-${c.code}'),
@@ -6542,7 +6542,7 @@ class _AccountPickerBodyState extends State<_AccountPickerBody> {
             ],
           ),
         ),
-        if (widget.isDesktop) const Divider(height: 1),
+        if (widget.isDesktop) const SizedBox(height: 4),
         Flexible(
           child: _reordering
               ? ReorderableListView.builder(

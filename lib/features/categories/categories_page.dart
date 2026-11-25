@@ -611,12 +611,23 @@ class _CategoriesPageState extends ConsumerState<CategoriesPage>
     }
 
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final cardColor = theme.brightness == Brightness.dark
+        ? scheme.surfaceContainerLow
+        : Color.lerp(
+            scheme.surfaceContainerLow,
+            scheme.surfaceContainer,
+            0.55,
+          )!;
+    final cardShape = RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(16),
+    );
     final isDesktop = DesktopAdaptive.isDesktop(context);
     final reorderableList = ReorderableListView.builder(
       key: ValueKey('categories-reorder-$topScope'),
       padding: isDesktop
           ? const EdgeInsets.symmetric(vertical: 8)
-          : const EdgeInsets.only(bottom: 96),
+          : const EdgeInsets.fromLTRB(0, 8, 0, 96),
       buildDefaultDragHandles: false,
       itemCount: topLevels.length,
       onReorderStart: (_) {
@@ -754,136 +765,143 @@ class _CategoriesPageState extends ConsumerState<CategoriesPage>
                 child: topTile,
               );
 
-        return Column(
+        return Card(
           key: ValueKey('cat-top-block-${top.id}'),
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            wrappedTopTile,
-            if (isExpanded && subs.isNotEmpty)
-              ReorderableListView.builder(
-                key: ValueKey('categories-reorder-$subScope'),
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                buildDefaultDragHandles: false,
-                itemCount: subs.length,
-                onReorderStart: (_) {
-                  if (!isDesktop) {
-                    HapticFeedback.selectionClick();
-                  }
-                },
-                proxyDecorator: _buildReorderProxy,
-                onReorderItem: (oldSubIndex, newSubIndex) =>
-                    _reorderCategoryScope(
-                      subScope,
-                      subs,
-                      oldSubIndex,
-                      newSubIndex,
-                    ),
-                itemBuilder: (subCtx, subIndex) {
-                  final sub = subs[subIndex];
-                  final subAvatar = CategoryIconAvatar(
-                    iconKey: sub.icon,
-                    parentIconKey: top.icon,
-                    colorHex: sub.colorFill ?? top.colorFill,
-                    name: '${top.name} · ${sub.name}',
-                    type: sub.type,
-                    size: isDesktop ? 30 : 32,
-                    dimmed: sub.isHide,
-                  );
-                  final subTile = Padding(
-                    padding: EdgeInsets.only(left: isDesktop ? 24 : 28),
-                    child: ListTile(
-                      key: Key('category-${sub.name}'),
-                      contentPadding: EdgeInsets.only(
-                        left: isDesktop ? 10 : 16,
-                        right: 8,
+          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 5),
+          elevation: 0,
+          surfaceTintColor: Colors.transparent,
+          color: cardColor,
+          clipBehavior: Clip.antiAlias,
+          shape: cardShape,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              wrappedTopTile,
+              if (isExpanded && subs.isNotEmpty)
+                ReorderableListView.builder(
+                  key: ValueKey('categories-reorder-$subScope'),
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  buildDefaultDragHandles: false,
+                  itemCount: subs.length,
+                  onReorderStart: (_) {
+                    if (!isDesktop) {
+                      HapticFeedback.selectionClick();
+                    }
+                  },
+                  proxyDecorator: _buildReorderProxy,
+                  onReorderItem: (oldSubIndex, newSubIndex) =>
+                      _reorderCategoryScope(
+                        subScope,
+                        subs,
+                        oldSubIndex,
+                        newSubIndex,
                       ),
-                      leading: isDesktop
-                          ? Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                _buildDesktopDragHandle(
-                                  index: subIndex,
-                                  handleKey: Key('cat-drag-handle-${sub.id}'),
+                  itemBuilder: (subCtx, subIndex) {
+                    final sub = subs[subIndex];
+                    final subAvatar = CategoryIconAvatar(
+                      iconKey: sub.icon,
+                      parentIconKey: top.icon,
+                      colorHex: sub.colorFill ?? top.colorFill,
+                      name: '${top.name} · ${sub.name}',
+                      type: sub.type,
+                      size: isDesktop ? 30 : 32,
+                      dimmed: sub.isHide,
+                    );
+                    final subTile = Padding(
+                      padding: EdgeInsets.only(left: isDesktop ? 24 : 28),
+                      child: ListTile(
+                        key: Key('category-${sub.name}'),
+                        contentPadding: EdgeInsets.only(
+                          left: isDesktop ? 10 : 16,
+                          right: 8,
+                        ),
+                        leading: isDesktop
+                            ? Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  _buildDesktopDragHandle(
+                                    index: subIndex,
+                                    handleKey: Key('cat-drag-handle-${sub.id}'),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  subAvatar,
+                                ],
+                              )
+                            : subAvatar,
+                        title: Text(
+                          sub.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            decoration: sub.isHide
+                                ? TextDecoration.lineThrough
+                                : null,
+                          ),
+                        ),
+                        subtitle: sub.isHide
+                            ? Text(
+                                '已隐藏',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: theme.colorScheme.onSurfaceVariant,
                                 ),
-                                const SizedBox(width: 6),
-                                subAvatar,
+                              )
+                            : null,
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              key: Key('hide-cat-${sub.id}'),
+                              visualDensity: VisualDensity.compact,
+                              icon: Icon(
+                                sub.isHide
+                                    ? Icons.visibility_outlined
+                                    : Icons.visibility_off_outlined,
+                              ),
+                              tooltip: sub.isHide ? '取消隐藏' : '隐藏',
+                              onPressed: () => _toggleHide(sub),
+                            ),
+                            PopupMenuButton<String>(
+                              key: Key('cat-menu-${sub.id}'),
+                              padding: const EdgeInsets.all(4),
+                              onSelected: (val) {
+                                if (val == 'edit') {
+                                  _editCategory(sub, parentCategory: top);
+                                } else if (val == 'delete') {
+                                  _deleteCategory(sub, all);
+                                }
+                              },
+                              itemBuilder: (context) => [
+                                const PopupMenuItem(
+                                  value: 'edit',
+                                  child: Text('编辑'),
+                                ),
+                                const PopupMenuItem(
+                                  value: 'delete',
+                                  child: Text('删除'),
+                                ),
                               ],
-                            )
-                          : subAvatar,
-                      title: Text(
-                        sub.name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          decoration: sub.isHide
-                              ? TextDecoration.lineThrough
-                              : null,
+                            ),
+                          ],
                         ),
                       ),
-                      subtitle: sub.isHide
-                          ? Text(
-                              '已隐藏',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: theme.colorScheme.onSurfaceVariant,
-                              ),
-                            )
-                          : null,
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          IconButton(
-                            key: Key('hide-cat-${sub.id}'),
-                            visualDensity: VisualDensity.compact,
-                            icon: Icon(
-                              sub.isHide
-                                  ? Icons.visibility_outlined
-                                  : Icons.visibility_off_outlined,
-                            ),
-                            tooltip: sub.isHide ? '取消隐藏' : '隐藏',
-                            onPressed: () => _toggleHide(sub),
-                          ),
-                          PopupMenuButton<String>(
-                            key: Key('cat-menu-${sub.id}'),
-                            padding: const EdgeInsets.all(4),
-                            onSelected: (val) {
-                              if (val == 'edit') {
-                                _editCategory(sub, parentCategory: top);
-                              } else if (val == 'delete') {
-                                _deleteCategory(sub, all);
-                              }
-                            },
-                            itemBuilder: (context) => [
-                              const PopupMenuItem(
-                                value: 'edit',
-                                child: Text('编辑'),
-                              ),
-                              const PopupMenuItem(
-                                value: 'delete',
-                                child: Text('删除'),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                  );
-                  if (isDesktop) {
-                    return KeyedSubtree(
+                    );
+                    if (isDesktop) {
+                      return KeyedSubtree(
+                        key: ValueKey('cat-sub-item-${sub.id}'),
+                        child: subTile,
+                      );
+                    }
+                    return ReorderableDelayedDragStartListener(
                       key: ValueKey('cat-sub-item-${sub.id}'),
+                      index: subIndex,
                       child: subTile,
                     );
-                  }
-                  return ReorderableDelayedDragStartListener(
-                    key: ValueKey('cat-sub-item-${sub.id}'),
-                    index: subIndex,
-                    child: subTile,
-                  );
-                },
-              ),
-            const Divider(height: 1),
-          ],
+                  },
+                ),
+            ],
+          ),
         );
       },
     );

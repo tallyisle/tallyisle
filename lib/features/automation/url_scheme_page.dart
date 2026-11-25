@@ -141,7 +141,7 @@ class _UrlSchemePageState extends ConsumerState<UrlSchemePage> {
     final listView = ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        Card(
+        _TonalCard(
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
@@ -196,7 +196,7 @@ class _UrlSchemePageState extends ConsumerState<UrlSchemePage> {
           ),
         ),
         const SizedBox(height: 16),
-        Card(
+        _TonalCard(
           key: const Key('url_scheme_tester_card'),
           child: Padding(
             padding: const EdgeInsets.all(16),
@@ -418,7 +418,7 @@ class _TemplateCard extends StatelessWidget {
     final theme = Theme.of(context);
     final isDesktop = DesktopAdaptive.isDesktop(context);
     final monoFamily = _platformMonoFontFamily(context);
-    return Card(
+    return _TonalCard(
       key: Key('url_template_card_$index'),
       child: Padding(
         padding: const EdgeInsets.all(14),
@@ -502,7 +502,7 @@ class _ParameterDocsCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final monoFamily = _platformMonoFontFamily(context);
-    return Card(
+    return _TonalCard(
       key: const Key('url_scheme_docs_card'),
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -542,6 +542,35 @@ class _ParameterDocsCard extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// 无边框柔和色调卡片（16dp 圆角）。
+class _TonalCard extends StatelessWidget {
+  const _TonalCard({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: 4),
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      clipBehavior: Clip.antiAlias,
+      color: isDark
+          ? scheme.surfaceContainerLow
+          : Color.lerp(
+              scheme.surfaceContainerLow,
+              scheme.surfaceContainer,
+              0.55,
+            )!,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: child,
     );
   }
 }

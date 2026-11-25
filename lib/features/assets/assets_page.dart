@@ -24,6 +24,13 @@ import 'asset_editor_page.dart';
 
 const _uuid = Uuid();
 
+Color _tonalCardColor(ThemeData theme) {
+  final scheme = theme.colorScheme;
+  return theme.brightness == Brightness.dark
+      ? scheme.surfaceContainerLow
+      : Color.lerp(scheme.surfaceContainerLow, scheme.surfaceContainer, 0.55)!;
+}
+
 /// Accounts of the current book with the net-worth summary
 /// (docs/modules/asset-overview.md).
 class AssetsPage extends ConsumerStatefulWidget {
@@ -308,6 +315,11 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
                   ? _selectedAssetId
                   : selectableAssets.first.id);
 
+        final cardColor = _tonalCardColor(theme);
+        final cardShape = RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        );
+
         var hintShown = false;
         Widget header(String text, {String? subtitle}) {
           final showHint = !hintShown;
@@ -444,23 +456,43 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
           bool showCreditBadge = false,
         }) {
           return <Widget>[
-            SliverToBoxAdapter(child: header(title, subtitle: subtitle)),
-            SliverReorderableList(
-              key: Key('assets-reorder-$groupKey'),
-              itemCount: items.length,
-              onReorderStart: (_) {
-                if (!isDesktop) {
-                  HapticFeedback.selectionClick();
-                }
-              },
-              proxyDecorator: proxyDecorator,
-              onReorderItem: (oldIndex, newIndex) =>
-                  _reorderGroup(groupKey, items, oldIndex, newIndex),
-              itemBuilder: (context, index) => buildAccountTile(
-                items[index],
-                index: index,
-                isDebtSection: isDebtSection,
-                showCreditBadge: showCreditBadge,
+            SliverToBoxAdapter(
+              child: Card(
+                margin: const EdgeInsets.fromLTRB(16, 6, 16, 6),
+                elevation: 0,
+                surfaceTintColor: Colors.transparent,
+                color: cardColor,
+                clipBehavior: Clip.antiAlias,
+                shape: cardShape,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    header(title, subtitle: subtitle),
+                    ReorderableListView.builder(
+                      key: Key('assets-reorder-$groupKey'),
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      buildDefaultDragHandles: false,
+                      padding: const EdgeInsets.only(bottom: 4),
+                      itemCount: items.length,
+                      onReorderStart: (_) {
+                        if (!isDesktop) {
+                          HapticFeedback.selectionClick();
+                        }
+                      },
+                      proxyDecorator: proxyDecorator,
+                      onReorderItem: (oldIndex, newIndex) =>
+                          _reorderGroup(groupKey, items, oldIndex, newIndex),
+                      itemBuilder: (context, index) => buildAccountTile(
+                        items[index],
+                        index: index,
+                        isDebtSection: isDebtSection,
+                        showCreditBadge: showCreditBadge,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ];
@@ -473,7 +505,12 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Card(
-                    margin: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                    margin: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                    elevation: 0,
+                    surfaceTintColor: Colors.transparent,
+                    color: cardColor,
+                    clipBehavior: Clip.antiAlias,
+                    shape: cardShape,
                     child: Padding(
                       padding: const EdgeInsets.symmetric(vertical: 16),
                       child: Column(
@@ -512,55 +549,49 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
                       ),
                     ),
                   ),
-                  Container(
+                  Card(
                     key: const Key('assets-quick-bar'),
-                    margin: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-                    child: Material(
-                      color: theme.colorScheme.surfaceContainerLow,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
-                        side: BorderSide(
-                          color: theme.colorScheme.outlineVariant.withValues(
-                            alpha: 0.45,
-                          ),
-                        ),
+                    margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                    elevation: 0,
+                    surfaceTintColor: Colors.transparent,
+                    color: cardColor,
+                    clipBehavior: Clip.antiAlias,
+                    shape: cardShape,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        vertical: 10,
+                        horizontal: 6,
                       ),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          vertical: 10,
-                          horizontal: 6,
-                        ),
-                        child: Row(
-                          children: [
-                            _AssetQuickEntryItem(
-                              itemKey: const Key('assets-quick-debts'),
-                              icon: Icons.swap_horiz_rounded,
-                              label: '借贷管理',
-                              onTap: () => _pushFullPageOrModal(
-                                '/debts',
-                                () => const DebtPage(),
-                              ),
+                      child: Row(
+                        children: [
+                          _AssetQuickEntryItem(
+                            itemKey: const Key('assets-quick-debts'),
+                            icon: Icons.swap_horiz_rounded,
+                            label: '借贷管理',
+                            onTap: () => _pushFullPageOrModal(
+                              '/debts',
+                              () => const DebtPage(),
                             ),
-                            _AssetQuickEntryItem(
-                              itemKey: const Key('assets-quick-installments'),
-                              icon: Icons.calendar_view_month_rounded,
-                              label: '分期管理',
-                              onTap: () => _pushFullPageOrModal(
-                                '/installments',
-                                () => const InstallmentPage(),
-                              ),
+                          ),
+                          _AssetQuickEntryItem(
+                            itemKey: const Key('assets-quick-installments'),
+                            icon: Icons.calendar_view_month_rounded,
+                            label: '分期管理',
+                            onTap: () => _pushFullPageOrModal(
+                              '/installments',
+                              () => const InstallmentPage(),
                             ),
-                            _AssetQuickEntryItem(
-                              itemKey: const Key('assets-quick-deposits'),
-                              icon: Icons.lock_clock_rounded,
-                              label: '定期存款',
-                              onTap: () => _pushFullPageOrModal(
-                                '/deposits',
-                                () => const FixedDepositPage(),
-                              ),
+                          ),
+                          _AssetQuickEntryItem(
+                            itemKey: const Key('assets-quick-deposits'),
+                            icon: Icons.lock_clock_rounded,
+                            label: '定期存款',
+                            onTap: () => _pushFullPageOrModal(
+                              '/deposits',
+                              () => const FixedDepositPage(),
                             ),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
                     ),
                   ),

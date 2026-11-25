@@ -69,7 +69,16 @@ void main() {
     await tester.enterText(find.byKey(const Key('category-name')), '数码科技');
     await tester.tap(find.byKey(const Key('category-save')));
     await settle();
-    await tester.drag(find.byType(ListView).first, const Offset(0, -300));
+    await tester.scrollUntilVisible(
+      find.text('数码科技'),
+      240,
+      scrollable: find
+          .descendant(
+            of: find.byType(ReorderableListView),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
     await settle();
     expect(find.text('数码科技'), findsOneWidget);
 

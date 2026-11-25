@@ -540,7 +540,7 @@ class _PeriodicEditorPageState extends ConsumerState<PeriodicEditorPage> {
                     constraints: const BoxConstraints(maxWidth: 640),
                     child: ListView(
                       padding: isDesktop
-                          ? const EdgeInsets.fromLTRB(20, 12, 20, 16)
+                          ? const EdgeInsets.fromLTRB(16, 12, 16, 16)
                           : const EdgeInsets.all(16),
                       children: [
                         Wrap(
@@ -590,11 +590,11 @@ class _PeriodicEditorPageState extends ConsumerState<PeriodicEditorPage> {
                             allAssets,
                             activeAssets,
                           ),
-                        const Divider(height: 32),
+                        const SizedBox(height: 24),
                         ..._buildCycleSection(),
-                        const Divider(height: 32),
+                        const SizedBox(height: 24),
                         ..._buildScheduleBoundsSection(),
-                        const Divider(height: 32),
+                        const SizedBox(height: 24),
                         TextField(
                           key: const Key('periodic_remark_input'),
                           controller: _remarkCtrl,

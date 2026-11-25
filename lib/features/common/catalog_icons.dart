@@ -1558,7 +1558,7 @@ class _CategoryVisualPickerSheetState
             ),
           ),
           const SizedBox(height: 8),
-          const Divider(height: 1),
+          const SizedBox(height: 6),
           Flexible(
             child: ListView(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
@@ -3906,7 +3906,7 @@ class _AssetVisualPickerSheetState extends State<_AssetVisualPickerSheet> {
                   ),
                 ),
                 const SizedBox(height: 8),
-                const Divider(height: 1),
+                const SizedBox(height: 6),
                 Expanded(
                   child: switch (_mode) {
                     _AssetPickerMode.preset => _buildPresetBody(theme),

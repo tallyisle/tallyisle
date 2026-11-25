@@ -101,7 +101,7 @@ Future<SmartQuickPrefillResult?> showSmartQuickPrefillDialogOrSheet(
                     ],
                   ),
                 ),
-                const Divider(height: 1),
+                const SizedBox(height: 4),
                 Flexible(
                   child: _SmartQuickContent(
                     prefillMode: true,
@@ -165,7 +165,7 @@ Future<SmartQuickPrefillResult?> showSmartQuickPrefillDialogOrSheet(
                   ],
                 ),
               ),
-              const Divider(height: 1),
+              const SizedBox(height: 4),
               Flexible(
                 child: _SmartQuickContent(
                   prefillMode: true,
@@ -1428,7 +1428,7 @@ class _SmartQuickContentState extends ConsumerState<_SmartQuickContent> {
           ],
           if (_hasSingleCandidate) ...[
             const SizedBox(height: 14),
-            Card(
+            _TonalCard(
               key: const Key('smart_quick_single_card'),
               margin: EdgeInsets.zero,
               child: Padding(
@@ -1865,7 +1865,7 @@ class _MultiCandidateCard extends StatelessWidget {
         ? candidate.assetId
         : null;
 
-    return Card(
+    return _TonalCard(
       key: Key('smart_quick_candidate_${candidate.index}'),
       margin: EdgeInsets.zero,
       child: Padding(
@@ -2014,6 +2014,40 @@ class _MultiCandidateCard extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// 无边框柔和色调卡片（16dp 圆角）。
+class _TonalCard extends StatelessWidget {
+  const _TonalCard({
+    super.key,
+    this.margin = const EdgeInsets.symmetric(vertical: 4),
+    required this.child,
+  });
+
+  final EdgeInsetsGeometry margin;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
+    return Card(
+      margin: margin,
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      clipBehavior: Clip.antiAlias,
+      color: isDark
+          ? scheme.surfaceContainerLow
+          : Color.lerp(
+              scheme.surfaceContainerLow,
+              scheme.surfaceContainer,
+              0.55,
+            )!,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: child,
     );
   }
 }

@@ -11,6 +11,13 @@ import 'credit_providers.dart';
 
 String _formatShortDate(DateTime d) => '${two(d.month)}-${two(d.day)}';
 
+Color _tonalCardColor(ThemeData theme) {
+  final scheme = theme.colorScheme;
+  return theme.brightness == Brightness.dark
+      ? scheme.surfaceContainerLow
+      : Color.lerp(scheme.surfaceContainerLow, scheme.surfaceContainer, 0.55)!;
+}
+
 /// Prominent banner for the earliest issued unpaid/overdue credit statement
 /// (docs/modules/credit-account.md R5). Rendered right beneath the compact
 /// header card when present, and takes zero space otherwise.
@@ -41,8 +48,10 @@ class CreditPendingBanner extends StatelessWidget {
       key: const Key('credit-pending-banner'),
       color: bgColor,
       elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      clipBehavior: Clip.antiAlias,
       margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         child: Row(
@@ -141,10 +150,20 @@ class _CreditSectionState extends ConsumerState<CreditSection> {
   @override
   Widget build(BuildContext context) {
     final asset = widget.asset;
+    final theme = Theme.of(context);
+    final cardColor = _tonalCardColor(theme);
+    final cardShape = RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(16),
+    );
     final info = CreditInfo.parse(asset.creditInfo);
     if (!info.configured) {
       return Card(
         margin: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+        elevation: 0,
+        surfaceTintColor: Colors.transparent,
+        color: cardColor,
+        clipBehavior: Clip.antiAlias,
+        shape: cardShape,
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Row(
@@ -154,7 +173,7 @@ class _CreditSectionState extends ConsumerState<CreditSection> {
               Expanded(
                 child: Text(
                   '尚未配置账单日与还款日，请编辑卡片补充信息。',
-                  style: Theme.of(context).textTheme.bodyMedium,
+                  style: theme.textTheme.bodyMedium,
                 ),
               ),
               const SizedBox(width: 8),
@@ -178,8 +197,14 @@ class _CreditSectionState extends ConsumerState<CreditSection> {
       child: statementsAsync.when(
         data: (statements) {
           if (statements.isEmpty) {
-            return const Card(
-              child: Padding(
+            return Card(
+              margin: EdgeInsets.zero,
+              elevation: 0,
+              surfaceTintColor: Colors.transparent,
+              color: cardColor,
+              clipBehavior: Clip.antiAlias,
+              shape: cardShape,
+              child: const Padding(
                 padding: EdgeInsets.all(24),
                 child: Center(child: Text('本年度暂无账单数据')),
               ),
@@ -199,13 +224,19 @@ class _CreditSectionState extends ConsumerState<CreditSection> {
             children: [
               if (visible.isEmpty)
                 Card(
+                  margin: EdgeInsets.zero,
+                  elevation: 0,
+                  surfaceTintColor: Colors.transparent,
+                  color: cardColor,
+                  clipBehavior: Clip.antiAlias,
+                  shape: cardShape,
                   child: Padding(
                     padding: const EdgeInsets.all(20),
                     child: Center(
                       child: Text(
                         '本年度 $futureEmptyCount 期账单尚未开始',
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
                         ),
                       ),
                     ),
@@ -329,6 +360,12 @@ class _CreditSectionState extends ConsumerState<CreditSection> {
           ),
         ),
         error: (e, _) => Card(
+          margin: EdgeInsets.zero,
+          elevation: 0,
+          surfaceTintColor: Colors.transparent,
+          color: cardColor,
+          clipBehavior: Clip.antiAlias,
+          shape: cardShape,
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Text('账单加载出错: ${safeMessage(e)}'),
@@ -365,16 +402,19 @@ class _StatementCard extends StatelessWidget {
     final scheme = theme.colorScheme;
     final p = item.period;
 
+    final baseColor = _tonalCardColor(theme);
+    final fillColor = selected
+        ? Color.lerp(baseColor, scheme.primaryContainer, 0.45)!
+        : baseColor;
+
     return Card(
       key: Key('credit-statement-card-${p.year}-${p.periodIndex}'),
       margin: EdgeInsets.zero,
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      color: fillColor,
       clipBehavior: Clip.antiAlias,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: selected
-            ? BorderSide(color: scheme.primary, width: 1.4)
-            : BorderSide(color: scheme.outlineVariant.withValues(alpha: 0.35)),
-      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: InkWell(
         onTap: onTap,
         child: Padding(

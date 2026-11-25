@@ -669,21 +669,40 @@ class _BudgetPageState extends ConsumerState<BudgetPage> {
                 ],
               );
 
-              return Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 8,
+              final isDarkBar = theme.brightness == Brightness.dark;
+              final barColor = isDarkBar
+                  ? theme.colorScheme.surfaceContainerLow
+                  : Color.lerp(
+                      theme.colorScheme.surfaceContainerLow,
+                      theme.colorScheme.surfaceContainer,
+                      0.55,
+                    )!;
+              final periodBar = Card(
+                key: const Key('budget_period_bar'),
+                elevation: 0,
+                surfaceTintColor: Colors.transparent,
+                clipBehavior: Clip.antiAlias,
+                color: barColor,
+                margin: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
                 ),
-                color: theme.colorScheme.surfaceContainerLow,
-                child: isDesktop
-                    ? Center(
-                        child: ConstrainedBox(
-                          constraints: const BoxConstraints(maxWidth: 880),
-                          child: periodRow,
-                        ),
-                      )
-                    : periodRow,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 4,
+                    vertical: 2,
+                  ),
+                  child: periodRow,
+                ),
               );
+              return isDesktop
+                  ? Center(
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 880),
+                        child: periodBar,
+                      ),
+                    )
+                  : periodBar;
             },
             loading: () => const LinearProgressIndicator(),
             error: (e, _) => Center(child: Text('账期错误: ${safeMessage(e)}')),
@@ -710,6 +729,18 @@ class _BudgetPageState extends ConsumerState<BudgetPage> {
                 final savingFill = isDark
                     ? Colors.teal.shade300
                     : Colors.teal.shade600;
+                final sectionColor = isDark
+                    ? colorScheme.surfaceContainerLow
+                    : Color.lerp(
+                        colorScheme.surfaceContainerLow,
+                        colorScheme.surfaceContainer,
+                        0.55,
+                      )!;
+                final nestedColor = isDark
+                    ? colorScheme.surfaceContainerHigh.withValues(alpha: 0.65)
+                    : colorScheme.surfaceContainerHighest.withValues(
+                        alpha: 0.45,
+                      );
 
                 final allCategoriesAsync = ref.watch(
                   categoriesProvider(bookIdAsync.value ?? 1),
@@ -731,418 +762,523 @@ class _BudgetPageState extends ConsumerState<BudgetPage> {
                   padding: const EdgeInsets.symmetric(vertical: 8),
                   children: [
                     // 1. Total budget section
-                    Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 4,
+                    Card(
+                      elevation: 0,
+                      surfaceTintColor: Colors.transparent,
+                      clipBehavior: Clip.antiAlias,
+                      color: sectionColor,
+                      margin: const EdgeInsets.fromLTRB(16, 6, 16, 6),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
                       ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Flexible(
-                            child: Text(
-                              '总预算',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: theme.textTheme.titleMedium?.copyWith(
-                                fontWeight: FontWeight.bold,
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 4,
+                              ),
+                              child: Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Flexible(
+                                    child: Text(
+                                      '总预算',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: theme.textTheme.titleMedium
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                    ),
+                                  ),
+                                  if (overview.totalBudget == null)
+                                    TextButton.icon(
+                                      key: const Key('set_total_budget_button'),
+                                      onPressed: () =>
+                                          _showTotalBudgetDialog(context),
+                                      icon: const Icon(Icons.add, size: 18),
+                                      label: const Text('设置总预算'),
+                                    )
+                                  else
+                                    IconButton(
+                                      key: const Key(
+                                        'edit_total_budget_button',
+                                      ),
+                                      icon: const Icon(
+                                        Icons.edit_outlined,
+                                        size: 20,
+                                      ),
+                                      onPressed: () => _showTotalBudgetDialog(
+                                        context,
+                                        existing: overview.totalBudget,
+                                        usage: overview.totalUsage,
+                                      ),
+                                    ),
+                                ],
                               ),
                             ),
-                          ),
-                          if (overview.totalBudget == null)
-                            TextButton.icon(
-                              key: const Key('set_total_budget_button'),
-                              onPressed: () => _showTotalBudgetDialog(context),
-                              icon: const Icon(Icons.add, size: 18),
-                              label: const Text('设置总预算'),
-                            )
-                          else
-                            IconButton(
-                              key: const Key('edit_total_budget_button'),
-                              icon: const Icon(Icons.edit_outlined, size: 20),
-                              onPressed: () => _showTotalBudgetDialog(
-                                context,
-                                existing: overview.totalBudget,
-                                usage: overview.totalUsage,
-                              ),
+                            BudgetSummaryCard(
+                              margin: EdgeInsets.zero,
+                              color: nestedColor,
+                              onTap: () {
+                                if (overview.totalBudget != null &&
+                                    overview.totalUsage != null) {
+                                  _openDrilldown(
+                                    context,
+                                    title: '总预算明细',
+                                    matchedRecordIds:
+                                        overview.totalUsage!.matchedRecordIds,
+                                    periodLabel: periodLabel,
+                                    amountMinor:
+                                        overview.totalBudget!.amountMinor,
+                                    usedMinor:
+                                        overview.totalUsage!.displayUsedMinor,
+                                    isSaving: false,
+                                  );
+                                } else {
+                                  _showTotalBudgetDialog(context);
+                                }
+                              },
                             ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
-                    BudgetSummaryCard(
-                      onTap: () {
-                        if (overview.totalBudget != null &&
-                            overview.totalUsage != null) {
-                          _openDrilldown(
-                            context,
-                            title: '总预算明细',
-                            matchedRecordIds:
-                                overview.totalUsage!.matchedRecordIds,
-                            periodLabel: periodLabel,
-                            amountMinor: overview.totalBudget!.amountMinor,
-                            usedMinor: overview.totalUsage!.displayUsedMinor,
-                            isSaving: false,
-                          );
-                        } else {
-                          _showTotalBudgetDialog(context);
-                        }
-                      },
-                    ),
-
-                    const Divider(height: 32),
 
                     // 2. Expense category budgets
-                    Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 4,
+                    Card(
+                      elevation: 0,
+                      surfaceTintColor: Colors.transparent,
+                      clipBehavior: Clip.antiAlias,
+                      color: sectionColor,
+                      margin: const EdgeInsets.fromLTRB(16, 6, 16, 6),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
                       ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Flexible(
-                            child: Text(
-                              '支出分类预算',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: theme.textTheme.titleMedium?.copyWith(
-                                fontWeight: FontWeight.bold,
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 4,
+                              ),
+                              child: Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Flexible(
+                                    child: Text(
+                                      '支出分类预算',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: theme.textTheme.titleMedium
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                    ),
+                                  ),
+                                  TextButton.icon(
+                                    key: const Key('add_expense_budget_button'),
+                                    onPressed: () => _showCategoryBudgetDialog(
+                                      context,
+                                      budgetType:
+                                          BudgetTypeCode.expenseCategory,
+                                      availableCategories: expenseCategories,
+                                    ),
+                                    icon: const Icon(Icons.add, size: 18),
+                                    label: const Text('添加'),
+                                  ),
+                                ],
                               ),
                             ),
-                          ),
-                          TextButton.icon(
-                            key: const Key('add_expense_budget_button'),
-                            onPressed: () => _showCategoryBudgetDialog(
-                              context,
-                              budgetType: BudgetTypeCode.expenseCategory,
-                              availableCategories: expenseCategories,
-                            ),
-                            icon: const Icon(Icons.add, size: 18),
-                            label: const Text('添加'),
-                          ),
-                        ],
+                            if (overview.expenseCategoryBudgets.isEmpty)
+                              Padding(
+                                padding: const EdgeInsets.all(24),
+                                child: Center(
+                                  child: Text(
+                                    '暂无支出分类预算',
+                                    style: TextStyle(
+                                      color: colorScheme.onSurfaceVariant,
+                                    ),
+                                  ),
+                                ),
+                              )
+                            else
+                              ...overview.expenseCategoryBudgets.map((detail) {
+                                final usage = detail.usage;
+                                final isOver = usage.isOverspent;
+                                final percent = usage.percent;
+                                final progress = (percent / 100.0).clamp(
+                                  0.0,
+                                  1.0,
+                                );
+
+                                return Card(
+                                  key: Key(
+                                    'category_budget_card_${detail.category.id}',
+                                  ),
+                                  elevation: 0,
+                                  surfaceTintColor: Colors.transparent,
+                                  clipBehavior: Clip.antiAlias,
+                                  color: nestedColor,
+                                  margin: const EdgeInsets.only(top: 8),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: ListTile(
+                                    onTap: () => _openDrilldown(
+                                      context,
+                                      title: '${detail.category.name}支出明细',
+                                      matchedRecordIds: usage.matchedRecordIds,
+                                      periodLabel: periodLabel,
+                                      amountMinor: detail.budget.amountMinor,
+                                      usedMinor: usage.displayUsedMinor,
+                                      isSaving: false,
+                                    ),
+                                    title: Row(
+                                      children: [
+                                        Expanded(
+                                          child: Text(
+                                            detail.parentCategory != null
+                                                ? '${detail.parentCategory!.name} / ${detail.category.name}'
+                                                : detail.category.name,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        ConstrainedBox(
+                                          constraints: const BoxConstraints(
+                                            maxWidth: 120,
+                                          ),
+                                          child: FittedBox(
+                                            fit: BoxFit.scaleDown,
+                                            alignment: Alignment.centerRight,
+                                            child: Text(
+                                              '¥${formatMinor(detail.budget.amountMinor)}',
+                                              maxLines: 1,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    subtitle: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        const SizedBox(height: 6),
+                                        ClipRRect(
+                                          borderRadius: BorderRadius.circular(
+                                            3,
+                                          ),
+                                          child: LinearProgressIndicator(
+                                            value: progress,
+                                            minHeight: 6,
+                                            backgroundColor: colorScheme
+                                                .surfaceContainerHighest,
+                                            valueColor:
+                                                AlwaysStoppedAnimation<Color>(
+                                                  isOver
+                                                      ? colorScheme.error
+                                                      : colorScheme.primary,
+                                                ),
+                                          ),
+                                        ),
+                                        const SizedBox(height: 6),
+                                        Row(
+                                          children: [
+                                            Expanded(
+                                              child: Align(
+                                                alignment: Alignment.centerLeft,
+                                                child: FittedBox(
+                                                  fit: BoxFit.scaleDown,
+                                                  child: Text(
+                                                    '已用: ¥${formatMinor(usage.displayUsedMinor)} (${percent.toStringAsFixed(1)}%)',
+                                                    maxLines: 1,
+                                                    style: TextStyle(
+                                                      fontSize: 12,
+                                                      color: colorScheme
+                                                          .onSurfaceVariant,
+                                                    ),
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                            const SizedBox(width: 8),
+                                            Flexible(
+                                              child: Align(
+                                                alignment:
+                                                    Alignment.centerRight,
+                                                child: FittedBox(
+                                                  fit: BoxFit.scaleDown,
+                                                  child: Text(
+                                                    isOver
+                                                        ? '超支: ¥${formatMinor(-usage.remainingMinor)}'
+                                                        : '剩余: ¥${formatMinor(usage.remainingMinor)}',
+                                                    maxLines: 1,
+                                                    style: TextStyle(
+                                                      fontSize: 12,
+                                                      fontWeight:
+                                                          FontWeight.w500,
+                                                      color: isOver
+                                                          ? semanticRed
+                                                          : semanticGreen,
+                                                    ),
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ],
+                                    ),
+                                    trailing: IconButton(
+                                      visualDensity: VisualDensity.compact,
+                                      icon: const Icon(
+                                        Icons.more_vert,
+                                        size: 20,
+                                      ),
+                                      onPressed: () =>
+                                          _showCategoryBudgetDialog(
+                                            context,
+                                            budgetType:
+                                                BudgetTypeCode.expenseCategory,
+                                            existing: detail,
+                                            availableCategories:
+                                                expenseCategories,
+                                          ),
+                                    ),
+                                  ),
+                                );
+                              }),
+                          ],
+                        ),
                       ),
                     ),
-                    if (overview.expenseCategoryBudgets.isEmpty)
-                      Padding(
-                        padding: const EdgeInsets.all(24),
-                        child: Center(
-                          child: Text(
-                            '暂无支出分类预算',
-                            style: TextStyle(
-                              color: colorScheme.onSurfaceVariant,
-                            ),
-                          ),
-                        ),
-                      )
-                    else
-                      ...overview.expenseCategoryBudgets.map((detail) {
-                        final usage = detail.usage;
-                        final isOver = usage.isOverspent;
-                        final percent = usage.percent;
-                        final progress = (percent / 100.0).clamp(0.0, 1.0);
-
-                        return Card(
-                          key: Key(
-                            'category_budget_card_${detail.category.id}',
-                          ),
-                          margin: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 4,
-                          ),
-                          child: ListTile(
-                            onTap: () => _openDrilldown(
-                              context,
-                              title: '${detail.category.name}支出明细',
-                              matchedRecordIds: usage.matchedRecordIds,
-                              periodLabel: periodLabel,
-                              amountMinor: detail.budget.amountMinor,
-                              usedMinor: usage.displayUsedMinor,
-                              isSaving: false,
-                            ),
-                            title: Row(
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    detail.parentCategory != null
-                                        ? '${detail.parentCategory!.name} / ${detail.category.name}'
-                                        : detail.category.name,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                ConstrainedBox(
-                                  constraints: const BoxConstraints(
-                                    maxWidth: 120,
-                                  ),
-                                  child: FittedBox(
-                                    fit: BoxFit.scaleDown,
-                                    alignment: Alignment.centerRight,
-                                    child: Text(
-                                      '¥${formatMinor(detail.budget.amountMinor)}',
-                                      maxLines: 1,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            subtitle: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const SizedBox(height: 6),
-                                ClipRRect(
-                                  borderRadius: BorderRadius.circular(3),
-                                  child: LinearProgressIndicator(
-                                    value: progress,
-                                    minHeight: 6,
-                                    backgroundColor:
-                                        colorScheme.surfaceContainerHighest,
-                                    valueColor: AlwaysStoppedAnimation<Color>(
-                                      isOver
-                                          ? colorScheme.error
-                                          : colorScheme.primary,
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(height: 6),
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: Align(
-                                        alignment: Alignment.centerLeft,
-                                        child: FittedBox(
-                                          fit: BoxFit.scaleDown,
-                                          child: Text(
-                                            '已用: ¥${formatMinor(usage.displayUsedMinor)} (${percent.toStringAsFixed(1)}%)',
-                                            maxLines: 1,
-                                            style: TextStyle(
-                                              fontSize: 12,
-                                              color:
-                                                  colorScheme.onSurfaceVariant,
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Flexible(
-                                      child: Align(
-                                        alignment: Alignment.centerRight,
-                                        child: FittedBox(
-                                          fit: BoxFit.scaleDown,
-                                          child: Text(
-                                            isOver
-                                                ? '超支: ¥${formatMinor(-usage.remainingMinor)}'
-                                                : '剩余: ¥${formatMinor(usage.remainingMinor)}',
-                                            maxLines: 1,
-                                            style: TextStyle(
-                                              fontSize: 12,
-                                              fontWeight: FontWeight.w500,
-                                              color: isOver
-                                                  ? semanticRed
-                                                  : semanticGreen,
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ),
-                            trailing: IconButton(
-                              visualDensity: VisualDensity.compact,
-                              icon: const Icon(Icons.more_vert, size: 20),
-                              onPressed: () => _showCategoryBudgetDialog(
-                                context,
-                                budgetType: BudgetTypeCode.expenseCategory,
-                                existing: detail,
-                                availableCategories: expenseCategories,
-                              ),
-                            ),
-                          ),
-                        );
-                      }),
-
-                    const Divider(height: 32),
 
                     // 3. Saving category budgets
-                    Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 4,
+                    Card(
+                      elevation: 0,
+                      surfaceTintColor: Colors.transparent,
+                      clipBehavior: Clip.antiAlias,
+                      color: sectionColor,
+                      margin: const EdgeInsets.fromLTRB(16, 6, 16, 6),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
                       ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Flexible(
-                            child: Text(
-                              '储蓄分类预算',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: theme.textTheme.titleMedium?.copyWith(
-                                fontWeight: FontWeight.bold,
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 4,
+                              ),
+                              child: Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Flexible(
+                                    child: Text(
+                                      '储蓄分类预算',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: theme.textTheme.titleMedium
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                    ),
+                                  ),
+                                  TextButton.icon(
+                                    key: const Key('add_saving_budget_button'),
+                                    onPressed: () => _showCategoryBudgetDialog(
+                                      context,
+                                      budgetType: BudgetTypeCode.savingCategory,
+                                      availableCategories: savingCategories,
+                                    ),
+                                    icon: const Icon(Icons.add, size: 18),
+                                    label: const Text('添加'),
+                                  ),
+                                ],
                               ),
                             ),
-                          ),
-                          TextButton.icon(
-                            key: const Key('add_saving_budget_button'),
-                            onPressed: () => _showCategoryBudgetDialog(
-                              context,
-                              budgetType: BudgetTypeCode.savingCategory,
-                              availableCategories: savingCategories,
-                            ),
-                            icon: const Icon(Icons.add, size: 18),
-                            label: const Text('添加'),
-                          ),
-                        ],
+                            if (overview.savingCategoryBudgets.isEmpty)
+                              Padding(
+                                padding: const EdgeInsets.all(24),
+                                child: Center(
+                                  child: Text(
+                                    '暂无储蓄分类预算',
+                                    style: TextStyle(
+                                      color: colorScheme.onSurfaceVariant,
+                                    ),
+                                  ),
+                                ),
+                              )
+                            else
+                              ...overview.savingCategoryBudgets.map((detail) {
+                                final usage = detail.usage;
+                                final percent = usage.percent;
+                                final progress = (percent / 100.0).clamp(
+                                  0.0,
+                                  1.0,
+                                );
+                                final isReached =
+                                    usage.remainingMinor <= BigInt.zero;
+
+                                return Card(
+                                  key: Key(
+                                    'saving_budget_card_${detail.category.id}',
+                                  ),
+                                  elevation: 0,
+                                  surfaceTintColor: Colors.transparent,
+                                  clipBehavior: Clip.antiAlias,
+                                  color: nestedColor,
+                                  margin: const EdgeInsets.only(top: 8),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: ListTile(
+                                    onTap: () => _openDrilldown(
+                                      context,
+                                      title: '${detail.category.name}储蓄明细',
+                                      matchedRecordIds: usage.matchedRecordIds,
+                                      periodLabel: periodLabel,
+                                      amountMinor: detail.budget.amountMinor,
+                                      usedMinor: usage.displayUsedMinor,
+                                      isSaving: true,
+                                    ),
+                                    title: Row(
+                                      children: [
+                                        Expanded(
+                                          child: Text(
+                                            detail.parentCategory != null
+                                                ? '${detail.parentCategory!.name} / ${detail.category.name}'
+                                                : detail.category.name,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        ConstrainedBox(
+                                          constraints: const BoxConstraints(
+                                            maxWidth: 136,
+                                          ),
+                                          child: FittedBox(
+                                            fit: BoxFit.scaleDown,
+                                            alignment: Alignment.centerRight,
+                                            child: Text(
+                                              '目标: ¥${formatMinor(detail.budget.amountMinor)}',
+                                              maxLines: 1,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    subtitle: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        const SizedBox(height: 6),
+                                        ClipRRect(
+                                          borderRadius: BorderRadius.circular(
+                                            3,
+                                          ),
+                                          child: LinearProgressIndicator(
+                                            value: progress,
+                                            minHeight: 6,
+                                            backgroundColor: colorScheme
+                                                .surfaceContainerHighest,
+                                            valueColor:
+                                                AlwaysStoppedAnimation<Color>(
+                                                  savingFill,
+                                                ),
+                                          ),
+                                        ),
+                                        const SizedBox(height: 6),
+                                        Row(
+                                          children: [
+                                            Expanded(
+                                              child: Align(
+                                                alignment: Alignment.centerLeft,
+                                                child: FittedBox(
+                                                  fit: BoxFit.scaleDown,
+                                                  child: Text(
+                                                    '已存: ¥${formatMinor(usage.displayUsedMinor)} (${percent.toStringAsFixed(1)}%)',
+                                                    maxLines: 1,
+                                                    style: TextStyle(
+                                                      fontSize: 12,
+                                                      color: colorScheme
+                                                          .onSurfaceVariant,
+                                                    ),
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                            const SizedBox(width: 8),
+                                            Flexible(
+                                              child: Align(
+                                                alignment:
+                                                    Alignment.centerRight,
+                                                child: FittedBox(
+                                                  fit: BoxFit.scaleDown,
+                                                  child: Text(
+                                                    isReached
+                                                        ? '已达成目标'
+                                                        : '待存: ¥${formatMinor(usage.remainingMinor)}',
+                                                    maxLines: 1,
+                                                    style: TextStyle(
+                                                      fontSize: 12,
+                                                      fontWeight:
+                                                          FontWeight.w500,
+                                                      color: isReached
+                                                          ? semanticTeal
+                                                          : colorScheme
+                                                                .onSurfaceVariant,
+                                                    ),
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ],
+                                    ),
+                                    trailing: IconButton(
+                                      visualDensity: VisualDensity.compact,
+                                      icon: const Icon(
+                                        Icons.more_vert,
+                                        size: 20,
+                                      ),
+                                      onPressed: () =>
+                                          _showCategoryBudgetDialog(
+                                            context,
+                                            budgetType:
+                                                BudgetTypeCode.savingCategory,
+                                            existing: detail,
+                                            availableCategories:
+                                                savingCategories,
+                                          ),
+                                    ),
+                                  ),
+                                );
+                              }),
+                          ],
+                        ),
                       ),
                     ),
-                    if (overview.savingCategoryBudgets.isEmpty)
-                      Padding(
-                        padding: const EdgeInsets.all(24),
-                        child: Center(
-                          child: Text(
-                            '暂无储蓄分类预算',
-                            style: TextStyle(
-                              color: colorScheme.onSurfaceVariant,
-                            ),
-                          ),
-                        ),
-                      )
-                    else
-                      ...overview.savingCategoryBudgets.map((detail) {
-                        final usage = detail.usage;
-                        final percent = usage.percent;
-                        final progress = (percent / 100.0).clamp(0.0, 1.0);
-                        final isReached = usage.remainingMinor <= BigInt.zero;
-
-                        return Card(
-                          key: Key('saving_budget_card_${detail.category.id}'),
-                          margin: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 4,
-                          ),
-                          child: ListTile(
-                            onTap: () => _openDrilldown(
-                              context,
-                              title: '${detail.category.name}储蓄明细',
-                              matchedRecordIds: usage.matchedRecordIds,
-                              periodLabel: periodLabel,
-                              amountMinor: detail.budget.amountMinor,
-                              usedMinor: usage.displayUsedMinor,
-                              isSaving: true,
-                            ),
-                            title: Row(
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    detail.parentCategory != null
-                                        ? '${detail.parentCategory!.name} / ${detail.category.name}'
-                                        : detail.category.name,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                ConstrainedBox(
-                                  constraints: const BoxConstraints(
-                                    maxWidth: 136,
-                                  ),
-                                  child: FittedBox(
-                                    fit: BoxFit.scaleDown,
-                                    alignment: Alignment.centerRight,
-                                    child: Text(
-                                      '目标: ¥${formatMinor(detail.budget.amountMinor)}',
-                                      maxLines: 1,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            subtitle: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const SizedBox(height: 6),
-                                ClipRRect(
-                                  borderRadius: BorderRadius.circular(3),
-                                  child: LinearProgressIndicator(
-                                    value: progress,
-                                    minHeight: 6,
-                                    backgroundColor:
-                                        colorScheme.surfaceContainerHighest,
-                                    valueColor: AlwaysStoppedAnimation<Color>(
-                                      savingFill,
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(height: 6),
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: Align(
-                                        alignment: Alignment.centerLeft,
-                                        child: FittedBox(
-                                          fit: BoxFit.scaleDown,
-                                          child: Text(
-                                            '已存: ¥${formatMinor(usage.displayUsedMinor)} (${percent.toStringAsFixed(1)}%)',
-                                            maxLines: 1,
-                                            style: TextStyle(
-                                              fontSize: 12,
-                                              color:
-                                                  colorScheme.onSurfaceVariant,
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Flexible(
-                                      child: Align(
-                                        alignment: Alignment.centerRight,
-                                        child: FittedBox(
-                                          fit: BoxFit.scaleDown,
-                                          child: Text(
-                                            isReached
-                                                ? '已达成目标'
-                                                : '待存: ¥${formatMinor(usage.remainingMinor)}',
-                                            maxLines: 1,
-                                            style: TextStyle(
-                                              fontSize: 12,
-                                              fontWeight: FontWeight.w500,
-                                              color: isReached
-                                                  ? semanticTeal
-                                                  : colorScheme
-                                                        .onSurfaceVariant,
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ),
-                            trailing: IconButton(
-                              visualDensity: VisualDensity.compact,
-                              icon: const Icon(Icons.more_vert, size: 20),
-                              onPressed: () => _showCategoryBudgetDialog(
-                                context,
-                                budgetType: BudgetTypeCode.savingCategory,
-                                existing: detail,
-                                availableCategories: savingCategories,
-                              ),
-                            ),
-                          ),
-                        );
-                      }),
                     const SizedBox(height: 24),
                   ],
                 );
@@ -1195,6 +1331,13 @@ class BudgetDrilldownPage extends ConsumerWidget {
     final colorScheme = theme.colorScheme;
     final isDark = theme.brightness == Brightness.dark;
     final semanticTeal = isDark ? Colors.teal.shade300 : Colors.teal.shade700;
+    final cardColor = isDark
+        ? colorScheme.surfaceContainerLow
+        : Color.lerp(
+            colorScheme.surfaceContainerLow,
+            colorScheme.surfaceContainer,
+            0.55,
+          )!;
     final isDesktop = DesktopAdaptive.isDesktop(context);
     final isPopupModal = isDesktop && ModalRoute.of(context) is PopupRoute;
 
@@ -1207,54 +1350,62 @@ class BudgetDrilldownPage extends ConsumerWidget {
       body: Column(
         children: [
           // Header summary card
-          Container(
-            padding: const EdgeInsets.all(16),
-            color: colorScheme.surfaceContainerLow,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        periodLabel,
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      FittedBox(
-                        fit: BoxFit.scaleDown,
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          isSaving
-                              ? '已存 ¥${formatMinor(usedMinor)} / 目标 ¥${formatMinor(amountMinor)}'
-                              : '已用 ¥${formatMinor(usedMinor)} / 预算 ¥${formatMinor(amountMinor)}',
-                          maxLines: 1,
-                          style: const TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.bold,
+          Card(
+            elevation: 0,
+            surfaceTintColor: Colors.transparent,
+            clipBehavior: Clip.antiAlias,
+            color: cardColor,
+            margin: const EdgeInsets.fromLTRB(16, 8, 16, 6),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          periodLabel,
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: colorScheme.onSurfaceVariant,
                           ),
                         ),
-                      ),
-                    ],
+                        const SizedBox(height: 4),
+                        FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            isSaving
+                                ? '已存 ¥${formatMinor(usedMinor)} / 目标 ¥${formatMinor(amountMinor)}'
+                                : '已用 ¥${formatMinor(usedMinor)} / 预算 ¥${formatMinor(amountMinor)}',
+                            maxLines: 1,
+                            style: const TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-                const SizedBox(width: 12),
-                Text(
-                  '共 ${matchedRecordIds.length} 笔',
-                  maxLines: 1,
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: colorScheme.onSurfaceVariant,
+                  const SizedBox(width: 12),
+                  Text(
+                    '共 ${matchedRecordIds.length} 笔',
+                    maxLines: 1,
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: colorScheme.onSurfaceVariant,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
-          const Divider(height: 1),
 
           // Bill records list
           Expanded(
@@ -1281,95 +1432,108 @@ class BudgetDrilldownPage extends ConsumerWidget {
                   );
                 }
 
-                return ListView.separated(
-                  itemCount: bills.length,
-                  separatorBuilder: (_, __) => const Divider(height: 1),
-                  itemBuilder: (context, index) {
-                    final r = bills[index];
-                    final cat = categoryMap[r.recordCatId];
-                    final date = DateTime.fromMillisecondsSinceEpoch(
-                      r.recordTime,
-                    );
-
-                    return ListTile(
-                      key: Key('drilldown_bill_${r.recordId}'),
-                      onTap: () {
-                        if (onRecordTap != null) {
-                          onRecordTap!(r.recordId);
-                        } else {
-                          pushDesktopModalOrMaterialRoute<void>(
-                            context,
-                            maxWidth: 560,
-                            maxHeight: 740,
-                            barrierDismissible: true,
-                            child: RecordDetailPage(recordId: r.recordId),
-                          );
-                        }
-                      },
-                      title: Row(
-                        children: [
-                          Flexible(
-                            flex: r.remark.isEmpty ? 1 : 0,
-                            child: ConstrainedBox(
-                              constraints: BoxConstraints(
-                                maxWidth: r.remark.isEmpty
-                                    ? double.infinity
-                                    : 120,
-                              ),
-                              child: Text(
-                                cat?.name ?? '无分类',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                ),
+                Widget buildBillTile(LedgerRecord r) {
+                  final cat = categoryMap[r.recordCatId];
+                  final date = DateTime.fromMillisecondsSinceEpoch(
+                    r.recordTime,
+                  );
+                  return ListTile(
+                    key: Key('drilldown_bill_${r.recordId}'),
+                    onTap: () {
+                      if (onRecordTap != null) {
+                        onRecordTap!(r.recordId);
+                      } else {
+                        pushDesktopModalOrMaterialRoute<void>(
+                          context,
+                          maxWidth: 560,
+                          maxHeight: 740,
+                          barrierDismissible: true,
+                          child: RecordDetailPage(recordId: r.recordId),
+                        );
+                      }
+                    },
+                    title: Row(
+                      children: [
+                        Flexible(
+                          flex: r.remark.isEmpty ? 1 : 0,
+                          child: ConstrainedBox(
+                            constraints: BoxConstraints(
+                              maxWidth: r.remark.isEmpty
+                                  ? double.infinity
+                                  : 120,
+                            ),
+                            child: Text(
+                              cat?.name ?? '无分类',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
                               ),
                             ),
                           ),
-                          if (r.remark.isNotEmpty) ...[
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                r.remark,
-                                maxLines: 1,
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  color: colorScheme.onSurfaceVariant,
-                                ),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          ] else
-                            const Spacer(),
-                          const SizedBox(width: 8),
-                          ConstrainedBox(
-                            constraints: const BoxConstraints(maxWidth: 128),
-                            child: FittedBox(
-                              fit: BoxFit.scaleDown,
-                              alignment: Alignment.centerRight,
-                              child: Text(
-                                r.moneyMinor.isNegative
-                                    ? '-¥${formatMinor(-r.moneyMinor)}'
-                                    : '¥${formatMinor(r.moneyMinor)}',
-                                maxLines: 1,
-                                style: TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  color: isSaving ? semanticTeal : null,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      subtitle: Text(
-                        formatDateTime(date),
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: colorScheme.onSurfaceVariant,
                         ),
+                        if (r.remark.isNotEmpty) ...[
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              r.remark,
+                              maxLines: 1,
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: colorScheme.onSurfaceVariant,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ] else
+                          const Spacer(),
+                        const SizedBox(width: 8),
+                        ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 128),
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            alignment: Alignment.centerRight,
+                            child: Text(
+                              r.moneyMinor.isNegative
+                                  ? '-¥${formatMinor(-r.moneyMinor)}'
+                                  : '¥${formatMinor(r.moneyMinor)}',
+                              maxLines: 1,
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                color: isSaving ? semanticTeal : null,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    subtitle: Text(
+                      formatDateTime(date),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: colorScheme.onSurfaceVariant,
                       ),
-                    );
-                  },
+                    ),
+                  );
+                }
+
+                return ListView(
+                  padding: const EdgeInsets.fromLTRB(16, 6, 16, 16),
+                  children: [
+                    Card(
+                      elevation: 0,
+                      surfaceTintColor: Colors.transparent,
+                      clipBehavior: Clip.antiAlias,
+                      color: cardColor,
+                      margin: EdgeInsets.zero,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Column(
+                        children: [for (final r in bills) buildBillTile(r)],
+                      ),
+                    ),
+                  ],
                 );
               },
             ),

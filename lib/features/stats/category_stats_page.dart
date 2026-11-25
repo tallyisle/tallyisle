@@ -15,6 +15,7 @@ import '../common/common.dart';
 import '../common/desktop_modal_page.dart';
 import '../common/year_month_picker_dialog.dart';
 import '../records/record_detail_page.dart';
+import '../budget/budget_widgets.dart' show tonalCardColor;
 import 'category_stats_providers.dart';
 
 /// Main category statistics page (F-008 / SCR-005, original `/anz/ADAct`).
@@ -95,13 +96,25 @@ class _CategoryStatsPageState extends ConsumerState<CategoryStatsPage> {
 
     final headerSummaryWidget = resultAsync.when(
       data: (res) => _HeaderSummaryCard(result: res),
-      loading: () => const Card(
-        child: SizedBox(
+      loading: () => Card(
+        elevation: 0,
+        surfaceTintColor: Colors.transparent,
+        clipBehavior: Clip.antiAlias,
+        color: tonalCardColor(context),
+        margin: EdgeInsets.zero,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: const SizedBox(
           height: 100,
           child: Center(child: CircularProgressIndicator()),
         ),
       ),
       error: (e, _) => Card(
+        elevation: 0,
+        surfaceTintColor: Colors.transparent,
+        clipBehavior: Clip.antiAlias,
+        color: tonalCardColor(context),
+        margin: EdgeInsets.zero,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Text('加载统计失败: $e'),
@@ -176,13 +189,13 @@ class _CategoryStatsPageState extends ConsumerState<CategoryStatsPage> {
                     constraints: const BoxConstraints(maxWidth: 1440),
                     child: Padding(
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 20,
+                        horizontal: 16,
                         vertical: 8,
                       ),
                       child: Row(
                         children: [
                           SizedBox(width: 210, child: dimensionSwitch),
-                          const SizedBox(width: 20),
+                          const SizedBox(width: 16),
                           Expanded(
                             child: _PeriodNavigationBar(
                               rangeKind: rangeKind,
@@ -195,7 +208,6 @@ class _CategoryStatsPageState extends ConsumerState<CategoryStatsPage> {
                     ),
                   ),
                 ),
-                const Divider(height: 1),
                 Expanded(
                   child: Center(
                     child: ConstrainedBox(
@@ -208,12 +220,7 @@ class _CategoryStatsPageState extends ConsumerState<CategoryStatsPage> {
                             flex: 46,
                             child: ListView(
                               key: const Key('category-stats-left-pane'),
-                              padding: const EdgeInsets.fromLTRB(
-                                20,
-                                14,
-                                10,
-                                24,
-                              ),
+                              padding: const EdgeInsets.fromLTRB(16, 14, 8, 24),
                               children: [
                                 Column(
                                   crossAxisAlignment:
@@ -245,12 +252,7 @@ class _CategoryStatsPageState extends ConsumerState<CategoryStatsPage> {
                             flex: 54,
                             child: ListView(
                               key: const Key('category-stats-right-pane'),
-                              padding: const EdgeInsets.fromLTRB(
-                                10,
-                                14,
-                                20,
-                                24,
-                              ),
+                              padding: const EdgeInsets.fromLTRB(8, 14, 16, 24),
                               children: [rankingsWidget],
                             ),
                           ),
@@ -587,7 +589,12 @@ class _HeaderSummaryCard extends StatelessWidget {
     }
 
     return Card(
-      elevation: 2,
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      clipBehavior: Clip.antiAlias,
+      color: tonalCardColor(context),
+      margin: EdgeInsets.zero,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -658,7 +665,7 @@ class _HeaderSummaryCard extends StatelessWidget {
                 ),
               ],
             ),
-            const Divider(height: 24),
+            const SizedBox(height: 20),
             Row(
               children: [
                 Expanded(
@@ -854,7 +861,12 @@ class _CategoryDonutChartCard extends ConsumerWidget {
     final topLegend = slices.take(5).toList();
 
     return Card(
-      elevation: 2,
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      clipBehavior: Clip.antiAlias,
+      color: tonalCardColor(context),
+      margin: EdgeInsets.zero,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -1101,7 +1113,12 @@ class _TrendChartCardState extends State<_TrendChartCard> {
         : theme.colorScheme.primary;
 
     return Card(
-      elevation: 2,
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      clipBehavior: Clip.antiAlias,
+      color: tonalCardColor(context),
+      margin: EdgeInsets.zero,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -1431,7 +1448,12 @@ class _CategoryRankingsCard extends ConsumerWidget {
         : RecordType.expense;
 
     return Card(
-      elevation: 2,
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      clipBehavior: Clip.antiAlias,
+      color: tonalCardColor(context),
+      margin: EdgeInsets.zero,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Column(
@@ -1502,7 +1524,7 @@ class _CategoryRankingsCard extends ConsumerWidget {
                 ),
               ),
 
-            const Divider(height: 16),
+            const SizedBox(height: 8),
 
             if (rows.isEmpty && result.uncategorizedRow == null)
               const Padding(
@@ -1522,7 +1544,7 @@ class _CategoryRankingsCard extends ConsumerWidget {
               // Uncategorized fallback closing row (ASYM-CAT-01)
               if (result.uncategorizedRow != null &&
                   result.uncategorizedRow!.count > 0) ...[
-                const Divider(height: 12),
+                const SizedBox(height: 8),
                 _UncategorizedRowWidget(
                   uncategorized: result.uncategorizedRow!,
                   onTap: () => _openUncategorizedDrilldown(context, catById),
@@ -2035,7 +2057,6 @@ class _CategoryStatsFilterDrawerState
                 ],
               ),
             ),
-            const Divider(height: 1),
             Expanded(
               child: ListView(
                 padding: const EdgeInsets.all(16),
@@ -2055,7 +2076,7 @@ class _CategoryStatsFilterDrawerState
                           .update(config.copyWith(includeExcludeBudget: val));
                     },
                   ),
-                  const Divider(height: 24),
+                  const SizedBox(height: 24),
 
                   // Books filter
                   Text('账本选择', style: theme.textTheme.titleSmall),
@@ -2097,7 +2118,7 @@ class _CategoryStatsFilterDrawerState
                     loading: () => const LinearProgressIndicator(),
                     error: (_, _) => const Text('加载账本失败'),
                   ),
-                  const Divider(height: 24),
+                  const SizedBox(height: 24),
 
                   // Assets filter
                   Text('账户选择', style: theme.textTheme.titleSmall),
@@ -2140,7 +2161,7 @@ class _CategoryStatsFilterDrawerState
                     loading: () => const LinearProgressIndicator(),
                     error: (_, _) => const Text('加载账户失败'),
                   ),
-                  const Divider(height: 24),
+                  const SizedBox(height: 24),
 
                   // Tags filter
                   Text('标签选择', style: theme.textTheme.titleSmall),
@@ -2285,7 +2306,12 @@ class _CategoryDrilldownPageState extends State<CategoryDrilldownPage> {
     final isExpandedDesktop = DesktopAdaptive.isExpandedDesktop(context);
 
     final summaryCard = Card(
-      elevation: 2,
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      clipBehavior: Clip.antiAlias,
+      color: tonalCardColor(context),
+      margin: EdgeInsets.zero,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Row(
@@ -2369,7 +2395,14 @@ class _CategoryDrilldownPageState extends State<CategoryDrilldownPage> {
 
     final subcategoryCard = hasSubcategories
         ? Card(
-            elevation: 2,
+            elevation: 0,
+            surfaceTintColor: Colors.transparent,
+            clipBehavior: Clip.antiAlias,
+            color: tonalCardColor(context),
+            margin: EdgeInsets.zero,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: Column(
@@ -2523,7 +2556,12 @@ class _CategoryDrilldownPageState extends State<CategoryDrilldownPage> {
               entry.type == RecordType.income) &&
           entry.moneyMinor < BigInt.zero;
       return Card(
+        elevation: 0,
+        surfaceTintColor: Colors.transparent,
+        clipBehavior: Clip.antiAlias,
+        color: tonalCardColor(context),
         margin: const EdgeInsets.symmetric(vertical: 4),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         child: ListTile(
           key: Key('drilldown-bill-${bill.recordId}'),
           leading: RecordTypeIconAvatar(
@@ -2623,7 +2661,7 @@ class _CategoryDrilldownPageState extends State<CategoryDrilldownPage> {
                     Expanded(
                       flex: 42,
                       child: ListView(
-                        padding: const EdgeInsets.fromLTRB(20, 16, 12, 24),
+                        padding: const EdgeInsets.fromLTRB(16, 16, 8, 24),
                         children: [
                           summaryCard,
                           if (subcategoryCard != null) ...[
@@ -2637,7 +2675,7 @@ class _CategoryDrilldownPageState extends State<CategoryDrilldownPage> {
                     Expanded(
                       flex: 58,
                       child: Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 16, 20, 16),
+                        padding: const EdgeInsets.fromLTRB(8, 16, 16, 16),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
@@ -2693,9 +2731,12 @@ class CategoryStatsOverviewCard extends ConsumerWidget {
     final catById = <int, RecordCategory>{for (final c in categories) c.id: c};
 
     return Card(
-      elevation: 1,
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      clipBehavior: Clip.antiAlias,
+      color: tonalCardColor(context),
       margin: EdgeInsets.zero,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: resultAsync.when(

@@ -201,6 +201,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                         records,
                         categories,
                         assets,
+                        truncated: records.length >= _limit,
                       ),
                       if (records.length >= _limit)
                         Padding(
@@ -272,9 +273,9 @@ class _SearchPageState extends ConsumerState<SearchPage> {
   ) {
     final theme = Theme.of(context);
     final isDesktop = DesktopAdaptive.isDesktop(context);
-    return Material(
-      elevation: 2,
-      color: theme.colorScheme.surfaceContainerHighest,
+    return Card(
+      key: const Key('search-filter-panel'),
+      margin: const EdgeInsets.fromLTRB(16, 8, 16, 4),
       child: ConstrainedBox(
         constraints: BoxConstraints(maxHeight: isDesktop ? 340 : 280),
         child: SingleChildScrollView(
@@ -641,30 +642,33 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     final isDark = theme.brightness == Brightness.dark;
     final summary = summaryAsync.value ?? IncomeExpense.zero;
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
-      child: Row(
-        children: [
-          _summaryColumn(
-            context,
-            '支出',
-            formatMinor(summary.expense),
-            isDark ? Colors.red.shade300 : Colors.red.shade700,
-          ),
-          _summaryColumn(
-            context,
-            '收入',
-            formatMinor(summary.income),
-            isDark ? Colors.green.shade300 : Colors.green.shade700,
-          ),
-          _summaryColumn(
-            context,
-            '结余',
-            formatMinor(summary.balance),
-            theme.textTheme.bodyMedium?.color,
-          ),
-        ],
+    return Card(
+      key: const Key('search-summary-bar'),
+      margin: const EdgeInsets.fromLTRB(16, 6, 16, 8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+        child: Row(
+          children: [
+            _summaryColumn(
+              context,
+              '支出',
+              formatMinor(summary.expense),
+              isDark ? Colors.red.shade300 : Colors.red.shade700,
+            ),
+            _summaryColumn(
+              context,
+              '收入',
+              formatMinor(summary.income),
+              isDark ? Colors.green.shade300 : Colors.green.shade700,
+            ),
+            _summaryColumn(
+              context,
+              '结余',
+              formatMinor(summary.balance),
+              theme.textTheme.bodyMedium?.color,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -707,30 +711,14 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     BuildContext context,
     List<LedgerRecord> records,
     List<RecordCategory> categories,
-    List<Asset> assets,
-  ) {
+    List<Asset> assets, {
+    required bool truncated,
+  }) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final widgets = <Widget>[];
-    String? currentDay;
+    final groups = groupRecordsByDay(records);
 
-    for (final r in records) {
-      final time = DateTime.fromMillisecondsSinceEpoch(r.recordTime);
-      final dayKey = formatDate(time);
-      if (dayKey != currentDay) {
-        currentDay = dayKey;
-        widgets.add(
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-            child: Text(
-              dayKey,
-              style: theme.textTheme.labelLarge?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
-            ),
-          ),
-        );
-      }
+    Widget tile(LedgerRecord r) {
       final label = recordLabel(r, categories, assets);
       final cat = r.recordCatId == noRef
           ? null
@@ -748,33 +736,42 @@ class _SearchPageState extends ConsumerState<SearchPage> {
       final isRefund =
           (r.type == RecordType.expense || r.type == RecordType.income) &&
           r.moneyMinor < BigInt.zero;
-      widgets.add(
-        ListTile(
-          key: Key('search-record-${r.recordId}'),
-          leading: RecordTypeIconAvatar(
-            recordType: r.type,
-            subType: r.subType,
-            isRefund: isRefund,
-            categoryName: catDisplayName,
-            categoryIcon: cat?.icon,
-            parentCategoryIcon: parentCat?.icon,
-            categoryColor: catColor,
-          ),
-          title: Text(label.title),
-          subtitle: label.subtitle.isEmpty ? null : Text(label.subtitle),
-          trailing: Text(
-            label.amount,
-            style: TextStyle(
-              color: r.type == RecordType.income
-                  ? (isDark ? Colors.green.shade300 : Colors.green.shade700)
-                  : null,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          onTap: () => context.push('/record/${r.recordId}'),
+      return ListTile(
+        key: Key('search-record-${r.recordId}'),
+        leading: RecordTypeIconAvatar(
+          recordType: r.type,
+          subType: r.subType,
+          isRefund: isRefund,
+          categoryName: catDisplayName,
+          categoryIcon: cat?.icon,
+          parentCategoryIcon: parentCat?.icon,
+          categoryColor: catColor,
         ),
+        title: Text(label.title),
+        subtitle: label.subtitle.isEmpty ? null : Text(label.subtitle),
+        trailing: Text(
+          label.amount,
+          style: TextStyle(
+            color: r.type == RecordType.income
+                ? (isDark ? Colors.green.shade300 : Colors.green.shade700)
+                : null,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        onTap: () => context.push('/record/${r.recordId}'),
       );
     }
-    return widgets;
+
+    return <Widget>[
+      for (var i = 0; i < groups.length; i++)
+        TallyDailyRecordCard(
+          day: groups[i].day,
+          records: groups[i].records,
+          // A paginated result may cut the oldest day short; never show a
+          // partial subtotal for it.
+          showSubtotal: !(truncated && i == groups.length - 1),
+          children: [for (final r in groups[i].records) tile(r)],
+        ),
+    ];
   }
 }

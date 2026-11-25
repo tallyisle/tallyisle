@@ -14,6 +14,7 @@ import '../domain/rules/cloud_sync_rules.dart';
 import '../features/automation/automation_providers.dart';
 import '../features/backup/backup_providers.dart';
 import '../features/backup/post_restore_refresh.dart';
+import '../features/common/tally_card.dart' show tallyCardTheme;
 import '../features/currencies/currency_rate_providers.dart';
 import '../features/deposit/fixed_deposit_providers.dart';
 import '../features/installment/installment_providers.dart';
@@ -48,6 +49,7 @@ ThemeData _buildDesktopTheme(ThemeData base) => base.copyWith(
   inputDecorationTheme: base.inputDecorationTheme.copyWith(
     contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
   ),
+  cardTheme: tallyCardTheme(base.colorScheme),
   segmentedButtonTheme: const SegmentedButtonThemeData(
     style: ButtonStyle(
       visualDensity: VisualDensity.standard,
@@ -570,6 +572,15 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
       ),
     );
 
+    final lightScheme = ColorScheme.fromSeed(
+      seedColor: seedColor,
+      brightness: Brightness.light,
+    );
+    final darkScheme = ColorScheme.fromSeed(
+      seedColor: seedColor,
+      brightness: Brightness.dark,
+    );
+
     return MaterialApp.router(
       debugShowCheckedModeBanner: false,
       onGenerateTitle: (context) => brandName(Localizations.localeOf(context)),
@@ -582,19 +593,15 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
           : const Locale('en'),
       themeMode: themeMode,
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: seedColor,
-          brightness: Brightness.light,
-        ),
+        colorScheme: lightScheme,
         segmentedButtonTheme: segmentedButtonTheme,
+        cardTheme: tallyCardTheme(lightScheme),
         useMaterial3: true,
       ),
       darkTheme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: seedColor,
-          brightness: Brightness.dark,
-        ),
+        colorScheme: darkScheme,
         segmentedButtonTheme: segmentedButtonTheme,
+        cardTheme: tallyCardTheme(darkScheme),
         useMaterial3: true,
       ),
       builder: (context, child) {

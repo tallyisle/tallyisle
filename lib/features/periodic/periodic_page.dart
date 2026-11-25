@@ -522,11 +522,24 @@ class _PeriodicPageState extends ConsumerState<PeriodicPage>
     final bookName = books.where((b) => b.id == rule.bookId).firstOrNull?.name;
     final issue = _accountIssue(rule, assets);
 
+    final cardTheme = Theme.of(context);
+    final cardScheme = cardTheme.colorScheme;
     return Card(
       key: Key('periodic_card_${rule.id}'),
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      clipBehavior: Clip.antiAlias,
+      color: cardTheme.brightness == Brightness.dark
+          ? cardScheme.surfaceContainerLow
+          : Color.lerp(
+              cardScheme.surfaceContainerLow,
+              cardScheme.surfaceContainer,
+              0.55,
+            )!,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       child: InkWell(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(16),
         onTap: () => _openHistory(rule.id),
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
@@ -666,79 +679,125 @@ class PeriodicHistoryPage extends ConsumerWidget {
           error: (e, _) => ErrorView(e),
           data: (records) {
             final rule = ruleAsync.value;
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 12,
-                  ),
-                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                  child: Text(
-                    rule == null
-                        ? '规则已删除 · 历史保留 ${records.length} 笔记录'
-                        : '${formatPeriodCycleSummary(periodType: rule.periodType, periodTypeDateJson: rule.periodTypeDate, frequency: rule.frequency)} · 共生成 ${records.length} 笔记录',
-                    key: const Key('periodic_history_summary'),
-                    style: const TextStyle(fontSize: 13),
-                  ),
-                ),
-                Expanded(
-                  child: records.isEmpty
-                      ? Center(
-                          child: Text(
-                            '暂无已生成的周期账单',
-                            style: TextStyle(
-                              color: Theme.of(
-                                context,
-                              ).colorScheme.onSurfaceVariant,
-                            ),
-                          ),
-                        )
-                      : ListView.separated(
-                          itemCount: records.length,
-                          separatorBuilder: (_, _) => const Divider(height: 1),
-                          itemBuilder: (context, index) {
-                            final r = records[index];
-                            final label = recordLabel(r, categories, assets);
-                            final timeStr = formatDateTime(
-                              DateTime.fromMillisecondsSinceEpoch(r.recordTime),
-                            );
-                            return ListTile(
-                              key: Key('periodic_history_item_${r.recordId}'),
-                              title: Text(label.title),
-                              subtitle: Text(
-                                label.subtitle.isEmpty
-                                    ? timeStr
-                                    : '${label.subtitle} · $timeStr',
-                              ),
-                              trailing: Text(
-                                label.amount,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
+            final theme = Theme.of(context);
+            final scheme = theme.colorScheme;
+            final isDark = theme.brightness == Brightness.dark;
+            final cardColor = isDark
+                ? scheme.surfaceContainerLow
+                : Color.lerp(
+                    scheme.surfaceContainerLow,
+                    scheme.surfaceContainer,
+                    0.55,
+                  )!;
+            final cardShape = RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            );
+            return Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 820),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Card(
+                      elevation: 0,
+                      surfaceTintColor: Colors.transparent,
+                      clipBehavior: Clip.antiAlias,
+                      color: cardColor,
+                      shape: cardShape,
+                      margin: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 12,
+                        ),
+                        child: Text(
+                          rule == null
+                              ? '规则已删除 · 历史保留 ${records.length} 笔记录'
+                              : '${formatPeriodCycleSummary(periodType: rule.periodType, periodTypeDateJson: rule.periodTypeDate, frequency: rule.frequency)} · 共生成 ${records.length} 笔记录',
+                          key: const Key('periodic_history_summary'),
+                          style: const TextStyle(fontSize: 13),
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      child: records.isEmpty
+                          ? Center(
+                              child: Text(
+                                '暂无已生成的周期账单',
+                                style: TextStyle(
+                                  color: scheme.onSurfaceVariant,
                                 ),
                               ),
-                              onTap: onRecordTap != null
-                                  ? () => onRecordTap!(r.recordId)
-                                  : isDesktop
-                                  ? () => unawaited(
-                                      pushDesktopModalOrMaterialRoute<void>(
-                                        context,
-                                        child: RecordDetailPage(
-                                          recordId: r.recordId,
+                            )
+                          : ListView(
+                              padding: const EdgeInsets.only(bottom: 24),
+                              children: [
+                                Card(
+                                  elevation: 0,
+                                  surfaceTintColor: Colors.transparent,
+                                  clipBehavior: Clip.antiAlias,
+                                  color: cardColor,
+                                  shape: cardShape,
+                                  margin: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                  ),
+                                  child: Column(
+                                    children: [
+                                      for (final r in records)
+                                        _buildHistoryTile(
+                                          context,
+                                          r,
+                                          categories,
+                                          assets,
+                                          isDesktop,
                                         ),
-                                      ),
-                                    )
-                                  : null,
-                            );
-                          },
-                        ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                    ),
+                  ],
                 ),
-              ],
+              ),
             );
           },
         ),
       ),
+    );
+  }
+
+  Widget _buildHistoryTile(
+    BuildContext context,
+    LedgerRecord r,
+    List<RecordCategory> categories,
+    List<Asset> assets,
+    bool isDesktop,
+  ) {
+    final label = recordLabel(r, categories, assets);
+    final timeStr = formatDateTime(
+      DateTime.fromMillisecondsSinceEpoch(r.recordTime),
+    );
+    return ListTile(
+      key: Key('periodic_history_item_${r.recordId}'),
+      title: Text(label.title),
+      subtitle: Text(
+        label.subtitle.isEmpty ? timeStr : '${label.subtitle} · $timeStr',
+      ),
+      trailing: Text(
+        label.amount,
+        style: const TextStyle(fontWeight: FontWeight.bold),
+      ),
+      onTap: onRecordTap != null
+          ? () => onRecordTap!(r.recordId)
+          : isDesktop
+          ? () => unawaited(
+              pushDesktopModalOrMaterialRoute<void>(
+                context,
+                child: RecordDetailPage(recordId: r.recordId),
+              ),
+            )
+          : null,
     );
   }
 }

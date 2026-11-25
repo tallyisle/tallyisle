@@ -248,7 +248,12 @@ class _TabSummaryCard extends StatelessWidget {
             ? 'installment_finished_summary_card'
             : 'installment_active_summary_card',
       ),
-      color: theme.colorScheme.surfaceContainerLow,
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      clipBehavior: Clip.antiAlias,
+      color: _tonalCardColor(Theme.of(context)),
+      shape: _tonalCardShape,
+      margin: EdgeInsets.zero,
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -321,8 +326,12 @@ class _InstallmentCard extends ConsumerWidget {
 
     return Card(
       key: Key('installment_card_${inst.id}'),
-      margin: const EdgeInsets.symmetric(vertical: 4),
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
       clipBehavior: Clip.antiAlias,
+      color: _tonalCardColor(Theme.of(context)),
+      shape: _tonalCardShape,
+      margin: const EdgeInsets.symmetric(vertical: 4),
       child: InkWell(
         onTap: onTap,
         child: Padding(
@@ -447,3 +456,15 @@ class InstallmentIntProgressBar extends StatelessWidget {
     );
   }
 }
+
+/// Borderless soft tonal card surface (16dp) shared by this feature's cards.
+Color _tonalCardColor(ThemeData theme) {
+  final scheme = theme.colorScheme;
+  return theme.brightness == Brightness.dark
+      ? scheme.surfaceContainerLow
+      : Color.lerp(scheme.surfaceContainerLow, scheme.surfaceContainer, 0.55)!;
+}
+
+const RoundedRectangleBorder _tonalCardShape = RoundedRectangleBorder(
+  borderRadius: BorderRadius.all(Radius.circular(16)),
+);

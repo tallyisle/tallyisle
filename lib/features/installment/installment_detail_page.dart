@@ -371,7 +371,12 @@ class _DetailSummaryCard extends StatelessWidget {
 
     return Card(
       key: const Key('installment_detail_summary_card'),
-      color: theme.colorScheme.surfaceContainerLow,
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      clipBehavior: Clip.antiAlias,
+      color: _tonalCardColor(Theme.of(context)),
+      shape: _tonalCardShape,
+      margin: EdgeInsets.zero,
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -429,7 +434,7 @@ class _DetailSummaryCard extends StatelessWidget {
                 Text('剩余手续费: ¥${formatMinor(progress.remainingFeeMinor)}'),
               ],
             ),
-            const Divider(height: 20),
+            const SizedBox(height: 12),
             Text(
               '扣款账户：$accName · 分类：$catText · 账本：$bookName',
               style: theme.textTheme.bodySmall,
@@ -567,6 +572,11 @@ class _PeriodScheduleCard extends StatelessWidget {
 
     return Card(
       key: Key('period_item_${item.period}'),
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      clipBehavior: Clip.antiAlias,
+      color: _tonalCardColor(Theme.of(context)),
+      shape: _tonalCardShape,
       margin: const EdgeInsets.symmetric(vertical: 4),
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -641,7 +651,7 @@ class _PeriodScheduleCard extends StatelessWidget {
                 ),
               ),
             ] else if (records.isNotEmpty) ...[
-              const Divider(height: 16),
+              const SizedBox(height: 12),
               for (final r in records)
                 ListTile(
                   key: Key('posted_record_${r.recordId}'),
@@ -896,3 +906,15 @@ class _DeleteInstallmentDialogState extends State<_DeleteInstallmentDialog> {
     );
   }
 }
+
+/// Borderless soft tonal card surface (16dp) shared by this feature's cards.
+Color _tonalCardColor(ThemeData theme) {
+  final scheme = theme.colorScheme;
+  return theme.brightness == Brightness.dark
+      ? scheme.surfaceContainerLow
+      : Color.lerp(scheme.surfaceContainerLow, scheme.surfaceContainer, 0.55)!;
+}
+
+const RoundedRectangleBorder _tonalCardShape = RoundedRectangleBorder(
+  borderRadius: BorderRadius.all(Radius.circular(16)),
+);

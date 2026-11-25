@@ -195,11 +195,11 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
       return (baseDesktopHeight * textScale).clamp(48.0, 68.0);
     }
     if (DesktopAdaptive.isDesktop(context) && viewportHeight < 680) {
-      final maxCompactGridHeight = (viewportHeight - 365.0).clamp(180.0, 224.0);
+      final maxCompactGridHeight = (viewportHeight - 385.0).clamp(180.0, 224.0);
       return (maxCompactGridHeight / rowCount).clamp(32.0, 40.0);
     }
     final baseCellHeight = viewportHeight < 700 ? 46.0 : 54.0;
-    final maxGridHeight = (viewportHeight - 285.0).clamp(192.0, 390.0);
+    final maxGridHeight = (viewportHeight - 305.0).clamp(192.0, 390.0);
     return (baseCellHeight * textScale).clamp(42.0, maxGridHeight / rowCount);
   }
 
@@ -265,31 +265,43 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
 
     Widget buildSingleColumnBody() => Column(
       children: [
-        _buildMonthSwitcher(context, month),
-        _buildMonthSummaryCard(context, monthSummaryAsync),
-        _buildWeekdayHeader(context),
-        _buildCalendarPageView(
+        _buildSectionCard(
           context,
-          activeOffset: activeOffset,
-          activeMonth: month,
-          assets: assets,
-          clampedSelectedDay: clampedSelectedDay,
-        ),
-        const Divider(height: 1),
-        _buildSelectedDayHeader(
-          context,
-          month,
-          summariesAsync,
-          clampedSelectedDay,
-          selectedDayNoonMs: selectedDayNoonMs,
+          margin: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+          child: _buildMonthSection(
+            context,
+            month: month,
+            monthSummaryAsync: monthSummaryAsync,
+            activeOffset: activeOffset,
+            assets: assets,
+            clampedSelectedDay: clampedSelectedDay,
+          ),
         ),
         Expanded(
-          child: _buildSelectedDayRecords(
+          child: _buildSectionCard(
             context,
-            summariesAsync,
-            clampedSelectedDay,
-            categories,
-            assets,
+            margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _buildSelectedDayHeader(
+                  context,
+                  month,
+                  summariesAsync,
+                  clampedSelectedDay,
+                  selectedDayNoonMs: selectedDayNoonMs,
+                ),
+                Expanded(
+                  child: _buildSelectedDayRecords(
+                    context,
+                    summariesAsync,
+                    clampedSelectedDay,
+                    categories,
+                    assets,
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ],
@@ -317,49 +329,47 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
                     SizedBox(
                       width: 480,
                       child: SingleChildScrollView(
-                        padding: const EdgeInsets.symmetric(vertical: 8),
-                        child: Column(
-                          children: [
-                            _buildMonthSwitcher(context, month),
-                            const SizedBox(height: 4),
-                            _buildMonthSummaryCard(context, monthSummaryAsync),
-                            const SizedBox(height: 6),
-                            _buildWeekdayHeader(context),
-                            _buildCalendarPageView(
-                              context,
-                              activeOffset: activeOffset,
-                              activeMonth: month,
-                              assets: assets,
-                              clampedSelectedDay: clampedSelectedDay,
-                              isDesktopPane: true,
-                            ),
-                          ],
+                        child: _buildSectionCard(
+                          context,
+                          margin: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                          child: _buildMonthSection(
+                            context,
+                            month: month,
+                            monthSummaryAsync: monthSummaryAsync,
+                            activeOffset: activeOffset,
+                            assets: assets,
+                            clampedSelectedDay: clampedSelectedDay,
+                            isDesktopPane: true,
+                          ),
                         ),
                       ),
                     ),
                     const VerticalDivider(width: 1),
                     Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          _buildDesktopSelectedDayHeader(
-                            context,
-                            month,
-                            summariesAsync,
-                            clampedSelectedDay,
-                            selectedDayNoonMs,
-                          ),
-                          const Divider(height: 1),
-                          Expanded(
-                            child: _buildSelectedDayRecords(
+                      child: _buildSectionCard(
+                        context,
+                        margin: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            _buildDesktopSelectedDayHeader(
                               context,
+                              month,
                               summariesAsync,
                               clampedSelectedDay,
-                              categories,
-                              assets,
+                              selectedDayNoonMs,
                             ),
-                          ),
-                        ],
+                            Expanded(
+                              child: _buildSelectedDayRecords(
+                                context,
+                                summariesAsync,
+                                clampedSelectedDay,
+                                categories,
+                                assets,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ],
@@ -375,6 +385,59 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
                     ),
                   )
                 : buildSingleColumnBody()),
+    );
+  }
+
+  Widget _buildSectionCard(
+    BuildContext context, {
+    required EdgeInsetsGeometry margin,
+    required Widget child,
+  }) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
+    return Card(
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      clipBehavior: Clip.antiAlias,
+      color: isDark
+          ? scheme.surfaceContainerLow
+          : Color.lerp(
+              scheme.surfaceContainerLow,
+              scheme.surfaceContainer,
+              0.55,
+            )!,
+      margin: margin,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: child,
+    );
+  }
+
+  Widget _buildMonthSection(
+    BuildContext context, {
+    required CalendarMonth month,
+    required AsyncValue<IncomeExpense> monthSummaryAsync,
+    required int activeOffset,
+    required List<Asset> assets,
+    required int clampedSelectedDay,
+    bool isDesktopPane = false,
+  }) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _buildMonthSwitcher(context, month),
+        _buildMonthSummaryCard(context, monthSummaryAsync),
+        _buildWeekdayHeader(context),
+        _buildCalendarPageView(
+          context,
+          activeOffset: activeOffset,
+          activeMonth: month,
+          assets: assets,
+          clampedSelectedDay: clampedSelectedDay,
+          isDesktopPane: isDesktopPane,
+        ),
+        const SizedBox(height: 4),
+      ],
     );
   }
 
@@ -461,7 +524,7 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
   Widget _buildMonthSwitcher(BuildContext context, CalendarMonth month) {
     final offsetNotifier = ref.read(calendarMonthOffsetProvider.notifier);
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+      padding: const EdgeInsets.fromLTRB(8, 4, 8, 0),
       child: Row(
         children: [
           IconButton(
@@ -520,11 +583,13 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
     final summary = summaryAsync.value ?? IncomeExpense.zero;
 
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
       decoration: BoxDecoration(
-        color: scheme.surfaceContainerHighest.withValues(alpha: 0.4),
-        borderRadius: BorderRadius.circular(8),
+        color: isDark
+            ? scheme.surfaceContainerHigh.withValues(alpha: 0.65)
+            : scheme.surfaceContainerHighest.withValues(alpha: 0.45),
+        borderRadius: BorderRadius.circular(12),
       ),
       child: Row(
         children: [
@@ -600,7 +665,7 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
         : Colors.orange.shade800;
     const weekdays = ['一', '二', '三', '四', '五', '六', '日'];
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
       child: Row(
         children: [
           for (var i = 0; i < 7; i++)
@@ -657,7 +722,7 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
             ? math.min(cellHeight, constraints.maxHeight / rowCount)
             : cellHeight;
         return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 4),
           child: GridView.builder(
             key: isActivePage
                 ? const Key('calendar-grid')
@@ -866,9 +931,8 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
     final hasDaySummary =
         summary.expense != BigInt.zero || summary.income != BigInt.zero;
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-      color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.25),
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       child: Row(
         children: [
           Expanded(
@@ -952,9 +1016,8 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
     final hasDaySummary =
         summary.expense != BigInt.zero || summary.income != BigInt.zero;
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-      color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Row(
         children: [
           Flexible(
