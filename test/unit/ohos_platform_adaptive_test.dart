@@ -83,6 +83,8 @@ void main() {
           expect(isDesktopTargetPlatform(ohos), isFalse);
           expect(isOhosTargetPlatform(ohos), isTrue);
           expect(isAndroidAppWidgetSupportedPlatform(ohos), isFalse);
+          expect(isMobileHomeWidgetSupportedPlatform(ohos), isTrue);
+          expect(isNativeOfflineOcrSupportedPlatform(ohos), isTrue);
           expect(isAndroidAccessibilitySupportedPlatform(ohos), isFalse);
         }
       },
@@ -104,6 +106,27 @@ void main() {
           isFalse,
         );
         expect(
+          isMobileHomeWidgetSupportedPlatform(TargetPlatform.android),
+          isTrue,
+        );
+        expect(
+          isMobileHomeWidgetSupportedPlatform(TargetPlatform.iOS),
+          isFalse,
+        );
+        expect(
+          isMobileHomeWidgetSupportedPlatform(TargetPlatform.linux),
+          isFalse,
+        );
+        expect(
+          isNativeOfflineOcrSupportedPlatform(TargetPlatform.android),
+          isTrue,
+        );
+        expect(isNativeOfflineOcrSupportedPlatform(TargetPlatform.iOS), isTrue);
+        expect(
+          isNativeOfflineOcrSupportedPlatform(TargetPlatform.linux),
+          isFalse,
+        );
+        expect(
           isAndroidAccessibilitySupportedPlatform(TargetPlatform.android),
           isTrue,
         );
@@ -117,11 +140,15 @@ void main() {
 
   group('HarmonyOS UI capability gating', () {
     testWidgets(
-      'HarmonyOS MePage hides Android-only AppWidgets while keeping Reminders, App Lock, Auto-Bill inbox, URL Scheme, and MCP visible',
+      'HarmonyOS MePage exposes mobile service-card widgets (me-widgets) alongside Reminders, App Lock, Auto-Bill inbox, URL Scheme, and MCP',
       (tester) async {
-        final ohos = _lookupOhosTargetPlatform() ?? TargetPlatform.iOS;
-        final isRealOhos = ohos.name == 'ohos';
-        debugDefaultTargetPlatformOverride = ohos;
+        // When running on official Flutter (no TargetPlatform.ohos enum value),
+        // verify mobile home-widget gating via TargetPlatform.android vs iOS;
+        // on CPF-Flutter, verify real TargetPlatform.ohos directly!
+        final ohos = _lookupOhosTargetPlatform();
+        final testPlatform = ohos ?? TargetPlatform.android;
+        final isRealOhos = ohos != null;
+        debugDefaultTargetPlatformOverride = testPlatform;
         try {
           await tester.binding.setSurfaceSize(const Size(390, 844));
           addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -132,14 +159,18 @@ void main() {
               child: MaterialApp(
                 localizationsDelegates: GlobalMaterialLocalizations.delegates,
                 supportedLocales: const <Locale>[Locale('zh'), Locale('en')],
-                theme: ThemeData(platform: ohos, useMaterial3: true),
+                theme: ThemeData(platform: testPlatform, useMaterial3: true),
                 home: Builder(
                   builder: (context) {
                     expect(DesktopAdaptive.isDesktop(context), isFalse);
                     expect(DesktopAdaptive.isOhos(context), isRealOhos);
                     expect(
                       DesktopAdaptive.supportsAndroidAppWidgets(context),
-                      isFalse,
+                      !isRealOhos,
+                    );
+                    expect(
+                      DesktopAdaptive.supportsMobileHomeWidgets(context),
+                      isTrue,
                     );
                     return const MePage();
                   },
@@ -149,15 +180,14 @@ void main() {
           );
           await _settle(tester);
 
-          // Android-only AppWidget entry is hidden on HarmonyOS / non-Android mobile
-          expect(find.byKey(const Key('me-widgets')), findsNothing);
-
-          // Visible & enabled HarmonyOS capabilities in MePage
+          // Visible & enabled HarmonyOS capabilities in MePage (now including me-widgets!)
           final scrollable = find.byType(Scrollable).first;
           for (final key in const <Key>[
             Key('me-reminders'),
             Key('me-migration'),
             Key('me-auto-bill'),
+            Key('me-ocr'),
+            Key('me-widgets'),
             Key('me-url-scheme'),
             Key('me-mcp'),
             Key('me-app-lock'),
@@ -177,7 +207,7 @@ void main() {
     );
 
     testWidgets(
-      'HarmonyOS pages expose Biometrics, Daily Reminders, tallyisle:// URL Scheme, MCP hints, and honest unsupported AppWidget / Accessibility states',
+      'HarmonyOS pages expose Biometrics, Daily Reminders, tallyisle:// URL Scheme, MCP hints, 4 native Form service cards, and honest unsupported Accessibility state',
       (tester) async {
         final ohos = _lookupOhosTargetPlatform() ?? TargetPlatform.iOS;
         final isRealOhos = ohos.name == 'ohos';
@@ -189,7 +219,7 @@ void main() {
           notificationsEnabled: false,
         );
         final autoBridge = createAutoBillBridge(isOhosOverride: true);
-        final widgetBridge = createAppWidgetBridge();
+        final widgetBridge = createAppWidgetBridge(isOhosOverride: true);
 
         await tester.runAsync(() async {
           final lockSvc = AppLockService(db, authenticator: bio);
@@ -281,7 +311,7 @@ void main() {
           );
         }
 
-        // 5. AutoBillPage: honest 当前平台不支持 badge, zero dead settings button, paste-only empty copy
+        // 5. AutoBillPage: honest 当前平台不支持 badge, zero dead settings button, HarmonyOS share guide strip
         await tester.pumpWidget(buildApp(const AutoBillPage()));
         await _settle(tester);
         expect(find.byKey(const Key('auto_bill_status_badge')), findsOneWidget);
@@ -290,22 +320,39 @@ void main() {
           find.byKey(const Key('auto_bill_open_settings_button')),
           findsNothing,
         );
-        expect(find.textContaining('开启无障碍识别'), findsNothing);
-
-        // 6. DesktopWidgetsPage (if opened directly): capability banner shown, pin button disabled, Android launcher guide hidden
-        await tester.pumpWidget(buildApp(const DesktopWidgetsPage()));
-        await _settle(tester);
-        expect(widgetBridge.capability.state, CapabilityState.unsupported);
         expect(
-          find.byKey(const Key('widget_capability_banner')),
+          find.byKey(const Key('auto_bill_ohos_guide_strip')),
           findsOneWidget,
         );
-        final pinBtn = tester.widget<FilledButton>(
-          find.byKey(const Key('widget_pin_quick_add')),
+        expect(find.textContaining('开启无障碍识别'), findsNothing);
+
+        // 6. DesktopWidgetsPage: CapabilityState.available on HarmonyOS with all 4 service cards & HarmonyOS guide
+        await tester.pumpWidget(buildApp(const DesktopWidgetsPage()));
+        await _settle(tester);
+        expect(widgetBridge.capability.state, CapabilityState.available);
+        expect(find.byKey(const Key('widget_capability_banner')), findsNothing);
+        final widgetScroll = find.byType(Scrollable).first;
+        for (final kind in DesktopWidgetKind.values) {
+          final pinFinder = find.byKey(Key('widget_pin_${kind.wireKey}'));
+          await tester.scrollUntilVisible(
+            pinFinder,
+            220,
+            scrollable: widgetScroll,
+          );
+          expect(
+            find.byKey(Key('widget_section_${kind.wireKey}')),
+            findsOneWidget,
+          );
+          final pinBtn = tester.widget<FilledButton>(pinFinder);
+          expect(pinBtn.onPressed, isNotNull);
+        }
+        await tester.scrollUntilVisible(
+          find.byKey(const Key('widget_ohos_guide_card')),
+          220,
+          scrollable: widgetScroll,
         );
-        expect(pinBtn.onPressed, isNull);
-        expect(find.text('仅支持 Android 系统桌面'), findsWidgets);
-        expect(find.byKey(const Key('widget_add_guide_card')), findsNothing);
+        expect(find.byKey(const Key('widget_ohos_guide_card')), findsOneWidget);
+        expect(find.textContaining('仅支持 Android'), findsNothing);
 
         // 7. SettingsPage compiles and renders cleanly without desktop shortcuts card
         await tester.pumpWidget(buildApp(const SettingsPage()));

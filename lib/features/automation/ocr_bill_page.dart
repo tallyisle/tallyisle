@@ -1,23 +1,30 @@
-import 'dart:typed_data';
-
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/adaptive.dart';
 import '../../app/providers.dart';
 import '../../core/failure.dart';
 import '../../data/automation/ocr_service.dart';
+import '../../data/automation/url_scheme_service.dart'
+    show matchCategoryByRef, matchFundingAssetByHint;
 import '../../data/db/database.dart';
 import '../../domain/model/codes.dart';
+import '../../domain/rules/auto_map_rules.dart';
 import '../../domain/rules/ocr_bill_rules.dart';
+import '../../domain/rules/smart_bill_nlp_rules.dart';
 import '../../domain/rules/url_scheme_rules.dart' show parseUrlMoney;
 import '../common/common.dart';
 import 'automation_providers.dart';
 
 /// Bill screenshot OCR & text parsing review page (`F-021`, `ADR-017`).
 ///
-/// Explicitly displays `'未配置'` when no `OcrProvider` endpoint is configured
-/// and NEVER fakes image OCR results.
+/// - Mobile (`Android` / `iOS` / `HarmonyOS`): defaults to built-in on-device
+///   offline OCR (`本机离线引擎（免费就绪）`).
+/// - Desktop / unconfigured: explicitly displays `'未配置'` and NEVER fakes
+///   image OCR results.
+/// - Supports switching between Native Offline OCR, Custom HTTP OCR, and
+///   Optional OpenAI-compatible AI Vision / Text Parser (`AiBillParserConfig`).
 class OcrBillPage extends ConsumerStatefulWidget {
   const OcrBillPage({super.key});
 
@@ -43,10 +50,14 @@ class _OcrBillPageState extends ConsumerState<OcrBillPage> {
     super.dispose();
   }
 
-  Future<void> _openConfigDialog(OcrEndpointConfig current) async {
+  Future<void> _openConfigDialog(
+    OcrEndpointConfig currentOcr,
+    AiBillParserConfig currentAi,
+  ) async {
     final updated = await showDialog<bool>(
       context: context,
-      builder: (_) => _OcrConfigDialog(initial: current),
+      builder: (_) =>
+          _OcrConfigDialog(initialOcr: currentOcr, initialAi: currentAi),
     );
     if (updated == true && mounted) {
       setState(() => _error = null);
@@ -99,11 +110,32 @@ class _OcrBillPageState extends ConsumerState<OcrBillPage> {
     }
   }
 
+  Future<void> _pasteAndParseClipboard() async {
+    if (_recognizing) return;
+    setState(() {
+      _error = null;
+      _infoMessage = null;
+    });
+    try {
+      final data = await Clipboard.getData(Clipboard.kTextPlain);
+      if (!mounted) return;
+      final text = data?.text?.trim() ?? '';
+      if (text.isEmpty) {
+        setState(() => _error = '剪贴板中暂无可识别文本');
+        return;
+      }
+      _textController.text = text;
+      await _parseTextLocally();
+    } catch (e) {
+      if (mounted) setState(() => _error = safeMessage(e));
+    }
+  }
+
   Future<void> _parseTextLocally() async {
     final raw = _textController.text.trim();
     if (raw.isEmpty) {
       setState(() {
-        _error = '请先粘贴或输入微信/支付宝账单文本或小票内容';
+        _error = '请先粘贴或输入微信/支付宝账单文本、口语或小票内容';
         _infoMessage = null;
       });
       return;
@@ -115,13 +147,27 @@ class _OcrBillPageState extends ConsumerState<OcrBillPage> {
     });
     try {
       final service = await ref.read(ocrServiceProvider.future);
-      final bookId = ref.read(currentBookIdProvider).value;
-      final parsed = await service.parseTextToCandidates(raw, bookId: bookId);
+      final autoService = await ref.read(autoBillServiceProvider.future);
+      final bookId = ref.read(currentBookIdProvider).value ?? 1;
+      var parsed = await service.parseTextToCandidates(raw, bookId: bookId);
+
+      final aiConfig = await autoService.getAiParserConfig();
+      if (aiConfig.isConfigured && (!aiConfig.fallbackOnly || parsed.isEmpty)) {
+        try {
+          final aiCandidates = await _parseWithAi(raw, aiConfig, bookId);
+          if (aiCandidates.isNotEmpty) {
+            parsed = aiCandidates;
+          }
+        } on Failure {
+          if (parsed.isEmpty) rethrow;
+        }
+      }
+
       if (!mounted) return;
       setState(() {
         _candidates = parsed;
         if (parsed.isEmpty) {
-          _error = '未从文本中提取到有效金额，请包含如“-18.50”或“实付 36.00”的金额行';
+          _error = '未从文本中提取到有效金额，请包含如“-18.50”、“实付 36.00”或“早饭9块5”的金额';
         } else {
           _infoMessage = '解析成功：共识别出 ${parsed.length} 条待核对账单';
         }
@@ -132,6 +178,89 @@ class _OcrBillPageState extends ConsumerState<OcrBillPage> {
     } finally {
       if (mounted) setState(() => _recognizing = false);
     }
+  }
+
+  Future<List<OcrBillCandidate>> _parseWithAi(
+    String rawText,
+    AiBillParserConfig aiConfig,
+    int bookId,
+  ) async {
+    final db = await ref.read(databaseProvider.future);
+    final autoService = await ref.read(autoBillServiceProvider.future);
+    final categories =
+        ref.read(categoriesProvider(bookId)).value ??
+        await (db.select(
+          db.recordCategories,
+        )..where((t) => t.accountBookId.equals(bookId))).get();
+    final allAssets =
+        ref.read(assetsProvider).value ?? await db.select(db.assets).get();
+    final links =
+        ref.read(assetBooksProvider).value ??
+        await db.select(db.assetBooks).get();
+    final rules = await autoService.listRules();
+    final fundingAssets = [
+      for (final a in allAssets)
+        if (a.type != AssetType.debt && a.status != AssetStatus.settled) a,
+    ];
+
+    final aiClient = ref.read(aiBillParserClientProvider);
+    final bills = await aiClient.parseText(
+      rawText,
+      config: aiConfig,
+      nowMs: db.nowMs(),
+      categoryNames: [
+        for (final c in categories)
+          if (!c.isHide) c.name,
+      ],
+      assetNames: [for (final a in fundingAssets) a.name],
+    );
+
+    final out = <OcrBillCandidate>[];
+    for (var i = 0; i < bills.length; i++) {
+      final b = bills[i];
+      final effectiveType = b.recordType == RecordType.income
+          ? RecordType.income
+          : RecordType.expense;
+      final matched = matchAutoMapRules(rules, [
+        b.remark,
+        ?b.categoryHint,
+        ?b.assetHint,
+      ]);
+      final dirCats = categories
+          .where((c) => !c.isHide && c.type == effectiveType)
+          .toList(growable: false);
+      final catId =
+          dirCats.where((c) => c.id == matched.categoryId).firstOrNull?.id ??
+          (b.categoryHint == null
+              ? null
+              : matchCategoryByRef(dirCats, b.categoryHint!)?.id) ??
+          dirCats.firstOrNull?.id;
+      final assetId =
+          fundingAssets.where((a) => a.id == matched.assetId).firstOrNull?.id ??
+          matchFundingAssetByHint(
+            assets: fundingAssets,
+            links: links,
+            bookId: bookId,
+            rawHint: b.assetHint,
+          )?.id;
+      final remark = matched.remark ?? (b.remark.isEmpty ? 'AI 识账' : b.remark);
+      out.add(
+        OcrBillCandidate(
+          index: i,
+          type: effectiveType,
+          money: b.money,
+          discount: b.discount,
+          recordTimeMs: b.recordTimeMs,
+          merchant: remark,
+          remark: remark,
+          categoryHint: b.categoryHint,
+          accountHint: b.assetHint,
+          categoryId: catId,
+          assetId: assetId,
+        ),
+      );
+    }
+    return out;
   }
 
   void _updateCandidate(int index, OcrBillCandidate updated) {
@@ -217,6 +346,9 @@ class _OcrBillPageState extends ConsumerState<OcrBillPage> {
     final providerAsync = ref.watch(ocrProviderInstanceProvider);
     final config =
         ref.watch(ocrConfigProvider).value ?? const OcrEndpointConfig();
+    final aiConfig =
+        ref.watch(aiBillParserConfigProvider).value ??
+        const AiBillParserConfig();
     final provider = providerAsync.value ?? const UnconfiguredOcrProvider();
     final bookId = ref.watch(currentBookIdProvider).value ?? 1;
     final categories =
@@ -241,7 +373,8 @@ class _OcrBillPageState extends ConsumerState<OcrBillPage> {
         _OcrProviderStatusCard(
           provider: provider,
           config: config,
-          onConfigure: () => _openConfigDialog(config),
+          aiConfig: aiConfig,
+          onConfigure: () => _openConfigDialog(config, aiConfig),
         ),
         const SizedBox(height: 12),
         Card(
@@ -287,13 +420,28 @@ class _OcrBillPageState extends ConsumerState<OcrBillPage> {
                     ),
                   ],
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 8),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton.icon(
+                    key: const Key('ocr_paste_parse_button'),
+                    style: TextButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                    ),
+                    onPressed: _recognizing ? null : _pasteAndParseClipboard,
+                    icon: const Icon(Icons.content_paste_go_rounded, size: 16),
+                    label: const Text('粘贴剪贴板文本解析'),
+                  ),
+                ),
+                const SizedBox(height: 6),
                 TextField(
                   key: const Key('ocr_text_input'),
                   controller: _textController,
                   maxLines: 3,
                   decoration: const InputDecoration(
-                    labelText: '账单明细或小票文本（支持直接离线粘贴解析）',
+                    labelText: '账单明细、小票或口语文本（支持直接离线解析）',
                     hintText: '例如：\n11月10日 09:15\n瑞幸咖啡\n-18.50',
                     border: OutlineInputBorder(),
                   ),
@@ -437,17 +585,28 @@ class _OcrProviderStatusCard extends StatelessWidget {
   const _OcrProviderStatusCard({
     required this.provider,
     required this.config,
+    required this.aiConfig,
     required this.onConfigure,
   });
 
   final OcrProvider provider;
   final OcrEndpointConfig config;
+  final AiBillParserConfig aiConfig;
   final VoidCallback onConfigure;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final configured = provider.isConfigured;
+    final aiSuffix = aiConfig.isConfigured ? ' · 已开启 AI 智能解析' : '';
+    final description = switch (provider.id) {
+      'native_offline' => '本机离线识图引擎开箱即用，全程断网本地提取文字，零上传零费用$aiSuffix。',
+      'ai_vision' =>
+        '多模态 AI 识图：${aiConfig.chatCompletionsUri.host}（${aiConfig.model}）',
+      'configurable_http' => 'HTTP 接口地址：${config.endpointUrl}$aiSuffix',
+      _ =>
+        '${provider.capability.reason}；可点击右侧配置自定义 HTTP OCR 或 AI 大模型接口$aiSuffix。',
+    };
 
     return Card(
       key: const Key('ocr_provider_status_card'),
@@ -456,7 +615,11 @@ class _OcrProviderStatusCard extends StatelessWidget {
         child: Row(
           children: [
             Icon(
-              configured ? Icons.cloud_done_outlined : Icons.cloud_off_outlined,
+              provider.id == 'native_offline'
+                  ? Icons.offline_bolt_outlined
+                  : (configured
+                        ? Icons.cloud_done_outlined
+                        : Icons.cloud_off_outlined),
               color: configured
                   ? theme.colorScheme.primary
                   : theme.colorScheme.outline,
@@ -502,12 +665,7 @@ class _OcrProviderStatusCard extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: 4),
-                  Text(
-                    configured
-                        ? '接口地址：${config.endpointUrl}'
-                        : '当前未配置图片 OCR 接口；可点击右侧配置自建/第三方 HTTP OCR 服务，或直接粘贴文本解析。',
-                    style: theme.textTheme.bodySmall,
-                  ),
+                  Text(description, style: theme.textTheme.bodySmall),
                 ],
               ),
             ),
@@ -518,7 +676,7 @@ class _OcrProviderStatusCard extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(horizontal: 8),
               ),
               onPressed: onConfigure,
-              child: Text(configured ? '修改配置' : '配置接口'),
+              child: Text(configured ? '识别设置' : '配置接口'),
             ),
           ],
         ),
@@ -528,17 +686,27 @@ class _OcrProviderStatusCard extends StatelessWidget {
 }
 
 class _OcrConfigDialog extends ConsumerStatefulWidget {
-  const _OcrConfigDialog({required this.initial});
+  const _OcrConfigDialog({required this.initialOcr, required this.initialAi});
 
-  final OcrEndpointConfig initial;
+  final OcrEndpointConfig initialOcr;
+  final AiBillParserConfig initialAi;
 
   @override
   ConsumerState<_OcrConfigDialog> createState() => _OcrConfigDialogState();
 }
 
 class _OcrConfigDialogState extends ConsumerState<_OcrConfigDialog> {
+  late OcrModePreference _mode;
   late final TextEditingController _urlController;
   late final TextEditingController _apiKeyController;
+
+  late bool _aiEnabled;
+  late bool _aiUseForImages;
+  late bool _aiFallbackOnly;
+  late final TextEditingController _aiBaseUrlController;
+  late final TextEditingController _aiModelController;
+  late final TextEditingController _aiApiKeyController;
+
   final CommandIds _commandIds = CommandIds();
   bool _saving = false;
   String? _error;
@@ -546,14 +714,27 @@ class _OcrConfigDialogState extends ConsumerState<_OcrConfigDialog> {
   @override
   void initState() {
     super.initState();
-    _urlController = TextEditingController(text: widget.initial.endpointUrl);
-    _apiKeyController = TextEditingController(text: widget.initial.apiKey);
+    _mode = widget.initialOcr.effectiveMode;
+    _urlController = TextEditingController(text: widget.initialOcr.endpointUrl);
+    _apiKeyController = TextEditingController(text: widget.initialOcr.apiKey);
+
+    _aiEnabled = widget.initialAi.enabled;
+    _aiUseForImages = widget.initialAi.useForImages;
+    _aiFallbackOnly = widget.initialAi.fallbackOnly;
+    _aiBaseUrlController = TextEditingController(
+      text: widget.initialAi.baseUrl,
+    );
+    _aiModelController = TextEditingController(text: widget.initialAi.model);
+    _aiApiKeyController = TextEditingController(text: widget.initialAi.apiKey);
   }
 
   @override
   void dispose() {
     _urlController.dispose();
     _apiKeyController.dispose();
+    _aiBaseUrlController.dispose();
+    _aiModelController.dispose();
+    _aiApiKeyController.dispose();
     super.dispose();
   }
 
@@ -563,15 +744,47 @@ class _OcrConfigDialogState extends ConsumerState<_OcrConfigDialog> {
       _error = null;
     });
     try {
-      final service = await ref.read(ocrServiceProvider.future);
-      final next = OcrEndpointConfig(
-        endpointUrl: _urlController.text,
-        apiKey: _apiKeyController.text,
-        timeoutSeconds: widget.initial.timeoutSeconds,
+      final ocrService = await ref.read(ocrServiceProvider.future);
+      final autoService = await ref.read(autoBillServiceProvider.future);
+
+      final effectiveMode =
+          _mode == OcrModePreference.nativeOffline &&
+              _urlController.text.trim().isNotEmpty
+          ? OcrModePreference.customHttp
+          : _mode;
+
+      final nextOcr = OcrEndpointConfig(
+        mode: effectiveMode,
+        endpointUrl: effectiveMode == OcrModePreference.nativeOffline
+            ? ''
+            : _urlController.text,
+        apiKey: effectiveMode == OcrModePreference.nativeOffline
+            ? ''
+            : _apiKeyController.text,
+        timeoutSeconds: widget.initialOcr.timeoutSeconds,
       );
-      await service.saveConfig(
-        commandId: _commandIds.forPayload(['save-ocr-cfg', next.encode()]),
-        config: next,
+
+      final wantAiEnabled =
+          _aiEnabled || effectiveMode == OcrModePreference.aiVision;
+      final wantAiImages =
+          _aiUseForImages || effectiveMode == OcrModePreference.aiVision;
+      final nextAi = AiBillParserConfig(
+        enabled: wantAiEnabled,
+        baseUrl: _aiBaseUrlController.text,
+        apiKey: _aiApiKeyController.text,
+        model: _aiModelController.text,
+        useForImages: wantAiImages,
+        fallbackOnly: _aiFallbackOnly,
+        timeoutSeconds: widget.initialAi.timeoutSeconds,
+      );
+
+      await ocrService.saveConfig(
+        commandId: _commandIds.forPayload(['save-ocr-cfg', nextOcr.encode()]),
+        config: nextOcr,
+      );
+      await autoService.saveAiParserConfig(
+        commandId: _commandIds.forPayload(['save-ai-cfg', nextAi.encode()]),
+        config: nextAi,
       );
       if (!mounted) return;
       Navigator.pop(context, true);
@@ -588,12 +801,15 @@ class _OcrConfigDialogState extends ConsumerState<_OcrConfigDialog> {
       _error = null;
     });
     try {
-      final service = await ref.read(ocrServiceProvider.future);
-      await service.clearConfig(
-        commandId: _commandIds.forPayload([
-          'clear-ocr-cfg',
-          DateTime.now().millisecondsSinceEpoch,
-        ]),
+      final ocrService = await ref.read(ocrServiceProvider.future);
+      final autoService = await ref.read(autoBillServiceProvider.future);
+      final ts = DateTime.now().millisecondsSinceEpoch;
+      await ocrService.clearConfig(
+        commandId: _commandIds.forPayload(['clear-ocr-cfg', ts]),
+      );
+      await autoService.saveAiParserConfig(
+        commandId: _commandIds.forPayload(['clear-ai-cfg', ts]),
+        config: const AiBillParserConfig(),
       );
       if (!mounted) return;
       Navigator.pop(context, true);
@@ -605,63 +821,184 @@ class _OcrConfigDialogState extends ConsumerState<_OcrConfigDialog> {
   }
 
   @override
-  Widget build(BuildContext context) => AlertDialog(
-    key: const Key('ocr_config_dialog'),
-    title: const Text('配置 HTTP OCR 接口'),
-    content: SizedBox(
-      width: 420,
-      child: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              key: const Key('ocr_endpoint_input'),
-              controller: _urlController,
-              decoration: const InputDecoration(
-                labelText: 'HTTP/HTTPS 接口地址',
-                hintText: 'https://ocr.example.com/v1/recognize',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              key: const Key('ocr_apikey_input'),
-              controller: _apiKeyController,
-              obscureText: true,
-              decoration: const InputDecoration(
-                labelText: 'Bearer API Key（可选）',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            if (_error != null) ...[
-              const SizedBox(height: 8),
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final hasCustomConfig =
+        !widget.initialOcr.isDefault ||
+        widget.initialAi != const AiBillParserConfig();
+
+    return AlertDialog(
+      key: const Key('ocr_config_dialog'),
+      title: const Text('识图引擎与 AI 解析设置'),
+      content: SizedBox(
+        width: 440,
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
+            children: [
               Text(
-                _error!,
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
+                '图片识别通道',
+                style: theme.textTheme.labelMedium?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
               ),
+              const SizedBox(height: 6),
+              SizedBox(
+                width: double.infinity,
+                child: SegmentedButton<OcrModePreference>(
+                  key: const Key('ocr_mode_segment'),
+                  showSelectedIcon: false,
+                  segments: const [
+                    ButtonSegment(
+                      value: OcrModePreference.nativeOffline,
+                      label: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text('本机离线', maxLines: 1, softWrap: false),
+                      ),
+                    ),
+                    ButtonSegment(
+                      value: OcrModePreference.customHttp,
+                      label: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text('HTTP OCR', maxLines: 1, softWrap: false),
+                      ),
+                    ),
+                    ButtonSegment(
+                      value: OcrModePreference.aiVision,
+                      label: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text('AI 识图', maxLines: 1, softWrap: false),
+                      ),
+                    ),
+                  ],
+                  selected: {_mode},
+                  onSelectionChanged: (s) => setState(() {
+                    _mode = s.first;
+                    if (_mode == OcrModePreference.aiVision) {
+                      _aiEnabled = true;
+                      _aiUseForImages = true;
+                    }
+                  }),
+                ),
+              ),
+              const SizedBox(height: 12),
+              if (_mode == OcrModePreference.nativeOffline)
+                Text(
+                  'Android / iOS / HarmonyOS 默认调用系统本机离线识别引擎，无需联网与密钥。',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              if (_mode == OcrModePreference.customHttp) ...[
+                TextField(
+                  key: const Key('ocr_endpoint_input'),
+                  controller: _urlController,
+                  decoration: const InputDecoration(
+                    labelText: 'HTTP/HTTPS OCR 接口地址',
+                    hintText: 'https://ocr.example.com/v1/recognize',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  key: const Key('ocr_apikey_input'),
+                  controller: _apiKeyController,
+                  obscureText: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Bearer API Key（可选）',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ],
+              const Divider(height: 24),
+              SwitchListTile(
+                key: const Key('ocr_ai_enable_switch'),
+                contentPadding: EdgeInsets.zero,
+                title: const Text('可选 AI 大模型智能解析'),
+                subtitle: const Text(
+                  '兼容 DeepSeek / 通义千问 / OpenAI 接口，辅助解析复杂小票与口语',
+                ),
+                value: _aiEnabled || _mode == OcrModePreference.aiVision,
+                onChanged: _mode == OcrModePreference.aiVision
+                    ? null
+                    : (v) => setState(() => _aiEnabled = v),
+              ),
+              if (_aiEnabled || _mode == OcrModePreference.aiVision) ...[
+                const SizedBox(height: 8),
+                TextField(
+                  key: const Key('ocr_ai_baseurl_input'),
+                  controller: _aiBaseUrlController,
+                  decoration: const InputDecoration(
+                    labelText: 'OpenAI 兼容 Base URL',
+                    hintText: 'https://api.deepseek.com/v1',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  key: const Key('ocr_ai_model_input'),
+                  controller: _aiModelController,
+                  decoration: const InputDecoration(
+                    labelText: '模型名称 (Model)',
+                    hintText: 'deepseek-chat 或 qwen-vl-max',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  key: const Key('ocr_ai_apikey_input'),
+                  controller: _aiApiKeyController,
+                  obscureText: true,
+                  decoration: const InputDecoration(
+                    labelText: 'API Key（可选，本地模型可留空）',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                SwitchListTile(
+                  key: const Key('ocr_ai_vision_switch'),
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('允许用于多模态图片直识'),
+                  value: _aiUseForImages || _mode == OcrModePreference.aiVision,
+                  onChanged: _mode == OcrModePreference.aiVision
+                      ? null
+                      : (v) => setState(() => _aiUseForImages = v),
+                ),
+                SwitchListTile(
+                  key: const Key('ocr_ai_fallback_switch'),
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('仅在离线规则置信度不足时调用'),
+                  value: _aiFallbackOnly,
+                  onChanged: (v) => setState(() => _aiFallbackOnly = v),
+                ),
+              ],
+              if (_error != null) ...[
+                const SizedBox(height: 8),
+                Text(_error!, style: TextStyle(color: theme.colorScheme.error)),
+              ],
             ],
-          ],
+          ),
         ),
       ),
-    ),
-    actions: [
-      if (widget.initial.isConfigured)
+      actions: [
+        if (hasCustomConfig)
+          TextButton(
+            key: const Key('ocr_config_clear_button'),
+            onPressed: _saving ? null : _clear,
+            child: const Text('恢复默认'),
+          ),
         TextButton(
-          key: const Key('ocr_config_clear_button'),
-          onPressed: _saving ? null : _clear,
-          child: const Text('清除配置'),
+          onPressed: _saving ? null : () => Navigator.pop(context, false),
+          child: const Text('取消'),
         ),
-      TextButton(
-        onPressed: _saving ? null : () => Navigator.pop(context, false),
-        child: const Text('取消'),
-      ),
-      FilledButton(
-        key: const Key('ocr_config_save_button'),
-        onPressed: _saving ? null : _save,
-        child: const Text('保存配置'),
-      ),
-    ],
-  );
+        FilledButton(
+          key: const Key('ocr_config_save_button'),
+          onPressed: _saving ? null : _save,
+          child: const Text('保存配置'),
+        ),
+      ],
+    );
+  }
 }
 
 class _CandidateReviewCard extends StatelessWidget {

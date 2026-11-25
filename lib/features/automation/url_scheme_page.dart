@@ -95,8 +95,8 @@ class _UrlSchemePageState extends ConsumerState<UrlSchemePage> {
       if (!mounted) return;
       setState(() => _lastResult = result);
 
-      // Refresh desktop widget snapshot if a record was written.
-      if (result.wroteRecord) {
+      // Refresh desktop widget snapshot if a record or draft was written.
+      if (result.wroteRecord || result.createdDraftId != null) {
         final widgetService = await ref.read(
           widgetSnapshotServiceProvider.future,
         );
@@ -281,9 +281,16 @@ class _UrlSchemePageState extends ConsumerState<UrlSchemePage> {
                   const SizedBox(height: 12),
                   _ExecutionResultBanner(
                     result: _lastResult!,
-                    onOpenRoute: _lastResult!.targetRoute == null
-                        ? null
-                        : () => _openTargetRoute(_lastResult!.targetRoute!),
+                    onOpenRoute: () {
+                      final target =
+                          _lastResult!.targetRoute ??
+                          (_lastResult!.createdDraftId != null
+                              ? autoBillDraftsRoute
+                              : null);
+                      if (target != null) {
+                        _openTargetRoute(target);
+                      }
+                    },
                   ),
                 ],
               ],
@@ -343,6 +350,13 @@ class _ExecutionResultBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final hasNavTarget =
+        result.targetRoute != null || result.createdDraftId != null;
+    final statusTitle = result.wroteRecord
+        ? '已成功写入账单（ID: ${result.createdRecordId}）'
+        : result.createdDraftId != null
+        ? '已智能识别并加入待确认草稿箱（#${result.createdDraftId}）'
+        : '解析成功：目标路由 ${result.targetRoute ?? '内部动作'}';
     return Container(
       key: const Key('url_scheme_result_success'),
       width: double.infinity,
@@ -355,9 +369,7 @@ class _ExecutionResultBanner extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            result.wroteRecord
-                ? '已成功写入账单（ID: ${result.createdRecordId}）'
-                : '解析成功：目标路由 ${result.targetRoute ?? '内部动作'}',
+            statusTitle,
             style: TextStyle(
               color: theme.colorScheme.onSecondaryContainer,
               fontWeight: FontWeight.w600,
@@ -373,13 +385,13 @@ class _ExecutionResultBanner extends StatelessWidget {
                 ),
               ),
             ),
-          if (onOpenRoute != null) ...[
+          if (hasNavTarget && onOpenRoute != null) ...[
             const SizedBox(height: 8),
             TextButton.icon(
               key: const Key('url_scheme_open_route_button'),
               onPressed: onOpenRoute,
               icon: const Icon(Icons.open_in_new, size: 16),
-              label: const Text('前往目标页面'),
+              label: Text(result.createdDraftId != null ? '查看待确认草稿' : '前往目标页面'),
             ),
           ],
         ],
@@ -481,6 +493,9 @@ class _ParameterDocsCard extends StatelessWidget {
     ('tags', '标签名称或 ID 列表（多个标签以英文或中文逗号分隔）'),
     ('exbudget / exstat', '传 1 或 true 时标记不计入预算 / 不计入收支统计'),
     ('showsheet', '传 1 或 true 时改为拉起记账编辑页确认，不直接静默入账'),
+    ('text (smartbill)', '口语短句、支付通知或短信原文（如 早饭包子8.5微信）'),
+    ('clipboard (smartbill)', '传 1 时拉起智能核对页并读取一次剪贴板（仅主动点击生效）'),
+    ('mode (smartbill)', 'auto（熟店自动入账否则进草稿）| draft（进草稿）| confirm（打开核对）'),
   ];
 
   @override

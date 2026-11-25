@@ -14,6 +14,8 @@ import '../../domain/rules/asset_overview.dart';
 import '../../domain/rules/billing_period.dart';
 import '../../domain/rules/income_expense.dart';
 import '../books/book_switcher_modal.dart';
+import '../automation/automation_providers.dart'
+    show autoBillDraftCountProvider, autoBillSettingsProvider;
 import '../backup/backup_providers.dart';
 import '../backup/mobile_sync_backup_quick_sheet.dart';
 import '../budget/budget_providers.dart'
@@ -384,6 +386,78 @@ class _HomeResetPeriodPill extends StatelessWidget {
   }
 }
 
+/// Compact borderless rounded strip displayed at the top of the home record
+/// list when pending smart/auto-captured drafts await user review.
+class HomePendingDraftsBanner extends StatelessWidget {
+  const HomePendingDraftsBanner({
+    super.key = const Key('home_pending_drafts_banner'),
+    required this.draftCount,
+    this.showBanner = true,
+  });
+
+  final int draftCount;
+  final bool showBanner;
+
+  @override
+  Widget build(BuildContext context) {
+    if (draftCount <= 0 || !showBanner) {
+      return const SizedBox.shrink();
+    }
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 6, 16, 4),
+      child: Material(
+        color: scheme.secondaryContainer,
+        borderRadius: BorderRadius.circular(14),
+        clipBehavior: Clip.antiAlias,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: Row(
+            children: [
+              Icon(
+                Icons.bolt_rounded,
+                size: 18,
+                color: scheme.onSecondaryContainer,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  '有 $draftCount 笔智能识别账单待确认',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: scheme.onSecondaryContainer,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              FilledButton(
+                key: const Key('home_pending_drafts_action'),
+                style: FilledButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  minimumSize: const Size(0, 30),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 4,
+                  ),
+                ),
+                onPressed: () => context.push('/automation/auto-bill'),
+                child: const FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text('去核对', maxLines: 1, softWrap: false),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _HomeBody extends ConsumerWidget {
   const _HomeBody();
 
@@ -399,6 +473,11 @@ class _HomeBody extends ConsumerWidget {
     final assets = ref.watch(assetsProvider).value ?? const <Asset>[];
     final settings =
         ref.watch(appSettingsProvider).value ?? AppSettings.defaults;
+    final draftCount = ref.watch(autoBillDraftCountProvider);
+    final showDraftBanner =
+        draftCount > 0 &&
+        (ref.watch(autoBillSettingsProvider).value?.showHomeDraftBanner ??
+            true);
     final assetOverview = ref.watch(assetOverviewProvider).value;
     final periodOffset = ref.watch(periodOffsetProvider);
     final offset = ref.read(periodOffsetProvider.notifier);
@@ -486,6 +565,10 @@ class _HomeBody extends ConsumerWidget {
                   context.push('/budget');
                 },
               ),
+            ),
+          if (showDraftBanner)
+            SliverToBoxAdapter(
+              child: HomePendingDraftsBanner(draftCount: draftCount),
             ),
           ...switch (records) {
             AsyncData(:final value) when value.isEmpty => [
@@ -614,6 +697,11 @@ class _DesktopHomeBody extends ConsumerWidget {
     final assets = ref.watch(assetsProvider).value ?? const <Asset>[];
     final settings =
         ref.watch(appSettingsProvider).value ?? AppSettings.defaults;
+    final draftCount = ref.watch(autoBillDraftCountProvider);
+    final showDraftBanner =
+        draftCount > 0 &&
+        (ref.watch(autoBillSettingsProvider).value?.showHomeDraftBanner ??
+            true);
     final assetOverview = ref.watch(assetOverviewProvider).value;
     final periodOffset = ref.watch(periodOffsetProvider);
     final offset = ref.read(periodOffsetProvider.notifier);
@@ -726,6 +814,10 @@ class _DesktopHomeBody extends ConsumerWidget {
                 ),
               ),
           ],
+          if (showDraftBanner)
+            SliverToBoxAdapter(
+              child: HomePendingDraftsBanner(draftCount: draftCount),
+            ),
           ...switch (records) {
             AsyncData(:final value) when value.isEmpty => [
               const SliverFillRemaining(

@@ -27,6 +27,8 @@ import '../assets/assets_page.dart';
 import '../attachments/attachment_providers.dart';
 import '../automation/automation_providers.dart'
     show widgetSnapshotServiceProvider;
+import '../automation/smart_quick_sheet.dart'
+    show SmartQuickPrefillResult, showSmartQuickPrefillDialogOrSheet;
 import '../budget/budget_widgets.dart';
 import '../categories/categories_page.dart';
 import '../common/catalog_icons.dart';
@@ -1209,6 +1211,144 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
         _panelMode = _BottomPanelMode.customKeypad;
       }
       convertedEdited = false;
+      _autoConvert();
+    });
+  }
+
+  Future<void> _openSmartQuickPrefill() async {
+    if (busy || editing) return;
+    _unfocusOsKeyboardFields();
+    final prefill = await showSmartQuickPrefillDialogOrSheet(context);
+    if (!mounted) return;
+    if (prefill == null) {
+      _focusDesktopAmountIfIdle();
+      return;
+    }
+    _applySmartQuickPrefill(prefill);
+    _activateCustomKeypad();
+  }
+
+  void _applySmartQuickPrefill(SmartQuickPrefillResult prefill) {
+    final effectiveConfig =
+        ref.read(diyToolbarConfigProvider).value ?? DiyToolbarConfig.defaults();
+    final currentBookId =
+        original?.accountBookId ??
+        ref.read(currentBookIdProvider).value ??
+        _resolvedBookId;
+    final currentCats = currentBookId == null
+        ? const <RecordCategory>[]
+        : (ref.read(categoriesProvider(currentBookId)).value ??
+              (currentBookId == _initialCategoriesBookId
+                  ? _initialCategories
+                  : const <RecordCategory>[]));
+    final currentAssets = ref.read(assetsProvider).value ?? _initialAssets;
+    final currentAssetBooks =
+        ref.read(assetBooksProvider).value ?? _initialAssetBooks;
+    final bindings = _buildAssetBookBindings(currentAssetBooks);
+    final effectiveDefaultId = _computeEffectiveDefaultAccountId(
+      config: effectiveConfig,
+      bookId: currentBookId,
+      assets: currentAssets,
+      assetBookBindings: bindings,
+    );
+
+    int? nextCategoryId;
+    int? nextParentCatId;
+    var nextUserTouchedCategory = false;
+    if (prefill.type != RecordType.transfer) {
+      final matchedCat = prefill.categoryId == null
+          ? null
+          : currentCats.where((c) => c.id == prefill.categoryId).firstOrNull;
+      if (matchedCat != null) {
+        nextCategoryId = matchedCat.id;
+        nextParentCatId =
+            (matchedCat.parentCatId != noRef && matchedCat.parentCatId != -1)
+            ? matchedCat.parentCatId
+            : matchedCat.id;
+        nextUserTouchedCategory = true;
+      } else {
+        final fallback = _firstTopCategoryForType(prefill.type, currentCats);
+        nextCategoryId = fallback?.id;
+        nextParentCatId = fallback?.id;
+      }
+    }
+
+    var nextAssetId = noRef;
+    var nextFromAssetId = noRef;
+    var nextToAssetId = noRef;
+    var nextUserTouchedAsset = false;
+
+    if (prefill.type == RecordType.transfer) {
+      final fromCandidate = prefill.assetId ?? noRef;
+      final toCandidate = prefill.toAssetId ?? noRef;
+      final validFrom = _isSelectableBookAsset(
+        fromCandidate,
+        bookId: currentBookId,
+        assets: currentAssets,
+        assetBookBindings: bindings,
+      );
+      final validTo = _isSelectableBookAsset(
+        toCandidate,
+        bookId: currentBookId,
+        assets: currentAssets,
+        assetBookBindings: bindings,
+      );
+      nextToAssetId = validTo ? toCandidate : noRef;
+      if (validFrom && fromCandidate != nextToAssetId) {
+        nextFromAssetId = fromCandidate;
+        nextUserTouchedAsset = true;
+      } else {
+        nextFromAssetId =
+            (effectiveDefaultId != noRef && effectiveDefaultId != nextToAssetId)
+            ? effectiveDefaultId
+            : noRef;
+        nextUserTouchedAsset = validTo;
+      }
+    } else {
+      final candidate = prefill.assetId ?? noRef;
+      final validAsset = _isSelectableBookAsset(
+        candidate,
+        bookId: currentBookId,
+        assets: currentAssets,
+        assetBookBindings: bindings,
+      );
+      if (validAsset) {
+        nextAssetId = candidate;
+        nextUserTouchedAsset = true;
+      } else {
+        nextAssetId = effectiveDefaultId;
+        nextUserTouchedAsset = false;
+      }
+    }
+
+    setState(() {
+      type = prefill.type;
+      _userTouchedType = true;
+      categoryId = nextCategoryId;
+      parentCatId = nextParentCatId;
+      _userTouchedCategory = nextUserTouchedCategory;
+      assetId = nextAssetId;
+      fromAssetId = nextFromAssetId;
+      toAssetId = nextToAssetId;
+      _userTouchedAsset = nextUserTouchedAsset;
+      _setAmountText(prefill.money.decimal);
+      discount.text =
+          (prefill.discount != null &&
+              !prefill.discount!.isZero &&
+              (prefill.type == RecordType.expense ||
+                  prefill.type == RecordType.income))
+          ? prefill.discount!.decimal
+          : '';
+      remark.text = prefill.remark;
+      time = DateTime.fromMillisecondsSinceEpoch(prefill.recordTimeMs);
+      if (_panelMode == _BottomPanelMode.frequentRemarks &&
+          prefill.type == RecordType.transfer) {
+        _panelMode = _BottomPanelMode.customKeypad;
+      }
+      _preservingLoadedConversion = false;
+      convertedEdited = false;
+      _savedAndResetBanner = false;
+      error = null;
       _autoConvert();
     });
   }
@@ -3213,6 +3353,14 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
               tooltip: '账单模板',
               icon: const Icon(Icons.bookmarks_outlined, size: 21),
               onPressed: busy ? null : _openTemplatesManager,
+            ),
+          if (!editing)
+            IconButton(
+              key: const Key('record_editor_smart_fill_button'),
+              visualDensity: VisualDensity.compact,
+              tooltip: '智能识账速填',
+              icon: const Icon(Icons.auto_awesome_outlined, size: 21),
+              onPressed: busy ? null : _openSmartQuickPrefill,
             ),
           IconButton(
             key: const Key('editor-diy-toolbar-btn'),

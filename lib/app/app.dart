@@ -106,6 +106,8 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
   StreamSubscription<String>? _launchRouteSub;
   StreamSubscription<String>? _deepLinkSub;
   StreamSubscription<CapturedPaymentEvent>? _capturedEventSub;
+  StreamSubscription<AutoBillSharedPayload>? _sharedPayloadSub;
+  StreamSubscription<AutoBillPromptActionEvent>? _promptActionSub;
   int _deepLinkSeq = 0;
   int _capturedEventSeq = 0;
   bool _disposed = false;
@@ -277,6 +279,66 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
     _capturedEventSub ??= autoBridge.onCapturedEvent.listen(
       (event) => unawaited(_handleCapturedEvent(event)),
     );
+    _sharedPayloadSub ??= autoBridge.onSharedPayload.listen(
+      (payload) => unawaited(_handleSharedPayload(payload)),
+    );
+    _promptActionSub ??= autoBridge.onPromptAction.listen(
+      (action) => unawaited(_handlePromptAction(action)),
+    );
+  }
+
+  Future<void> _refreshWidgetSnapshotBestEffort() async {
+    if (_disposed || !mounted) return;
+    try {
+      final widgetService = await ref.read(
+        widgetSnapshotServiceProvider.future,
+      );
+      if (_disposed || !mounted) return;
+      await widgetService.syncToPlatform();
+      if (!_disposed && mounted) {
+        ref.invalidate(widgetSnapshotProvider);
+      }
+    } catch (_) {
+      // Non-blocking widget refresh.
+    }
+  }
+
+  Future<void> _handleSharedPayload(AutoBillSharedPayload payload) async {
+    if (_disposed || !mounted || !payload.isValid) return;
+    switch (payload.kind) {
+      case AutoBillSharedPayloadKind.shortcut:
+        final target = switch (payload.shortcutAction) {
+          AutoBillShortcutAction.newRecord => '/record/new',
+          AutoBillShortcutAction.smartBill => '/automation/smart-bill',
+          AutoBillShortcutAction.ocrBill => '/automation/ocr',
+          AutoBillShortcutAction.drafts => '/automation/auto-bill',
+          _ => null,
+        };
+        _handleLaunchRoute(target);
+      case AutoBillSharedPayloadKind.text:
+      case AutoBillSharedPayloadKind.image:
+        ref.read(pendingSharedPayloadProvider.notifier).push(payload);
+        final currentPath = router.routeInformationProvider.value.uri.path;
+        if (currentPath != '/automation/smart-bill') {
+          _handleLaunchRoute('/automation/smart-bill');
+        }
+    }
+  }
+
+  Future<void> _handlePromptAction(AutoBillPromptActionEvent event) async {
+    if (_disposed || !mounted || !event.isValid) return;
+    try {
+      final service = await ref.read(autoBillServiceProvider.future);
+      if (_disposed || !mounted) return;
+      final res = await service.executePromptAction(event);
+      if (_disposed || !mounted) return;
+      if (res.targetRoute != null) {
+        _handleLaunchRoute(res.targetRoute);
+      }
+      await _refreshWidgetSnapshotBestEffort();
+    } catch (_) {
+      // Non-blocking prompt action execution.
+    }
   }
 
   void _handleLaunchRoute(String? route) {
@@ -310,13 +372,8 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
       if (result.targetRoute != null) {
         _handleLaunchRoute(result.targetRoute);
       }
-      if (result.wroteRecord) {
-        final widgetService = await ref.read(
-          widgetSnapshotServiceProvider.future,
-        );
-        if (!_disposed && mounted) {
-          await widgetService.syncToPlatform();
-        }
+      if (result.wroteRecord || result.createdDraftId != null) {
+        await _refreshWidgetSnapshotBestEffort();
       }
     } catch (_) {
       // Non-blocking external deep-link handling.
@@ -328,17 +385,9 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
     try {
       final service = await ref.read(autoBillServiceProvider.future);
       if (_disposed || !mounted) return;
-      final seq = _capturedEventSeq++;
-      await service.ingestPaymentText(
-        commandId:
-            'live-acc:$seq:${event.capturedAtMs}:${event.packageName.hashCode}',
-        rawText: event.rawText,
-        packageName: event.packageName,
-        capturedAtMs: event.capturedAtMs,
-        allowNonPaymentSkip: true,
-      );
+      await service.ingestCapturedEvent(event, index: _capturedEventSeq++);
     } catch (_) {
-      // Non-blocking accessibility event ingestion.
+      // Non-blocking capture event ingestion.
     }
   }
 
@@ -374,9 +423,32 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
         }
       });
       await safeStep(() async {
+        final autoBridge = ref.read(autoBillBridgeProvider);
+        final shared = await autoBridge.consumePendingSharedPayloads();
+        if (_disposed || !mounted) return;
+        for (final payload in shared) {
+          await _handleSharedPayload(payload);
+        }
+      });
+      await safeStep(() async {
         final service = await ref.read(autoBillServiceProvider.future);
         if (_disposed || !mounted) return;
+        final actionResults = await service
+            .consumeAndExecutePendingPromptActions();
+        if (_disposed || !mounted) return;
+        for (final r in actionResults) {
+          if (r.targetRoute != null) {
+            _handleLaunchRoute(r.targetRoute);
+          }
+        }
         await service.ingestCapturedEvents();
+        if (_disposed || !mounted) return;
+        final notif = await service.getNotificationListenerStatus();
+        final a11y = await service.getAccessibilityStatus();
+        if (_disposed || !mounted) return;
+        if (notif.supported || a11y.supported) {
+          await service.syncNativeConfig();
+        }
       });
       // Run cloud sync / 24h silent cloud backup BEFORE local auto-plan
       // catch-ups so a fresh remote snapshot is pulled first instead of
@@ -468,6 +540,10 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
     _deepLinkSub = null;
     unawaited(_capturedEventSub?.cancel());
     _capturedEventSub = null;
+    unawaited(_sharedPayloadSub?.cancel());
+    _sharedPayloadSub = null;
+    unawaited(_promptActionSub?.cancel());
+    _promptActionSub = null;
     router.dispose();
     super.dispose();
   }

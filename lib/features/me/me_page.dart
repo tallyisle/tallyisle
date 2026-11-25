@@ -11,6 +11,7 @@ import '../automation/automation_providers.dart'
 import '../automation/desktop_widgets_page.dart';
 import '../automation/mcp_settings_page.dart';
 import '../automation/ocr_bill_page.dart';
+import '../automation/smart_quick_sheet.dart';
 import '../automation/url_scheme_page.dart';
 import '../backup/backup_page.dart';
 import '../backup/backup_providers.dart';
@@ -384,6 +385,7 @@ const Set<String> _supportedEmbeddedRoutes = <String>{
   '/attachments',
   '/stat-stories',
   '/automation/auto-bill',
+  '/automation/smart-bill',
   '/automation/ocr',
   '/automation/widgets',
   '/automation/url-scheme',
@@ -458,6 +460,7 @@ Widget _buildEmbeddedMePage(BuildContext context, String route) =>
       '/attachments' => const BillImagesPage(),
       '/stat-stories' => const StatStoriesPage(),
       '/automation/auto-bill' => const AutoBillPage(),
+      '/automation/smart-bill' => const SmartQuickBillPage(),
       '/automation/ocr' => const OcrBillPage(),
       '/automation/widgets' => const DesktopWidgetsPage(),
       '/automation/url-scheme' => const UrlSchemePage(),
@@ -506,7 +509,7 @@ class _MePageState extends ConsumerState<MePage> {
   }
 
   void _selectEmbeddedRoute(BuildContext context, String route) {
-    final showAndroidWidgets = DesktopAdaptive.supportsAndroidAppWidgets(
+    final showAndroidWidgets = DesktopAdaptive.supportsMobileHomeWidgets(
       context,
     );
     final normalized = _normalizeSectionRoute(
@@ -659,7 +662,7 @@ class _MePageState extends ConsumerState<MePage> {
     final isDark = theme.brightness == Brightness.dark;
     final draftCount = ref.watch(autoBillDraftCountProvider);
     final isDesktop = DesktopAdaptive.isDesktop(context);
-    final showAndroidWidgets = DesktopAdaptive.supportsAndroidAppWidgets(
+    final showAndroidWidgets = DesktopAdaptive.supportsMobileHomeWidgets(
       context,
     );
     final quickEntryVis =

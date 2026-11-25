@@ -10,6 +10,7 @@ import '../features/automation/auto_bill_page.dart';
 import '../features/automation/desktop_widgets_page.dart';
 import '../features/automation/mcp_settings_page.dart';
 import '../features/automation/ocr_bill_page.dart';
+import '../features/automation/smart_quick_sheet.dart';
 import '../features/automation/url_scheme_page.dart';
 import '../features/backup/backup_page.dart';
 import '../features/backup/s3_config_page.dart';
@@ -609,7 +610,29 @@ GoRouter buildRouter({
     ),
     GoRoute(
       path: '/automation/auto-bill',
-      builder: (_, _) => const AutoBillPage(),
+      builder: (_, state) => AutoBillPage(
+        initialDraftId: int.tryParse(
+          state.uri.queryParameters['draftId'] ?? '',
+        ),
+      ),
+    ),
+    GoRoute(
+      path: '/automation/smart-bill',
+      pageBuilder: (context, state) {
+        final q = state.uri.queryParameters;
+        final clipRaw = q['clipboard']?.trim().toLowerCase();
+        final readClipboard =
+            clipRaw == '1' || clipRaw == 'true' || clipRaw == 'yes';
+        return _adaptiveFormPage(
+          context,
+          state,
+          SmartQuickBillPage(
+            initialText: q['text'],
+            readClipboardOnOpen: readClipboard,
+            sourceApp: q['app'],
+          ),
+        );
+      },
     ),
     GoRoute(path: '/automation/ocr', builder: (_, _) => const OcrBillPage()),
     GoRoute(

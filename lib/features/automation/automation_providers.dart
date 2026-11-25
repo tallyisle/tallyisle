@@ -101,12 +101,38 @@ final ocrServiceProvider = FutureProvider<OcrService>((ref) async {
 final widgetSnapshotProvider = FutureProvider<WidgetSnapshotPayload>((
   ref,
 ) async {
-  // Watch reactive book & period record streams so edits auto-recompute the preview.
+  // Watch reactive book, period record, and pending draft streams so edits auto-recompute the preview.
   ref.watch(currentBookProvider);
   ref.watch(periodRecordsProvider);
+  ref.watch(autoBillDraftsProvider);
   final service = await ref.watch(widgetSnapshotServiceProvider.future);
   return service.computeCurrentSnapshot();
 });
+
+/// Transient queue holding an incoming external share (text or screenshot path)
+/// handed off from [TallyIsleApp] to `SmartQuickBillPage`.
+final class PendingSharedPayloadNotifier
+    extends Notifier<AutoBillSharedPayload?> {
+  @override
+  AutoBillSharedPayload? build() => null;
+
+  void push(AutoBillSharedPayload payload) {
+    state = payload;
+  }
+
+  AutoBillSharedPayload? consume() {
+    final current = state;
+    if (current != null) {
+      state = null;
+    }
+    return current;
+  }
+}
+
+final pendingSharedPayloadProvider =
+    NotifierProvider<PendingSharedPayloadNotifier, AutoBillSharedPayload?>(
+      PendingSharedPayloadNotifier.new,
+    );
 
 final activeWidgetCountsProvider = FutureProvider<Map<DesktopWidgetKind, int>>((
   ref,
