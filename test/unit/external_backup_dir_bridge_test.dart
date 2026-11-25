@@ -390,7 +390,8 @@ void main() {
         final ohosEts = File(
           'ohos/entry/src/main/ets/plugins/FileBridge.ets',
         ).readAsStringSync();
-        expect(ohosEts, contains('picker.DocumentSaveMode.DOWNLOAD'));
+        expect(ohosEts, contains('picker.DocumentPickerMode.DOWNLOAD'));
+        expect(ohosEts, isNot(contains('DocumentSaveMode')));
         expect(ohosEts, contains("'ohosDownload'"));
         expect(ohosEts, contains('文件管理 / 下载 / 帐屿'));
         expect(ohosEts, contains('fsyncSync'));

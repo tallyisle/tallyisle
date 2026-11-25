@@ -214,7 +214,7 @@ export class FileBridge implements MethodCallHandler {
 
   private handlePickBackupDirectory(result: MethodResult): void {
     const saveOptions: picker.DocumentSaveOptions = new picker.DocumentSaveOptions();
-    saveOptions.pickerMode = picker.DocumentSaveMode.DOWNLOAD;
+    saveOptions.pickerMode = picker.DocumentPickerMode.DOWNLOAD;
 
     let documentPicker: picker.DocumentViewPicker;
     try {
@@ -239,11 +239,10 @@ export class FileBridge implements MethodCallHandler {
         if (!fs.accessSync(dirPath)) {
           fs.mkdirSync(dirPath);
         }
-        const binding: Record<string, string> = {
-          'mode': 'ohosDownload',
-          'locator': dirPath,
-          'displayPath': '文件管理 / 下载 / 帐屿',
-        };
+        const binding: Map<string, Any> = new Map<string, Any>();
+        binding.set('mode', 'ohosDownload');
+        binding.set('locator', dirPath);
+        binding.set('displayPath', '文件管理 / 下载 / 帐屿');
         result.success(binding);
       } catch (ioErr) {
         Log.e(TAG, 'Failed resolving DOWNLOAD backup directory: ' + JSON.stringify(ioErr));
@@ -287,7 +286,7 @@ export class FileBridge implements MethodCallHandler {
         return;
       }
       const entries: Array<string> = fs.listFileSync(dirPath);
-      const items: Array<Record<string, Object>> = [];
+      const items: Array<Map<string, Any>> = new Array<Map<string, Any>>();
       for (let i: number = 0; i < entries.length; i++) {
         const name: string = entries[i];
         if (name.toLowerCase().endsWith('.tmp')) {
@@ -297,11 +296,10 @@ export class FileBridge implements MethodCallHandler {
         try {
           const stat: fs.Stat = fs.statSync(childPath);
           if (stat.isFile()) {
-            const item: Record<string, Object> = {
-              'fileName': name,
-              'sizeBytes': stat.size,
-              'modifiedAtMs': Math.floor(stat.mtime * 1000),
-            };
+            const item: Map<string, Any> = new Map<string, Any>();
+            item.set('fileName', name);
+            item.set('sizeBytes', stat.size);
+            item.set('modifiedAtMs', Math.floor(stat.mtime * 1000));
             items.push(item);
           }
         } catch (_ignoreChild) {
@@ -347,6 +345,9 @@ export class FileBridge implements MethodCallHandler {
         fs.fsyncSync(outFile.fd);
       } finally {
         fs.closeSync(outFile);
+      }
+      if (fs.accessSync(finalPath)) {
+        fs.unlinkSync(finalPath);
       }
       fs.renameSync(tmpPath, finalPath);
       result.success(null);
