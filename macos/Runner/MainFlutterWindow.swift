@@ -21,6 +21,7 @@ class MainFlutterWindow: NSWindow {
   private var isZoomedState: Bool = false
   private var isFullScreenState: Bool = false
   private var isTransitioningFullScreen: Bool = false
+  private var fullScreenTransitionGeneration: Int = 0
   private var observerTokens: [NSObjectProtocol] = []
 
   deinit {
@@ -73,12 +74,13 @@ class MainFlutterWindow: NSWindow {
         self.isFullScreenState = savedFullScreen
 
         if savedFullScreen {
-          self.isTransitioningFullScreen = true
+          self.beginFullScreenTransition()
           DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             if !self.styleMask.contains(.fullScreen) {
               self.toggleFullScreen(nil)
             } else {
+              self.fullScreenTransitionGeneration &+= 1
               self.isTransitioningFullScreen = false
             }
           }
@@ -236,7 +238,7 @@ class MainFlutterWindow: NSWindow {
         object: self,
         queue: .main
       ) { [weak self] _ in
-        self?.isTransitioningFullScreen = true
+        self?.beginFullScreenTransition()
       }
     )
     observerTokens.append(
@@ -246,6 +248,7 @@ class MainFlutterWindow: NSWindow {
         queue: .main
       ) { [weak self] _ in
         guard let self = self else { return }
+        self.fullScreenTransitionGeneration &+= 1
         self.isTransitioningFullScreen = false
         self.isFullScreenState = true
         self.isZoomedState = false
@@ -254,22 +257,11 @@ class MainFlutterWindow: NSWindow {
     )
     observerTokens.append(
       center.addObserver(
-        forName: NSWindow.didFailToEnterFullScreenNotification,
-        object: self,
-        queue: .main
-      ) { [weak self] _ in
-        guard let self = self else { return }
-        self.isTransitioningFullScreen = false
-        self.captureAndPersistWindowState()
-      }
-    )
-    observerTokens.append(
-      center.addObserver(
         forName: NSWindow.willExitFullScreenNotification,
         object: self,
         queue: .main
       ) { [weak self] _ in
-        self?.isTransitioningFullScreen = true
+        self?.beginFullScreenTransition()
       }
     )
     observerTokens.append(
@@ -279,19 +271,9 @@ class MainFlutterWindow: NSWindow {
         queue: .main
       ) { [weak self] _ in
         guard let self = self else { return }
+        self.fullScreenTransitionGeneration &+= 1
         self.isTransitioningFullScreen = false
         self.isFullScreenState = false
-        self.captureAndPersistWindowState()
-      }
-    )
-    observerTokens.append(
-      center.addObserver(
-        forName: NSWindow.didFailToExitFullScreenNotification,
-        object: self,
-        queue: .main
-      ) { [weak self] _ in
-        guard let self = self else { return }
-        self.isTransitioningFullScreen = false
         self.captureAndPersistWindowState()
       }
     )
@@ -313,6 +295,22 @@ class MainFlutterWindow: NSWindow {
         self?.captureAndPersistWindowState()
       }
     )
+  }
+
+  private func beginFullScreenTransition() {
+    self.isTransitioningFullScreen = true
+    self.fullScreenTransitionGeneration &+= 1
+    let expectedGeneration = self.fullScreenTransitionGeneration
+    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+      guard let self = self else { return }
+      guard self.isTransitioningFullScreen,
+        self.fullScreenTransitionGeneration == expectedGeneration
+      else {
+        return
+      }
+      self.isTransitioningFullScreen = false
+      self.captureAndPersistWindowState()
+    }
   }
 
   private func captureAndPersistWindowState() {

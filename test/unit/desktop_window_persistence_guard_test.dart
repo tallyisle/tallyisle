@@ -193,6 +193,13 @@ void main() {
         expect(macSrc, contains('NSWindow.didEnterFullScreenNotification'));
         expect(macSrc, contains('NSWindow.didExitFullScreenNotification'));
         expect(macSrc, contains('NSWindow.willCloseNotification'));
+        // Guard against nonexistent AppKit NSWindow notification members
+        // (windowDidFailToEnter/ExitFullScreen are NSWindowDelegate-only).
+        expect(
+          macSrc.contains('didFailToEnterFullScreenNotification'),
+          isFalse,
+        );
+        expect(macSrc.contains('didFailToExitFullScreenNotification'), isFalse);
         expect(
           macSrc,
           contains(
