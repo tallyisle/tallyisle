@@ -8,12 +8,12 @@ library;
 
 /// Semantic version `MAJOR.MINOR.PATCH` (Android `versionName`, iOS/macOS
 /// `CFBundleShortVersionString`, Windows `FileVersion`).
-const String appVersionName = '0.8.0';
+const String appVersionName = '0.9.0';
 
 /// Strictly increasing integer build number (Android `versionCode`, iOS/macOS
 /// `CFBundleVersion`). Must never decrease, otherwise Android refuses
 /// overwrite-install of a newer package.
-const int appBuildNumber = 11;
+const int appBuildNumber = 12;
 
 /// Full human-readable label, e.g. `0.2.0 (Build 2)`.
 const String appVersionLabel = '$appVersionName (Build $appBuildNumber)';
