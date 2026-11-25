@@ -128,6 +128,7 @@ final class AutoMapInfo {
     this.recordType,
     this.toAssetId,
     this.remark,
+    this.allowAutoConfirm = true,
     Map<String, Object?>? raw,
   }) : raw = {...?raw};
 
@@ -137,7 +138,31 @@ final class AutoMapInfo {
   final int? recordType;
   final int? toAssetId;
   final String? remark;
+
+  /// Per-rule switch “允许熟店自动入账” (JSON key `allowAutoConfirm`, default
+  /// `true` for backward compatibility with `.penny` / older rows).
+  final bool allowAutoConfirm;
   final Map<String, Object?> raw;
+
+  /// Returns a copy with the given fields replaced (unknown keys preserved).
+  AutoMapInfo copyWith({
+    int? mapAssetId,
+    int? mapCategoryId,
+    int? bookId,
+    int? recordType,
+    int? toAssetId,
+    String? remark,
+    bool? allowAutoConfirm,
+  }) => AutoMapInfo(
+    mapAssetId: mapAssetId ?? this.mapAssetId,
+    mapCategoryId: mapCategoryId ?? this.mapCategoryId,
+    bookId: bookId ?? this.bookId,
+    recordType: recordType ?? this.recordType,
+    toAssetId: toAssetId ?? this.toAssetId,
+    remark: remark ?? this.remark,
+    allowAutoConfirm: allowAutoConfirm ?? this.allowAutoConfirm,
+    raw: raw,
+  );
 
   bool get hasAnyMapping =>
       mapAssetId != null ||
@@ -173,8 +198,19 @@ final class AutoMapInfo {
       remark: remarkVal is String && remarkVal.trim().isNotEmpty
           ? remarkVal.trim()
           : null,
+      allowAutoConfirm: _parseAllowFlag(map['allowAutoConfirm']),
       raw: map,
     );
+  }
+
+  static bool _parseAllowFlag(Object? v) {
+    if (v is bool) return v;
+    if (v is int) return v != 0;
+    if (v is String) {
+      final s = v.trim().toLowerCase();
+      if (s == 'false' || s == '0' || s == 'no') return false;
+    }
+    return true;
   }
 
   String encode() {
@@ -214,6 +250,7 @@ final class AutoMapInfo {
     } else {
       out.remove('remark');
     }
+    out['allowAutoConfirm'] = allowAutoConfirm;
     return jsonEncode(out);
   }
 }
@@ -237,6 +274,9 @@ final class AutoMapMatchResult {
     this.bookId,
     this.recordType,
     this.remark,
+    this.categoryRule,
+    this.assetRule,
+    this.toAssetRule,
   });
 
   final List<AutoMapRule> matchedRules;
@@ -247,7 +287,59 @@ final class AutoMapMatchResult {
   final int? recordType;
   final String? remark;
 
+  /// The highest-priority rule that supplied [categoryId].
+  final AutoMapRule? categoryRule;
+
+  /// The highest-priority rule that supplied [assetId].
+  final AutoMapRule? assetRule;
+
+  /// The highest-priority rule that supplied [toAssetId].
+  final AutoMapRule? toAssetRule;
+
   bool get isMatched => matchedRules.isNotEmpty;
+
+  /// Pure gate for “熟店自动入账” (decision 9). Returns `true` only when ALL hold:
+  /// - [globalAutoConfirmEnabled] (`AutoBillSettings.autoConfirmMatchedRules`);
+  /// - [resolvedRecordType] is expense / income / transfer;
+  /// - every contributing rule (category / account rules) has
+  ///   `allowAutoConfirm == true`;
+  /// - non-transfer: an explicit rule-matched category
+  ///   ([resolvedRuleCategoryId] equals the [categoryRule] mapping) AND a
+  ///   resolved funding account [resolvedPrimaryAssetId];
+  /// - transfer: distinct resolved from/to accounts with at least one account
+  ///   supplied by a rule.
+  /// Anything missing falls back to the draft inbox.
+  bool canAutoConfirm({
+    required bool globalAutoConfirmEnabled,
+    required int resolvedRecordType,
+    required int? resolvedRuleCategoryId,
+    required int? resolvedPrimaryAssetId,
+    required int? resolvedSecondaryAssetId,
+  }) {
+    if (!globalAutoConfirmEnabled || !isMatched) return false;
+    bool allows(AutoMapRule? r) => r == null || r.info.allowAutoConfirm;
+    if (!allows(assetRule) || !allows(toAssetRule)) return false;
+    bool validId(int? id) => id != null && id > 0;
+    switch (resolvedRecordType) {
+      case RecordType.expense:
+      case RecordType.income:
+        final rule = categoryRule;
+        if (rule == null || !rule.info.allowAutoConfirm) return false;
+        if (!validId(resolvedRuleCategoryId) ||
+            resolvedRuleCategoryId != rule.info.mapCategoryId) {
+          return false;
+        }
+        return validId(resolvedPrimaryAssetId);
+      case RecordType.transfer:
+        if (assetRule == null && toAssetRule == null) return false;
+        if (!allows(categoryRule)) return false;
+        return validId(resolvedPrimaryAssetId) &&
+            validId(resolvedSecondaryAssetId) &&
+            resolvedPrimaryAssetId != resolvedSecondaryAssetId;
+      default:
+        return false;
+    }
+  }
 }
 
 /// Sorts rules longest-keyword-first (ties broken by ascending `id`) per `F-020` R2.
@@ -281,6 +373,9 @@ AutoMapMatchResult matchAutoMapRules(
   int? bookId;
   int? recordType;
   String? remark;
+  AutoMapRule? categoryRule;
+  AutoMapRule? assetRule;
+  AutoMapRule? toAssetRule;
 
   for (final rule in ordered) {
     final needle = rule.key.trim().toLowerCase();
@@ -288,6 +383,11 @@ AutoMapMatchResult matchAutoMapRules(
     final hit = normalizedHaystacks.any((h) => h.contains(needle));
     if (!hit) continue;
     matched.add(rule);
+    if (assetId == null && rule.info.mapAssetId != null) assetRule = rule;
+    if (toAssetId == null && rule.info.toAssetId != null) toAssetRule = rule;
+    if (categoryId == null && rule.info.mapCategoryId != null) {
+      categoryRule = rule;
+    }
     assetId ??= rule.info.mapAssetId;
     toAssetId ??= rule.info.toAssetId;
     categoryId ??= rule.info.mapCategoryId;
@@ -304,37 +404,86 @@ AutoMapMatchResult matchAutoMapRules(
     bookId: bookId,
     recordType: recordType,
     remark: remark,
+    categoryRule: categoryRule,
+    assetRule: assetRule,
+    toAssetRule: toAssetRule,
   );
 }
+
+/// Known Android payment / bank / SMS packages → friendly Chinese names.
+///
+/// Native capture whitelists (`AutoBillNotificationListenerService`,
+/// `AutoBillAccessibilityService`) should stay aligned with these keys.
+const Map<String, String> autoBillKnownAppPackages = {
+  'com.tencent.mm': '微信',
+  'com.eg.android.AlipayGphone': '支付宝',
+  'com.unionpay': '云闪付',
+  'cn.gov.pbc.dcep': '数字人民币',
+  'com.jingdong.app.mall': '京东',
+  'com.jd.jrapp': '京东',
+  'com.sankuai.meituan': '美团',
+  'com.sankuai.meituan.takeoutnew': '美团',
+  'com.xunmeng.pinduoduo': '拼多多',
+  'com.taobao.taobao': '淘宝',
+  'com.ss.android.ugc.aweme': '抖音',
+  'com.ss.android.ugc.aweme.lite': '抖音',
+  'com.icbc': '工商银行',
+  'com.chinamworld.main': '建设银行',
+  'com.android.bankabc': '农业银行',
+  'com.chinamworld.bocmbci': '中国银行',
+  'cmb.pb': '招商银行',
+  'com.cmbchina.ccd.pluto.cmbActivity': '招商银行掌上生活',
+  'com.bankcomm.Bankcomm': '交通银行',
+  'com.bankcomm.maidanba': '交通银行买单吧',
+  'com.yitong.mbank.psbc': '邮储银行',
+  'com.ecitic.bank.mobile': '中信银行',
+  'com.citiccard.mobilebank': '中信银行动卡空间',
+  'com.cebbank.mobile.cemb': '光大银行',
+  'cn.com.spdb.mobilebank.per': '浦发银行',
+  'cn.com.cmbc.newmbank': '民生银行',
+  'com.cib.cibmb': '兴业银行',
+  'com.pingan.paces.ccms': '平安口袋银行',
+  'com.cgbchina.xpt': '广发银行发现精彩',
+  'com.android.mms': '短信',
+  'com.google.android.apps.messaging': '短信',
+  'com.samsung.android.messaging': '短信',
+  'com.huawei.message': '短信',
+  'com.hihonor.mms': '短信',
+  'com.oplus.mms': '短信',
+  'com.coloros.mms': '短信',
+  'com.vivo.message': '短信',
+  'com.xiaomi.mms': '短信',
+};
 
 /// Friendly Chinese app name for known Android payment packages.
 String friendlyAutoBillAppName(String? appOrPackage) {
   final raw = appOrPackage?.trim() ?? '';
   if (raw.isEmpty) return '自动识别';
-  switch (raw) {
-    case 'com.tencent.mm':
-      return '微信';
-    case 'com.eg.android.AlipayGphone':
-      return '支付宝';
-    case 'com.unionpay':
-      return '云闪付';
-    case 'cn.gov.pbc.dcep':
-      return '数字人民币';
-    case 'com.jingdong.app.mall':
-    case 'com.jd.jrapp':
-      return '京东';
-    case 'com.sankuai.meituan':
-    case 'com.sankuai.meituan.takeoutnew':
-      return '美团';
-    case 'com.xunmeng.pinduoduo':
-      return '拼多多';
-    case 'com.android.mms':
-    case 'com.google.android.apps.messaging':
-      return '短信';
-    default:
-      return raw;
-  }
+  return autoBillKnownAppPackages[raw] ?? raw;
 }
+
+/// Cross-channel dedup window (decision 2): the notification listener and the
+/// accessibility reader capturing the same payment within 15 s are merged.
+const int crossChannelDedupWindowMs = 15000;
+
+/// Semantic fingerprint shared by notification / accessibility captures of the
+/// same payment: normalized channel (friendly app name), direction and exact
+/// minor amount. Merchant text is intentionally excluded because the two
+/// channels render it differently. Combine with [isWithinCrossChannelWindow].
+String computeCrossChannelPaymentFingerprint({
+  required String sourceAppOrPackage,
+  required int recordType,
+  required Money money,
+}) {
+  final channel = friendlyAutoBillAppName(
+    sourceAppOrPackage,
+  ).replaceAll(RegExp(r'\s+'), '').toLowerCase();
+  return 'xc1|$channel|$recordType|${money.storageMinor}';
+}
+
+/// Whether two capture timestamps fall inside [crossChannelDedupWindowMs].
+bool isWithinCrossChannelWindow(int aMs, int bMs) =>
+    (aMs - bMs).abs() <= crossChannelDedupWindowMs;
 
 /// Typed representation of a pending draft stored in `auto_map` (`key = 'KEY_DRAFT'`).
 ///
@@ -581,6 +730,8 @@ final class ParsedPaymentNotification {
     this.accountHint2,
     this.categoryHint,
     required this.rawText,
+    this.isRefund = false,
+    this.cardTail,
   });
 
   final int recordType;
@@ -593,6 +744,12 @@ final class ParsedPaymentNotification {
   final String? accountHint2;
   final String? categoryHint;
   final String rawText;
+
+  /// Refund / 退款到账 direction (booked as income).
+  final bool isRefund;
+
+  /// Bank card tail digits (`尾号1234` → `'1234'`) when present.
+  final String? cardTail;
 }
 
 /// Parses WeChat Pay, Alipay, UnionPay, and bank SMS payment texts into a
@@ -645,8 +802,16 @@ ParsedPaymentNotification? parsePaymentText(
     accountHint2: accounts.$2,
     categoryHint: _inferCategoryKeyword(merchant, normalized),
     rawText: normalized,
+    isRefund: _refundCue.hasMatch(normalized),
+    cardTail: RegExp(
+      r'(?:尾号|末四位|账户|卡号)\s*[*＊]*\s*(\d{4})(?!\d)',
+    ).firstMatch(normalized)?.group(1),
   );
 }
+
+final RegExp _refundCue = RegExp(
+  r'退款成功|退款到账|已退款|退款.{0,12}(?:到账|退回|原路)|退回|退货退款',
+);
 
 String _detectSourceApp(String text, String? packageOrApp) {
   if (packageOrApp != null && packageOrApp.trim().isNotEmpty) {
@@ -670,6 +835,9 @@ String _detectSourceApp(String text, String? packageOrApp) {
   }
   if (text.contains('数字人民币')) {
     return '数字人民币';
+  }
+  if (text.contains('抖音支付') || text.contains('抖音月付')) {
+    return '抖音';
   }
   final bankTag = RegExp(r'【([^】]{2,12}(?:银行|农信|信用社|信用卡))】').firstMatch(text);
   if (bankTag != null) {
@@ -767,6 +935,9 @@ int _detectDirection(
 }) {
   if (RegExp(r'信用卡还款|提现到|转入余额宝|向.{1,20}转账.*转入|储蓄卡向.*转账').hasMatch(text)) {
     return RecordType.transfer;
+  }
+  if (_refundCue.hasMatch(text)) {
+    return RecordType.income;
   }
   if (RegExp(r'收款|收到|转入|收入|代发工资|工资|奖金|退款到账|收益|红包入账|入账').hasMatch(text)) {
     if (!RegExp(r'收款方[：:]|商户[：:]').hasMatch(text) || hasPositiveSign) {

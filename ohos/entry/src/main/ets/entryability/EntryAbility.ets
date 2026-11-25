@@ -15,7 +15,7 @@ export default class EntryAbility extends FlutterAbility {
 
   private ensureAutomationBridge(): AutomationBridge {
     if (this.automationBridge == null) {
-      this.automationBridge = new AutomationBridge();
+      this.automationBridge = new AutomationBridge(this.context);
     }
     return this.automationBridge;
   }

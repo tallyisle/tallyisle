@@ -1,2 +1,6 @@
 "CFBundleDisplayName" = "TallyIsle";
 "CFBundleName" = "TallyIsle";
+"SHORTCUT_NEW_RECORD_TITLE" = "New Record";
+"SHORTCUT_SMART_BILL_TITLE" = "Smart Bill";
+"SHORTCUT_OCR_BILL_TITLE" = "Scan Receipt";
+"SHORTCUT_DRAFTS_TITLE" = "Pending Drafts";

@@ -43,6 +43,27 @@
                 "scheme": "tallyisle"
               }
             ]
+          },
+          {
+            "actions": [
+              "ohos.want.action.sendData"
+            ],
+            "uris": [
+              {
+                "utd": "general.image",
+                "maxFileSupported": 9
+              },
+              {
+                "utd": "general.plain-text",
+                "maxFileSupported": 1
+              }
+            ]
+          }
+        ],
+        "metadata": [
+          {
+            "name": "ohos.ability.shortcuts",
+            "resource": "$profile:shortcuts_config"
           }
         ]
       }
@@ -53,6 +74,23 @@
       },
       {
         "name": "ohos.permission.ACCESS_BIOMETRIC"
+      }
+    ],
+    "extensionAbilities": [
+      {
+        "name": "TallyFormExtensionAbility",
+        "srcEntry": "./ets/formability/TallyFormExtensionAbility.ets",
+        "label": "$string:EntryAbility_label",
+        "description": "$string:form_ability_desc",
+        "icon": "$media:icon",
+        "type": "form",
+        "exported": true,
+        "metadata": [
+          {
+            "name": "ohos.extension.form",
+            "resource": "$profile:form_config"
+          }
+        ]
       }
     ]
   }

@@ -24,10 +24,20 @@ class MainActivity : FlutterActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         ReminderNativeScheduler.ensureNotificationChannel(this)
-        val handledDeepLink = ensureAutomationBridge().captureIntent(
+        val bridge = ensureAutomationBridge()
+        val handledDeepLink = bridge.captureIntent(
             intent,
             notifyFlutter = false,
         )
+        val isReplay = savedInstanceState != null ||
+            (intent?.flags ?: 0) and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0
+        if (isReplay) {
+            // Never replay a share / shortcut payload from a restored or recents-launched task.
+            intent?.takeIf { AutoBillIntentCapture.isCapturable(it) }
+                ?.let { AutoBillIntentCapture.clearHandled(it) }
+        } else {
+            bridge.captureExternalIntent(intent, notifyFlutter = false)
+        }
         if (handledDeepLink) {
             intent?.removeExtra(ReminderNativeScheduler.EXTRA_LAUNCH_ROUTE)
         } else {
@@ -36,12 +46,16 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-        setIntent(intent)
-        val handledDeepLink = ensureAutomationBridge().captureIntent(
+        // Capture (and strip) `tallyisle://` data and share / shortcut payloads *before* the
+        // Flutter embedding can route them to GoRouter.
+        val bridge = ensureAutomationBridge()
+        val handledDeepLink = bridge.captureIntent(
             intent,
             notifyFlutter = true,
         )
+        bridge.captureExternalIntent(intent, notifyFlutter = true)
+        super.onNewIntent(intent)
+        setIntent(intent)
         if (handledDeepLink) {
             intent.removeExtra(ReminderNativeScheduler.EXTRA_LAUNCH_ROUTE)
         } else {

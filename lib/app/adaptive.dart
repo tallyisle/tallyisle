@@ -57,6 +57,18 @@ bool isOhosTargetPlatform(TargetPlatform platform) => platform.name == 'ohos';
 bool isAndroidAppWidgetSupportedPlatform(TargetPlatform platform) =>
     platform == TargetPlatform.android;
 
+/// Returns `true` when [platform] supports native mobile home-screen widgets:
+/// Android `AppWidget` or HarmonyOS Form Kit service cards (`F-034`).
+bool isMobileHomeWidgetSupportedPlatform(TargetPlatform platform) =>
+    platform == TargetPlatform.android || isOhosTargetPlatform(platform);
+
+/// Returns `true` when [platform] ships a built-in offline OCR engine
+/// (Android ML Kit Chinese / iOS Vision / HarmonyOS CoreVisionKit).
+bool isNativeOfflineOcrSupportedPlatform(TargetPlatform platform) =>
+    platform == TargetPlatform.android ||
+    platform == TargetPlatform.iOS ||
+    isOhosTargetPlatform(platform);
+
 /// Returns `true` when [platform] supports Android `AccessibilityService`
 /// payment notification/window capture (`F-020`).
 bool isAndroidAccessibilitySupportedPlatform(TargetPlatform platform) =>
@@ -108,6 +120,12 @@ abstract final class DesktopAdaptive {
   static bool supportsAndroidAppWidgets(BuildContext context) =>
       !isDesktop(context) &&
       isAndroidAppWidgetSupportedPlatform(Theme.of(context).platform);
+
+  /// Whether native mobile home-screen widgets (Android AppWidget / HarmonyOS
+  /// service cards) are supported (`false` on desktop and iOS).
+  static bool supportsMobileHomeWidgets(BuildContext context) =>
+      !isDesktop(context) &&
+      isMobileHomeWidgetSupportedPlatform(Theme.of(context).platform);
 
   /// Whether the active platform uses macOS modifier conventions (`⌘` / `⌥`).
   static bool isMacOS(BuildContext context) =>

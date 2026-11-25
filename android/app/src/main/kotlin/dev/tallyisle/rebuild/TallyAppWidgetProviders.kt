@@ -25,6 +25,7 @@ data class PersistedWidgetSnapshot(
     val todayExpenseFormatted: String,
     val budgetRemainingFormatted: String?,
     val updatedAtMs: Long,
+    val pendingDraftCount: Int = 0,
 )
 
 /**
@@ -40,6 +41,7 @@ object TallyWidgetStore {
     const val KIND_QUICK_ADD = "quick_add"
     const val KIND_MONTH_SUMMARY = "month_summary"
     const val KIND_MONTH_BAR = "month_bar"
+    const val KIND_SMART_QUICK = "smart_quick"
 
     private const val EXTRA_LAUNCH_ROUTE = "dev.tallyisle.rebuild.extra.LAUNCH_ROUTE"
     private const val MAIN_ACTIVITY_CLASS = "dev.tallyisle.rebuild.MainActivity"
@@ -58,6 +60,7 @@ object TallyWidgetStore {
     private const val KEY_TODAY_EXPENSE_FORMATTED = "today_expense_formatted"
     private const val KEY_BUDGET_REMAINING_FORMATTED = "budget_remaining_formatted"
     private const val KEY_UPDATED_AT_MS = "updated_at_ms"
+    private const val KEY_PENDING_DRAFT_COUNT = "pending_draft_count"
 
     fun saveSnapshot(context: Context, snapshot: PersistedWidgetSnapshot) {
         val prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -74,6 +77,7 @@ object TallyWidgetStore {
             .putString(KEY_BALANCE_FORMATTED, snapshot.balanceFormatted)
             .putString(KEY_TODAY_EXPENSE_FORMATTED, snapshot.todayExpenseFormatted)
             .putLong(KEY_UPDATED_AT_MS, snapshot.updatedAtMs)
+            .putInt(KEY_PENDING_DRAFT_COUNT, snapshot.pendingDraftCount.coerceAtLeast(0))
         if (snapshot.budgetRemainingMinor != null && snapshot.budgetRemainingFormatted != null) {
             editor.putString(KEY_BUDGET_REMAINING_MINOR, snapshot.budgetRemainingMinor)
             editor.putString(KEY_BUDGET_REMAINING_FORMATTED, snapshot.budgetRemainingFormatted)
@@ -101,6 +105,7 @@ object TallyWidgetStore {
             todayExpenseFormatted = prefs.getString(KEY_TODAY_EXPENSE_FORMATTED, "0.00") ?: "0.00",
             budgetRemainingFormatted = prefs.getString(KEY_BUDGET_REMAINING_FORMATTED, null),
             updatedAtMs = prefs.getLong(KEY_UPDATED_AT_MS, 0L),
+            pendingDraftCount = prefs.getInt(KEY_PENDING_DRAFT_COUNT, 0),
         )
     }
 
@@ -124,10 +129,16 @@ object TallyWidgetStore {
             renderMonthBar(appContext, manager, id, snapshot)
         }
 
+        val smartIds = manager.getAppWidgetIds(ComponentName(appContext, SmartQuickWidgetProvider::class.java))
+        for (id in smartIds) {
+            renderSmartQuick(appContext, manager, id, snapshot)
+        }
+
         return mapOf(
             KIND_QUICK_ADD to quickIds.size,
             KIND_MONTH_SUMMARY to summaryIds.size,
             KIND_MONTH_BAR to barIds.size,
+            KIND_SMART_QUICK to smartIds.size,
         )
     }
 
@@ -144,6 +155,9 @@ object TallyWidgetStore {
             KIND_MONTH_BAR to manager.getAppWidgetIds(
                 ComponentName(appContext, MonthBarWidgetProvider::class.java),
             ).size,
+            KIND_SMART_QUICK to manager.getAppWidgetIds(
+                ComponentName(appContext, SmartQuickWidgetProvider::class.java),
+            ).size,
         )
     }
 
@@ -156,6 +170,7 @@ object TallyWidgetStore {
             KIND_QUICK_ADD -> ComponentName(appContext, QuickAddWidgetProvider::class.java)
             KIND_MONTH_SUMMARY -> ComponentName(appContext, MonthSummaryWidgetProvider::class.java)
             KIND_MONTH_BAR -> ComponentName(appContext, MonthBarWidgetProvider::class.java)
+            KIND_SMART_QUICK -> ComponentName(appContext, SmartQuickWidgetProvider::class.java)
             else -> return false
         }
         return try {
@@ -303,6 +318,103 @@ object TallyWidgetStore {
         manager.updateAppWidget(appWidgetId, views)
     }
 
+    internal fun renderSmartQuick(
+        context: Context,
+        manager: AppWidgetManager,
+        appWidgetId: Int,
+        snapshot: PersistedWidgetSnapshot = loadSnapshot(context),
+    ) {
+        val layoutId = resId(context, "widget_smart_quick", "layout")
+        if (layoutId == 0) return
+        val views = RemoteViews(context.packageName, layoutId)
+        val idBase = appWidgetId and 0x3FF
+
+        val titleId = resId(context, "widget_smart_title", "id")
+        if (titleId != 0) {
+            views.setTextViewText(titleId, snapshot.bookName)
+        }
+        val badgeId = resId(context, "widget_smart_badge", "id")
+        if (badgeId != 0) {
+            val count = snapshot.pendingDraftCount
+            views.setTextViewText(badgeId, if (count > 0) "待确认 $count" else "智能速记")
+        }
+        val rootId = resId(context, "widget_smart_root", "id")
+        if (rootId != 0) {
+            views.setOnClickPendingIntent(
+                rootId,
+                buildDeepLinkPendingIntent(
+                    context = context,
+                    requestCode = 9100 + idBase,
+                    uriString = "tallyisle://home",
+                    launchRoute = "/",
+                ),
+            )
+        }
+        if (badgeId != 0) {
+            views.setOnClickPendingIntent(
+                badgeId,
+                buildShortcutPendingIntent(
+                    context = context,
+                    requestCode = 10700 + idBase,
+                    shortcutAction = AutomationBridge.SHORTCUT_DRAFTS,
+                ),
+            )
+        }
+        val addBtnId = resId(context, "widget_smart_btn_add", "id")
+        if (addBtnId != 0) {
+            views.setOnClickPendingIntent(
+                addBtnId,
+                buildDeepLinkPendingIntent(
+                    context = context,
+                    requestCode = 9500 + idBase,
+                    uriString = "tallyisle://newbill",
+                    launchRoute = "/record/new",
+                ),
+            )
+        }
+        val textBtnId = resId(context, "widget_smart_btn_text", "id")
+        if (textBtnId != 0) {
+            views.setOnClickPendingIntent(
+                textBtnId,
+                buildShortcutPendingIntent(
+                    context = context,
+                    requestCode = 9900 + idBase,
+                    shortcutAction = AutomationBridge.SHORTCUT_SMART_BILL,
+                ),
+            )
+        }
+        val ocrBtnId = resId(context, "widget_smart_btn_ocr", "id")
+        if (ocrBtnId != 0) {
+            views.setOnClickPendingIntent(
+                ocrBtnId,
+                buildShortcutPendingIntent(
+                    context = context,
+                    requestCode = 10300 + idBase,
+                    shortcutAction = AutomationBridge.SHORTCUT_OCR_BILL,
+                ),
+            )
+        }
+        manager.updateAppWidget(appWidgetId, views)
+    }
+
+    private fun buildShortcutPendingIntent(
+        context: Context,
+        requestCode: Int,
+        shortcutAction: String,
+    ): PendingIntent {
+        val intent = AutomationBridge.buildShortcutIntent(
+            context,
+            shortcutAction,
+            AutomationBridge.SOURCE_WIDGET,
+        )
+        return PendingIntent.getActivity(
+            context,
+            requestCode,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+    }
+
     private fun buildDeepLinkPendingIntent(
         context: Context,
         requestCode: Int,
@@ -365,6 +477,20 @@ class MonthBarWidgetProvider : AppWidgetProvider() {
         val snapshot = TallyWidgetStore.loadSnapshot(context)
         for (id in appWidgetIds) {
             TallyWidgetStore.renderMonthBar(context, appWidgetManager, id, snapshot)
+        }
+    }
+}
+
+/** 4×1 Smart Quick desktop AppWidget: pending-draft badge + 记一笔 / 口语粘贴 / 识图 pills. */
+class SmartQuickWidgetProvider : AppWidgetProvider() {
+    override fun onUpdate(
+        context: Context,
+        appWidgetManager: AppWidgetManager,
+        appWidgetIds: IntArray,
+    ) {
+        val snapshot = TallyWidgetStore.loadSnapshot(context)
+        for (id in appWidgetIds) {
+            TallyWidgetStore.renderSmartQuick(context, appWidgetManager, id, snapshot)
         }
     }
 }

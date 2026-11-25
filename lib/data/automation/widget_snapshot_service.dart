@@ -1,6 +1,7 @@
 import 'package:drift/drift.dart';
 
 import '../../domain/model/codes.dart';
+import '../../domain/rules/auto_map_rules.dart' show autoMapDraftKey;
 import '../../domain/rules/billing_period.dart';
 import '../../domain/rules/income_expense.dart';
 import '../../platform/app_widgets.dart';
@@ -40,9 +41,18 @@ final class WidgetSnapshotService {
                   ..limit(1))
                 .getSingleOrNull();
 
+        final draftCountExpr = db.autoMaps.id.count();
+        final pendingDraftCount =
+            await (db.selectOnly(db.autoMaps)
+                  ..addColumns([draftCountExpr])
+                  ..where(db.autoMaps.key.equals(autoMapDraftKey)))
+                .map((row) => row.read(draftCountExpr) ?? 0)
+                .getSingle();
+
         if (book == null) {
           return WidgetSnapshotPayload.empty(
             updatedAtMs: moment.millisecondsSinceEpoch,
+            pendingDraftCount: pendingDraftCount,
           );
         }
 
@@ -132,6 +142,7 @@ final class WidgetSnapshotService {
           todayExpenseMinor: todaySummary.expense,
           budgetRemainingMinor: budgetRemainingMinor,
           updatedAtMs: moment.millisecondsSinceEpoch,
+          pendingDraftCount: pendingDraftCount,
         );
       });
 

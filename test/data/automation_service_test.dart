@@ -1,9 +1,12 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:drift/drift.dart'
     show BooleanExpressionOperators, Value, driftRuntimeOptions;
 import 'package:drift/native.dart';
+import 'package:flutter/foundation.dart'
+    show TargetPlatform, debugDefaultTargetPlatformOverride;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tallyisle/core/failure.dart';
@@ -20,6 +23,7 @@ import 'package:tallyisle/domain/rules/auto_map_rules.dart';
 import 'package:tallyisle/domain/rules/currency_rates.dart'
     show rateToAnchorFromPrice;
 import 'package:tallyisle/domain/rules/ocr_bill_rules.dart';
+import 'package:tallyisle/domain/rules/smart_bill_nlp_rules.dart';
 import 'package:tallyisle/domain/rules/url_scheme_rules.dart';
 import 'package:tallyisle/platform/app_widgets.dart';
 import 'package:tallyisle/platform/auto_bill_bridge.dart';
@@ -653,4 +657,903 @@ void main() {
       },
     );
   });
+
+  group('Smart auto-bookkeeping: tiered ingest, undo, batch, prompts', () {
+    late int walletId;
+    late int foodCatId;
+    late int shopCatId;
+    late InMemoryAutoBillBridge bridge;
+    late AutoBillService service;
+    var changes = 0;
+
+    Future<BigInt> balanceOf(int id) async => (await (db.select(
+      db.assets,
+    )..where((t) => t.id.equals(id))).getSingle()).balanceMinor;
+
+    setUp(() async {
+      changes = 0;
+      walletId = await ledger.createAsset(
+        commandId: cmd(),
+        name: '微信钱包',
+        initial: Money.minor(BigInt.from(50000)),
+      );
+      foodCatId =
+          (await (db.select(db.recordCategories)..where(
+                    (t) => t.name.equals('餐饮') & t.accountBookId.equals(1),
+                  ))
+                  .getSingle())
+              .id;
+      shopCatId =
+          (await (db.select(db.recordCategories)..where(
+                    (t) => t.name.equals('购物') & t.accountBookId.equals(1),
+                  ))
+                  .getSingle())
+              .id;
+      bridge = InMemoryAutoBillBridge(
+        status: const AccessibilityBridgeStatus.android(enabled: true),
+        notificationListenerStatus:
+            const AutoBillPermissionStatus.notificationListener(enabled: true),
+        overlayStatus: const AutoBillPermissionStatus.overlay(granted: false),
+      );
+      service = AutoBillService(
+        db,
+        ledgerService: ledger,
+        bridge: bridge,
+        afterChange: () async => changes++,
+      );
+      await service.saveRule(
+        commandId: cmd(),
+        key: '瑞幸',
+        info: AutoMapInfo(mapCategoryId: foodCatId, mapAssetId: walletId),
+      );
+      await service.saveRule(
+        commandId: cmd(),
+        key: '全家',
+        info: AutoMapInfo(mapCategoryId: shopCatId),
+      );
+      await service.saveRule(
+        commandId: cmd(),
+        key: '星巴克',
+        info: AutoMapInfo(
+          mapCategoryId: foodCatId,
+          mapAssetId: walletId,
+          allowAutoConfirm: false,
+        ),
+      );
+    });
+
+    tearDown(() => bridge.dispose());
+
+    test(
+      'drafts by default, auto-confirms only when gate passes, dedupes cross-channel, undo restores draft',
+      () async {
+        expect(await service.getSettings(), const AutoBillSettings());
+        expect(
+          (await service.getNotificationListenerStatus()).statusLabel,
+          '已开启',
+        );
+        expect((await service.getOverlayPermissionStatus()).statusLabel, '未授权');
+
+        // 1. Global auto-confirm OFF → draft + notification prompt.
+        final first = await service.ingestPaymentTextWithOutcome(
+          commandId: cmd(),
+          rawText: '微信支付\n瑞幸咖啡\n-¥18.50',
+          packageName: 'com.tencent.mm',
+          capturedAtMs: 1762845000000,
+          channel: 'notification',
+        );
+        expect(first.kind, AutoBillIngestKind.draftQueued);
+        expect(first.categoryId, foodCatId);
+        expect(first.assetId, walletId);
+        expect(bridge.prompts.single.promptKind, 'draft');
+        expect(bridge.prompts.single.promptMode, 'notification');
+        expect(bridge.prompts.single.amountFormatted, '18.50');
+        expect(bridge.prompts.single.categoryName, '餐饮');
+        expect(bridge.prompts.single.assetName, '微信钱包');
+        expect(bridge.prompts.single.toMap()['draftId'], first.draftId);
+        expect(changes, 1);
+
+        // 2. Enable 熟店自动入账 + overlay; native receives pick lists.
+        await service.saveSettings(
+          commandId: cmd(),
+          settings: const AutoBillSettings(
+            autoConfirmMatchedRules: true,
+            promptMode: AutoBillPromptMode.overlay,
+          ),
+        );
+        expect((await service.getSettings()).autoConfirmMatchedRules, isTrue);
+        final synced = bridge.lastSyncedConfig!.toMap();
+        expect(synced['promptMode'], 'overlay');
+        expect(synced['enableNotificationCapture'], isTrue);
+        final cats = synced['categories']! as List;
+        expect(
+          (cats.first as Map).keys,
+          containsAll(<String>['id', 'name', 'type', 'parentId']),
+        );
+        expect(
+          synced['assets'],
+          anyElement(equals({'id': walletId, 'name': '微信钱包'})),
+        );
+
+        // 3. Rule category + account resolved → booked directly.
+        final auto = await service.ingestPaymentTextWithOutcome(
+          commandId: cmd(),
+          rawText: '微信支付\n瑞幸咖啡\n-¥25.00',
+          packageName: 'com.tencent.mm',
+          capturedAtMs: 1762846000000,
+          channel: 'notification',
+        );
+        expect(auto.kind, AutoBillIngestKind.autoConfirmed);
+        final rec = await (db.select(
+          db.records,
+        )..where((t) => t.recordId.equals(auto.recordId!))).getSingle();
+        expect(rec.moneyMinor, BigInt.from(2500));
+        expect(rec.recordCatId, foodCatId);
+        expect(rec.assetId, walletId);
+        expect(await balanceOf(walletId), BigInt.from(47500));
+        expect(bridge.prompts.last.promptKind, 'auto_confirmed');
+        expect(bridge.prompts.last.recordId, auto.recordId);
+        expect(bridge.prompts.last.promptMode, 'overlay');
+
+        // 4. Accessibility twin 3 s later (different wording) → merged.
+        final twin = await service.ingestPaymentTextWithOutcome(
+          commandId: cmd(),
+          rawText: '付款成功 瑞幸咖啡(中关村店) 付款金额 25.00元',
+          packageName: 'com.tencent.mm',
+          capturedAtMs: 1762846003000,
+          channel: 'accessibility',
+        );
+        expect(twin.kind, AutoBillIngestKind.duplicate);
+        expect(twin.recordId, auto.recordId);
+        // Same-channel re-delivery of identical text → merged.
+        final again = await service.ingestPaymentTextWithOutcome(
+          commandId: cmd(),
+          rawText: '微信支付\n瑞幸咖啡\n-¥25.00',
+          packageName: 'com.tencent.mm',
+          capturedAtMs: 1762846001000,
+          channel: 'notification',
+        );
+        expect(again.kind, AutoBillIngestKind.duplicate);
+        expect(await db.select(db.records).get(), hasLength(1));
+
+        // 5. Rule without account / rule switched off → draft (gate refuses).
+        final noAccount = await service.ingestPaymentTextWithOutcome(
+          commandId: cmd(),
+          rawText: '支付宝 付款 ¥12.00 商户：全家便利店',
+          packageName: 'com.eg.android.AlipayGphone',
+          capturedAtMs: 1762847000000,
+        );
+        expect(noAccount.kind, AutoBillIngestKind.draftQueued);
+        final ruleOff = await service.ingestPaymentTextWithOutcome(
+          commandId: cmd(),
+          rawText: '微信支付\n星巴克\n-¥36.00',
+          packageName: 'com.tencent.mm',
+          capturedAtMs: 1762848000000,
+        );
+        expect(ruleOff.kind, AutoBillIngestKind.draftQueued);
+
+        // Compat wrapper never auto-confirms.
+        final compatId = await service.ingestPaymentText(
+          commandId: cmd(),
+          rawText: '微信支付\n瑞幸咖啡\n-¥9.90',
+          packageName: 'com.tencent.mm',
+          capturedAtMs: 1762849000000,
+        );
+        expect(compatId, isNotNull);
+        expect(await db.select(db.records).get(), hasLength(1));
+
+        // 6. Undo auto-confirmed bill → record deleted, balance restored,
+        // draft restored; idempotent.
+        final undoCmd = cmd();
+        final restoredId = await service.undoAutoConfirmedRecord(
+          commandId: undoCmd,
+          recordId: auto.recordId!,
+        );
+        expect(
+          await service.undoAutoConfirmedRecord(
+            commandId: undoCmd,
+            recordId: auto.recordId!,
+          ),
+          restoredId,
+        );
+        expect(
+          await service.undoAutoConfirmedRecord(
+            commandId: cmd(),
+            recordId: auto.recordId!,
+          ),
+          restoredId,
+        );
+        expect(await db.select(db.records).get(), isEmpty);
+        expect(await balanceOf(walletId), BigInt.from(50000));
+        final restored = (await service.listDrafts()).firstWhere(
+          (d) => d.id == restoredId,
+        );
+        expect(restored.money.storageMinor, BigInt.from(2500));
+        expect(restored.categoryId, foodCatId);
+        expect(restored.assetId, walletId);
+        expect(restored.sourceApp, '微信');
+        await expectLater(
+          service.undoAutoConfirmedRecord(
+            commandId: cmd(),
+            recordId: 'missing-record',
+          ),
+          throwsA(isA<Failure>()),
+        );
+
+        // 7. Prompt actions: confirm with overrides, ignore, edit routes.
+        final confirmRes = await service.executePromptAction(
+          AutoBillPromptActionEvent(
+            action: AutoBillPromptActionKind.confirmDraft,
+            draftId: first.draftId,
+            remark: '生椰拿铁',
+            actionAtMs: 1,
+          ),
+        );
+        final confirmed = await (db.select(
+          db.records,
+        )..where((t) => t.recordId.equals(confirmRes.recordId!))).getSingle();
+        expect(confirmed.remark, '生椰拿铁');
+        expect(await balanceOf(walletId), BigInt.from(48150));
+
+        bridge.simulatePromptAction(
+          AutoBillPromptActionEvent(
+            action: AutoBillPromptActionKind.ignoreDraft,
+            draftId: ruleOff.draftId,
+            actionAtMs: 2,
+          ),
+        );
+        final queued = await service.consumeAndExecutePendingPromptActions();
+        expect(queued.single.succeeded, isTrue);
+        expect(
+          (await service.listDrafts()).map((d) => d.id),
+          isNot(contains(ruleOff.draftId)),
+        );
+        final edit = await service.executePromptAction(
+          AutoBillPromptActionEvent(
+            action: AutoBillPromptActionKind.editDraft,
+            draftId: noAccount.draftId,
+            actionAtMs: 3,
+          ),
+        );
+        expect(
+          edit.targetRoute,
+          '/automation/auto-bill?draftId=${noAccount.draftId}',
+        );
+        final editRec = await service.executePromptAction(
+          const AutoBillPromptActionEvent(
+            action: AutoBillPromptActionKind.editRecord,
+            recordId: 'abc',
+            actionAtMs: 4,
+          ),
+        );
+        expect(editRec.targetRoute, '/record/abc');
+
+        // 8. Batch confirm is atomic.
+        final before = (await db.select(db.records).get()).length;
+        await expectLater(
+          service.confirmDraftsBatch(
+            commandId: cmd(),
+            draftIds: [restoredId, 999999],
+          ),
+          throwsA(isA<Failure>()),
+        );
+        expect(await db.select(db.records).get(), hasLength(before));
+        final remaining = (await service.listDrafts())
+            .map((d) => d.id!)
+            .toList();
+        final batchIds = await service.confirmDraftsBatch(
+          commandId: cmd(),
+          draftIds: remaining,
+        );
+        expect(batchIds, hasLength(remaining.length));
+        expect(await service.listDrafts(), isEmpty);
+      },
+    );
+
+    test(
+      'capture channel switches, NLP fallback and optional AI fallback',
+      () async {
+        await service.saveSettings(
+          commandId: cmd(),
+          settings: const AutoBillSettings(enableAccessibilityCapture: false),
+        );
+        bridge.simulateCapturedEvent(
+          const CapturedPaymentEvent(
+            packageName: 'com.tencent.mm',
+            rawText: '微信支付 付款 ¥8.00 商户：便利店',
+            capturedAtMs: 1762845000000,
+            channel: 'accessibility',
+          ),
+        );
+        bridge.simulateCapturedEvent(
+          const CapturedPaymentEvent(
+            packageName: 'com.tencent.mm',
+            rawText: '群聊：明天一起吃饭吧 2个人',
+            capturedAtMs: 1762845001000,
+            channel: 'notification',
+          ),
+        );
+        final outcomes = await service.ingestCapturedEventsWithOutcomes();
+        expect(outcomes.map((o) => o.kind), [
+          AutoBillIngestKind.skipped,
+          AutoBillIngestKind.skipped,
+        ]);
+        expect(await service.listDrafts(), isEmpty);
+
+        // Colloquial text (user-supplied) falls back to the NLP parser.
+        final nlp = await service.ingestSmartText(
+          commandId: cmd(),
+          text: '昨天早饭买煎饼微信钱包花了9块5',
+        );
+        expect(nlp.kind, AutoBillIngestKind.draftQueued);
+        expect(nlp.parseSource, 'nlp');
+        expect(nlp.money!.storageMinor, BigInt.from(950));
+        expect(nlp.assetId, walletId);
+        expect(nlp.categoryId, foodCatId);
+
+        // AI is only used when the user enabled it and offline parsing failed.
+        final ai = _FakeAiClient();
+        final aiService = AutoBillService(
+          db,
+          ledgerService: ledger,
+          bridge: bridge,
+          aiClient: ai,
+        );
+        await expectLater(
+          aiService.ingestSmartText(commandId: cmd(), text: '一张看不清的小票'),
+          throwsA(isA<Failure>()),
+        );
+        expect(ai.calls, 0);
+        await aiService.saveAiParserConfig(
+          commandId: cmd(),
+          config: const AiBillParserConfig(
+            enabled: true,
+            baseUrl: 'https://api.example.com/v1',
+            model: 'demo',
+          ),
+        );
+        expect((await aiService.getAiParserConfig()).isConfigured, isTrue);
+        final viaAi = await aiService.ingestSmartText(
+          commandId: cmd(),
+          text: '一张看不清的小票',
+        );
+        expect(ai.calls, 1);
+        expect(viaAi.parseSource, 'ai');
+        expect(viaAi.money!.storageMinor, BigInt.from(4200));
+      },
+    );
+
+    test(
+      'UrlSchemeService executes smartbill auto/draft/confirm and drafts/ocr routes',
+      () async {
+        final url = UrlSchemeService(
+          db,
+          ledgerService: ledger,
+          bridge: bridge,
+          autoBillService: service,
+        );
+        final draftRes = await url.executeUri(
+          'tallyisle://smartbill?text=${Uri.encodeComponent('早饭包子8.5元')}&mode=draft&app=shortcut',
+          commandId: cmd(),
+        );
+        expect(draftRes.action, UrlSchemeAction.smartBill);
+        expect(draftRes.createdDraftId, isNotNull);
+        expect(draftRes.wroteRecord, isFalse);
+
+        final confirm = await url.executeUri(
+          'tallyisle://smartbill?clipboard=1',
+          commandId: cmd(),
+        );
+        expect(confirm.targetRoute, startsWith('/automation/smart-bill'));
+        expect(confirm.createdDraftId, isNull);
+
+        expect(
+          (await url.executeUri(
+            'tallyisle://drafts',
+            commandId: cmd(),
+          )).targetRoute,
+          '/automation/auto-bill',
+        );
+        expect(
+          (await url.executeUri(
+            'tallyisle://ocr',
+            commandId: cmd(),
+          )).targetRoute,
+          '/automation/ocr',
+        );
+      },
+    );
+  });
+
+  group('Smart quick widget, native OCR provider and AI client', () {
+    test(
+      'snapshot carries pendingDraftCount and decodes smart_quick counts',
+      () async {
+        await db
+            .into(db.autoMaps)
+            .insert(
+              AutoMapsCompanion.insert(
+                key: autoMapDraftKey,
+                draft: const Value('{"bt":0,"moneyMinor":"100","date":1}'),
+              ),
+            );
+        Map<Object?, Object?>? wire;
+        const testChannel = MethodChannel('dev.tallyisle/test_widgets_v2');
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(testChannel, (call) async {
+              if (call.method == 'updateWidgetSnapshot') {
+                wire = call.arguments as Map<Object?, Object?>;
+                return {
+                  'quick_add': 0,
+                  'month_summary': 1,
+                  'month_bar': 0,
+                  'smart_quick': 2,
+                };
+              }
+              return null;
+            });
+        addTearDown(
+          () => TestDefaultBinaryMessengerBinding
+              .instance
+              .defaultBinaryMessenger
+              .setMockMethodCallHandler(testChannel, null),
+        );
+        final widgetService = WidgetSnapshotService(
+          db,
+          bridge: MethodChannelAppWidgetBridge(channel: testChannel),
+        );
+        final (snapshot, counts) = await widgetService.syncToPlatform(
+          now: fixedNow,
+        );
+        expect(snapshot.pendingDraftCount, 1);
+        expect(wire?['pendingDraftCount'], 1);
+        expect(counts[DesktopWidgetKind.smartQuick], 2);
+        expect(WidgetSnapshotPayload.fromMap(snapshot.toMap()), snapshot);
+        expect(
+          DesktopWidgetKind.fromWireKey('smart_quick'),
+          DesktopWidgetKind.smartQuick,
+        );
+      },
+    );
+
+    test(
+      'OcrService uses native offline engine on mobile, honest 未配置 elsewhere',
+      () async {
+        final bridge = InMemoryAutoBillBridge(
+          offlineOcrText: '11月10日 09:00\n瑞幸咖啡\n-18.50',
+        );
+        addTearDown(bridge.dispose);
+        final mobile = OcrService(
+          db,
+          ledgerService: ledger,
+          bridge: bridge,
+          nativeOfflineSupported: true,
+        );
+        final provider = await mobile.getProvider();
+        expect(provider, isA<NativeOfflineOcrProvider>());
+        expect(provider.isConfigured, isTrue);
+        expect(provider.statusLabel, '本机离线引擎（免费就绪）');
+        final (text, candidates) = await mobile.recognizeImageToCandidates(
+          Uint8List.fromList([1, 2, 3]),
+          now: fixedNow,
+        );
+        expect(text, contains('瑞幸咖啡'));
+        expect(candidates.single.money.storageMinor, BigInt.from(1850));
+
+        bridge.offlineOcrText = null;
+        await expectLater(
+          mobile.recognizeImageToCandidates(Uint8List.fromList([1])),
+          throwsA(
+            isA<Failure>().having(
+              (f) => f.code,
+              'code',
+              FailureCode.unsupportedCapability,
+            ),
+          ),
+        );
+
+        final desktop = OcrService(
+          db,
+          ledgerService: ledger,
+          bridge: bridge,
+          nativeOfflineSupported: false,
+        );
+        final desktopProvider = await desktop.getProvider();
+        expect(desktopProvider.statusLabel, '未配置');
+        expect(desktopProvider.capability.reason, '当前平台仅支持文本解析或配置在线接口');
+
+        // AI vision mode with a user AI config allowing images.
+        final ai = _FakeAiClient();
+        final aiOcr = OcrService(
+          db,
+          ledgerService: ledger,
+          bridge: bridge,
+          aiClient: ai,
+          nativeOfflineSupported: true,
+        );
+        await aiOcr.saveConfig(
+          commandId: cmd(),
+          config: const OcrEndpointConfig(mode: OcrModePreference.aiVision),
+        );
+        expect(await aiOcr.getProvider(), isA<UnconfiguredOcrProvider>());
+        await AutoBillService(
+          db,
+          ledgerService: ledger,
+          bridge: bridge,
+        ).saveAiParserConfig(
+          commandId: cmd(),
+          config: const AiBillParserConfig(
+            enabled: true,
+            baseUrl: 'https://api.example.com/v1',
+            model: 'vl',
+            useForImages: true,
+          ),
+        );
+        final aiProvider = await aiOcr.getProvider();
+        expect(aiProvider, isA<AiVisionOcrProvider>());
+        expect(
+          await aiProvider.recognizeImage(Uint8List.fromList([9])),
+          '全家便利店\n实付金额: 12.00',
+        );
+      },
+    );
+
+    test(
+      'OpenAiCompatibleBillParserClient talks to a loopback /chat/completions',
+      () async {
+        final previousOverrides = HttpOverrides.current;
+        HttpOverrides.global = null;
+        addTearDown(() => HttpOverrides.global = previousOverrides);
+
+        final requests = <Map<String, Object?>>[];
+        String? auth;
+        String? path;
+        final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+        addTearDown(() => server.close(force: true));
+        server.listen((req) async {
+          auth = req.headers.value(HttpHeaders.authorizationHeader);
+          path = req.uri.path;
+          final body = await utf8.decoder.bind(req).join();
+          final json = (jsonDecode(body) as Map).cast<String, Object?>();
+          requests.add(json);
+          final isImage = (json['messages']! as List).any(
+            (m) => (m as Map)['content'] is List,
+          );
+          req.response
+            ..statusCode = 200
+            ..headers.contentType = ContentType.json
+            ..write(
+              jsonEncode({
+                'choices': [
+                  {
+                    'message': {
+                      'content': isImage
+                          ? '瑞幸咖啡\n-18.50'
+                          : '```json\n{"bills":[{"type":"expense","amount":"18.50","remark":"瑞幸"}]}\n```',
+                    },
+                  },
+                ],
+              }),
+            );
+          await req.response.close();
+        });
+
+        final config = AiBillParserConfig(
+          enabled: true,
+          baseUrl: 'http://127.0.0.1:${server.port}/v1',
+          apiKey: 'sk-test',
+          model: 'deepseek-chat',
+        );
+        final client = OpenAiCompatibleBillParserClient();
+        final bills = await client.parseText(
+          '瑞幸咖啡18.5',
+          config: config,
+          nowMs: fixedNow.millisecondsSinceEpoch,
+          categoryNames: const ['餐饮'],
+        );
+        expect(path, '/v1/chat/completions');
+        expect(auth, 'Bearer sk-test');
+        expect(requests.single['model'], 'deepseek-chat');
+        expect(bills.single.money.storageMinor, BigInt.from(1850));
+
+        final text = await client.transcribeImage(
+          Uint8List.fromList([1, 2]),
+          config: config,
+          fileName: 'a.jpg',
+        );
+        expect(text, '瑞幸咖啡\n-18.50');
+        final imageMsg = (requests.last['messages']! as List).single as Map;
+        final parts = imageMsg['content'] as List;
+        expect(
+          ((parts.last as Map)['image_url'] as Map)['url'],
+          startsWith('data:image/jpeg;base64,'),
+        );
+
+        await expectLater(
+          client.parseText('x', config: const AiBillParserConfig(), nowMs: 0),
+          throwsA(isA<Failure>()),
+        );
+      },
+    );
+  });
+
+  group('MethodChannelAutoBillBridge canonical wire contract', () {
+    test('Dart→native methods and native→Dart callbacks', () async {
+      const name = 'dev.tallyisle/test_automation_contract';
+      const channel = MethodChannel(name);
+      final calls = <MethodCall>[];
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+            calls.add(call);
+            switch (call.method) {
+              case 'getNotificationListenerStatus':
+                return {
+                  'supported': true,
+                  'enabled': true,
+                  'statusLabel': '已开启',
+                };
+              case 'getOverlayPermissionStatus':
+                return {
+                  'supported': true,
+                  'enabled': false,
+                  'statusLabel': '未授权',
+                };
+              case 'openNotificationListenerSettings':
+              case 'openOverlaySettings':
+              case 'syncAndroidAutoBillConfig':
+              case 'showAutoBillPrompt':
+                return true;
+              case 'consumeCapturedEvents':
+                return [
+                  {
+                    'packageName': 'com.tencent.mm',
+                    'rawText': '付款 ¥1.00',
+                    'capturedAtMs': 5,
+                    'channel': 'notification',
+                  },
+                ];
+              case 'consumePendingSharedPayloads':
+                return [
+                  {
+                    'kind': 'image',
+                    'imagePaths': ['/tmp/a.png'],
+                    'source': 'share',
+                    'receivedAtMs': 7,
+                  },
+                  {
+                    'kind': 'shortcut',
+                    'shortcutAction': 'bogus',
+                    'receivedAtMs': 8,
+                  },
+                  {
+                    'kind': 'shortcut',
+                    'shortcutAction': 'smart_bill',
+                    'source': 'shortcut',
+                    'receivedAtMs': 9,
+                  },
+                ];
+              case 'consumePendingPromptActions':
+                return [
+                  {'action': 'undo_record', 'recordId': 'r1', 'actionAtMs': 3},
+                  {'action': 'confirm_draft', 'actionAtMs': 4},
+                ];
+              case 'recognizeImageOffline':
+                return {'supported': true, 'text': '瑞幸 18.50'};
+              default:
+                return null;
+            }
+          });
+      addTearDown(
+        () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(channel, null),
+      );
+      final bridge = MethodChannelAutoBillBridge(
+        channel: channel,
+        isOhosOverride: false,
+      );
+      addTearDown(bridge.dispose);
+
+      expect(
+        await bridge.getNotificationListenerStatus(),
+        const AutoBillPermissionStatus.notificationListener(enabled: true),
+      );
+      expect(
+        await bridge.getOverlayPermissionStatus(),
+        const AutoBillPermissionStatus.overlay(granted: false),
+      );
+      expect(await bridge.openNotificationListenerSettings(), isTrue);
+      expect(await bridge.openOverlaySettings(), isTrue);
+      expect(
+        await bridge.syncAndroidAutoBillConfig(
+          const AutoBillNativeConfig(
+            enableNotificationCapture: true,
+            enableAccessibilityCapture: false,
+            promptMode: 'overlay',
+            categories: [
+              {'id': 1, 'name': '餐饮', 'type': 0, 'parentId': -1},
+            ],
+            assets: [
+              {'id': 2, 'name': '微信'},
+            ],
+          ),
+        ),
+        isTrue,
+      );
+      final syncArgs = calls.last.arguments as Map;
+      expect(
+        syncArgs.keys,
+        containsAll(<String>[
+          'enableNotificationCapture',
+          'enableAccessibilityCapture',
+          'promptMode',
+          'categories',
+          'assets',
+        ]),
+      );
+      expect(
+        await bridge.showAutoBillPrompt(
+          const AutoBillPromptRequest(
+            promptKind: 'draft',
+            promptMode: 'notification',
+            draftId: 3,
+            recordType: 0,
+            amountFormatted: '18.50',
+            merchant: '瑞幸',
+          ),
+        ),
+        isTrue,
+      );
+      expect(
+        (calls.last.arguments as Map).keys,
+        containsAll(<String>[
+          'promptKind',
+          'promptMode',
+          'draftId',
+          'recordId',
+          'recordType',
+          'amountFormatted',
+          'currencySymbol',
+          'merchant',
+          'categoryId',
+          'categoryName',
+          'assetId',
+          'assetName',
+        ]),
+      );
+
+      final events = await bridge.consumeCapturedEvents();
+      expect(events.single.channel, 'notification');
+      final shares = await bridge.consumePendingSharedPayloads();
+      expect(shares, hasLength(2));
+      expect(shares.first.kind, AutoBillSharedPayloadKind.image);
+      expect(shares.first.imagePaths, ['/tmp/a.png']);
+      expect(shares.last.shortcutAction, 'smart_bill');
+      final actions = await bridge.consumePendingPromptActions();
+      expect(actions.single.action, 'undo_record');
+      expect(actions.single.recordId, 'r1');
+
+      final ocr = await bridge.recognizeImageOffline(
+        Uint8List.fromList([1, 2, 3]),
+        fileName: 'x.png',
+      );
+      expect(ocr.supported, isTrue);
+      expect(ocr.text, '瑞幸 18.50');
+      final ocrArgs = calls.last.arguments as Map;
+      expect(ocrArgs['bytes'], isA<Uint8List>());
+      expect(ocrArgs['fileName'], 'x.png');
+
+      // Native → Dart callbacks: false without listener, true once handled.
+      Future<Object?> send(String method, Object? args) async {
+        final completer = Completer<ByteData?>();
+        await TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .handlePlatformMessage(
+              name,
+              const StandardMethodCodec().encodeMethodCall(
+                MethodCall(method, args),
+              ),
+              completer.complete,
+            );
+        return const StandardMethodCodec().decodeEnvelope(
+          (await completer.future)!,
+        );
+      }
+
+      const sharedArgs = {
+        'kind': 'text',
+        'text': '早饭8元',
+        'source': 'share',
+        'receivedAtMs': 1,
+      };
+      const actionArgs = {
+        'action': 'confirm_draft',
+        'draftId': 5,
+        'categoryId': 2,
+        'actionAtMs': 1,
+      };
+      expect(await send('onSharedPayload', sharedArgs), isFalse);
+      expect(await send('onPromptAction', actionArgs), isFalse);
+      final shared = <AutoBillSharedPayload>[];
+      final prompted = <AutoBillPromptActionEvent>[];
+      final s1 = bridge.onSharedPayload.listen(shared.add);
+      final s2 = bridge.onPromptAction.listen(prompted.add);
+      addTearDown(s1.cancel);
+      addTearDown(s2.cancel);
+      expect(await send('onSharedPayload', sharedArgs), isTrue);
+      expect(await send('onPromptAction', actionArgs), isTrue);
+      expect(
+        await send('onSharedPayload', const {
+          'kind': 'text',
+          'receivedAtMs': 1,
+        }),
+        isFalse,
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(shared.single.text, '早饭8元');
+      expect(prompted.single.draftId, 5);
+      expect(prompted.single.categoryId, 2);
+    });
+
+    test(
+      'iOS and HarmonyOS use the native channel with honest unsupported capture',
+      () async {
+        debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+        addTearDown(() => debugDefaultTargetPlatformOverride = null);
+        final ios = createAutoBillBridge();
+        addTearDown(ios.dispose);
+        expect(ios, isA<MethodChannelAutoBillBridge>());
+        expect(ios.capability.reason, contains('iOS'));
+        expect(
+          await ios.getAccessibilityStatus(),
+          const AccessibilityBridgeStatus.unsupported(),
+        );
+        expect(
+          await ios.getNotificationListenerStatus(),
+          const AutoBillPermissionStatus.unsupported(),
+        );
+        expect((await ios.getOverlayPermissionStatus()).statusLabel, '当前平台不支持');
+        expect(
+          (await ios.recognizeImageOffline(Uint8List.fromList([1]))).supported,
+          isFalse,
+        );
+
+        debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+        final ohos = createAutoBillBridge(isOhosOverride: true);
+        addTearDown(ohos.dispose);
+        expect(ohos, isA<MethodChannelAutoBillBridge>());
+        expect(
+          await ohos.getNotificationListenerStatus(),
+          const AutoBillPermissionStatus.unsupported(),
+        );
+        final desktop = createAutoBillBridge(isOhosOverride: false);
+        addTearDown(desktop.dispose);
+        expect(desktop, isA<InMemoryAutoBillBridge>());
+      },
+    );
+  });
+}
+
+final class _FakeAiClient implements AiBillParserClient {
+  int calls = 0;
+
+  @override
+  Future<List<SmartBillParseResult>> parseText(
+    String text, {
+    required AiBillParserConfig config,
+    required int nowMs,
+    List<String> categoryNames = const [],
+    List<String> assetNames = const [],
+  }) async {
+    calls++;
+    return parseAiBillJsonResponse(
+      '{"bills":[{"type":"expense","amount":"42.00","remark":"小票"}]}',
+      nowMs: nowMs,
+    );
+  }
+
+  @override
+  Future<String> transcribeImage(
+    Uint8List imageBytes, {
+    required AiBillParserConfig config,
+    String? fileName,
+  }) async => '全家便利店\n实付金额: 12.00';
 }

@@ -15,6 +15,7 @@ import '../../platform/auto_bill_bridge.dart';
 import '../db/database.dart';
 import '../db/failures.dart';
 import '../ledger/ledger_service.dart';
+import 'auto_bill_service.dart';
 
 /// Outcome of executing a `tallyisle://` URI (`F-033`).
 final class UrlSchemeExecutionResult {
@@ -24,6 +25,8 @@ final class UrlSchemeExecutionResult {
     this.targetRoute,
     this.createdRecordId,
     this.resolvedBookId,
+    this.createdDraftId,
+    this.smartBillOutcome,
   });
 
   final String rawUri;
@@ -31,6 +34,12 @@ final class UrlSchemeExecutionResult {
   final String? targetRoute;
   final String? createdRecordId;
   final int? resolvedBookId;
+
+  /// Draft id queued (or matched as duplicate) by `smartbill`.
+  final int? createdDraftId;
+
+  /// Full tiered ingestion outcome for `smartbill` auto/draft modes.
+  final AutoBillIngestOutcome? smartBillOutcome;
 
   bool get wroteRecord => createdRecordId != null;
 }
@@ -41,12 +50,23 @@ final class UrlSchemeService {
     this.db, {
     LedgerService? ledgerService,
     AutoBillBridge? bridge,
+    AutoBillService? autoBillService,
   }) : _ledger = ledgerService ?? LedgerService(db),
-       _bridge = bridge;
+       _bridge = bridge,
+       _autoBillService = autoBillService;
 
   final AppDatabase db;
   final LedgerService _ledger;
   final AutoBillBridge? _bridge;
+  AutoBillService? _autoBillService;
+
+  /// Never constructs a second native channel bridge (that would steal the
+  /// shared `dev.tallyisle/automation` handler).
+  AutoBillService get _autoBill => _autoBillService ??= AutoBillService(
+    db,
+    ledgerService: _ledger,
+    bridge: _bridge ?? InMemoryAutoBillBridge(),
+  );
 
   Stream<String>? get onDeepLink => _bridge?.onDeepLink;
 
@@ -79,6 +99,34 @@ final class UrlSchemeService {
       throw const Failure(FailureCode.validation, '提交标识无效');
     }
     final parsed = parseUrlScheme(rawUri);
+
+    final smart = parsed.smartBill;
+    if (smart != null) {
+      final mode = smart.effectiveMode;
+      final text = smart.text;
+      if (mode == SmartBillUrlMode.confirm || text == null || text.isEmpty) {
+        return UrlSchemeExecutionResult(
+          rawUri: parsed.rawUri,
+          action: parsed.action,
+          targetRoute: parsed.targetRoute,
+        );
+      }
+      final outcome = await _autoBill.ingestSmartText(
+        commandId: commandId,
+        text: text,
+        sourceApp: smart.sourceApp,
+        autoConfirm: mode == SmartBillUrlMode.auto,
+      );
+      return UrlSchemeExecutionResult(
+        rawUri: parsed.rawUri,
+        action: parsed.action,
+        createdRecordId: outcome.kind == AutoBillIngestKind.autoConfirmed
+            ? outcome.recordId
+            : null,
+        createdDraftId: outcome.draftId,
+        smartBillOutcome: outcome,
+      );
+    }
 
     if (!parsed.writesDirectly) {
       return guardDatabase(() async {

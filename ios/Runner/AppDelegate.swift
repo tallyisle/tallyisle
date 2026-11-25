@@ -67,15 +67,20 @@ private final class DocumentPickerDelegateBox: NSObject,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
     let ok = super.application(application, didFinishLaunchingWithOptions: launchOptions)
-    if fileChannel == nil, let controller = window?.rootViewController as? FlutterViewController {
-      registerFileChannel(messenger: controller.binaryMessenger)
+    if let controller = window?.rootViewController as? FlutterViewController {
+      if fileChannel == nil {
+        registerFileChannel(messenger: controller.binaryMessenger)
+      }
+      AutomationBridge.shared.attach(messenger: controller.binaryMessenger)
     }
     return ok
   }
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
-    registerFileChannel(messenger: engineBridge.applicationRegistrar.messenger())
+    let messenger = engineBridge.applicationRegistrar.messenger()
+    registerFileChannel(messenger: messenger)
+    AutomationBridge.shared.attach(messenger: messenger)
   }
 
   private func registerFileChannel(messenger: FlutterBinaryMessenger) {

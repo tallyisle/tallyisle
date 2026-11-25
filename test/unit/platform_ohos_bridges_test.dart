@@ -189,22 +189,36 @@ void main() {
 
   group('HarmonyOS AutoBillBridge & AppWidgetBridge (dev.tallyisle/automation)', () {
     test(
-      'handles tallyisle:// deep links exclusively while honestly reporting AccessibilityService & desktop widgets as unsupported (ADR-008)',
+      'handles tallyisle:// deep links while honestly reporting AccessibilityService as unsupported and enabling HarmonyOS service cards (ADR-008)',
       () async {
+        // HarmonyOS Form Kit service cards share the native widget pipeline.
+        final ohosWidgetBridge = createAppWidgetBridge(isOhosOverride: true);
+        expect(ohosWidgetBridge.capability.state, CapabilityState.available);
+        expect(ohosWidgetBridge.capability.reason, contains('HarmonyOS'));
+        // Missing native plugin never fakes a successful pin.
+        expect(
+          await ohosWidgetBridge.requestPinWidget(DesktopWidgetKind.smartQuick),
+          isFalse,
+        );
+        await ohosWidgetBridge.dispose();
         final ohosTargets = TargetPlatform.values
             .where((p) => p.name == 'ohos')
             .toList();
         for (final target in ohosTargets) {
           debugDefaultTargetPlatformOverride = target;
           final widgetBridge = createAppWidgetBridge();
-          expect(widgetBridge.capability.state, CapabilityState.unsupported);
-          expect(
-            await widgetBridge.requestPinWidget(DesktopWidgetKind.quickAdd),
-            isFalse,
-          );
+          expect(widgetBridge.capability.state, CapabilityState.available);
           await widgetBridge.dispose();
         }
         debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+        final desktopWidgetBridge = createAppWidgetBridge(
+          isOhosOverride: false,
+        );
+        expect(
+          desktopWidgetBridge.capability.state,
+          CapabilityState.unsupported,
+        );
+        await desktopWidgetBridge.dispose();
 
         const channel = MethodChannel(automationChannelName);
         String? pendingUri = 'tallyisle://add?type=0&money=28.50&remark=早餐';

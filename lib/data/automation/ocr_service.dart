@@ -5,6 +5,8 @@ import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 import 'package:drift/drift.dart';
+import 'package:flutter/foundation.dart'
+    show TargetPlatform, defaultTargetPlatform, kIsWeb;
 
 import '../../core/failure.dart';
 import '../../domain/ledger/record_extra.dart';
@@ -14,6 +16,8 @@ import '../../domain/rules/asset_overview.dart'
 import '../../domain/rules/auto_map_rules.dart';
 import '../../domain/rules/currency_rates.dart' show baseCurrency, billSnapshot;
 import '../../domain/rules/ocr_bill_rules.dart';
+import '../../domain/rules/smart_bill_nlp_rules.dart';
+import '../../platform/auto_bill_bridge.dart';
 import '../../platform/files.dart';
 import '../db/database.dart';
 import '../db/failures.dart';
@@ -40,7 +44,10 @@ abstract interface class OcrProvider {
 
 /// Default honest unconfigured provider (`ADR-017`).
 final class UnconfiguredOcrProvider implements OcrProvider {
-  const UnconfiguredOcrProvider();
+  const UnconfiguredOcrProvider({this.hint = ocrUnconfiguredStatusLabel});
+
+  /// Human-readable reason shown in [capability] (e.g. desktop hint).
+  final String hint;
 
   @override
   String get id => 'unconfigured';
@@ -55,16 +62,291 @@ final class UnconfiguredOcrProvider implements OcrProvider {
   String get statusLabel => ocrUnconfiguredStatusLabel;
 
   @override
-  Capability get capability => const Capability(
-    CapabilityState.unconfigured,
-    ocrUnconfiguredStatusLabel,
-  );
+  Capability get capability => Capability(CapabilityState.unconfigured, hint);
 
   @override
   Future<String> recognizeImage(Uint8List imageBytes, {String? fileName}) {
     throw const Failure(
       FailureCode.unsupportedCapability,
       'OCR 服务未配置：请先配置 HTTP OCR 接口地址，或直接粘贴账单文本进行解析',
+    );
+  }
+}
+
+/// Built-in on-device OCR (Android ML Kit Chinese / iOS Vision / HarmonyOS
+/// CoreVisionKit) via `AutoBillBridge.recognizeImageOffline`. Zero network.
+final class NativeOfflineOcrProvider implements OcrProvider {
+  const NativeOfflineOcrProvider(this.bridge);
+
+  final AutoBillBridge bridge;
+
+  @override
+  String get id => 'native_offline';
+
+  @override
+  String get label => '本机离线识图';
+
+  @override
+  bool get isConfigured => true;
+
+  @override
+  String get statusLabel => ocrNativeOfflineReadyLabel;
+
+  @override
+  Capability get capability =>
+      const Capability(CapabilityState.available, ocrNativeOfflineReadyLabel);
+
+  @override
+  Future<String> recognizeImage(
+    Uint8List imageBytes, {
+    String? fileName,
+  }) async {
+    if (imageBytes.isEmpty) {
+      throw const Failure(FailureCode.validation, '所选图片内容为空');
+    }
+    final result = await bridge.recognizeImageOffline(
+      imageBytes,
+      fileName: fileName,
+    );
+    if (!result.supported) {
+      throw const Failure(
+        FailureCode.unsupportedCapability,
+        '当前设备不支持本机离线识图，请改用自定义接口或直接粘贴账单文本',
+      );
+    }
+    if (result.text.trim().isEmpty) {
+      throw const Failure(FailureCode.validation, '未在图片中识别到文字，请换一张更清晰的截图');
+    }
+    return result.text;
+  }
+}
+
+/// Optional OpenAI-compatible AI client (text parsing & image transcription).
+abstract interface class AiBillParserClient {
+  /// Parses free text into validated bills (`parseAiBillJsonResponse`).
+  Future<List<SmartBillParseResult>> parseText(
+    String text, {
+    required AiBillParserConfig config,
+    required int nowMs,
+    List<String> categoryNames = const [],
+    List<String> assetNames = const [],
+  });
+
+  /// Transcribes all visible text lines in an image (multimodal models).
+  Future<String> transcribeImage(
+    Uint8List imageBytes, {
+    required AiBillParserConfig config,
+    String? fileName,
+  });
+}
+
+/// `dart:io` `HttpClient` implementation of an OpenAI-compatible
+/// `/chat/completions` client (DeepSeek / 通义千问 / OpenAI …). Zero third-party
+/// packages; only used when the user explicitly enables it (`P-03`).
+final class OpenAiCompatibleBillParserClient implements AiBillParserClient {
+  OpenAiCompatibleBillParserClient({HttpClient Function()? httpClientFactory})
+    : _httpClientFactory = httpClientFactory ?? HttpClient.new;
+
+  final HttpClient Function() _httpClientFactory;
+
+  static const int _maxResponseBytes = 4 * 1024 * 1024;
+
+  @override
+  Future<List<SmartBillParseResult>> parseText(
+    String text, {
+    required AiBillParserConfig config,
+    required int nowMs,
+    List<String> categoryNames = const [],
+    List<String> assetNames = const [],
+  }) async {
+    if (text.trim().isEmpty) {
+      throw const Failure(FailureCode.validation, '待识别文本为空');
+    }
+    final content = await _chat(config, [
+      for (final m in buildAiBillParserMessages(
+        text,
+        nowMs: nowMs,
+        categoryNames: categoryNames,
+        assetNames: assetNames,
+      ))
+        m,
+    ]);
+    return parseAiBillJsonResponse(content, nowMs: nowMs);
+  }
+
+  @override
+  Future<String> transcribeImage(
+    Uint8List imageBytes, {
+    required AiBillParserConfig config,
+    String? fileName,
+  }) async {
+    if (imageBytes.isEmpty) {
+      throw const Failure(FailureCode.validation, '所选图片内容为空');
+    }
+    final lower = (fileName ?? '').toLowerCase();
+    final mime = lower.endsWith('.jpg') || lower.endsWith('.jpeg')
+        ? 'image/jpeg'
+        : lower.endsWith('.webp')
+        ? 'image/webp'
+        : 'image/png';
+    final text = await _chat(config, [
+      {
+        'role': 'user',
+        'content': [
+          {'type': 'text', 'text': '请逐行原样输出这张账单图片中的全部文字，不要解释、不要总结。'},
+          {
+            'type': 'image_url',
+            'image_url': {
+              'url': 'data:$mime;base64,${base64Encode(imageBytes)}',
+            },
+          },
+        ],
+      },
+    ]);
+    if (text.trim().isEmpty) {
+      throw const Failure(FailureCode.validation, 'AI 未识别到图片文字');
+    }
+    return text.trim();
+  }
+
+  Future<String> _chat(
+    AiBillParserConfig config,
+    List<Map<String, Object>> messages,
+  ) async {
+    if (!config.isConfigured) {
+      throw const Failure(
+        FailureCode.unsupportedCapability,
+        'AI 识账未配置：请先填写接口地址与模型名称并启用',
+      );
+    }
+    final uri = config.chatCompletionsUri;
+    final timeout = Duration(seconds: config.timeoutSeconds.clamp(5, 120));
+    final client = _httpClientFactory()..connectionTimeout = timeout;
+    try {
+      final request = await client.postUrl(uri).timeout(timeout);
+      request.headers.set(
+        HttpHeaders.contentTypeHeader,
+        'application/json; charset=utf-8',
+      );
+      request.headers.set(HttpHeaders.acceptHeader, 'application/json');
+      final token = config.apiKey.trim();
+      if (token.isNotEmpty) {
+        request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
+      }
+      request.add(
+        utf8.encode(
+          jsonEncode({
+            'model': config.model.trim(),
+            'messages': messages,
+            'temperature': 0,
+            'stream': false,
+          }),
+        ),
+      );
+      final response = await request.close().timeout(timeout);
+      final chunks = BytesBuilder(copy: false);
+      await for (final chunk in response.timeout(timeout)) {
+        if (chunks.length + chunk.length > _maxResponseBytes) {
+          throw const Failure(FailureCode.validation, 'AI 接口响应体积超出限制');
+        }
+        chunks.add(chunk);
+      }
+      if (response.statusCode == 401 || response.statusCode == 403) {
+        throw Failure(
+          FailureCode.authRequired,
+          'AI 接口鉴权未通过（HTTP ${response.statusCode}），请检查 API Key',
+        );
+      }
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw Failure(
+          FailureCode.remoteUnavailable,
+          'AI 接口请求失败（HTTP ${response.statusCode}）',
+        );
+      }
+      final body = utf8.decode(chunks.takeBytes(), allowMalformed: true);
+      final Object? decoded;
+      try {
+        decoded = jsonDecode(body);
+      } on FormatException {
+        throw const Failure(FailureCode.validation, 'AI 接口返回的不是有效 JSON');
+      }
+      if (decoded is Map) {
+        final choices = decoded['choices'];
+        if (choices is List && choices.isNotEmpty && choices.first is Map) {
+          final first = choices.first as Map;
+          final message = first['message'];
+          if (message is Map && message['content'] is String) {
+            return message['content'] as String;
+          }
+          if (first['text'] is String) return first['text'] as String;
+        }
+      }
+      throw const Failure(
+        FailureCode.validation,
+        'AI 接口响应缺少 choices[0].message.content',
+      );
+    } on Failure {
+      rethrow;
+    } on TimeoutException {
+      throw const Failure(
+        FailureCode.remoteUnavailable,
+        'AI 接口请求超时，请检查网络或服务状态',
+      );
+    } on SocketException catch (e) {
+      throw Failure(FailureCode.remoteUnavailable, '无法连接 AI 接口：${e.message}');
+    } on HttpException catch (e) {
+      throw Failure(FailureCode.remoteUnavailable, 'AI 接口通信异常：${e.message}');
+    } catch (_) {
+      throw const Failure(FailureCode.remoteUnavailable, 'AI 识账请求未完成，请检查接口配置');
+    } finally {
+      client.close(force: true);
+    }
+  }
+}
+
+/// Multimodal AI image transcription provider (`OcrModePreference.aiVision`).
+final class AiVisionOcrProvider implements OcrProvider {
+  const AiVisionOcrProvider(this.config, this.client);
+
+  final AiBillParserConfig config;
+  final AiBillParserClient client;
+
+  @override
+  String get id => 'ai_vision';
+
+  @override
+  String get label => '自定义 AI 大模型识图';
+
+  @override
+  bool get isConfigured => config.isConfigured && config.useForImages;
+
+  @override
+  String get statusLabel =>
+      isConfigured ? ocrConfiguredStatusLabel : ocrUnconfiguredStatusLabel;
+
+  @override
+  Capability get capability => isConfigured
+      ? Capability(
+          CapabilityState.available,
+          '已连接至 ${config.chatCompletionsUri.host}',
+        )
+      : const Capability(
+          CapabilityState.unconfigured,
+          ocrUnconfiguredStatusLabel,
+        );
+
+  @override
+  Future<String> recognizeImage(Uint8List imageBytes, {String? fileName}) {
+    if (!isConfigured) {
+      throw const Failure(
+        FailureCode.unsupportedCapability,
+        'AI 识图未配置：请在 AI 识账设置中启用并允许用于图片',
+      );
+    }
+    return client.transcribeImage(
+      imageBytes,
+      config: config,
+      fileName: fileName,
     );
   }
 }
@@ -192,12 +474,34 @@ final class OcrService {
     this.db, {
     LedgerService? ledgerService,
     HttpClient Function()? httpClientFactory,
+    AutoBillBridge? bridge,
+    AiBillParserClient? aiClient,
+    bool? nativeOfflineSupported,
   }) : _ledger = ledgerService ?? LedgerService(db),
-       _httpClientFactory = httpClientFactory;
+       _httpClientFactory = httpClientFactory,
+       _bridge = bridge,
+       _aiClient = aiClient,
+       _nativeOfflineSupported = nativeOfflineSupported;
 
   final AppDatabase db;
   final LedgerService _ledger;
   final HttpClient Function()? _httpClientFactory;
+  final AutoBillBridge? _bridge;
+  final AiBillParserClient? _aiClient;
+  final bool? _nativeOfflineSupported;
+
+  /// Whether the built-in on-device engine can be used (Android / iOS /
+  /// HarmonyOS with a bridge). Desktop & tests without a bridge: `false`.
+  bool get nativeOfflineAvailable {
+    if (_bridge == null) return false;
+    final override = _nativeOfflineSupported;
+    if (override != null) return override;
+    if (kIsWeb) return false;
+    final p = defaultTargetPlatform;
+    return p == TargetPlatform.android ||
+        p == TargetPlatform.iOS ||
+        p.name == 'ohos';
+  }
 
   /// Watches `OcrEndpointConfig` stored in `ti_preference` (`ocr_provider_config`).
   Stream<OcrEndpointConfig> watchConfig() =>
@@ -214,21 +518,69 @@ final class OcrService {
     return OcrEndpointConfig.parse(row?.value);
   });
 
-  /// Watches the active [OcrProvider] (`UnconfiguredOcrProvider` when unconfigured).
-  Stream<OcrProvider> watchProvider() => watchConfig().map(_providerForConfig);
+  /// Watches the active [OcrProvider] (reacts to OCR and AI config rows).
+  Stream<OcrProvider> watchProvider() =>
+      (db.select(db.preferences)..where(
+            (t) => t.key.isIn(const [
+              ocrProviderPreferenceKey,
+              aiBillParserConfigPreferenceKey,
+            ]),
+          ))
+          .watch()
+          .map(_providerForRows);
 
   /// Builds the active [OcrProvider] once.
-  Future<OcrProvider> getProvider() async =>
-      _providerForConfig(await getConfig());
+  Future<OcrProvider> getProvider() => guardDatabase(() async {
+    final rows =
+        await (db.select(db.preferences)..where(
+              (t) => t.key.isIn(const [
+                ocrProviderPreferenceKey,
+                aiBillParserConfigPreferenceKey,
+              ]),
+            ))
+            .get();
+    return _providerForRows(rows);
+  });
 
-  OcrProvider _providerForConfig(OcrEndpointConfig config) {
-    if (!config.isConfigured) {
-      return const UnconfiguredOcrProvider();
-    }
-    return ConfigurableHttpOcrProvider(
-      config,
-      httpClientFactory: _httpClientFactory,
+  OcrProvider _providerForRows(List<Preference> rows) {
+    String? valueOf(String key) =>
+        rows.where((r) => r.key == key).firstOrNull?.value;
+    return _providerForConfig(
+      OcrEndpointConfig.parse(valueOf(ocrProviderPreferenceKey)),
+      AiBillParserConfig.parse(valueOf(aiBillParserConfigPreferenceKey)),
     );
+  }
+
+  /// Provider resolution:
+  /// - `customHttp` (or `nativeOffline` with a configured endpoint override)
+  ///   → [ConfigurableHttpOcrProvider];
+  /// - `aiVision` with an enabled AI config allowing images → [AiVisionOcrProvider];
+  /// - `nativeOffline` on Android / iOS / HarmonyOS → [NativeOfflineOcrProvider];
+  /// - otherwise an honest [UnconfiguredOcrProvider] (`'未配置'`).
+  OcrProvider _providerForConfig(
+    OcrEndpointConfig config, [
+    AiBillParserConfig ai = const AiBillParserConfig(),
+  ]) {
+    switch (config.effectiveMode) {
+      case OcrModePreference.customHttp:
+        if (!config.isConfigured) return const UnconfiguredOcrProvider();
+        return ConfigurableHttpOcrProvider(
+          config,
+          httpClientFactory: _httpClientFactory,
+        );
+      case OcrModePreference.aiVision:
+        final client = _aiClient;
+        if (client != null && ai.isConfigured && ai.useForImages) {
+          return AiVisionOcrProvider(ai, client);
+        }
+        return const UnconfiguredOcrProvider(hint: 'AI 识图未配置：请启用 AI 识账并允许用于图片');
+      case OcrModePreference.nativeOffline:
+        final bridge = _bridge;
+        if (bridge != null && nativeOfflineAvailable) {
+          return NativeOfflineOcrProvider(bridge);
+        }
+        return const UnconfiguredOcrProvider(hint: ocrDesktopUnconfiguredHint);
+    }
   }
 
   Future<T> _command<T>(
@@ -274,7 +626,7 @@ final class OcrService {
     required OcrEndpointConfig config,
   }) => _command(commandId, ['ocr-save-config-v1', config.encode()], () async {
     final validated = config.validated();
-    if (!validated.isConfigured) {
+    if (validated.isDefault) {
       await (db.delete(
         db.preferences,
       )..where((t) => t.key.equals(ocrProviderPreferenceKey))).go();

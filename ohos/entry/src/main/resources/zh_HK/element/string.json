@@ -11,6 +11,94 @@
     {
       "name": "EntryAbility_label",
       "value": "帐屿"
+    },
+    {
+      "name": "form_ability_desc",
+      "value": "帐屿桌面服務卡片"
+    },
+    {
+      "name": "form_quick_add_name",
+      "value": "快捷記一筆"
+    },
+    {
+      "name": "form_quick_add_desc",
+      "value": "一鍵新增一筆帳"
+    },
+    {
+      "name": "form_month_summary_name",
+      "value": "月度概覽"
+    },
+    {
+      "name": "form_month_summary_desc",
+      "value": "本月支出、收入與結餘"
+    },
+    {
+      "name": "form_month_bar_name",
+      "value": "月度橫條"
+    },
+    {
+      "name": "form_month_bar_desc",
+      "value": "橫向月度收支並可快速記帳"
+    },
+    {
+      "name": "form_smart_quick_name",
+      "value": "智慧速記"
+    },
+    {
+      "name": "form_smart_quick_desc",
+      "value": "記一筆、智慧識帳、識圖，並顯示待確認角標"
+    },
+    {
+      "name": "shortcut_new_record",
+      "value": "記一筆"
+    },
+    {
+      "name": "shortcut_smart_bill",
+      "value": "智慧識帳"
+    },
+    {
+      "name": "shortcut_ocr_bill",
+      "value": "識圖記帳"
+    },
+    {
+      "name": "shortcut_drafts",
+      "value": "待確認草稿"
+    },
+    {
+      "name": "widget_expense",
+      "value": "支出"
+    },
+    {
+      "name": "widget_income",
+      "value": "收入"
+    },
+    {
+      "name": "widget_balance",
+      "value": "結餘"
+    },
+    {
+      "name": "widget_add_record",
+      "value": "+ 記一筆"
+    },
+    {
+      "name": "widget_smart_bill",
+      "value": "智慧識帳"
+    },
+    {
+      "name": "widget_ocr_bill",
+      "value": "識圖"
+    },
+    {
+      "name": "widget_smart_title",
+      "value": "智慧速記"
+    },
+    {
+      "name": "widget_pending_count",
+      "value": "%d 筆待確認"
+    },
+    {
+      "name": "widget_no_data",
+      "value": "開啟帐屿同步資料"
     }
   ]
 }

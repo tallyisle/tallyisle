@@ -10,4 +10,25 @@
     <string name="widget_month_summary_desc">2×2 卡片展示当前账本本期支出、收入与结余，并支持一键记账</string>
     <string name="widget_month_bar_label">帐屿 · 月度横条</string>
     <string name="widget_month_bar_desc">4×1 横条展示当前账本本期支出、收入、今日支出与快捷记账按钮</string>
+
+    <string name="notification_listener_service_label">帐屿支付通知监听</string>
+    <string name="autobill_prompt_channel_name">自动记账提醒</string>
+    <string name="autobill_prompt_channel_description">识别到支付后的可操作提醒：免开 App 即可确认入账、修改、忽略或撤销</string>
+    <string name="tile_quick_bill_label">智能记账</string>
+    <string name="process_text_tally_bill">帐屿记账</string>
+
+    <string name="shortcut_new_record_short">记一笔</string>
+    <string name="shortcut_new_record_long">新建一笔记录</string>
+    <string name="shortcut_smart_bill_short">智能记账</string>
+    <string name="shortcut_smart_bill_long">一句话 / 粘贴支付文本识账</string>
+    <string name="shortcut_ocr_bill_short">识图记账</string>
+    <string name="shortcut_ocr_bill_long">选择账单图片离线识别</string>
+    <string name="shortcut_drafts_short">待确认</string>
+    <string name="shortcut_drafts_long">核对待确认草稿</string>
+
+    <string name="widget_smart_quick_label">帐屿 · 智能速记</string>
+    <string name="widget_smart_quick_desc">4×1 智能速记卡片：待确认角标，一键记一笔 / 口语粘贴 / 识图</string>
+    <string name="widget_smart_quick_btn_add">+ 记一笔</string>
+    <string name="widget_smart_quick_btn_text">口语/粘贴</string>
+    <string name="widget_smart_quick_btn_ocr">识图</string>
 </resources>

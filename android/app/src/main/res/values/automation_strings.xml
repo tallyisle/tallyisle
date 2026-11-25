@@ -10,4 +10,25 @@
     <string name="widget_month_summary_desc">2x2 card showing current book expense, income, balance, and quick add</string>
     <string name="widget_month_bar_label">TallyIsle · Monthly Bar</string>
     <string name="widget_month_bar_desc">4x1 bar showing current book expense, income, today expense, and quick add</string>
+
+    <string name="notification_listener_service_label">TallyIsle Payment Notifications</string>
+    <string name="autobill_prompt_channel_name">Auto-bookkeeping prompts</string>
+    <string name="autobill_prompt_channel_description">Actionable prompts for detected payments: confirm, edit, ignore or undo without opening the app</string>
+    <string name="tile_quick_bill_label">Smart Bill</string>
+    <string name="process_text_tally_bill">Add to TallyIsle</string>
+
+    <string name="shortcut_new_record_short">New record</string>
+    <string name="shortcut_new_record_long">Add a new record</string>
+    <string name="shortcut_smart_bill_short">Smart bill</string>
+    <string name="shortcut_smart_bill_long">Type a sentence or paste a payment text</string>
+    <string name="shortcut_ocr_bill_short">Scan receipt</string>
+    <string name="shortcut_ocr_bill_long">Recognize a bill from an image</string>
+    <string name="shortcut_drafts_short">Pending drafts</string>
+    <string name="shortcut_drafts_long">Review pending auto-bill drafts</string>
+
+    <string name="widget_smart_quick_label">TallyIsle · Smart Quick</string>
+    <string name="widget_smart_quick_desc">4x1 smart quick card with pending draft badge, quick add, speak/paste and image recognition</string>
+    <string name="widget_smart_quick_btn_add">+ Add</string>
+    <string name="widget_smart_quick_btn_text">Speak/Paste</string>
+    <string name="widget_smart_quick_btn_ocr">Scan</string>
 </resources>

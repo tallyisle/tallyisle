@@ -71,6 +71,11 @@ flutter {
     source = "../.."
 }
 
+dependencies {
+    // Bundled offline Chinese OCR model (no Google Play Services required).
+    implementation("com.google.mlkit:text-recognition-chinese:16.0.1")
+}
+
 // Ensure `--release --no-pub` offline builds strip dev-only `integration_test` registration
 // left in GeneratedPluginRegistrant.java by `flutter pub get --offline`.
 tasks.configureEach {

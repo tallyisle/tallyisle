@@ -388,4 +388,292 @@ void main() {
       },
     );
   });
+
+  group('Smart auto-bookkeeping upgrade (decisions 2 / 9 / 10)', () {
+    AutoMapRule rule(int id, String key, AutoMapInfo info) =>
+        AutoMapRule(id: id, key: key, info: info);
+
+    test('AutoMapInfo.allowAutoConfirm defaults true and roundtrips', () {
+      expect(AutoMapInfo.parse('{"mapCategoryId":3}').allowAutoConfirm, isTrue);
+      expect(
+        AutoMapInfo.parse(
+          '{"mapCategoryId":3,"allowAutoConfirm":false}',
+        ).allowAutoConfirm,
+        isFalse,
+      );
+      final info = AutoMapInfo(
+        mapCategoryId: 3,
+        allowAutoConfirm: false,
+        raw: {'keep': 1},
+      );
+      final back = AutoMapInfo.parse(info.encode());
+      expect(back.allowAutoConfirm, isFalse);
+      expect(back.raw['keep'], 1);
+      expect(back.copyWith(allowAutoConfirm: true).allowAutoConfirm, isTrue);
+    });
+
+    test('canAutoConfirm requires global switch + rule category + account', () {
+      final rules = [
+        rule(1, '瑞幸', AutoMapInfo(mapCategoryId: 10, mapAssetId: 2)),
+        rule(2, '星巴克', AutoMapInfo(mapCategoryId: 10)),
+        rule(
+          3,
+          '肯德基',
+          AutoMapInfo(
+            mapCategoryId: 11,
+            mapAssetId: 2,
+            allowAutoConfirm: false,
+          ),
+        ),
+        rule(4, '还信用卡', AutoMapInfo(mapAssetId: 2, toAssetId: 5)),
+      ];
+      final luckin = matchAutoMapRules(rules, ['瑞幸咖啡']);
+      expect(luckin.categoryRule?.id, 1);
+      bool gate(
+        AutoMapMatchResult m, {
+        bool global = true,
+        int type = RecordType.expense,
+        int? cat = 10,
+        int? a1 = 2,
+        int? a2,
+      }) => m.canAutoConfirm(
+        globalAutoConfirmEnabled: global,
+        resolvedRecordType: type,
+        resolvedRuleCategoryId: cat,
+        resolvedPrimaryAssetId: a1,
+        resolvedSecondaryAssetId: a2,
+      );
+
+      expect(gate(luckin), isTrue);
+      expect(gate(luckin, global: false), isFalse);
+      expect(gate(luckin, a1: null), isFalse, reason: 'missing account');
+      expect(gate(luckin, cat: null), isFalse, reason: 'missing category');
+      expect(gate(luckin, cat: 99), isFalse, reason: 'not the rule category');
+
+      // Category from rule, account only recognized from text hint → allowed.
+      final sbux = matchAutoMapRules(rules, ['星巴克咖啡']);
+      expect(gate(sbux, a1: 7), isTrue);
+      expect(gate(sbux, a1: null), isFalse);
+
+      // Per-rule switch off → draft.
+      final kfc = matchAutoMapRules(rules, ['肯德基']);
+      expect(gate(kfc, cat: 11), isFalse);
+
+      // No rule at all → never auto.
+      expect(gate(matchAutoMapRules(rules, ['无名小店'])), isFalse);
+
+      // Transfer needs distinct from/to accounts.
+      final tr = matchAutoMapRules(rules, ['还信用卡']);
+      expect(
+        gate(tr, type: RecordType.transfer, cat: null, a1: 2, a2: 5),
+        isTrue,
+      );
+      expect(
+        gate(tr, type: RecordType.transfer, cat: null, a1: 2, a2: 2),
+        isFalse,
+      );
+      expect(
+        gate(tr, type: RecordType.transfer, cat: null, a1: 2, a2: null),
+        isFalse,
+      );
+    });
+
+    test('bank / Douyin packages, refund cue, card tail', () {
+      expect(friendlyAutoBillAppName('com.icbc'), '工商银行');
+      expect(friendlyAutoBillAppName('cmb.pb'), '招商银行');
+      expect(friendlyAutoBillAppName('com.ss.android.ugc.aweme'), '抖音');
+      expect(friendlyAutoBillAppName('com.cgbchina.xpt'), '广发银行发现精彩');
+      expect(friendlyAutoBillAppName('com.unknown.app'), 'com.unknown.app');
+
+      const sms = '【工商银行】您尾号5678卡11月10日14:20收入人民币8,500.00元，摘要：代发工资';
+      final income = parsePaymentText(sms, fallbackNowMs: 1762840000000)!;
+      expect(income.recordType, RecordType.income);
+      expect(income.money.storageMinor, BigInt.from(850000));
+      expect(income.accountHint1, '工商银行(5678)');
+      expect(income.cardTail, '5678');
+
+      final refund = parsePaymentText(
+        '支付宝 退款成功 ¥23.50 已原路退回 商户：淘宝',
+        packageOrApp: 'com.eg.android.AlipayGphone',
+        fallbackNowMs: 1762840000000,
+      )!;
+      expect(refund.recordType, RecordType.income);
+      expect(refund.isRefund, isTrue);
+
+      final douyin = parsePaymentText(
+        '抖音支付 付款成功 ¥39.90',
+        fallbackNowMs: 1762840000000,
+      )!;
+      expect(douyin.sourceApp, '抖音');
+      expect(douyin.recordType, RecordType.expense);
+    });
+
+    test('cross-channel fingerprint ignores merchant and uses 15s window', () {
+      final a = computeCrossChannelPaymentFingerprint(
+        sourceAppOrPackage: 'com.tencent.mm',
+        recordType: RecordType.expense,
+        money: Money.minor(BigInt.from(1850)),
+      );
+      final b = computeCrossChannelPaymentFingerprint(
+        sourceAppOrPackage: '微信',
+        recordType: RecordType.expense,
+        money: Money.minor(BigInt.from(1850)),
+      );
+      final c = computeCrossChannelPaymentFingerprint(
+        sourceAppOrPackage: '微信',
+        recordType: RecordType.expense,
+        money: Money.minor(BigInt.from(1851)),
+      );
+      expect(a, b);
+      expect(a, isNot(c));
+      expect(isWithinCrossChannelWindow(1000, 16000), isTrue);
+      expect(isWithinCrossChannelWindow(1000, 16001), isFalse);
+    });
+
+    test('tallyisle://smartbill, drafts, ocr parsing and templates', () {
+      final auto = parseUrlScheme(
+        'tallyisle://smartbill?text=早饭8元&app=shortcut',
+      );
+      expect(auto.action, UrlSchemeAction.smartBill);
+      expect(auto.smartBill!.mode, SmartBillUrlMode.auto);
+      expect(auto.smartBill!.text, '早饭8元');
+      expect(auto.smartBill!.sourceApp, 'shortcut');
+      expect(auto.targetRoute, isNull);
+      expect(auto.writesDirectly, isFalse);
+
+      final draft = parseUrlScheme('tallyisle://smartbill?text=x9元&mode=draft');
+      expect(draft.smartBill!.effectiveMode, SmartBillUrlMode.draft);
+
+      final clip = parseUrlScheme(
+        'tallyisle://smartbill?clipboard=1&mode=auto',
+      );
+      expect(clip.smartBill!.readClipboard, isTrue);
+      expect(clip.smartBill!.effectiveMode, SmartBillUrlMode.confirm);
+      expect(Uri.parse(clip.targetRoute!).path, smartBillConfirmRoute);
+      expect(Uri.parse(clip.targetRoute!).queryParameters['clipboard'], '1');
+
+      final confirm = parseUrlScheme(
+        'tallyisle://smartbill?text=午饭25&mode=confirm',
+      );
+      expect(Uri.parse(confirm.targetRoute!).queryParameters['text'], '午饭25');
+
+      expect(
+        () => parseUrlScheme('tallyisle://smartbill'),
+        throwsA(isA<Failure>()),
+      );
+      expect(
+        () => parseUrlScheme('tallyisle://smartbill?text=a&mode=boom'),
+        throwsA(isA<Failure>()),
+      );
+
+      expect(
+        parseUrlScheme('tallyisle://drafts').targetRoute,
+        '/automation/auto-bill',
+      );
+      expect(
+        parseUrlScheme('tallyisle://drafts').action,
+        UrlSchemeAction.drafts,
+      );
+      expect(parseUrlScheme('tallyisle://ocr').targetRoute, '/automation/ocr');
+
+      for (final t in urlSchemeTemplates) {
+        expect(
+          () => parseUrlScheme(t.tallyIsleUri),
+          returnsNormally,
+          reason: t.title,
+        );
+      }
+      expect(
+        urlSchemeTemplates.where((t) => t.tallyIsleUri.contains('smartbill')),
+        hasLength(greaterThanOrEqualTo(2)),
+      );
+    });
+
+    test(
+      'OcrEndpointConfig mode: default native, legacy HTTP rows, override',
+      () {
+        const def = OcrEndpointConfig();
+        expect(def.mode, OcrModePreference.nativeOffline);
+        expect(def.effectiveMode, OcrModePreference.nativeOffline);
+        expect(def.isDefault, isTrue);
+
+        final legacy = OcrEndpointConfig.parse(
+          '{"endpointUrl":"https://ocr.example.com/v1","apiKey":"k","timeoutSeconds":30}',
+        );
+        expect(legacy.mode, OcrModePreference.customHttp);
+
+        const override = OcrEndpointConfig(
+          endpointUrl: 'https://ocr.example.com',
+        );
+        expect(override.effectiveMode, OcrModePreference.customHttp);
+
+        const ai = OcrEndpointConfig(mode: OcrModePreference.aiVision);
+        expect(
+          OcrEndpointConfig.parse(ai.encode()).mode,
+          OcrModePreference.aiVision,
+        );
+        expect(
+          const OcrEndpointConfig(mode: OcrModePreference.customHttp).validated,
+          throwsA(isA<Failure>()),
+        );
+      },
+    );
+
+    test(
+      'parseOcrBillCandidates: bill detail page, 合计 N件, colloquial lines',
+      () {
+        const detail = """
+账单详情
+瑞幸咖啡
+-18.50
+当前状态 支付成功
+支付时间 2026年11月10日 09:15:22
+商品 生椰拿铁
+支付方式 招商银行储蓄卡(1234)
+""";
+        final d = parseOcrBillCandidates(
+          detail,
+          defaultYear: 2026,
+          fallbackTimeMs: 1762800000000,
+        );
+        expect(d, hasLength(1));
+        expect(d.single.merchant, '瑞幸咖啡');
+        expect(d.single.money.storageMinor, BigInt.from(1850));
+        expect(d.single.accountHint, '招商银行储蓄卡(1234)');
+        expect(d.single.remark, '瑞幸咖啡 生椰拿铁');
+        expect(d.single.categoryHint, '餐饮');
+        expect(
+          d.single.recordTimeMs,
+          DateTime(2026, 11, 10, 9, 15, 22).millisecondsSinceEpoch,
+        );
+
+        const receipt = """
+永辉超市
+2026-11-11 10:20
+苹果 12.80
+牛奶 9.90
+合计 2件 22.70
+""";
+        final r = parseOcrBillCandidates(
+          receipt,
+          defaultYear: 2026,
+          fallbackTimeMs: 1762800000000,
+        );
+        expect(r.single.money.storageMinor, BigInt.from(2270));
+
+        const notes = "早饭包子8.5元\n午饭外卖25元\n打车三十二块\n随便写写";
+        final n = parseOcrBillCandidates(
+          notes,
+          defaultYear: 2026,
+          fallbackTimeMs: 1762800000000,
+        );
+        expect(n.map((c) => c.money.storageMinor), [
+          BigInt.from(850),
+          BigInt.from(2500),
+          BigInt.from(3200),
+        ]);
+        expect(n[2].categoryHint, '交通');
+      },
+    );
+  });
 }

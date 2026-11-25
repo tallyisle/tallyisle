@@ -16,6 +16,76 @@ enum UrlSchemeAction {
   newBill,
   addBill,
   internalReminder,
+
+  /// `tallyisle://smartbill?text=…&clipboard=1&mode=auto|draft|confirm&app=…`
+  smartBill,
+
+  /// `tallyisle://drafts` → pending-draft inbox.
+  drafts,
+
+  /// `tallyisle://ocr` → image / text bill recognition page.
+  ocr,
+}
+
+/// Route of the auto-bill draft inbox page.
+const String autoBillDraftsRoute = '/automation/auto-bill';
+
+/// Route of the OCR bill recognition page.
+const String ocrBillRoute = '/automation/ocr';
+
+/// Route the UI layer should register to open the smart-bill quick sheet in
+/// confirm mode (query: `text`, `clipboard`, `app`).
+const String smartBillConfirmRoute = '/automation/smart-bill';
+
+/// Maximum accepted smart-bill text length.
+const int maxSmartBillTextLength = 5000;
+
+/// How a `smartbill` URI should be handled.
+enum SmartBillUrlMode {
+  /// Tiered: auto-confirm when the 熟店 gate passes, otherwise queue a draft.
+  auto('auto'),
+
+  /// Always queue a pending draft.
+  draft('draft'),
+
+  /// Open TallyIsle's prefilled confirm sheet (no silent write).
+  confirm('confirm');
+
+  const SmartBillUrlMode(this.wireKey);
+  final String wireKey;
+
+  static SmartBillUrlMode? fromWireKey(String? raw) {
+    final key = raw?.trim().toLowerCase();
+    for (final m in SmartBillUrlMode.values) {
+      if (m.wireKey == key) return m;
+    }
+    return null;
+  }
+}
+
+/// Validated parameters of a `tallyisle://smartbill` URI.
+final class UrlSmartBillParams {
+  const UrlSmartBillParams({
+    this.text,
+    this.readClipboard = false,
+    this.mode = SmartBillUrlMode.auto,
+    this.sourceApp,
+  });
+
+  /// Payment / SMS / colloquial text (may be `null` when [readClipboard]).
+  final String? text;
+
+  /// `clipboard=1`: the user explicitly asked to read the clipboard (only the
+  /// UI layer may read it, after this explicit trigger; never in background).
+  final bool readClipboard;
+  final SmartBillUrlMode mode;
+  final String? sourceApp;
+
+  /// Clipboard reads always require the foreground confirm UI.
+  SmartBillUrlMode get effectiveMode =>
+      readClipboard && (text == null || text!.isEmpty)
+      ? SmartBillUrlMode.confirm
+      : mode;
 }
 
 /// Validated parameters for a direct `addbill` execution (`F-033` R2/R3).
@@ -81,6 +151,7 @@ final class ParsedUrlSchemeCommand {
     this.year,
     this.month,
     this.bookRef,
+    this.smartBill,
   });
 
   final String rawUri;
@@ -96,6 +167,9 @@ final class ParsedUrlSchemeCommand {
   final int? year;
   final int? month;
   final String? bookRef;
+
+  /// Present when `action == UrlSchemeAction.smartBill`.
+  final UrlSmartBillParams? smartBill;
 
   bool get writesDirectly => addBill != null;
 }
@@ -145,6 +219,32 @@ const List<UrlSchemeTemplate> urlSchemeTemplates = [
     description: '在两个资金账户间记一笔转账，可选附带手续费。',
     tallyIsleUri:
         'tallyisle://addbill?type=2&money=1000.00&fee=1.00&asset1=储蓄卡&asset2=信用卡&remark=信用卡还款',
+  ),
+  UrlSchemeTemplate(
+    title: '智能识账（一句话 / 通知文本）',
+    description:
+        'iOS 快捷指令或鸿蒙场景把截屏文字、短信或口语传入 text；熟店规则满足“分类+账户”时自动入账，否则进入待确认草稿。',
+    tallyIsleUri: 'tallyisle://smartbill?text=早饭包子8.5微信&mode=auto&app=shortcut',
+  ),
+  UrlSchemeTemplate(
+    title: '智能识账（总是先进草稿箱）',
+    description: '后台静默把文本收进待确认草稿箱，稍后在帐屿中核对入账。',
+    tallyIsleUri: 'tallyisle://smartbill?text=瑞幸咖啡18.50元微信&mode=draft',
+  ),
+  UrlSchemeTemplate(
+    title: '粘贴剪贴板识账（打开核对）',
+    description: '点击后打开帐屿核对面板并读取一次剪贴板（仅在你主动触发时读取）。',
+    tallyIsleUri: 'tallyisle://smartbill?clipboard=1&mode=confirm',
+  ),
+  UrlSchemeTemplate(
+    title: '打开待确认草稿箱',
+    description: '直达自动记账待确认草稿列表。',
+    tallyIsleUri: 'tallyisle://drafts',
+  ),
+  UrlSchemeTemplate(
+    title: '打开识图记账',
+    description: '直达账单图片 / 文本识别页。',
+    tallyIsleUri: 'tallyisle://ocr',
   ),
 ];
 
@@ -469,6 +569,25 @@ ParsedUrlSchemeCommand parseUrlScheme(String rawUri) {
         month: month,
         bookRef: bookRef,
       );
+    case 'smartbill':
+    case 'smart-bill':
+    case 'smart':
+      return _buildSmartBill(rawUri: trimmed, scheme: scheme, q: q);
+    case 'drafts':
+    case 'draft':
+      return ParsedUrlSchemeCommand(
+        rawUri: trimmed,
+        scheme: scheme,
+        action: UrlSchemeAction.drafts,
+        targetRoute: autoBillDraftsRoute,
+      );
+    case 'ocr':
+      return ParsedUrlSchemeCommand(
+        rawUri: trimmed,
+        scheme: scheme,
+        action: UrlSchemeAction.ocr,
+        targetRoute: ocrBillRoute,
+      );
     case 'newbill':
       return _buildNewBillNavigation(
         rawUri: trimmed,
@@ -591,6 +710,56 @@ ParsedUrlSchemeCommand parseUrlScheme(String rawUri) {
     default:
       throw Failure(FailureCode.validation, '不支持的 URL 动作：$actionToken');
   }
+}
+
+ParsedUrlSchemeCommand _buildSmartBill({
+  required String rawUri,
+  required String scheme,
+  required Map<String, String> q,
+}) {
+  final text = _firstNonBlank(q, const ['text', 'content', 't'])?.trim();
+  final clipboard = _parseBoolFlag(_firstNonBlank(q, const ['clipboard']));
+  if ((text == null || text.isEmpty) && !clipboard) {
+    throw const Failure(
+      FailureCode.validation,
+      'smartbill 需要 text 参数，或使用 clipboard=1 主动读取剪贴板',
+    );
+  }
+  if (text != null && text.length > maxSmartBillTextLength) {
+    throw const Failure(FailureCode.validation, '识别文本过长（最多 5000 字）');
+  }
+  final modeRaw = _firstNonBlank(q, const ['mode']);
+  final mode = modeRaw == null
+      ? SmartBillUrlMode.auto
+      : SmartBillUrlMode.fromWireKey(modeRaw);
+  if (mode == null) {
+    throw Failure(FailureCode.validation, '不支持的 smartbill 模式：$modeRaw');
+  }
+  final app = _firstNonBlank(q, const ['app', 'source']);
+  final params = UrlSmartBillParams(
+    text: text,
+    readClipboard: clipboard,
+    mode: mode,
+    sourceApp: app,
+  );
+  String? route;
+  if (params.effectiveMode == SmartBillUrlMode.confirm) {
+    route = Uri(
+      path: smartBillConfirmRoute,
+      queryParameters: {
+        'text': ?text,
+        if (clipboard) 'clipboard': '1',
+        'app': ?app,
+      },
+    ).toString();
+  }
+  return ParsedUrlSchemeCommand(
+    rawUri: rawUri,
+    scheme: scheme,
+    action: UrlSchemeAction.smartBill,
+    targetRoute: route,
+    smartBill: params,
+  );
 }
 
 ParsedUrlSchemeCommand _buildNewBillNavigation({

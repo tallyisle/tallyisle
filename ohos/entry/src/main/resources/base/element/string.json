@@ -11,6 +11,94 @@
     {
       "name": "EntryAbility_label",
       "value": "TallyIsle"
+    },
+    {
+      "name": "form_ability_desc",
+      "value": "TallyIsle home screen service cards"
+    },
+    {
+      "name": "form_quick_add_name",
+      "value": "Quick add"
+    },
+    {
+      "name": "form_quick_add_desc",
+      "value": "One tap to add a new record"
+    },
+    {
+      "name": "form_month_summary_name",
+      "value": "Month summary"
+    },
+    {
+      "name": "form_month_summary_desc",
+      "value": "This month expense, income and balance"
+    },
+    {
+      "name": "form_month_bar_name",
+      "value": "Month bar"
+    },
+    {
+      "name": "form_month_bar_desc",
+      "value": "Wide monthly overview with quick add"
+    },
+    {
+      "name": "form_smart_quick_name",
+      "value": "Smart quick"
+    },
+    {
+      "name": "form_smart_quick_desc",
+      "value": "Add, smart bill and image recognition with pending drafts badge"
+    },
+    {
+      "name": "shortcut_new_record",
+      "value": "Add record"
+    },
+    {
+      "name": "shortcut_smart_bill",
+      "value": "Smart bill"
+    },
+    {
+      "name": "shortcut_ocr_bill",
+      "value": "Recognize image"
+    },
+    {
+      "name": "shortcut_drafts",
+      "value": "Pending drafts"
+    },
+    {
+      "name": "widget_expense",
+      "value": "Expense"
+    },
+    {
+      "name": "widget_income",
+      "value": "Income"
+    },
+    {
+      "name": "widget_balance",
+      "value": "Balance"
+    },
+    {
+      "name": "widget_add_record",
+      "value": "+ Add"
+    },
+    {
+      "name": "widget_smart_bill",
+      "value": "Smart bill"
+    },
+    {
+      "name": "widget_ocr_bill",
+      "value": "Image"
+    },
+    {
+      "name": "widget_smart_title",
+      "value": "Quick entry"
+    },
+    {
+      "name": "widget_pending_count",
+      "value": "%d pending"
+    },
+    {
+      "name": "widget_no_data",
+      "value": "Open TallyIsle to sync"
     }
   ]
 }

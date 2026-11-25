@@ -7,11 +7,14 @@ import 'files.dart';
 
 const String automationChannelName = 'dev.tallyisle/automation';
 
-/// Supported Android home-screen desktop widgets (`F-034`).
+/// Supported Android home-screen widgets / HarmonyOS service cards (`F-034`).
 enum DesktopWidgetKind {
   quickAdd('quick_add', '快捷记账', '1×1'),
   monthSummary('month_summary', '月度收支概览', '2×2'),
-  monthBar('month_bar', '月度横条', '4×1');
+  monthBar('month_bar', '月度横条', '4×1'),
+
+  /// 智能速记：记一笔 / 口语粘贴 / 识图 + 待确认草稿角标（decision 10）。
+  smartQuick('smart_quick', '智能速记', '4×1 / 2×2');
 
   const DesktopWidgetKind(this.wireKey, this.title, this.gridLabel);
 
@@ -41,12 +44,14 @@ final class WidgetSnapshotPayload {
     required this.todayExpenseMinor,
     this.budgetRemainingMinor,
     required this.updatedAtMs,
+    this.pendingDraftCount = 0,
   });
 
   factory WidgetSnapshotPayload.empty({
     String bookName = '日常账本',
     String periodLabel = '本期',
     int updatedAtMs = 0,
+    int pendingDraftCount = 0,
   }) => WidgetSnapshotPayload(
     bookName: bookName,
     periodLabel: periodLabel,
@@ -55,6 +60,7 @@ final class WidgetSnapshotPayload {
     balanceMinor: BigInt.zero,
     todayExpenseMinor: BigInt.zero,
     updatedAtMs: updatedAtMs,
+    pendingDraftCount: pendingDraftCount,
   );
 
   factory WidgetSnapshotPayload.fromMap(Map<Object?, Object?> map) {
@@ -74,6 +80,7 @@ final class WidgetSnapshotPayload {
           ? null
           : BigInt.tryParse(budgetText),
       updatedAtMs: (map['updatedAtMs'] as num?)?.toInt() ?? 0,
+      pendingDraftCount: (map['pendingDraftCount'] as num?)?.toInt() ?? 0,
     );
   }
 
@@ -86,6 +93,9 @@ final class WidgetSnapshotPayload {
   final BigInt todayExpenseMinor;
   final BigInt? budgetRemainingMinor;
   final int updatedAtMs;
+
+  /// Pending `auto_map` `KEY_DRAFT` count (smart-quick widget badge).
+  final int pendingDraftCount;
 
   String get expenseFormatted => Money.minor(expenseMinor).decimal;
   String get incomeFormatted => Money.minor(incomeMinor).decimal;
@@ -110,6 +120,7 @@ final class WidgetSnapshotPayload {
     'todayExpenseFormatted': todayExpenseFormatted,
     'budgetRemainingFormatted': budgetRemainingFormatted,
     'updatedAtMs': updatedAtMs,
+    'pendingDraftCount': pendingDraftCount,
   };
 
   @override
@@ -124,7 +135,8 @@ final class WidgetSnapshotPayload {
           balanceMinor == other.balanceMinor &&
           todayExpenseMinor == other.todayExpenseMinor &&
           budgetRemainingMinor == other.budgetRemainingMinor &&
-          updatedAtMs == other.updatedAtMs;
+          updatedAtMs == other.updatedAtMs &&
+          pendingDraftCount == other.pendingDraftCount;
 
   @override
   int get hashCode => Object.hash(
@@ -137,6 +149,7 @@ final class WidgetSnapshotPayload {
     todayExpenseMinor,
     budgetRemainingMinor,
     updatedAtMs,
+    pendingDraftCount,
   );
 }
 
@@ -159,15 +172,19 @@ abstract interface class AppWidgetBridge {
   Future<void> dispose();
 }
 
-/// Creates the platform-appropriate [AppWidgetBridge].
-AppWidgetBridge createAppWidgetBridge() {
-  if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
-    return MethodChannelAppWidgetBridge();
+/// Creates the platform-appropriate [AppWidgetBridge]: native channel on
+/// Android (AppWidget) and HarmonyOS (Form Kit service cards).
+AppWidgetBridge createAppWidgetBridge({bool? isOhosOverride}) {
+  if (!kIsWeb) {
+    final isOhos = isOhosOverride ?? (defaultTargetPlatform.name == 'ohos');
+    if (defaultTargetPlatform == TargetPlatform.android || isOhos) {
+      return MethodChannelAppWidgetBridge(isOhos: isOhos);
+    }
   }
   return InMemoryAppWidgetBridge(
     capability: const Capability(
       CapabilityState.unsupported,
-      '桌面小组件仅在 Android 系统桌面生效，当前平台仅提供实时预览',
+      '桌面小组件仅在 Android 系统桌面与 HarmonyOS 服务卡片生效，当前平台仅提供实时预览',
     ),
     pinSupported: false,
   );
@@ -188,20 +205,29 @@ Map<DesktopWidgetKind, int> _decodeCountsMap(Map<Object?, Object?>? raw) {
   return out;
 }
 
-/// Android native implementation bridged via `MethodChannel('dev.tallyisle/automation')`.
+/// Android / HarmonyOS native implementation bridged via
+/// `MethodChannel('dev.tallyisle/automation')`.
 ///
 /// Never registers a method-call handler so it coexists cleanly with
 /// `MethodChannelAutoBillBridge` on the shared channel.
 final class MethodChannelAppWidgetBridge implements AppWidgetBridge {
-  MethodChannelAppWidgetBridge({MethodChannel? channel})
+  MethodChannelAppWidgetBridge({MethodChannel? channel, this.isOhos = false})
     : _channel = channel ?? const MethodChannel(automationChannelName);
 
   final MethodChannel _channel;
-  final InMemoryAppWidgetBridge _fallback = InMemoryAppWidgetBridge();
+  final bool isOhos;
+
+  /// Honest fallback when the native plugin is missing: never reports a fake
+  /// successful pin.
+  final InMemoryAppWidgetBridge _fallback = InMemoryAppWidgetBridge(
+    pinSupported: false,
+  );
 
   @override
-  Capability get capability =>
-      const Capability(CapabilityState.available, 'Android 原生桌面小组件已接入');
+  Capability get capability => Capability(
+    CapabilityState.available,
+    isOhos ? 'HarmonyOS 原生桌面服务卡片已接入' : 'Android 原生桌面小组件已接入',
+  );
 
   @override
   Future<Map<DesktopWidgetKind, int>> updateSnapshot(

@@ -28,6 +28,22 @@
 	<string>$(FLUTTER_BUILD_NAME)</string>
 	<key>CFBundleSignature</key>
 	<string>????</string>
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>TallyIsle Bill Attachment</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.image</string>
+				<string>public.plain-text</string>
+			</array>
+		</dict>
+	</array>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -43,6 +59,8 @@
 	</array>
 	<key>CFBundleVersion</key>
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
+	<key>FlutterDeepLinkingEnabled</key>
+	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
@@ -70,6 +88,41 @@
 			</array>
 		</dict>
 	</dict>
+	<key>UIApplicationShortcutItems</key>
+	<array>
+		<dict>
+			<key>UIApplicationShortcutItemIconSymbolName</key>
+			<string>plus.circle</string>
+			<key>UIApplicationShortcutItemTitle</key>
+			<string>SHORTCUT_NEW_RECORD_TITLE</string>
+			<key>UIApplicationShortcutItemType</key>
+			<string>dev.tallyisle.shortcut.new_record</string>
+		</dict>
+		<dict>
+			<key>UIApplicationShortcutItemIconSymbolName</key>
+			<string>sparkles</string>
+			<key>UIApplicationShortcutItemTitle</key>
+			<string>SHORTCUT_SMART_BILL_TITLE</string>
+			<key>UIApplicationShortcutItemType</key>
+			<string>dev.tallyisle.shortcut.smart_bill</string>
+		</dict>
+		<dict>
+			<key>UIApplicationShortcutItemIconSymbolName</key>
+			<string>doc.text.viewfinder</string>
+			<key>UIApplicationShortcutItemTitle</key>
+			<string>SHORTCUT_OCR_BILL_TITLE</string>
+			<key>UIApplicationShortcutItemType</key>
+			<string>dev.tallyisle.shortcut.ocr_bill</string>
+		</dict>
+		<dict>
+			<key>UIApplicationShortcutItemIconSymbolName</key>
+			<string>tray.full</string>
+			<key>UIApplicationShortcutItemTitle</key>
+			<string>SHORTCUT_DRAFTS_TITLE</string>
+			<key>UIApplicationShortcutItemType</key>
+			<string>dev.tallyisle.shortcut.drafts</string>
+		</dict>
+	</array>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UILaunchStoryboardName</key>

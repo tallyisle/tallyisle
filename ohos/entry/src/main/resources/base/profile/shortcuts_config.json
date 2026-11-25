@@ -1,0 +1,64 @@
+{
+  "shortcuts": [
+    {
+      "shortcutId": "new_record",
+      "label": "$string:shortcut_new_record",
+      "icon": "$media:icon",
+      "wants": [
+        {
+          "bundleName": "dev.tallyisle.app",
+          "moduleName": "entry",
+          "abilityName": "EntryAbility",
+          "parameters": {
+            "shortcut_action": "new_record"
+          }
+        }
+      ]
+    },
+    {
+      "shortcutId": "smart_bill",
+      "label": "$string:shortcut_smart_bill",
+      "icon": "$media:icon",
+      "wants": [
+        {
+          "bundleName": "dev.tallyisle.app",
+          "moduleName": "entry",
+          "abilityName": "EntryAbility",
+          "parameters": {
+            "shortcut_action": "smart_bill"
+          }
+        }
+      ]
+    },
+    {
+      "shortcutId": "ocr_bill",
+      "label": "$string:shortcut_ocr_bill",
+      "icon": "$media:icon",
+      "wants": [
+        {
+          "bundleName": "dev.tallyisle.app",
+          "moduleName": "entry",
+          "abilityName": "EntryAbility",
+          "parameters": {
+            "shortcut_action": "ocr_bill"
+          }
+        }
+      ]
+    },
+    {
+      "shortcutId": "drafts",
+      "label": "$string:shortcut_drafts",
+      "icon": "$media:icon",
+      "wants": [
+        {
+          "bundleName": "dev.tallyisle.app",
+          "moduleName": "entry",
+          "abilityName": "EntryAbility",
+          "parameters": {
+            "shortcut_action": "drafts"
+          }
+        }
+      ]
+    }
+  ]
+}

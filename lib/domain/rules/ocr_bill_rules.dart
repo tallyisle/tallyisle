@@ -3,6 +3,8 @@ import 'dart:convert';
 import '../../core/failure.dart';
 import '../../core/money.dart';
 import '../model/codes.dart';
+import 'smart_bill_nlp_rules.dart'
+    show SmartBillConfidence, parseNaturalLanguageBill;
 
 /// Preference key storing `OcrEndpointConfig` in `ti_preference` (`ADR-017`).
 const String ocrProviderPreferenceKey = 'ocr_provider_config';
@@ -11,17 +13,70 @@ const String ocrProviderPreferenceKey = 'ocr_provider_config';
 const String ocrUnconfiguredStatusLabel = '未配置';
 const String ocrConfiguredStatusLabel = '已配置';
 
-/// User-configurable HTTP OCR endpoint settings (`F-021`, `ADR-017`).
+/// Status label when the built-in on-device OCR engine is ready.
+const String ocrNativeOfflineReadyLabel = '本机离线引擎（免费就绪）';
+
+/// Honest desktop label when no OCR route is configured.
+const String ocrDesktopUnconfiguredHint = '当前平台仅支持文本解析或配置在线接口';
+
+/// Image OCR route preference (`ti_preference['ocr_provider_config'].mode`).
+enum OcrModePreference {
+  /// Built-in on-device engine (Android ML Kit / iOS Vision / HarmonyOS
+  /// CoreVisionKit). Default.
+  nativeOffline('native_offline', '本机离线识图'),
+
+  /// User-configured HTTP OCR endpoint.
+  customHttp('custom_http', '自定义 HTTP OCR 接口'),
+
+  /// User-configured multimodal AI (`AiBillParserConfig.useForImages`).
+  aiVision('ai_vision', '自定义 AI 大模型识图');
+
+  const OcrModePreference(this.wireKey, this.label);
+
+  final String wireKey;
+  final String label;
+
+  static OcrModePreference? fromWireKey(Object? raw) {
+    final key = raw?.toString().trim().toLowerCase();
+    for (final m in OcrModePreference.values) {
+      if (m.wireKey == key) return m;
+    }
+    return null;
+  }
+}
+
+/// User-configurable OCR settings (`F-021`, `ADR-017`): route [mode] plus the
+/// optional custom HTTP endpoint.
 final class OcrEndpointConfig {
   const OcrEndpointConfig({
     this.endpointUrl = '',
     this.apiKey = '',
     this.timeoutSeconds = 30,
+    this.mode = OcrModePreference.nativeOffline,
   });
 
   final String endpointUrl;
   final String apiKey;
   final int timeoutSeconds;
+
+  /// Requested route. A configured [endpointUrl] under [OcrModePreference.nativeOffline]
+  /// acts as a custom HTTP override (see [effectiveMode]).
+  final OcrModePreference mode;
+
+  /// Resolved route: `nativeOffline` + configured endpoint → `customHttp`.
+  OcrModePreference get effectiveMode =>
+      mode == OcrModePreference.nativeOffline && isConfigured
+      ? OcrModePreference.customHttp
+      : mode;
+
+  /// `true` when nothing differs from defaults (row can be deleted).
+  bool get isDefault =>
+      mode == OcrModePreference.nativeOffline &&
+      endpointUrl.trim().isEmpty &&
+      apiKey.trim().isEmpty;
+
+  /// Whether the custom HTTP endpoint is valid (alias of [isConfigured]).
+  bool get hasCustomHttpEndpoint => isConfigured;
 
   bool get isConfigured {
     final trimmed = endpointUrl.trim();
@@ -45,13 +100,29 @@ final class OcrEndpointConfig {
         'OCR 接口地址须以 http:// 或 https:// 开头且包含有效域名或 IP',
       );
     }
+    if (mode == OcrModePreference.customHttp && trimmedUrl.isEmpty) {
+      throw const Failure(FailureCode.validation, '请填写自定义 OCR 接口地址');
+    }
     final clampedTimeout = timeoutSeconds.clamp(5, 120);
     return OcrEndpointConfig(
       endpointUrl: trimmedUrl,
       apiKey: apiKey.trim(),
       timeoutSeconds: clampedTimeout,
+      mode: mode,
     );
   }
+
+  OcrEndpointConfig copyWith({
+    String? endpointUrl,
+    String? apiKey,
+    int? timeoutSeconds,
+    OcrModePreference? mode,
+  }) => OcrEndpointConfig(
+    endpointUrl: endpointUrl ?? this.endpointUrl,
+    apiKey: apiKey ?? this.apiKey,
+    timeoutSeconds: timeoutSeconds ?? this.timeoutSeconds,
+    mode: mode ?? this.mode,
+  );
 
   factory OcrEndpointConfig.parse(String? jsonText) {
     if (jsonText == null || jsonText.trim().isEmpty) {
@@ -64,10 +135,18 @@ final class OcrEndpointConfig {
       final key = (decoded['apiKey'] as String?)?.trim() ?? '';
       final rawTimeout = decoded['timeoutSeconds'];
       final timeout = rawTimeout is int ? rawTimeout.clamp(5, 120) : 30;
+      final explicitMode = OcrModePreference.fromWireKey(decoded['mode']);
+      final legacyHttp = OcrEndpointConfig(endpointUrl: url).isConfigured;
       return OcrEndpointConfig(
         endpointUrl: url,
         apiKey: key,
         timeoutSeconds: timeout,
+        // Legacy rows (pre-mode) with an endpoint were HTTP OCR configs.
+        mode:
+            explicitMode ??
+            (legacyHttp
+                ? OcrModePreference.customHttp
+                : OcrModePreference.nativeOffline),
       );
     } on FormatException {
       return const OcrEndpointConfig();
@@ -75,6 +154,7 @@ final class OcrEndpointConfig {
   }
 
   String encode() => jsonEncode({
+    'mode': mode.wireKey,
     'endpointUrl': endpointUrl.trim(),
     'apiKey': apiKey.trim(),
     'timeoutSeconds': timeoutSeconds.clamp(5, 120),
@@ -243,6 +323,15 @@ List<OcrBillCandidate> parseOcrBillCandidates(
       .toList(growable: false);
   if (rawLines.isEmpty) return const [];
 
+  // WeChat / Alipay / UnionPay single bill-detail page.
+  final detail = _parseBillDetailCandidate(
+    rawLines,
+    fullText: normalized,
+    defaultYear: defaultYear,
+    fallbackTimeMs: fallbackTimeMs,
+  );
+  if (detail != null) return [detail];
+
   final ledgerItems = _parseLedgerListCandidates(
     rawLines,
     defaultYear: defaultYear,
@@ -258,7 +347,106 @@ List<OcrBillCandidate> parseOcrBillCandidates(
     defaultYear: defaultYear,
     fallbackTimeMs: fallbackTimeMs,
   );
-  return receipt == null ? const [] : [receipt];
+  if (receipt != null) return [receipt];
+
+  // Colloquial multi-line notes, e.g. "早饭 8.5\n午饭外卖 25\n打车 32".
+  return _parseColloquialLines(rawLines, fallbackTimeMs: fallbackTimeMs);
+}
+
+final RegExp _detailMarker = RegExp(
+  r'^(?:支付时间|交易时间|创建时间|付款时间|支付方式|付款方式|当前状态|交易状态|商品说明|商品|收单机构|交易单号|订单号|商户单号)',
+);
+
+OcrBillCandidate? _parseBillDetailCandidate(
+  List<String> lines, {
+  required String fullText,
+  required int defaultYear,
+  required int fallbackTimeMs,
+}) {
+  final markerCount = lines.where((l) => _detailMarker.hasMatch(l)).length;
+  if (markerCount < 2) return null;
+  final amountLines = <int>[];
+  for (var i = 0; i < lines.length; i++) {
+    if (_signedAmountWholeLine.hasMatch(lines[i])) amountLines.add(i);
+  }
+  if (amountLines.length != 1) return null;
+  final idx = amountLines.single;
+  final m = _signedAmountWholeLine.firstMatch(lines[idx])!;
+  final money = _parsePositiveMoney(m.group(2)!);
+  if (money == null) return null;
+
+  String? valueOf(RegExp key) {
+    for (final line in lines) {
+      final km = key.firstMatch(line);
+      if (km != null) {
+        final v = line.substring(km.end).replaceFirst(RegExp(r'^[：:\s]+'), '');
+        if (v.trim().isNotEmpty) return v.trim();
+      }
+    }
+    return null;
+  }
+
+  var merchant = '账单识别';
+  for (var i = idx - 1; i >= 0; i--) {
+    final line = lines[i];
+    if (_isLedgerNoiseLine(line) || _detailMarker.hasMatch(line)) continue;
+    if (RegExp(r'^(?:账单详情|交易详情|全部账单)$').hasMatch(line)) continue;
+    merchant = line.length <= 32 ? line : line.substring(0, 32);
+    break;
+  }
+  final goods = valueOf(RegExp(r'^(?:商品说明|商品)'));
+  final timeText = valueOf(RegExp(r'^(?:支付时间|交易时间|创建时间|付款时间)'));
+  final account = valueOf(RegExp(r'^(?:支付方式|付款方式)'));
+  final isIncome =
+      m.group(1) == '+' || RegExp(r'收款|退款|入账|收入').hasMatch(fullText);
+  final remark = goods != null && goods != merchant
+      ? '$merchant $goods'
+      : merchant;
+  return OcrBillCandidate(
+    index: 0,
+    type: isIncome ? RecordType.income : RecordType.expense,
+    money: money,
+    recordTimeMs:
+        (timeText == null
+            ? null
+            : _tryExtractLineDateMs(timeText, defaultYear)) ??
+        fallbackTimeMs,
+    merchant: merchant,
+    remark: remark,
+    categoryHint:
+        _inferOcrCategory(merchant) ??
+        (goods == null ? null : _inferOcrCategory(goods)),
+    accountHint: account,
+  );
+}
+
+List<OcrBillCandidate> _parseColloquialLines(
+  List<String> lines, {
+  required int fallbackTimeMs,
+}) {
+  final out = <OcrBillCandidate>[];
+  for (final line in lines) {
+    final parsed = parseNaturalLanguageBill(line, nowMs: fallbackTimeMs);
+    if (parsed == null ||
+        parsed.recordType == RecordType.transfer ||
+        parsed.confidence == SmartBillConfidence.low) {
+      continue;
+    }
+    final remark = parsed.remark.isEmpty ? line : parsed.remark;
+    out.add(
+      OcrBillCandidate(
+        index: out.length,
+        type: parsed.recordType,
+        money: parsed.money,
+        recordTimeMs: parsed.recordTimeMs,
+        merchant: remark,
+        remark: remark,
+        categoryHint: parsed.categoryHint,
+        accountHint: parsed.assetHint,
+      ),
+    );
+  }
+  return out;
 }
 
 final RegExp _signedAmountInline = RegExp(
@@ -395,7 +583,7 @@ OcrBillCandidate? _parseSingleReceiptCandidate(
 }) {
   final totalPatterns = <RegExp>[
     RegExp(
-      r'(?:实付金额|实付款|实付|应付金额|应付|合计金额|总计|合计|TOTAL|Total)[：:\s]*[¥￥$]?\s*(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)\s*元?',
+      r'(?:实付金额|实付款|实付|实收|应付金额|应付|应收|合计金额|总计|合计|TOTAL|Total)[：:\s]*(?:共?\s*\d+\s*(?:件|项|个|份)\s*)?[¥￥$]?\s*(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)\s*元?',
     ),
     RegExp(r'[¥￥]\s*(\d{1,3}(?:,\d{3})*\.\d{2}|\d+\.\d{1,2})'),
   ];

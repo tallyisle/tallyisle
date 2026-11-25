@@ -1,2 +1,6 @@
 "CFBundleDisplayName" = "帐屿";
 "CFBundleName" = "帐屿";
+"SHORTCUT_NEW_RECORD_TITLE" = "记一笔";
+"SHORTCUT_SMART_BILL_TITLE" = "智能识账";
+"SHORTCUT_OCR_BILL_TITLE" = "识图记账";
+"SHORTCUT_DRAFTS_TITLE" = "待确认草稿";

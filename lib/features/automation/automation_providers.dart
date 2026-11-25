@@ -12,6 +12,7 @@ import '../../data/automation/widget_snapshot_service.dart';
 import '../../domain/rules/auto_map_rules.dart';
 import '../../domain/rules/mcp_rules.dart';
 import '../../domain/rules/ocr_bill_rules.dart';
+import '../../domain/rules/smart_bill_nlp_rules.dart';
 import '../../platform/app_widgets.dart';
 import '../../platform/auto_bill_bridge.dart';
 import '../../platform/files.dart';
@@ -34,11 +35,24 @@ final ocrHttpClientFactoryProvider = Provider<HttpClient Function()?>(
   (ref) => null,
 );
 
+/// Optional user-enabled OpenAI-compatible client (never called unless the
+/// user enables `AiBillParserConfig`).
+final aiBillParserClientProvider = Provider<AiBillParserClient>((ref) {
+  final clientFactory = ref.watch(ocrHttpClientFactoryProvider);
+  return OpenAiCompatibleBillParserClient(httpClientFactory: clientFactory);
+});
+
 final urlSchemeServiceProvider = FutureProvider<UrlSchemeService>((ref) async {
   final db = await ref.watch(databaseProvider.future);
   final ledger = await ref.watch(ledgerServiceProvider.future);
   final bridge = ref.watch(autoBillBridgeProvider);
-  return UrlSchemeService(db, ledgerService: ledger, bridge: bridge);
+  final autoBill = await ref.watch(autoBillServiceProvider.future);
+  return UrlSchemeService(
+    db,
+    ledgerService: ledger,
+    bridge: bridge,
+    autoBillService: autoBill,
+  );
 });
 
 final widgetSnapshotServiceProvider = FutureProvider<WidgetSnapshotService>((
@@ -53,17 +67,33 @@ final autoBillServiceProvider = FutureProvider<AutoBillService>((ref) async {
   final db = await ref.watch(databaseProvider.future);
   final ledger = await ref.watch(ledgerServiceProvider.future);
   final bridge = ref.watch(autoBillBridgeProvider);
-  return AutoBillService(db, ledgerService: ledger, bridge: bridge);
+  final aiClient = ref.watch(aiBillParserClientProvider);
+  final widgets = await ref.watch(widgetSnapshotServiceProvider.future);
+  return AutoBillService(
+    db,
+    ledgerService: ledger,
+    bridge: bridge,
+    aiClient: aiClient,
+    afterChange: () async {
+      if (widgets.capability.state == CapabilityState.available) {
+        await widgets.syncToPlatform();
+      }
+    },
+  );
 });
 
 final ocrServiceProvider = FutureProvider<OcrService>((ref) async {
   final db = await ref.watch(databaseProvider.future);
   final ledger = await ref.watch(ledgerServiceProvider.future);
   final clientFactory = ref.watch(ocrHttpClientFactoryProvider);
+  final bridge = ref.watch(autoBillBridgeProvider);
+  final aiClient = ref.watch(aiBillParserClientProvider);
   return OcrService(
     db,
     ledgerService: ledger,
     httpClientFactory: clientFactory,
+    bridge: bridge,
+    aiClient: aiClient,
   );
 });
 
@@ -90,6 +120,30 @@ final accessibilityStatusProvider = FutureProvider<AccessibilityBridgeStatus>((
 ) async {
   final bridge = ref.watch(autoBillBridgeProvider);
   return bridge.getAccessibilityStatus();
+});
+
+final notificationListenerStatusProvider =
+    FutureProvider<AutoBillPermissionStatus>((ref) async {
+      final bridge = ref.watch(autoBillBridgeProvider);
+      return bridge.getNotificationListenerStatus();
+    });
+
+final overlayPermissionStatusProvider =
+    FutureProvider<AutoBillPermissionStatus>((ref) async {
+      final bridge = ref.watch(autoBillBridgeProvider);
+      return bridge.getOverlayPermissionStatus();
+    });
+
+final autoBillSettingsProvider = StreamProvider<AutoBillSettings>((ref) async* {
+  final service = await ref.watch(autoBillServiceProvider.future);
+  yield* service.watchSettings();
+});
+
+final aiBillParserConfigProvider = StreamProvider<AiBillParserConfig>((
+  ref,
+) async* {
+  final service = await ref.watch(autoBillServiceProvider.future);
+  yield* service.watchAiParserConfig();
 });
 
 final autoMapRulesProvider = StreamProvider<List<AutoMapRule>>((ref) async* {
