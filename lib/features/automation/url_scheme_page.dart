@@ -224,11 +224,9 @@ class _UrlSchemePageState extends ConsumerState<UrlSchemePage> {
                 Row(
                   children: [
                     Expanded(
-                      child: FilledButton.icon(
+                      child: TallySoftButton.icon(
                         key: const Key('url_scheme_execute_button'),
-                        style: FilledButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(horizontal: 10),
-                        ),
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
                         onPressed: _executing ? null : _executeTestUri,
                         icon: const Icon(Icons.play_arrow, size: 18),
                         label: FittedBox(
@@ -243,11 +241,9 @@ class _UrlSchemePageState extends ConsumerState<UrlSchemePage> {
                     ),
                     const SizedBox(width: 10),
                     Expanded(
-                      child: OutlinedButton.icon(
+                      child: TallySoftButton.icon(
                         key: const Key('url_scheme_copy_current_button'),
-                        style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(horizontal: 10),
-                        ),
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
                         onPressed: () =>
                             _copyText(_uriController.text.trim(), '当前调试'),
                         icon: const Icon(Icons.copy, size: 18),

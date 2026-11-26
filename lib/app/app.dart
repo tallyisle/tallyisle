@@ -14,6 +14,12 @@ import '../domain/rules/cloud_sync_rules.dart';
 import '../features/automation/automation_providers.dart';
 import '../features/backup/backup_providers.dart';
 import '../features/backup/post_restore_refresh.dart';
+import '../features/common/tally_button.dart'
+    show
+        tallyFabTheme,
+        tallyPrimaryButtonTheme,
+        tallySoftOutlinedButtonTheme,
+        tallyTextButtonTheme;
 import '../features/common/tally_card.dart' show tallyCardTheme;
 import '../features/currencies/currency_rate_providers.dart';
 import '../features/deposit/fixed_deposit_providers.dart';
@@ -50,6 +56,13 @@ ThemeData _buildDesktopTheme(ThemeData base) => base.copyWith(
     contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
   ),
   cardTheme: tallyCardTheme(base.colorScheme),
+  filledButtonTheme: tallyPrimaryButtonTheme(base.colorScheme, isDesktop: true),
+  outlinedButtonTheme: tallySoftOutlinedButtonTheme(
+    base.colorScheme,
+    isDesktop: true,
+  ),
+  textButtonTheme: tallyTextButtonTheme(base.colorScheme),
+  floatingActionButtonTheme: tallyFabTheme(base.colorScheme),
   segmentedButtonTheme: const SegmentedButtonThemeData(
     style: ButtonStyle(
       visualDensity: VisualDensity.standard,
@@ -596,12 +609,32 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
         colorScheme: lightScheme,
         segmentedButtonTheme: segmentedButtonTheme,
         cardTheme: tallyCardTheme(lightScheme),
+        filledButtonTheme: tallyPrimaryButtonTheme(
+          lightScheme,
+          isDesktop: false,
+        ),
+        outlinedButtonTheme: tallySoftOutlinedButtonTheme(
+          lightScheme,
+          isDesktop: false,
+        ),
+        textButtonTheme: tallyTextButtonTheme(lightScheme),
+        floatingActionButtonTheme: tallyFabTheme(lightScheme),
         useMaterial3: true,
       ),
       darkTheme: ThemeData(
         colorScheme: darkScheme,
         segmentedButtonTheme: segmentedButtonTheme,
         cardTheme: tallyCardTheme(darkScheme),
+        filledButtonTheme: tallyPrimaryButtonTheme(
+          darkScheme,
+          isDesktop: false,
+        ),
+        outlinedButtonTheme: tallySoftOutlinedButtonTheme(
+          darkScheme,
+          isDesktop: false,
+        ),
+        textButtonTheme: tallyTextButtonTheme(darkScheme),
+        floatingActionButtonTheme: tallyFabTheme(darkScheme),
         useMaterial3: true,
       ),
       builder: (context, child) {

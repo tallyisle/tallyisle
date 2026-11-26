@@ -101,8 +101,9 @@ class _InstallmentPageState extends ConsumerState<InstallmentPage> {
             if (isDesktop)
               Padding(
                 padding: const EdgeInsets.only(right: 8),
-                child: FilledButton.tonalIcon(
+                child: TallySoftButton.icon(
                   key: const Key('add_installment_fab'),
+                  compact: true,
                   onPressed: () => pushDesktopModalOrMaterialRoute<Object?>(
                     context,
                     child: const InstallmentEditorPage(),
@@ -199,7 +200,16 @@ class _InstallmentTabList extends StatelessWidget {
               ? 'installment_empty_finished'
               : 'installment_empty_active',
         ),
-        child: Text(isFinishedTab ? '暂无已完结分期' : '暂无进行中的分期计划'),
+        child: isFinishedTab
+            ? const TallyEmptyState(
+                icon: Icons.task_alt_rounded,
+                title: '暂无已完结分期',
+              )
+            : const TallyEmptyState(
+                icon: Icons.calendar_view_month_rounded,
+                title: '暂无进行中的分期计划',
+                subtitle: '新建信用卡或账单分期后，可按期跟踪待还本金与手续费',
+              ),
       );
     }
 

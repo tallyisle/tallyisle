@@ -539,14 +539,9 @@ class _CategoriesPageState extends ConsumerState<CategoriesPage>
             ),
             if (isDesktop) ...[
               const SizedBox(width: 4),
-              FilledButton.icon(
+              TallySoftButton.icon(
                 key: const Key('add-category'),
-                style: FilledButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 8,
-                  ),
-                ),
+                compact: true,
                 onPressed: () => _addCategory(
                   bookId,
                   _tabController.index == 0
@@ -607,7 +602,11 @@ class _CategoriesPageState extends ConsumerState<CategoriesPage>
     );
 
     if (topLevels.isEmpty) {
-      return const Center(child: Text('暂无分类'));
+      return const TallyEmptyState(
+        icon: Icons.category_outlined,
+        title: '暂无分类',
+        subtitle: '添加收支分类与二级子分类，让每笔账单归类清晰',
+      );
     }
 
     final theme = Theme.of(context);

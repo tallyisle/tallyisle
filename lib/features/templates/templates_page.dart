@@ -477,14 +477,9 @@ class _TemplatesPageState extends ConsumerState<TemplatesPage> {
             ),
             if (isDesktop) ...[
               const SizedBox(width: 8),
-              FilledButton.icon(
+              TallySoftButton.icon(
                 key: const Key('add_template_fab'),
-                style: FilledButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 8,
-                  ),
-                ),
+                compact: true,
                 onPressed: _openCreate,
                 icon: const Icon(Icons.add, size: 18),
                 label: const Text('新建模板'),
@@ -594,15 +589,13 @@ class _TemplatesPageState extends ConsumerState<TemplatesPage> {
                     }).toList();
 
                     if (rows.isEmpty) {
-                      return Center(
-                        key: const Key('templates_empty_state'),
-                        child: Padding(
-                          padding: const EdgeInsets.all(24),
-                          child: Text(
-                            isDesktop
-                                ? '暂无账单模板，点击右上角“新建模板”添加常用记账项'
-                                : '暂无账单模板，点击右下角“新建模板”添加常用记账项',
-                            style: Theme.of(context).textTheme.bodyMedium,
+                      return const Center(
+                        child: SingleChildScrollView(
+                          child: TallyEmptyState(
+                            key: Key('templates_empty_state'),
+                            icon: Icons.bookmark_border_rounded,
+                            title: '暂无账单模板',
+                            subtitle: '把高频固定收支存为模板，记账时一键快速填入',
                           ),
                         ),
                       );

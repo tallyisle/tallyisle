@@ -238,7 +238,7 @@ class _WebDavConfigPageState extends ConsumerState<WebDavConfigPage> {
     final actionButtons = Row(
       children: [
         Expanded(
-          child: OutlinedButton.icon(
+          child: TallySoftButton.icon(
             key: const Key('webdav_test_connection_button'),
             onPressed: _busy ? null : _handleTestConnection,
             icon: const Icon(Icons.wifi_tethering, size: 18),

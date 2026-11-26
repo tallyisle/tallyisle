@@ -486,40 +486,97 @@ class _CategoryTransferPageState extends ConsumerState<CategoryTransferPage>
         const SizedBox(height: 12),
         _tonalCard(
           context,
-          child: SwitchListTile(
-            key: const Key('cat-json-include-hidden'),
-            title: const Text('导出时包含已隐藏分类'),
-            value: _jsonIncludeHidden,
-            onChanged: _busy
-                ? null
-                : (v) => setState(() => _jsonIncludeHidden = v),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text('导出分类方案', style: Theme.of(context).textTheme.titleMedium),
+                const SizedBox(height: 4),
+                SwitchListTile(
+                  key: const Key('cat-json-include-hidden'),
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('导出时包含已隐藏分类'),
+                  value: _jsonIncludeHidden,
+                  onChanged: _busy
+                      ? null
+                      : (v) => setState(() => _jsonIncludeHidden = v),
+                ),
+                const SizedBox(height: 8),
+                if (DesktopAdaptive.isDesktop(context))
+                  TallySoftButton.icon(
+                    key: const Key('cat-export-save-btn'),
+                    onPressed: _busy ? null : () => _exportSave(selectedBookId),
+                    icon: const Icon(Icons.download_outlined, size: 18),
+                    label: const FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        '导出分类方案为 JSON 文件',
+                        maxLines: 1,
+                        softWrap: false,
+                      ),
+                    ),
+                  )
+                else
+                  LayoutBuilder(
+                    builder: (ctx, constraints) {
+                      final saveBtn = TallySoftButton.icon(
+                        key: const Key('cat-export-save-btn'),
+                        onPressed: _busy
+                            ? null
+                            : () => _exportSave(selectedBookId),
+                        icon: const Icon(Icons.download_outlined, size: 18),
+                        label: const FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text(
+                            '导出分类方案为 JSON 文件',
+                            maxLines: 1,
+                            softWrap: false,
+                          ),
+                        ),
+                      );
+                      final shareBtn = TallySoftButton.icon(
+                        key: const Key('cat-export-share-btn'),
+                        onPressed:
+                            _busy || shareCap.state != CapabilityState.available
+                            ? null
+                            : () => _exportShare(selectedBookId),
+                        icon: const Icon(Icons.share_outlined, size: 18),
+                        label: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text(
+                            shareCap.state == CapabilityState.available
+                                ? '系统分享分类方案 JSON'
+                                : '系统分享（${shareCap.reason}）',
+                            maxLines: 1,
+                            softWrap: false,
+                          ),
+                        ),
+                      );
+                      if (constraints.maxWidth >= 460) {
+                        return Row(
+                          children: [
+                            Expanded(child: saveBtn),
+                            const SizedBox(width: 10),
+                            Expanded(child: shareBtn),
+                          ],
+                        );
+                      }
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          saveBtn,
+                          const SizedBox(height: 10),
+                          shareBtn,
+                        ],
+                      );
+                    },
+                  ),
+              ],
+            ),
           ),
         ),
         const SizedBox(height: 12),
-        FilledButton.icon(
-          key: const Key('cat-export-save-btn'),
-          onPressed: _busy ? null : () => _exportSave(selectedBookId),
-          icon: const Icon(Icons.download_outlined),
-          label: const Text('导出分类方案为 JSON 文件'),
-        ),
-        if (!DesktopAdaptive.isDesktop(context)) ...[
-          const SizedBox(height: 12),
-          OutlinedButton.icon(
-            key: const Key('cat-export-share-btn'),
-            onPressed: _busy || shareCap.state != CapabilityState.available
-                ? null
-                : () => _exportShare(selectedBookId),
-            icon: const Icon(Icons.share_outlined),
-            label: Text(
-              shareCap.state == CapabilityState.available
-                  ? '系统分享分类方案 JSON'
-                  : '系统分享（${shareCap.reason}）',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        ],
-        const SizedBox(height: 16),
         _tonalCard(
           context,
           child: Padding(
@@ -534,12 +591,12 @@ class _CategoryTransferPageState extends ConsumerState<CategoryTransferPage>
                 const SizedBox(height: 8),
                 const Text('支持导入帐屿导出的两级分类 .json 文件。同名同类型分类将自动复用合并，不会产生重复分类。'),
                 const SizedBox(height: 12),
-                FilledButton.tonalIcon(
+                TallySoftButton.icon(
                   key: const Key('cat-import-pick-btn'),
                   onPressed: _busy
                       ? null
                       : () => _pickAndImport(selectedBookId, selectedBook.name),
-                  icon: const Icon(Icons.upload_file_outlined),
+                  icon: const Icon(Icons.upload_file_outlined, size: 18),
                   label: Text(
                     '选择 JSON 文件导入到「${selectedBook.name}」',
                     maxLines: 1,

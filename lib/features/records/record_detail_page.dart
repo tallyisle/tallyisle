@@ -839,7 +839,7 @@ class _RecordDetailPageState extends ConsumerState<RecordDetailPage> {
           ],
           if (isChild) ...[
             const SizedBox(height: 12),
-            OutlinedButton(
+            TallySoftButton(
               onPressed: () => unawaited(_openRelatedRecord(childOf)),
               child: const Text('查看原账单'),
             ),
@@ -848,14 +848,14 @@ class _RecordDetailPageState extends ConsumerState<RecordDetailPage> {
             Text(error!, style: TextStyle(color: theme.colorScheme.error)),
           const SizedBox(height: 16),
           if (generated)
-            OutlinedButton(
+            TallySoftButton(
               key: const Key('view-fee-parent'),
               onPressed: () => _openFeeParentRecord(feeParent),
               child: const Text('这是转账手续费，查看所属转账'),
             )
           else ...[
             if (isAdvance && !advanceSettled) ...[
-              FilledButton.tonal(
+              TallySoftButton(
                 key: const Key('settle-advance'),
                 onPressed: busy ? null : () => _settleAdvance(r),
                 child: const Text('结算转为正式账单'),
@@ -863,7 +863,7 @@ class _RecordDetailPageState extends ConsumerState<RecordDetailPage> {
               const SizedBox(height: 10),
             ],
             if (refundable) ...[
-              OutlinedButton(
+              TallySoftButton(
                 key: const Key('add-refund'),
                 onPressed: busy ? null : () => _addLink(r, refund: true),
                 child: const Text('退款'),
@@ -871,7 +871,7 @@ class _RecordDetailPageState extends ConsumerState<RecordDetailPage> {
               const SizedBox(height: 10),
             ],
             if (r.type == RecordType.reimbursable) ...[
-              OutlinedButton(
+              TallySoftButton(
                 key: const Key('add-reimbursement'),
                 onPressed: busy ? null : () => _addLink(r, refund: false),
                 child: const Text('登记报销款'),
@@ -879,7 +879,7 @@ class _RecordDetailPageState extends ConsumerState<RecordDetailPage> {
               const SizedBox(height: 10),
             ],
             if (editable) ...[
-              FilledButton(
+              TallySoftButton(
                 key: const Key('edit'),
                 onPressed: busy ? null : () => _openEditRecord(r.recordId),
                 child: const Text('编辑'),

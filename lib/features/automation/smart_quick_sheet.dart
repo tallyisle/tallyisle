@@ -1346,12 +1346,10 @@ class _SmartQuickContentState extends ConsumerState<_SmartQuickContent> {
             spacing: 8,
             runSpacing: 8,
             children: [
-              FilledButton.icon(
+              TallySoftButton.icon(
                 key: const Key('smart_quick_parse_button'),
-                style: FilledButton.styleFrom(
-                  visualDensity: isDesktop ? null : VisualDensity.compact,
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                ),
+                compact: !isDesktop,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
                 onPressed: _parsing
                     ? null
                     : () => _parseInputText(sourceOverride: widget.sourceApp),
@@ -1365,12 +1363,10 @@ class _SmartQuickContentState extends ConsumerState<_SmartQuickContent> {
                   ),
                 ),
               ),
-              FilledButton.tonalIcon(
+              TallySoftButton.icon(
                 key: const Key('smart_quick_paste_button'),
-                style: FilledButton.styleFrom(
-                  visualDensity: isDesktop ? null : VisualDensity.compact,
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                ),
+                compact: !isDesktop,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
                 onPressed: _parsing ? null : _pasteFromClipboardAndParse,
                 icon: const Icon(Icons.content_paste_go_rounded, size: 17),
                 label: const FittedBox(
@@ -1378,12 +1374,10 @@ class _SmartQuickContentState extends ConsumerState<_SmartQuickContent> {
                   child: Text('粘贴剪贴板识别', maxLines: 1, softWrap: false),
                 ),
               ),
-              OutlinedButton.icon(
+              TallySoftButton.icon(
                 key: const Key('smart_quick_pick_image_button'),
-                style: OutlinedButton.styleFrom(
-                  visualDensity: isDesktop ? null : VisualDensity.compact,
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                ),
+                compact: !isDesktop,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
                 onPressed: _parsing ? null : _pickAndRecognizeImage,
                 icon: const Icon(Icons.document_scanner_outlined, size: 17),
                 label: const FittedBox(
@@ -1673,11 +1667,9 @@ class _SmartQuickContentState extends ConsumerState<_SmartQuickContent> {
                     const SizedBox(height: 10),
                     Align(
                       alignment: Alignment.centerLeft,
-                      child: OutlinedButton.icon(
+                      child: TallySoftButton.icon(
                         key: const Key('smart_quick_datetime_button'),
-                        style: OutlinedButton.styleFrom(
-                          visualDensity: VisualDensity.compact,
-                        ),
+                        compact: true,
                         onPressed: _pickDateTime,
                         icon: const Icon(Icons.schedule, size: 16),
                         label: Text(

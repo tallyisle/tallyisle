@@ -675,13 +675,11 @@ class _UnifiedAssetHeaderCard extends ConsumerWidget {
 
     final actionButtons = <Widget>[
       if (credit)
-        FilledButton.icon(
+        TallySoftButton.icon(
           key: const Key('credit-repay'),
-          style: FilledButton.styleFrom(
-            visualDensity: VisualDensity.compact,
-            minimumSize: const Size(0, 36),
-            padding: const EdgeInsets.symmetric(horizontal: 10),
-          ),
+          compact: true,
+          minimumSize: const Size(0, 36),
+          padding: const EdgeInsets.symmetric(horizontal: 10),
           icon: const Icon(Icons.payments_outlined, size: 17),
           label: const FittedBox(
             fit: BoxFit.scaleDown,
@@ -695,55 +693,30 @@ class _UnifiedAssetHeaderCard extends ConsumerWidget {
           },
         ),
       if (!debt)
-        credit
-            ? OutlinedButton.icon(
-                key: const Key('asset-detail-new-record'),
-                style: OutlinedButton.styleFrom(
-                  visualDensity: VisualDensity.compact,
-                  minimumSize: const Size(0, 36),
-                  padding: const EdgeInsets.symmetric(horizontal: 10),
-                ),
-                icon: const Icon(Icons.edit_note, size: 17),
-                label: const FittedBox(
-                  fit: BoxFit.scaleDown,
-                  child: Text('记一笔', maxLines: 1, softWrap: false),
-                ),
-                onPressed: () => _pushRouteOrModal(
-                  context,
-                  '/record/new?asset=${asset.id}',
-                  () => RecordEditorPage(initialAsset: asset.id),
-                  maxWidth: 900,
-                  maxHeight: 740,
-                ),
-              )
-            : FilledButton.icon(
-                key: const Key('asset-detail-new-record'),
-                style: FilledButton.styleFrom(
-                  visualDensity: VisualDensity.compact,
-                  minimumSize: const Size(0, 36),
-                  padding: const EdgeInsets.symmetric(horizontal: 10),
-                ),
-                icon: const Icon(Icons.edit_note, size: 17),
-                label: const FittedBox(
-                  fit: BoxFit.scaleDown,
-                  child: Text('记一笔', maxLines: 1, softWrap: false),
-                ),
-                onPressed: () => _pushRouteOrModal(
-                  context,
-                  '/record/new?asset=${asset.id}',
-                  () => RecordEditorPage(initialAsset: asset.id),
-                  maxWidth: 900,
-                  maxHeight: 740,
-                ),
-              ),
-      if (!credit && !debt)
-        OutlinedButton.icon(
-          key: const Key('asset-detail-deposits'),
-          style: OutlinedButton.styleFrom(
-            visualDensity: VisualDensity.compact,
-            minimumSize: const Size(0, 36),
-            padding: const EdgeInsets.symmetric(horizontal: 10),
+        TallySoftButton.icon(
+          key: const Key('asset-detail-new-record'),
+          compact: true,
+          minimumSize: const Size(0, 36),
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          icon: const Icon(Icons.edit_note, size: 17),
+          label: const FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text('记一笔', maxLines: 1, softWrap: false),
           ),
+          onPressed: () => _pushRouteOrModal(
+            context,
+            '/record/new?asset=${asset.id}',
+            () => RecordEditorPage(initialAsset: asset.id),
+            maxWidth: 900,
+            maxHeight: 740,
+          ),
+        ),
+      if (!credit && !debt)
+        TallySoftButton.icon(
+          key: const Key('asset-detail-deposits'),
+          compact: true,
+          minimumSize: const Size(0, 36),
+          padding: const EdgeInsets.symmetric(horizontal: 10),
           icon: const Icon(Icons.lock_clock_outlined, size: 17),
           label: const FittedBox(
             fit: BoxFit.scaleDown,
@@ -758,13 +731,11 @@ class _UnifiedAssetHeaderCard extends ConsumerWidget {
           ),
         ),
       if (credit)
-        OutlinedButton.icon(
+        TallySoftButton.icon(
           key: const Key('asset-detail-installments'),
-          style: OutlinedButton.styleFrom(
-            visualDensity: VisualDensity.compact,
-            minimumSize: const Size(0, 36),
-            padding: const EdgeInsets.symmetric(horizontal: 10),
-          ),
+          compact: true,
+          minimumSize: const Size(0, 36),
+          padding: const EdgeInsets.symmetric(horizontal: 10),
           icon: const Icon(Icons.calendar_view_month_outlined, size: 17),
           label: const FittedBox(
             fit: BoxFit.scaleDown,
@@ -779,13 +750,11 @@ class _UnifiedAssetHeaderCard extends ConsumerWidget {
           ),
         ),
       if (debt)
-        FilledButton.icon(
+        TallySoftButton.icon(
           key: const Key('asset-detail-debt'),
-          style: FilledButton.styleFrom(
-            visualDensity: VisualDensity.compact,
-            minimumSize: const Size(0, 36),
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-          ),
+          compact: true,
+          minimumSize: const Size(0, 36),
+          padding: const EdgeInsets.symmetric(horizontal: 12),
           icon: const Icon(Icons.swap_horiz_outlined, size: 17),
           label: const FittedBox(
             fit: BoxFit.scaleDown,

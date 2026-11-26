@@ -1521,13 +1521,16 @@ class _RecordDateTimeDialogState extends State<RecordDateTimeDialog> {
                     child: const Text('取消'),
                   ),
                   const SizedBox(width: 8),
-                  FilledButton.tonal(
+                  FilledButton(
                     key: const Key('datetime-confirm-btn'),
                     style: FilledButton.styleFrom(
                       minimumSize: const Size(0, 38),
                       padding: const EdgeInsets.symmetric(horizontal: 18),
                       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                       side: BorderSide.none,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
                     ),
                     onPressed: _confirm,
                     child: const Text(

@@ -237,7 +237,7 @@ class _PennyImportPageState extends ConsumerState<PennyImportPage> {
                       const SizedBox(height: 16),
                       SizedBox(
                         width: double.infinity,
-                        child: FilledButton.icon(
+                        child: TallySoftButton.icon(
                           key: const Key('select_penny_file_button'),
                           onPressed: _busy ? null : _selectAndImportFile,
                           icon: const Icon(Icons.upload_file, size: 18),
@@ -351,7 +351,7 @@ class _PennyImportPageState extends ConsumerState<PennyImportPage> {
                           const SizedBox(height: 12),
                           SizedBox(
                             width: double.infinity,
-                            child: OutlinedButton(
+                            child: TallySoftButton(
                               key: const Key('penny_back_button'),
                               onPressed: () => Navigator.of(context).pop(true),
                               child: const Text('返回'),

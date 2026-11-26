@@ -292,14 +292,9 @@ class _BankCardsPageState extends ConsumerState<BankCardsPage> {
             ),
             if (isDesktop) ...[
               const SizedBox(width: 8),
-              FilledButton.icon(
+              TallySoftButton.icon(
                 key: const Key('add_bank_card_fab'),
-                style: FilledButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 8,
-                  ),
-                ),
+                compact: true,
                 onPressed: _openCreate,
                 icon: const Icon(Icons.add_card, size: 18),
                 label: const Text('添加银行卡'),
@@ -405,18 +400,16 @@ class _BankCardsPageState extends ConsumerState<BankCardsPage> {
 
                           if (rows.isEmpty) {
                             return Center(
-                              key: isActivePage
-                                  ? const Key('bank_cards_empty_state')
-                                  : ValueKey(
-                                      'bank_cards_empty_state_page_$pageIndex',
-                                    ),
-                              child: Padding(
-                                padding: const EdgeInsets.all(24),
-                                child: Text(
-                                  isDesktop
-                                      ? '暂无银行卡备忘，点击右上角“添加银行卡”保存常用卡号'
-                                      : '暂无银行卡备忘，点击右下角“添加银行卡”保存常用卡号',
-                                  style: Theme.of(context).textTheme.bodyMedium,
+                              child: SingleChildScrollView(
+                                child: TallyEmptyState(
+                                  key: isActivePage
+                                      ? const Key('bank_cards_empty_state')
+                                      : ValueKey(
+                                          'bank_cards_empty_state_page_$pageIndex',
+                                        ),
+                                  icon: Icons.credit_card_outlined,
+                                  title: '暂无银行卡备忘',
+                                  subtitle: '保存常用储蓄卡与信用卡信息，方便随时核对与一键复制',
                                 ),
                               ),
                             );

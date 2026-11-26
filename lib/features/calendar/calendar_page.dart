@@ -978,13 +978,10 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
             ),
           ),
           const SizedBox(width: 12),
-          FilledButton.tonal(
+          TallySoftButton(
             key: const Key('calendar-add-for-day'),
-            style: FilledButton.styleFrom(
-              visualDensity: VisualDensity.compact,
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            ),
+            compact: true,
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
             onPressed: () =>
                 context.push('/record/new?time=$selectedDayNoonMs'),
             child: const Text('+ 补记该日账单', maxLines: 1, softWrap: false),
@@ -1066,16 +1063,10 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
             const Spacer(),
           if (showCompactAddButton) ...[
             const SizedBox(width: 8),
-            FilledButton.tonal(
+            TallySoftButton(
               key: const Key('calendar-compact-add-for-day'),
-              style: FilledButton.styleFrom(
-                visualDensity: VisualDensity.compact,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 6,
-                ),
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
+              compact: true,
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               onPressed: () =>
                   context.push('/record/new?time=$selectedDayNoonMs'),
               child: const Text(

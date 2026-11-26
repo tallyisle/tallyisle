@@ -495,12 +495,10 @@ class _DetailSummaryCard extends StatelessWidget {
               Row(
                 children: [
                   Expanded(
-                    child: FilledButton.icon(
+                    child: TallySoftButton.icon(
                       key: const Key('post_next_period_button'),
                       onPressed: busy ? null : onPostNext,
-                      style: FilledButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
                       icon: const Icon(Icons.playlist_add_check, size: 18),
                       label: FittedBox(
                         fit: BoxFit.scaleDown,
@@ -514,12 +512,10 @@ class _DetailSummaryCard extends StatelessWidget {
                   ),
                   const SizedBox(width: 10),
                   Expanded(
-                    child: OutlinedButton.icon(
+                    child: TallySoftButton.icon(
                       key: const Key('early_settle_button'),
                       onPressed: busy ? null : onEarlySettle,
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
                       icon: const Icon(Icons.done_all, size: 18),
                       label: const FittedBox(
                         fit: BoxFit.scaleDown,

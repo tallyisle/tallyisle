@@ -339,38 +339,23 @@ class _TagRankingsPageState extends ConsumerState<TagRankingsPage> {
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
           ),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
-            child: Column(
-              children: [
-                Icon(
-                  Icons.label_off_outlined,
-                  size: 40,
-                  color: theme.colorScheme.outline,
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  view.hasAnyTags
-                      ? '当前周期暂无带标签的${isExpense ? '支出' : '收入'}账单'
-                      : '还没有创建任何标签',
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                OutlinedButton.icon(
-                  key: const Key('tag-rankings-manage-tags-btn'),
-                  icon: const Icon(Icons.label_outline, size: 18),
-                  label: const Text('去管理标签'),
-                  onPressed: () {
-                    if (isPopupModal) {
-                      Navigator.of(context).maybePop();
-                    } else {
-                      context.push('/tags');
-                    }
-                  },
-                ),
-              ],
+          child: TallyEmptyState(
+            icon: Icons.label_off_outlined,
+            title: view.hasAnyTags
+                ? '当前周期暂无带标签的${isExpense ? '支出' : '收入'}账单'
+                : '还没有创建任何标签',
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
+            action: TallySoftButton.icon(
+              key: const Key('tag-rankings-manage-tags-btn'),
+              icon: const Icon(Icons.label_outline, size: 18),
+              label: const Text('去管理标签'),
+              onPressed: () {
+                if (isPopupModal) {
+                  Navigator.of(context).maybePop();
+                } else {
+                  context.push('/tags');
+                }
+              },
             ),
           ),
         );

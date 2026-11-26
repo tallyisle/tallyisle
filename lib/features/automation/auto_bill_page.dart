@@ -597,8 +597,9 @@ class _DesktopAutoBillBanner extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 12),
-            FilledButton.tonalIcon(
+            TallySoftButton.icon(
               key: const Key('auto_bill_desktop_paste_button'),
+              compact: true,
               onPressed: onPasteParse,
               icon: const Icon(Icons.content_paste_go_rounded, size: 17),
               label: const Text('粘贴识账'),
@@ -698,13 +699,9 @@ class _AndroidAutoBillStatusCard extends StatelessWidget {
                   ),
                 ),
                 if (notificationStatus.supported)
-                  TextButton(
+                  TallySoftButton(
                     key: const Key('auto_bill_open_notif_settings_button'),
-                    style: TextButton.styleFrom(
-                      visualDensity: VisualDensity.compact,
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      padding: const EdgeInsets.symmetric(horizontal: 8),
-                    ),
+                    compact: true,
                     onPressed: onOpenNotificationSettings,
                     child: Text(notificationStatus.enabled ? '设置' : '去开启'),
                   ),
@@ -749,13 +746,9 @@ class _AndroidAutoBillStatusCard extends StatelessWidget {
                   ),
                 ),
                 if (accessibilityStatus.supported)
-                  TextButton(
+                  TallySoftButton(
                     key: const Key('auto_bill_open_settings_button'),
-                    style: TextButton.styleFrom(
-                      visualDensity: VisualDensity.compact,
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      padding: const EdgeInsets.symmetric(horizontal: 8),
-                    ),
+                    compact: true,
                     onPressed: onOpenAccessibilitySettings,
                     child: Text(accessibilityStatus.enabled ? '设置' : '去开启'),
                   ),
@@ -841,12 +834,9 @@ class _IosAutoBillCard extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
-            FilledButton.tonal(
+            TallySoftButton(
               key: const Key('auto_bill_ios_guide_button'),
-              style: FilledButton.styleFrom(
-                visualDensity: VisualDensity.compact,
-                padding: const EdgeInsets.symmetric(horizontal: 10),
-              ),
+              compact: true,
               onPressed: onOpenGuide,
               child: const Text('绑定向导'),
             ),
@@ -1106,15 +1096,11 @@ class _AutoBillStrategySettingsCard extends StatelessWidget {
                           ),
                         ),
                       ),
-                      TextButton(
+                      TallySoftButton(
                         key: const Key(
                           'auto_bill_open_overlay_settings_button',
                         ),
-                        style: TextButton.styleFrom(
-                          visualDensity: VisualDensity.compact,
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          padding: const EdgeInsets.symmetric(horizontal: 8),
-                        ),
+                        compact: true,
                         onPressed: onOpenOverlaySettings,
                         child: const Text('授权悬浮窗'),
                       ),
@@ -1206,7 +1192,7 @@ class _DraftsTabView extends StatelessWidget {
           if (!isDesktop)
             SizedBox(
               width: double.infinity,
-              child: FilledButton.icon(
+              child: TallySoftButton.icon(
                 key: const Key('auto_bill_paste_parse_button'),
                 onPressed: onPasteParse,
                 icon: const Icon(Icons.content_paste_go, size: 18),
@@ -1233,13 +1219,9 @@ class _DraftsTabView extends StatelessWidget {
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    FilledButton.tonal(
+                    TallySoftButton(
                       key: const Key('auto_bill_confirm_all_drafts_button'),
-                      style: FilledButton.styleFrom(
-                        visualDensity: VisualDensity.compact,
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        padding: const EdgeInsets.symmetric(horizontal: 10),
-                      ),
+                      compact: true,
                       onPressed: () => onConfirmAll(drafts),
                       child: const FittedBox(
                         fit: BoxFit.scaleDown,
@@ -1379,14 +1361,11 @@ class _DraftsTabView extends StatelessWidget {
                               onPressed: () => onEditConfirm(draft),
                               child: const Text('编辑入账'),
                             ),
-                            FilledButton.tonal(
+                            TallySoftButton(
                               key: Key('auto_bill_quick_confirm_${draft.id}'),
-                              style: FilledButton.styleFrom(
-                                visualDensity: VisualDensity.compact,
-                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                ),
+                              compact: true,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
                               ),
                               onPressed: () => onQuickConfirm(draft),
                               child: const Text('确认入账'),
@@ -1436,7 +1415,7 @@ class _RulesTabView extends StatelessWidget {
         children: [
           SizedBox(
             width: double.infinity,
-            child: FilledButton.icon(
+            child: TallySoftButton.icon(
               key: const Key('auto_bill_add_rule_button'),
               onPressed: onAddRule,
               icon: const Icon(Icons.add, size: 18),

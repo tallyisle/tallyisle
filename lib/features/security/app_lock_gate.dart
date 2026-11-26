@@ -403,10 +403,12 @@ class _LockOverlayScreen extends StatelessWidget {
                     const SizedBox(height: 12),
                     Wrap(
                       alignment: WrapAlignment.center,
+                      crossAxisAlignment: WrapCrossAlignment.center,
                       spacing: 12,
+                      runSpacing: 8,
                       children: [
                         if (canUseBiometric && !isDesktop)
-                          TextButton.icon(
+                          TallySoftButton.icon(
                             key: const Key('app_lock_biometric_button'),
                             onPressed: verifying ? null : onBiometric,
                             icon: const Icon(Icons.fingerprint),
@@ -443,22 +445,28 @@ class _PinNumericKeypad extends StatelessWidget {
   final VoidCallback onBackspace;
   final VoidCallback onClear;
 
-  Widget _digitBtn(BuildContext context, String digit) => Expanded(
-    child: Padding(
-      padding: const EdgeInsets.all(6),
-      child: OutlinedButton(
-        key: Key('app_lock_key_$digit'),
-        style: OutlinedButton.styleFrom(
-          minimumSize: const Size(64, 54),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(14),
+  Widget _digitBtn(BuildContext context, String digit) {
+    final scheme = Theme.of(context).colorScheme;
+    return Expanded(
+      child: Padding(
+        padding: const EdgeInsets.all(6),
+        child: OutlinedButton(
+          key: Key('app_lock_key_$digit'),
+          style: OutlinedButton.styleFrom(
+            backgroundColor: scheme.surfaceContainerHigh,
+            foregroundColor: scheme.onSurface,
+            side: BorderSide.none,
+            minimumSize: const Size(64, 54),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+            ),
           ),
+          onPressed: enabled ? () => onDigit(digit) : null,
+          child: Text(digit, style: Theme.of(context).textTheme.titleLarge),
         ),
-        onPressed: enabled ? () => onDigit(digit) : null,
-        child: Text(digit, style: Theme.of(context).textTheme.titleLarge),
       ),
-    ),
-  );
+    );
+  }
 
   @override
   Widget build(BuildContext context) => Column(

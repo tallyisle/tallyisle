@@ -7,8 +7,11 @@ import 'package:uuid/uuid.dart';
 import '../../app/providers.dart';
 import '../../core/failure.dart';
 import '../../core/money.dart';
+import 'tally_button.dart';
 
+export 'tally_button.dart';
 export 'tally_card.dart';
+export 'tally_empty_state.dart';
 
 const _uuid = Uuid();
 
@@ -45,7 +48,7 @@ class ErrorView extends ConsumerWidget {
         children: [
           Text(safeMessage(error), textAlign: TextAlign.center),
           const SizedBox(height: 16),
-          FilledButton(
+          TallySoftButton(
             onPressed: () => ref.invalidate(databaseProvider),
             child: const Text('重试'),
           ),

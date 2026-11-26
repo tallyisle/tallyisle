@@ -236,16 +236,8 @@ class _CsvExportPageState extends ConsumerState<CsvExportPage> {
                       Row(
                         children: [
                           Expanded(
-                            child: OutlinedButton.icon(
+                            child: TallySoftButton.icon(
                               key: const Key('export_start_date_button'),
-                              style: const ButtonStyle(
-                                padding: WidgetStatePropertyAll(
-                                  EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                    vertical: 10,
-                                  ),
-                                ),
-                              ),
                               onPressed: _busy
                                   ? null
                                   : () => _pickDate(isStart: true),
@@ -262,16 +254,8 @@ class _CsvExportPageState extends ConsumerState<CsvExportPage> {
                           ),
                           const SizedBox(width: 8),
                           Expanded(
-                            child: OutlinedButton.icon(
+                            child: TallySoftButton.icon(
                               key: const Key('export_end_date_button'),
-                              style: const ButtonStyle(
-                                padding: WidgetStatePropertyAll(
-                                  EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                    vertical: 10,
-                                  ),
-                                ),
-                              ),
                               onPressed: _busy
                                   ? null
                                   : () => _pickDate(isStart: false),
@@ -361,32 +345,76 @@ class _CsvExportPageState extends ConsumerState<CsvExportPage> {
                       '遵循 RFC 4180 标准转义，备注中的逗号、双引号及多行换行均可无损往返导入。',
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
+                    const SizedBox(height: 16),
+                    LayoutBuilder(
+                      builder: (ctx, constraints) {
+                        final confirmBtn = FilledButton.icon(
+                          key: const Key('confirm_csv_export_button'),
+                          onPressed: _busy
+                              ? null
+                              : () => _runExport(share: false),
+                          icon: _busy
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(Icons.download_outlined, size: 18),
+                          label: const FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text(
+                              '导出并保存 CSV',
+                              maxLines: 1,
+                              softWrap: false,
+                            ),
+                          ),
+                        );
+                        if (!canShare) {
+                          return SizedBox(
+                            width: double.infinity,
+                            child: confirmBtn,
+                          );
+                        }
+                        final shareBtn = TallySoftButton.icon(
+                          key: const Key('share_csv_export_button'),
+                          onPressed: _busy
+                              ? null
+                              : () => _runExport(share: true),
+                          icon: const Icon(Icons.share_outlined, size: 18),
+                          label: const FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text(
+                              '生成并调用系统分享',
+                              maxLines: 1,
+                              softWrap: false,
+                            ),
+                          ),
+                        );
+                        if (constraints.maxWidth >= 440) {
+                          return Row(
+                            children: [
+                              Expanded(child: shareBtn),
+                              const SizedBox(width: 10),
+                              Expanded(child: confirmBtn),
+                            ],
+                          );
+                        }
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            confirmBtn,
+                            const SizedBox(height: 10),
+                            shareBtn,
+                          ],
+                        );
+                      },
+                    ),
                   ],
                 ),
               ),
             ),
-            const SizedBox(height: 20),
-            FilledButton.icon(
-              key: const Key('confirm_csv_export_button'),
-              onPressed: _busy ? null : () => _runExport(share: false),
-              icon: _busy
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.download_outlined),
-              label: const Text('导出并保存 CSV'),
-            ),
-            if (canShare) ...[
-              const SizedBox(height: 12),
-              OutlinedButton.icon(
-                key: const Key('share_csv_export_button'),
-                onPressed: _busy ? null : () => _runExport(share: true),
-                icon: const Icon(Icons.share_outlined),
-                label: const Text('生成并调用系统分享'),
-              ),
-            ],
           ],
         );
         if (!isDesktop) return list;

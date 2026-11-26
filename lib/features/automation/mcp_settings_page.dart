@@ -377,15 +377,9 @@ class _McpSettingsPageState extends ConsumerState<McpSettingsPage> {
                           spacing: 8,
                           runSpacing: 8,
                           children: [
-                            OutlinedButton.icon(
+                            TallySoftButton.icon(
                               key: const Key('mcp_token_visibility_button'),
-                              style: OutlinedButton.styleFrom(
-                                visualDensity: VisualDensity.compact,
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 6,
-                                ),
-                              ),
+                              compact: true,
                               onPressed: () =>
                                   setState(() => _revealToken = !_revealToken),
                               icon: Icon(
@@ -396,15 +390,9 @@ class _McpSettingsPageState extends ConsumerState<McpSettingsPage> {
                               ),
                               label: Text(_revealToken ? '隐藏令牌' : '显示令牌'),
                             ),
-                            OutlinedButton.icon(
+                            TallySoftButton.icon(
                               key: const Key('mcp_token_copy_button'),
-                              style: OutlinedButton.styleFrom(
-                                visualDensity: VisualDensity.compact,
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 6,
-                                ),
-                              ),
+                              compact: true,
                               onPressed: () =>
                                   _copyText(config.authToken, ' Bearer 令牌'),
                               icon: const Icon(Icons.copy_outlined, size: 16),
@@ -479,7 +467,7 @@ class _McpSettingsPageState extends ConsumerState<McpSettingsPage> {
                   const SizedBox(height: 12),
                   SizedBox(
                     width: double.infinity,
-                    child: FilledButton.icon(
+                    child: TallySoftButton.icon(
                       key: const Key('mcp_copy_client_config_button'),
                       onPressed: () =>
                           _copyText(clientConfigJson, ' MCP 客户端配置 JSON'),

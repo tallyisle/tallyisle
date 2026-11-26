@@ -266,7 +266,7 @@ class _S3ConfigPageState extends ConsumerState<S3ConfigPage> {
     final actionButtons = Row(
       children: [
         Expanded(
-          child: OutlinedButton.icon(
+          child: TallySoftButton.icon(
             key: const Key('s3_test_connection_button'),
             onPressed: _busy ? null : _handleTestConnection,
             icon: const Icon(Icons.wifi_tethering, size: 18),

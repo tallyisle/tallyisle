@@ -45,7 +45,7 @@ void main() {
       await settle(tester);
 
       expect(find.byKey(const Key('debt_page')), findsOneWidget);
-      expect(find.text('暂无进行中的借贷项目，点击右下角新建'), findsOneWidget);
+      expect(find.text('暂无进行中的借贷项目'), findsOneWidget);
       expect(find.byType(ChoiceChip), findsNothing);
       final stateTabs = tester.widget<SegmentedButton<int>>(
         find.byKey(const Key('debt_state_tabs')),

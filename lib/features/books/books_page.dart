@@ -281,14 +281,9 @@ class _BooksPageState extends ConsumerState<BooksPage> {
         title: const Text('账本管理'),
         actions: isDesktop
             ? [
-                FilledButton.icon(
+                TallySoftButton.icon(
                   key: const Key('add-book'),
-                  style: FilledButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 8,
-                    ),
-                  ),
+                  compact: true,
                   onPressed: _addBook,
                   icon: const Icon(Icons.add, size: 18),
                   label: const Text('新建账本'),
@@ -300,7 +295,11 @@ class _BooksPageState extends ConsumerState<BooksPage> {
       body: asyncBody(booksAsync, (books) {
         final currentBookId = currentBookIdAsync.value ?? 1;
         if (books.isEmpty) {
-          return const Center(child: Text('暂无账本'));
+          return const TallyEmptyState(
+            icon: Icons.menu_book_outlined,
+            title: '暂无账本',
+            subtitle: '按生活、旅行或专项创建独立账本，清晰分开管理收支',
+          );
         }
 
         final theme = Theme.of(context);

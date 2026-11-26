@@ -108,34 +108,12 @@ class _ReminderPageState extends ConsumerState<ReminderPage>
         Expanded(
           child: asyncBody(remindersAsync, (items) {
             if (items.isEmpty) {
-              final mutedColor = Theme.of(context).colorScheme.onSurfaceVariant;
-              return Center(
-                key: const Key('reminder_empty_state'),
-                child: Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.notifications_none_outlined,
-                        size: 56,
-                        color: mutedColor,
-                      ),
-                      const SizedBox(height: 12),
-                      const Text(
-                        '暂无记账提醒',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        isDesktop ? '点击右上角“新建提醒”添加每日定时提醒' : '点击右下角按钮添加每日定时提醒',
-                        style: TextStyle(color: mutedColor),
-                      ),
-                    ],
-                  ),
+              return const Center(
+                child: TallyEmptyState(
+                  key: Key('reminder_empty_state'),
+                  icon: Icons.notifications_none_outlined,
+                  title: '暂无记账提醒',
+                  subtitle: '添加每日定时提醒，养成按时记账习惯',
                 ),
               );
             }
@@ -211,8 +189,9 @@ class _ReminderPageState extends ConsumerState<ReminderPage>
             ? [
                 Padding(
                   padding: const EdgeInsets.only(right: 8),
-                  child: FilledButton.tonalIcon(
+                  child: TallySoftButton.icon(
                     key: const Key('add_reminder_fab'),
+                    compact: true,
                     onPressed: () => unawaited(_openEditor()),
                     icon: const Icon(Icons.add, size: 18),
                     label: const Text('新建提醒'),
@@ -311,8 +290,9 @@ class _PermissionBanner extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 8),
-          FilledButton.tonal(
+          TallySoftButton(
             key: const Key('reminder_permission_action'),
+            compact: true,
             onPressed: () => unawaited(onEnablePressed()),
             child: const Text('去开启'),
           ),

@@ -278,24 +278,29 @@ class _PeriodicPageState extends ConsumerState<PeriodicPage>
         error: (e, _) => ErrorView(e),
         data: (rules) {
           if (rules.isEmpty) {
-            final emptyText = switch (tabState) {
-              PeriodState.active => '暂无进行中的周期记账',
-              PeriodState.ended => '暂无已结束的周期记账',
-              PeriodState.paused => '暂无已停用的周期记账',
-              _ => '暂无周期记账',
+            final (emptyIcon, emptyTitle, emptySubtitle) = switch (tabState) {
+              PeriodState.active => (
+                Icons.autorenew_rounded,
+                '暂无进行中的周期记账',
+                '房租、订阅会员或固定工资可设为周期自动入账',
+              ),
+              PeriodState.ended => (Icons.task_alt_rounded, '暂无已结束的周期记账', null),
+              PeriodState.paused => (
+                Icons.pause_circle_outline_rounded,
+                '暂无已停用的周期记账',
+                null,
+              ),
+              _ => (Icons.autorenew_rounded, '暂无周期记账', null),
             };
             return RefreshIndicator(
               onRefresh: () => _triggerCatchUp(force: true),
               child: ListView(
                 children: [
-                  const SizedBox(height: 120),
-                  Center(
-                    child: Text(
-                      emptyText,
-                      style: TextStyle(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
+                  const SizedBox(height: 56),
+                  TallyEmptyState(
+                    icon: emptyIcon,
+                    title: emptyTitle,
+                    subtitle: emptySubtitle,
                   ),
                 ],
               ),
@@ -448,8 +453,9 @@ class _PeriodicPageState extends ConsumerState<PeriodicPage>
               padding: const EdgeInsets.only(right: 8),
               child: Tooltip(
                 message: '新建周期记账',
-                child: FilledButton.tonalIcon(
+                child: TallySoftButton.icon(
                   key: const Key('add_periodic_button'),
+                  compact: true,
                   onPressed: () => _openEditor(),
                   icon: const Icon(Icons.add, size: 18),
                   label: const Text('新建周期'),
@@ -721,12 +727,10 @@ class PeriodicHistoryPage extends ConsumerWidget {
                     ),
                     Expanded(
                       child: records.isEmpty
-                          ? Center(
-                              child: Text(
-                                '暂无已生成的周期账单',
-                                style: TextStyle(
-                                  color: scheme.onSurfaceVariant,
-                                ),
+                          ? const Center(
+                              child: TallyEmptyState(
+                                icon: Icons.receipt_long_outlined,
+                                title: '暂无已生成的周期账单',
                               ),
                             )
                           : ListView(

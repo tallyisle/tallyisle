@@ -209,7 +209,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                             vertical: 16,
                             horizontal: 32,
                           ),
-                          child: OutlinedButton(
+                          child: TallySoftButton(
                             key: const Key('search-load-more'),
                             onPressed: () => setState(() => _limit += 50),
                             child: const Text('加载更多'),
@@ -346,7 +346,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                   Text('时间：', style: theme.textTheme.bodyMedium),
                   const SizedBox(width: 8),
                   Expanded(
-                    child: OutlinedButton.icon(
+                    child: TallySoftButton.icon(
                       icon: const Icon(Icons.date_range, size: 18),
                       label: FittedBox(
                         fit: BoxFit.scaleDown,
@@ -620,8 +620,9 @@ class _SearchPageState extends ConsumerState<SearchPage> {
               // Reset button
               Align(
                 alignment: Alignment.centerRight,
-                child: TextButton.icon(
+                child: TallySoftButton.icon(
                   key: const Key('search-reset-filters'),
+                  compact: true,
                   icon: const Icon(Icons.refresh, size: 16),
                   label: const Text('重置筛选'),
                   onPressed: _resetFilters,

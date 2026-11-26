@@ -387,16 +387,8 @@ class _CsvImportPageState extends ConsumerState<CsvImportPage> {
                     Row(
                       children: [
                         Expanded(
-                          child: FilledButton.icon(
+                          child: TallySoftButton.icon(
                             key: const Key('pick_import_file_button'),
-                            style: const ButtonStyle(
-                              padding: WidgetStatePropertyAll(
-                                EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 10,
-                                ),
-                              ),
-                            ),
                             onPressed: busy ? null : _pickAndPreview,
                             icon: const Icon(
                               Icons.folder_open_outlined,
@@ -414,16 +406,8 @@ class _CsvImportPageState extends ConsumerState<CsvImportPage> {
                         ),
                         const SizedBox(width: 10),
                         Expanded(
-                          child: OutlinedButton.icon(
+                          child: TallySoftButton.icon(
                             key: const Key('export_template_v3_button'),
-                            style: const ButtonStyle(
-                              padding: WidgetStatePropertyAll(
-                                EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 10,
-                                ),
-                              ),
-                            ),
                             onPressed: busy ? null : _downloadTemplateV3,
                             icon: const Icon(
                               Icons.description_outlined,

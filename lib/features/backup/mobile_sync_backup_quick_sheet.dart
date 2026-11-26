@@ -177,7 +177,7 @@ Future<SyncConflictResolution?> _promptQuickConflictResolution(
           onPressed: () => Navigator.of(ctx).pop(null),
           child: const Text('稍后处理'),
         ),
-        OutlinedButton(
+        TallySoftButton(
           key: const Key('conflict_use_remote_button'),
           onPressed: () =>
               Navigator.of(ctx).pop(SyncConflictResolution.useRemote),
@@ -529,7 +529,7 @@ class _MobileSyncBackupQuickSheetState
               ],
               const SizedBox(height: 14),
               if (preview.isCloudReady) ...[
-                FilledButton.icon(
+                TallySoftButton.icon(
                   key: const Key('quick_sheet_sync_now_button'),
                   onPressed: busy ? null : _runSync,
                   icon: const Icon(Icons.sync_rounded, size: 18),
@@ -539,7 +539,7 @@ class _MobileSyncBackupQuickSheetState
                 Row(
                   children: [
                     Expanded(
-                      child: OutlinedButton.icon(
+                      child: TallySoftButton.icon(
                         key: const Key('quick_sheet_local_backup_button'),
                         onPressed: busy ? null : _runLocalBackup,
                         icon: const Icon(Icons.save_outlined, size: 17),
@@ -552,7 +552,7 @@ class _MobileSyncBackupQuickSheetState
                     if (canSave || canShare) ...[
                       const SizedBox(width: 8),
                       Expanded(
-                        child: OutlinedButton.icon(
+                        child: TallySoftButton.icon(
                           key: const Key('quick_sheet_export_save_button'),
                           onPressed: busy ? null : _runExportExternal,
                           icon: Icon(
@@ -575,7 +575,7 @@ class _MobileSyncBackupQuickSheetState
                   ],
                 ),
               ] else ...[
-                FilledButton.icon(
+                TallySoftButton.icon(
                   key: const Key('quick_sheet_local_backup_button'),
                   onPressed: busy ? null : _runLocalBackup,
                   icon: const Icon(Icons.save_outlined, size: 18),
@@ -585,7 +585,7 @@ class _MobileSyncBackupQuickSheetState
                 Row(
                   children: [
                     Expanded(
-                      child: OutlinedButton.icon(
+                      child: TallySoftButton.icon(
                         key: const Key('quick_sheet_configure_sync_button'),
                         onPressed: busy
                             ? null
@@ -604,7 +604,7 @@ class _MobileSyncBackupQuickSheetState
                     if (canSave || canShare) ...[
                       const SizedBox(width: 8),
                       Expanded(
-                        child: OutlinedButton.icon(
+                        child: TallySoftButton.icon(
                           key: const Key('quick_sheet_export_save_button'),
                           onPressed: busy ? null : _runExportExternal,
                           icon: Icon(
@@ -824,16 +824,9 @@ class _MobileMeSyncQuickCardState extends ConsumerState<MobileMeSyncQuickCard> {
                   ),
                 ),
                 const SizedBox(width: 8),
-                FilledButton.tonal(
+                TallySoftButton(
                   key: const Key('me-mobile-sync-quick-action'),
-                  style: FilledButton.styleFrom(
-                    visualDensity: VisualDensity.compact,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 6,
-                    ),
-                  ),
+                  compact: true,
                   onPressed: busy ? null : () => _handleOneTap(preview),
                   child: busy
                       ? const SizedBox(

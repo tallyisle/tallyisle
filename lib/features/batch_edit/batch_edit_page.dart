@@ -487,15 +487,12 @@ class _BatchEditPageState extends ConsumerState<BatchEditPage> {
                             ),
                           ),
                           const SizedBox(width: 8),
-                          OutlinedButton.icon(
+                          TallySoftButton.icon(
                             key: const Key('batch-delete-btn'),
-                            style: OutlinedButton.styleFrom(
-                              visualDensity: VisualDensity.compact,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 8,
-                              ),
-                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            compact: true,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 8,
                             ),
                             onPressed: _busy || selectedInBook.isEmpty
                                 ? null
@@ -507,15 +504,12 @@ class _BatchEditPageState extends ConsumerState<BatchEditPage> {
                             ),
                           ),
                           const SizedBox(width: 8),
-                          FilledButton.icon(
+                          TallySoftButton.icon(
                             key: const Key('batch-open-edit-btn'),
-                            style: FilledButton.styleFrom(
-                              visualDensity: VisualDensity.compact,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 8,
-                              ),
-                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            compact: true,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 8,
                             ),
                             onPressed: _busy || selectedInBook.isEmpty
                                 ? null
@@ -851,7 +845,7 @@ class _BatchEditConfigSheetState extends ConsumerState<_BatchEditConfigSheet> {
       ),
       if (_editDate) ...[
         const SizedBox(height: 6),
-        OutlinedButton.icon(
+        TallySoftButton.icon(
           key: const Key('batch-pick-date-btn'),
           onPressed: _pickDate,
           icon: const Icon(Icons.calendar_today_outlined),

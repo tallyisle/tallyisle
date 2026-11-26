@@ -93,8 +93,9 @@ class _SavingsPageState extends ConsumerState<SavingsPage>
             ? [
                 Padding(
                   padding: const EdgeInsets.only(right: 8),
-                  child: FilledButton.tonalIcon(
+                  child: TallySoftButton.icon(
                     key: const Key('add_savings_plan_fab'),
+                    compact: true,
                     onPressed: _openEditor,
                     icon: const Icon(Icons.add, size: 18),
                     label: const Text('新建计划'),
@@ -178,17 +179,11 @@ class _ActivePlansTab extends StatelessWidget {
         _ActiveSummaryCard(summaryAsync: summaryAsync),
         const SizedBox(height: 12),
         if (plans.isEmpty)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 48),
-            child: Center(
-              child: Text(
-                isDesktop
-                    ? '暂无进行中的存钱计划，点击右上角“新建计划”开始存钱吧'
-                    : '暂无进行中的存钱计划，点击右下角“新建计划”开始存钱吧',
-                key: const Key('empty_active_savings_text'),
-                textAlign: TextAlign.center,
-              ),
-            ),
+          const TallyEmptyState(
+            icon: Icons.savings_outlined,
+            title: '暂无进行中的存钱计划',
+            titleKey: Key('empty_active_savings_text'),
+            subtitle: '支持定额、递增与自由存钱模式，稳步积累目标金额',
           )
         else
           for (final plan in plans) ...[
@@ -227,7 +222,11 @@ class _ArchivedPlansTab extends StatelessWidget {
   Widget build(BuildContext context) => asyncBody(plansAsync, (plans) {
     if (plans.isEmpty) {
       return const Center(
-        child: Text('暂无已归档的存钱计划', key: Key('empty_archived_savings_text')),
+        child: TallyEmptyState(
+          icon: Icons.archive_outlined,
+          title: '暂无已归档的存钱计划',
+          titleKey: Key('empty_archived_savings_text'),
+        ),
       );
     }
     final isDesktop = DesktopAdaptive.isDesktop(context);

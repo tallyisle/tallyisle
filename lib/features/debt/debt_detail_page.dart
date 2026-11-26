@@ -484,7 +484,7 @@ class _DebtDetailPageState extends ConsumerState<DebtDetailPage> {
               if (!settled) ...[
                 SizedBox(
                   width: double.infinity,
-                  child: FilledButton.icon(
+                  child: TallySoftButton.icon(
                     key: const Key('debt_action_repay'),
                     icon: const Icon(Icons.payments_outlined, size: 18),
                     label: FittedBox(
@@ -502,11 +502,9 @@ class _DebtDetailPageState extends ConsumerState<DebtDetailPage> {
                 Row(
                   children: [
                     Expanded(
-                      child: OutlinedButton.icon(
+                      child: TallySoftButton.icon(
                         key: const Key('debt_action_add_principal'),
-                        style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(horizontal: 10),
-                        ),
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
                         icon: const Icon(Icons.add_circle_outline, size: 18),
                         label: FittedBox(
                           fit: BoxFit.scaleDown,
@@ -521,11 +519,9 @@ class _DebtDetailPageState extends ConsumerState<DebtDetailPage> {
                     ),
                     const SizedBox(width: 10),
                     Expanded(
-                      child: OutlinedButton.icon(
+                      child: TallySoftButton.icon(
                         key: const Key('debt_action_interest_only'),
-                        style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(horizontal: 10),
-                        ),
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
                         icon: const Icon(Icons.percent, size: 18),
                         label: const FittedBox(
                           fit: BoxFit.scaleDown,
@@ -540,7 +536,7 @@ class _DebtDetailPageState extends ConsumerState<DebtDetailPage> {
               ] else
                 SizedBox(
                   width: double.infinity,
-                  child: OutlinedButton.icon(
+                  child: TallySoftButton.icon(
                     key: const Key('debt_action_interest_only'),
                     icon: const Icon(Icons.percent, size: 18),
                     label: const FittedBox(
@@ -572,9 +568,10 @@ class _DebtDetailPageState extends ConsumerState<DebtDetailPage> {
                 ],
               ),
               if (view.records.isEmpty)
-                const Padding(
-                  padding: EdgeInsets.all(24),
-                  child: Center(child: Text('暂无关联流水')),
+                const TallyEmptyState(
+                  icon: Icons.receipt_long_outlined,
+                  title: '暂无关联流水',
+                  padding: EdgeInsets.symmetric(horizontal: 24, vertical: 32),
                 )
               else if (!_groupByType)
                 for (final r in view.records) _buildRecordTile(view, r)

@@ -253,8 +253,9 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
           if (isDesktop)
             Padding(
               padding: const EdgeInsets.only(right: 12, left: 4),
-              child: FilledButton.tonalIcon(
+              child: TallySoftButton.icon(
                 key: const Key('add-asset'),
+                compact: true,
                 onPressed: _openCreateAsset,
                 icon: const Icon(Icons.add, size: 18),
                 label: const Text('添加账户'),
@@ -584,70 +585,100 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
                     ),
                   ),
                   if (allVisibleEmpty)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 32,
-                      ),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(isDesktop ? '还没有账户，点右上角或下方添加' : '还没有账户，点右下角添加'),
-                          const SizedBox(height: 16),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: OutlinedButton.icon(
-                                  key: const Key('empty-add-normal-asset'),
-                                  onPressed: _openCreateAsset,
-                                  style: OutlinedButton.styleFrom(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 10,
-                                    ),
-                                  ),
-                                  icon: const Icon(
-                                    Icons.account_balance_wallet_outlined,
-                                    size: 18,
-                                  ),
-                                  label: const FittedBox(
-                                    fit: BoxFit.scaleDown,
-                                    child: Text(
-                                      '新建资金账户',
-                                      maxLines: 1,
-                                      softWrap: false,
-                                    ),
-                                  ),
+                    Card(
+                      key: const Key('assets-empty-guide-card'),
+                      margin: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+                      elevation: 0,
+                      surfaceTintColor: Colors.transparent,
+                      color: cardColor,
+                      clipBehavior: Clip.antiAlias,
+                      shape: cardShape,
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 24, 16, 16),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Center(
+                              child: Container(
+                                width: 56,
+                                height: 56,
+                                decoration: BoxDecoration(
+                                  color: theme.colorScheme.primaryContainer
+                                      .withValues(
+                                        alpha:
+                                            theme.brightness == Brightness.dark
+                                            ? 0.32
+                                            : 0.48,
+                                      ),
+                                  shape: BoxShape.circle,
+                                ),
+                                alignment: Alignment.center,
+                                child: Icon(
+                                  Icons.account_balance_wallet_outlined,
+                                  size: 26,
+                                  color: theme.colorScheme.primary,
                                 ),
                               ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: OutlinedButton.icon(
-                                  key: const Key('empty-add-credit-asset'),
-                                  onPressed: () => _openCreateAsset(
+                            ),
+                            const SizedBox(height: 14),
+                            Text(
+                              '还没有资产账户',
+                              textAlign: TextAlign.center,
+                              style: theme.textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              '添加常用账户后，记账会自动同步余额与信用账期',
+                              textAlign: TextAlign.center,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: theme.colorScheme.onSurfaceVariant,
+                                height: 1.4,
+                              ),
+                            ),
+                            const SizedBox(height: 20),
+                            LayoutBuilder(
+                              builder: (context, constraints) {
+                                final normalCard = _EmptyAssetActionCard(
+                                  cardKey: const Key('empty-add-normal-asset'),
+                                  icon: Icons.account_balance_wallet_outlined,
+                                  title: '新建资金账户',
+                                  subtitle: '现金 · 储蓄卡 · 微信 · 支付宝',
+                                  onTap: _openCreateAsset,
+                                );
+                                final creditCard = _EmptyAssetActionCard(
+                                  cardKey: const Key('empty-add-credit-asset'),
+                                  icon: Icons.credit_card_outlined,
+                                  title: '新建信用账户',
+                                  subtitle: '信用卡 · 花呗 · 白条',
+                                  onTap: () => _openCreateAsset(
                                     initialType: AssetType.credit,
                                   ),
-                                  style: OutlinedButton.styleFrom(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 10,
-                                    ),
-                                  ),
-                                  icon: const Icon(
-                                    Icons.credit_card_outlined,
-                                    size: 18,
-                                  ),
-                                  label: const FittedBox(
-                                    fit: BoxFit.scaleDown,
-                                    child: Text(
-                                      '新建信用账户',
-                                      maxLines: 1,
-                                      softWrap: false,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
+                                );
+                                if (constraints.maxWidth >= 500) {
+                                  return Row(
+                                    children: [
+                                      Expanded(child: normalCard),
+                                      const SizedBox(width: 10),
+                                      Expanded(child: creditCard),
+                                    ],
+                                  );
+                                }
+                                return Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  children: [
+                                    normalCard,
+                                    const SizedBox(height: 10),
+                                    creditCard,
+                                  ],
+                                );
+                              },
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                 ],
@@ -754,6 +785,91 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
               icon: const Icon(Icons.add),
               label: const Text('添加账户'),
             ),
+    );
+  }
+}
+
+class _EmptyAssetActionCard extends StatelessWidget {
+  const _EmptyAssetActionCard({
+    required this.cardKey,
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  final Key cardKey;
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
+    return Material(
+      color: tallySoftButtonFillColor(scheme),
+      borderRadius: BorderRadius.circular(kTallyNestedRadius),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        key: cardKey,
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(kTallyNestedRadius),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: scheme.surface.withValues(alpha: isDark ? 0.35 : 0.72),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                alignment: Alignment.center,
+                child: Icon(icon, size: 20, color: scheme.primary),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w600,
+                        color: scheme.onPrimaryContainer,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: scheme.onPrimaryContainer.withValues(
+                          alpha: 0.78,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Icon(
+                Icons.add_circle_outline_rounded,
+                size: 18,
+                color: scheme.primary,
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

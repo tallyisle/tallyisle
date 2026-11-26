@@ -311,7 +311,7 @@ class _WidgetPreviewSection extends StatelessWidget {
             const SizedBox(height: 14),
             SizedBox(
               width: double.infinity,
-              child: FilledButton.tonalIcon(
+              child: TallySoftButton.icon(
                 key: Key('widget_pin_${kind.wireKey}'),
                 onPressed: onPin,
                 icon: Icon(

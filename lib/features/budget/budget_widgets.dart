@@ -333,12 +333,9 @@ class _BudgetSummaryCardState extends ConsumerState<BudgetSummaryCard> {
                         ),
                       ),
                       const SizedBox(width: 8),
-                      FilledButton.tonal(
-                        style: FilledButton.styleFrom(
-                          visualDensity: VisualDensity.compact,
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        ),
+                      TallySoftButton(
+                        compact: true,
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
                         onPressed: widget.onTap,
                         child: const FittedBox(
                           fit: BoxFit.scaleDown,
@@ -421,12 +418,9 @@ class _BudgetSummaryCardState extends ConsumerState<BudgetSummaryCard> {
                   ),
                 ),
                 const SizedBox(width: 8),
-                FilledButton.tonal(
-                  style: FilledButton.styleFrom(
-                    visualDensity: VisualDensity.compact,
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
+                TallySoftButton(
+                  compact: true,
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
                   onPressed: widget.onTap,
                   child: const FittedBox(
                     fit: BoxFit.scaleDown,

@@ -13,6 +13,7 @@ import '../../domain/model/codes.dart';
 import '../../domain/rules/bank_icon_catalog.dart';
 import '../../domain/rules/template_card_rules.dart';
 import 'svg_vector_icon.dart';
+import 'tally_button.dart';
 
 /// Harmonious Material 3-aligned color presets for TallyIsle's soft rounded
 /// circular category and account icon badges.
@@ -3730,10 +3731,11 @@ class _AssetVisualPickerSheetState extends State<_AssetVisualPickerSheet> {
         Row(
           children: [
             Expanded(
-              child: FilledButton.icon(
+              child: TallySoftButton.icon(
                 key: const Key('asset-picker-upload-image-btn'),
-                style: FilledButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
                 ),
                 onPressed: _uploadingImage
                     ? null
@@ -3758,10 +3760,11 @@ class _AssetVisualPickerSheetState extends State<_AssetVisualPickerSheet> {
             if (hasCustomImage) ...[
               const SizedBox(width: 8),
               Expanded(
-                child: OutlinedButton.icon(
+                child: TallySoftButton.icon(
                   key: const Key('asset-picker-reset-icon-btn'),
-                  style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
                   ),
                   onPressed: _uploadingImage
                       ? null

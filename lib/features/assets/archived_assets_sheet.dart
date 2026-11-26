@@ -375,15 +375,7 @@ class _ArchivedTabList extends StatelessWidget {
     final theme = Theme.of(context);
     if (items.isEmpty) {
       return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Text(
-            emptyText,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
-          ),
-        ),
+        child: TallyEmptyState(icon: Icons.archive_outlined, title: emptyText),
       );
     }
 
@@ -539,15 +531,12 @@ class _ArchivedAssetRow extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 8),
-              FilledButton.tonal(
+              TallySoftButton(
                 key: Key('restore-archived-asset-${asset.id}'),
+                compact: true,
+                minimumSize: const Size(52, 32),
+                padding: const EdgeInsets.symmetric(horizontal: 10),
                 onPressed: restoring ? null : onRestore,
-                style: FilledButton.styleFrom(
-                  visualDensity: VisualDensity.compact,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  minimumSize: const Size(52, 32),
-                  padding: const EdgeInsets.symmetric(horizontal: 10),
-                ),
                 child: const Text('恢复', maxLines: 1, softWrap: false),
               ),
             ],

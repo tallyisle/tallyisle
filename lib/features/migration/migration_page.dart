@@ -628,16 +628,8 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
                       const SizedBox(height: 12),
                       LayoutBuilder(
                         builder: (ctx, constraints) {
-                          final sheetBtn = OutlinedButton.icon(
+                          final sheetBtn = TallySoftButton.icon(
                             key: const Key('migration_open_yiyu_sheet_button'),
-                            style: const ButtonStyle(
-                              padding: WidgetStatePropertyAll(
-                                EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 10,
-                                ),
-                              ),
-                            ),
                             onPressed: _busy
                                 ? null
                                 : () => _pickFileAndOpenCsvImport(
@@ -656,16 +648,8 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
                               ),
                             ),
                           );
-                          final backupBtn = FilledButton.icon(
+                          final backupBtn = TallySoftButton.icon(
                             key: const Key('migration_pick_yiyu_backup_button'),
-                            style: const ButtonStyle(
-                              padding: WidgetStatePropertyAll(
-                                EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 10,
-                                ),
-                              ),
-                            ),
                             onPressed: _busy ? null : _pickAndImportYiyuBackup,
                             icon: const Icon(Icons.archive_outlined, size: 18),
                             label: const FittedBox(
@@ -726,17 +710,9 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
                       const SizedBox(height: 12),
                       LayoutBuilder(
                         builder: (ctx, constraints) {
-                          final sheetBtn = OutlinedButton.icon(
+                          final sheetBtn = TallySoftButton.icon(
                             key: const Key(
                               'migration_open_haohao_sheet_button',
-                            ),
-                            style: const ButtonStyle(
-                              padding: WidgetStatePropertyAll(
-                                EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 10,
-                                ),
-                              ),
                             ),
                             onPressed: _busy
                                 ? null
@@ -756,16 +732,8 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
                               ),
                             ),
                           );
-                          final dbBtn = FilledButton.icon(
+                          final dbBtn = TallySoftButton.icon(
                             key: const Key('migration_pick_haohao_db_button'),
-                            style: const ButtonStyle(
-                              padding: WidgetStatePropertyAll(
-                                EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 10,
-                                ),
-                              ),
-                            ),
                             onPressed: _busy ? null : _pickAndImportHaohaoDb,
                             icon: const Icon(Icons.storage_outlined, size: 18),
                             label: const FittedBox(
@@ -825,7 +793,7 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
                       const SizedBox(height: 12),
                       SizedBox(
                         width: double.infinity,
-                        child: FilledButton.tonalIcon(
+                        child: TallySoftButton.icon(
                           key: const Key('migration_open_qianji_import_button'),
                           onPressed: _busy
                               ? null

@@ -616,7 +616,15 @@ class _BillImagesPageState extends ConsumerState<BillImagesPage> {
             }
 
             if (groups.isEmpty) {
-              return const Center(child: Text('暂无带图片的账单记录'));
+              return const Center(
+                child: SingleChildScrollView(
+                  child: TallyEmptyState(
+                    icon: Icons.photo_library_outlined,
+                    title: '暂无带图片的账单记录',
+                    subtitle: '在记一笔或编辑账单时添加小票、发票等图片附件，会按月归档于此',
+                  ),
+                ),
+              );
             }
 
             final monthKeys = groups.keys.toList();

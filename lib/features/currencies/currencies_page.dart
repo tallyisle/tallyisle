@@ -175,14 +175,9 @@ class _CurrenciesPageState extends ConsumerState<CurrenciesPage> {
         title: const Text('币种与汇率'),
         actions: isDesktop
             ? [
-                FilledButton.icon(
+                TallySoftButton.icon(
                   key: const Key('add-currency'),
-                  style: FilledButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 8,
-                    ),
-                  ),
+                  compact: true,
                   onPressed: openAddCurrency,
                   icon: const Icon(Icons.add, size: 18),
                   label: const Text('添加币种'),
@@ -374,13 +369,11 @@ class _CurrenciesPageState extends ConsumerState<CurrenciesPage> {
                       child: Row(
                         children: [
                           Expanded(
-                            child: FilledButton.icon(
+                            child: TallySoftButton.icon(
                               key: const Key('online-rate-sync-now'),
                               onPressed: _syncing ? null : _syncNow,
-                              style: FilledButton.styleFrom(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                ),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
                               ),
                               icon: _syncing
                                   ? const SizedBox(
@@ -403,15 +396,13 @@ class _CurrenciesPageState extends ConsumerState<CurrenciesPage> {
                           ),
                           const SizedBox(width: 10),
                           Expanded(
-                            child: OutlinedButton.icon(
+                            child: TallySoftButton.icon(
                               key: const Key('online-rate-source-btn'),
                               onPressed: _syncing
                                   ? null
                                   : () => _configureCustomSource(settings),
-                              style: OutlinedButton.styleFrom(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                ),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
                               ),
                               icon: const Icon(Icons.tune, size: 18),
                               label: const FittedBox(
@@ -1287,22 +1278,17 @@ class _CurrencyDialogState extends ConsumerState<_CurrencyDialog> {
                 ),
               ),
               SizedBox(height: isDesktop ? 10 : 8),
-              OutlinedButton.icon(
+              TallySoftButton.icon(
                 key: const Key('currency-fetch-online-btn'),
+                compact: !isDesktop,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+                minimumSize: Size(0, isDesktop ? 38 : 34),
                 onPressed: (_fetching || _saving)
                     ? null
                     : _onFetchOnlinePressed,
-                style: OutlinedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 8,
-                  ),
-                  minimumSize: Size(0, isDesktop ? 38 : 34),
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  visualDensity: isDesktop
-                      ? VisualDensity.standard
-                      : VisualDensity.compact,
-                ),
                 icon: _fetching
                     ? const SizedBox(
                         width: 14,

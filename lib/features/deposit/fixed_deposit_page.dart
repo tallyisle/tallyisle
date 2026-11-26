@@ -170,8 +170,9 @@ class _FixedDepositPageState extends ConsumerState<FixedDepositPage> {
           if (isDesktop)
             Padding(
               padding: const EdgeInsets.only(right: 8),
-              child: FilledButton.tonalIcon(
+              child: TallySoftButton.icon(
                 key: const Key('add_deposit_fab'),
+                compact: true,
                 onPressed: _openCreate,
                 icon: const Icon(Icons.add, size: 18),
                 label: const Text('新建定存'),
@@ -384,29 +385,10 @@ class _EmptyDepositView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isDesktop = DesktopAdaptive.isDesktop(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 48),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            Icons.savings_outlined,
-            size: 48,
-            color: Theme.of(context).colorScheme.outline,
-          ),
-          const SizedBox(height: 12),
-          Text('暂无定期存款记录', style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 4),
-          Text(
-            isDesktop
-                ? '点击右上角“新建定存”登记本金与利率，到期自动结算收益'
-                : '点击右下角“新建定存”登记本金与利率，到期自动结算收益',
-            style: Theme.of(context).textTheme.bodySmall,
-            textAlign: TextAlign.center,
-          ),
-        ],
-      ),
+    return const TallyEmptyState(
+      icon: Icons.savings_outlined,
+      title: '暂无定期存款记录',
+      subtitle: '记录银行存单本金、利率与期限，到期可自动结算利息',
     );
   }
 }

@@ -598,19 +598,14 @@ class _BackupHistoryManagementDialogState
                       if (allItems.isNotEmpty)
                         SingleChildScrollView(
                           scrollDirection: Axis.horizontal,
-                          padding: const EdgeInsets.fromLTRB(16, 2, 16, 2),
+                          padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
                           child: Row(
                             children: [
-                              TextButton.icon(
+                              TallySoftButton.icon(
                                 key: const Key(
                                   'backup_history_select_all_button',
                                 ),
-                                style: TextButton.styleFrom(
-                                  visualDensity: VisualDensity.compact,
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                  ),
-                                ),
+                                compact: true,
                                 onPressed:
                                     effectiveBusy || filteredItems.isEmpty
                                     ? null
@@ -621,45 +616,35 @@ class _BackupHistoryManagementDialogState
                                   allFilteredSelected
                                       ? Icons.deselect_rounded
                                       : Icons.select_all_rounded,
-                                  size: 17,
+                                  size: 16,
                                 ),
                                 label: Text(
                                   allFilteredSelected ? '取消全选' : '全选',
                                 ),
                               ),
-                              const SizedBox(width: 4),
-                              TextButton.icon(
+                              const SizedBox(width: 8),
+                              TallySoftButton.icon(
                                 key: const Key(
                                   'backup_history_select_conflicts_button',
                                 ),
-                                style: TextButton.styleFrom(
-                                  visualDensity: VisualDensity.compact,
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                  ),
-                                ),
+                                compact: true,
                                 onPressed:
                                     effectiveBusy || conflictItems.isEmpty
                                     ? null
                                     : () => _selectAllConflicts(conflictItems),
                                 icon: const Icon(
                                   Icons.warning_amber_rounded,
-                                  size: 17,
+                                  size: 16,
                                 ),
                                 label: const Text('选中全部冲突包'),
                               ),
                               if (validSelected.isNotEmpty) ...[
-                                const SizedBox(width: 4),
-                                TextButton(
+                                const SizedBox(width: 8),
+                                TallySoftButton(
                                   key: const Key(
                                     'backup_history_clear_selection_button',
                                   ),
-                                  style: TextButton.styleFrom(
-                                    visualDensity: VisualDensity.compact,
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 8,
-                                    ),
-                                  ),
+                                  compact: true,
                                   onPressed: effectiveBusy
                                       ? null
                                       : () => setState(_selectedNames.clear),
@@ -926,15 +911,16 @@ class _BackupHistoryManagementDialogState
                               ),
                             ),
                             const SizedBox(width: 10),
-                            FilledButton.icon(
+                            TallySoftButton.icon(
                               key: const Key(
                                 'backup_history_batch_delete_button',
                               ),
                               style: validSelected.isEmpty
                                   ? null
                                   : FilledButton.styleFrom(
-                                      backgroundColor: scheme.error,
-                                      foregroundColor: scheme.onError,
+                                      backgroundColor: scheme.errorContainer,
+                                      foregroundColor: scheme.onErrorContainer,
+                                      iconColor: scheme.onErrorContainer,
                                     ),
                               onPressed:
                                   !effectiveBusy && validSelected.isNotEmpty

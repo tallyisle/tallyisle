@@ -433,16 +433,13 @@ class HomePendingDraftsBanner extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 8),
-              FilledButton(
+              TallySoftButton(
                 key: const Key('home_pending_drafts_action'),
-                style: FilledButton.styleFrom(
-                  visualDensity: VisualDensity.compact,
-                  minimumSize: const Size(0, 30),
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 4,
-                  ),
+                compact: true,
+                minimumSize: const Size(0, 30),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 4,
                 ),
                 onPressed: () => context.push('/automation/auto-bill'),
                 child: const FittedBox(
@@ -574,7 +571,11 @@ class _HomeBody extends ConsumerWidget {
             AsyncData(:final value) when value.isEmpty => [
               const SliverFillRemaining(
                 hasScrollBody: false,
-                child: Center(child: Text('本期暂无账单')),
+                child: TallyEmptyState(
+                  icon: Icons.receipt_long_outlined,
+                  title: '本期暂无账单',
+                  subtitle: '记下一笔日常收支，清晰掌握本期账目流向',
+                ),
               ),
             ],
             AsyncData(:final value) => [
@@ -817,7 +818,11 @@ class _DesktopHomeBody extends ConsumerWidget {
             AsyncData(:final value) when value.isEmpty => [
               const SliverFillRemaining(
                 hasScrollBody: false,
-                child: Center(child: Text('本期暂无账单')),
+                child: TallyEmptyState(
+                  icon: Icons.receipt_long_outlined,
+                  title: '本期暂无账单',
+                  subtitle: '记下一笔日常收支，清晰掌握本期账目流向',
+                ),
               ),
             ],
             AsyncData(:final value) => [

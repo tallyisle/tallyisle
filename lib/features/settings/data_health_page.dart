@@ -6,6 +6,7 @@ import '../../app/adaptive.dart';
 import '../../app/providers.dart';
 import '../../core/failure.dart';
 import '../../domain/rules/data_health_rules.dart';
+import '../common/common.dart';
 import '../common/desktop_modal_page.dart';
 import 'settings_providers.dart';
 
@@ -136,7 +137,7 @@ class _DataHealthPageState extends ConsumerState<DataHealthPage> {
                   const SizedBox(height: 12),
                   Text('体检读取失败：$err', textAlign: TextAlign.center),
                   const SizedBox(height: 16),
-                  FilledButton.tonalIcon(
+                  TallySoftButton.icon(
                     onPressed: _recheck,
                     icon: const Icon(Icons.refresh),
                     label: const Text('重试'),
@@ -275,44 +276,55 @@ class _DataHealthPageState extends ConsumerState<DataHealthPage> {
                   ),
                 ),
                 const SizedBox(height: 12),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    if (report.repairableCount > 0) ...[
-                      FilledButton.icon(
-                        key: const Key('data_health_repair_button'),
-                        onPressed: _repairing
-                            ? null
-                            : () => _confirmAndRepair(report),
-                        icon: _repairing
-                            ? const SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : const Icon(Icons.build_circle_outlined),
-                        label: FittedBox(
-                          fit: BoxFit.scaleDown,
-                          child: Text(
-                            '一键修复可自动校准项 (${report.repairableCount})',
-                            maxLines: 1,
-                            softWrap: false,
+                Card(
+                  margin: EdgeInsets.zero,
+                  elevation: 0,
+                  surfaceTintColor: Colors.transparent,
+                  clipBehavior: Clip.antiAlias,
+                  shape: _softCardShape,
+                  color: _softCardColor(theme),
+                  child: Padding(
+                    padding: const EdgeInsets.all(14),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        if (report.repairableCount > 0) ...[
+                          TallySoftButton.icon(
+                            key: const Key('data_health_repair_button'),
+                            onPressed: _repairing
+                                ? null
+                                : () => _confirmAndRepair(report),
+                            icon: _repairing
+                                ? const SizedBox(
+                                    width: 16,
+                                    height: 16,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : const Icon(Icons.build_circle_outlined),
+                            label: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Text(
+                                '一键修复可自动校准项 (${report.repairableCount})',
+                                maxLines: 1,
+                                softWrap: false,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                        ],
+                        TallySoftButton.icon(
+                          onPressed: _repairing ? null : _recheck,
+                          icon: const Icon(Icons.refresh),
+                          label: const FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text('重新体检', maxLines: 1, softWrap: false),
                           ),
                         ),
-                      ),
-                      const SizedBox(height: 8),
-                    ],
-                    OutlinedButton.icon(
-                      onPressed: _repairing ? null : _recheck,
-                      icon: const Icon(Icons.refresh),
-                      label: const FittedBox(
-                        fit: BoxFit.scaleDown,
-                        child: Text('重新体检', maxLines: 1, softWrap: false),
-                      ),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
                 const SizedBox(height: 16),
                 if (report.issues.isEmpty)

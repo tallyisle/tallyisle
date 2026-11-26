@@ -2686,7 +2686,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                           const Padding(
                             padding: EdgeInsets.symmetric(vertical: 20),
                             child: Text(
-                              '暂无可用标签，可点击右上角“管理标签”新建。',
+                              '暂无可用标签，可通过「管理标签」新建。',
                               textAlign: TextAlign.center,
                             ),
                           )
@@ -2730,7 +2730,8 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                             ),
                           ),
                         const SizedBox(height: 14),
-                        FilledButton.tonal(
+                        TallySoftButton(
+                          compact: true,
                           onPressed: () => Navigator.of(dialogCtx).pop(),
                           child: const Text('完成'),
                         ),
@@ -2787,7 +2788,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                       const Padding(
                         padding: EdgeInsets.symmetric(vertical: 16),
                         child: Text(
-                          '暂无可用标签，可点击右上角“管理标签”新建。',
+                          '暂无可用标签，可通过「管理标签」新建。',
                           textAlign: TextAlign.center,
                         ),
                       )
@@ -2822,7 +2823,8 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                         ),
                       ),
                     const SizedBox(height: 12),
-                    FilledButton.tonal(
+                    TallySoftButton(
+                      compact: true,
                       onPressed: () => Navigator.pop(sheetCtx),
                       child: const Text('完成'),
                     ),
@@ -5359,20 +5361,11 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
               context,
             ).scale(1.0).clamp(1.0, 2.0);
             final compactBar = barConstraints.maxWidth < 550.0 * textScale;
-            final saveAndAgainButton = OutlinedButton(
+            final saveAndAgainButton = TallySoftButton(
               key: const Key('desktop-save-and-again'),
-              style: OutlinedButton.styleFrom(
-                visualDensity: VisualDensity.compact,
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                minimumSize: const Size(0, 34),
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                side: BorderSide(
-                  color: cs.outlineVariant.withValues(alpha: 0.85),
-                ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-              ),
+              compact: true,
+              minimumSize: const Size(0, 34),
+              padding: const EdgeInsets.symmetric(horizontal: 12),
               onPressed: canSubmit ? _triggerDesktopSaveAndAgain : null,
               child: Text(
                 compactBar ? '再记' : fullSaveAndAgainLabel,
@@ -5679,7 +5672,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               Text(
-                                '暂无常用备注，记账后自动统计，也可点击右上角「管理」添加',
+                                '暂无常用备注，记账后自动统计，也可手动添加',
                                 textAlign: TextAlign.center,
                                 style: TextStyle(
                                   fontSize: 12.5,
@@ -5687,11 +5680,9 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                                 ),
                               ),
                               const SizedBox(height: 10),
-                              FilledButton.tonalIcon(
+                              TallySoftButton.icon(
                                 key: const Key('editor-remarks-empty-add-btn'),
-                                style: FilledButton.styleFrom(
-                                  visualDensity: VisualDensity.compact,
-                                ),
+                                compact: true,
                                 onPressed: busy ? null : _openRemarksManager,
                                 icon: const Icon(Icons.add_rounded, size: 16),
                                 label: const Text(

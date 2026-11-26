@@ -253,7 +253,7 @@ class _RecordReceiptDialogState extends ConsumerState<RecordReceiptDialog> {
                     if (hideUnavailableShare)
                       SizedBox(
                         width: double.infinity,
-                        child: FilledButton.icon(
+                        child: TallySoftButton.icon(
                           key: const Key('receipt-save-btn'),
                           onPressed:
                               _busy ||
@@ -268,7 +268,7 @@ class _RecordReceiptDialogState extends ConsumerState<RecordReceiptDialog> {
                       Row(
                         children: [
                           Expanded(
-                            child: OutlinedButton.icon(
+                            child: TallySoftButton.icon(
                               key: const Key('receipt-save-btn'),
                               onPressed:
                                   _busy ||
@@ -284,7 +284,7 @@ class _RecordReceiptDialogState extends ConsumerState<RecordReceiptDialog> {
                           ),
                           const SizedBox(width: 8),
                           Expanded(
-                            child: FilledButton.icon(
+                            child: TallySoftButton.icon(
                               key: const Key('receipt-share-btn'),
                               onPressed:
                                   _busy ||

@@ -493,11 +493,9 @@ class _SavingsEditorPageState extends ConsumerState<SavingsEditorPage> {
           Row(
             children: [
               Expanded(
-                child: OutlinedButton.icon(
+                child: TallySoftButton.icon(
                   key: const Key('pick_start_date_button'),
-                  style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
                   onPressed: _busy ? null : () => _pickDate(isStart: true),
                   icon: const Icon(Icons.event, size: 16),
                   label: FittedBox(
@@ -512,11 +510,9 @@ class _SavingsEditorPageState extends ConsumerState<SavingsEditorPage> {
               ),
               const SizedBox(width: 8),
               Expanded(
-                child: OutlinedButton.icon(
+                child: TallySoftButton.icon(
                   key: const Key('pick_end_date_button'),
-                  style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
                   onPressed: _busy ? null : () => _pickDate(isStart: false),
                   icon: const Icon(Icons.event_available, size: 16),
                   label: FittedBox(
@@ -620,11 +616,9 @@ class _SavingsEditorPageState extends ConsumerState<SavingsEditorPage> {
           Row(
             children: [
               Expanded(
-                child: OutlinedButton.icon(
+                child: TallySoftButton.icon(
                   key: const Key('pick_start_date_button'),
-                  style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
                   onPressed: _busy ? null : () => _pickDate(isStart: true),
                   icon: const Icon(Icons.event, size: 16),
                   label: FittedBox(
@@ -639,11 +633,9 @@ class _SavingsEditorPageState extends ConsumerState<SavingsEditorPage> {
               ),
               const SizedBox(width: 8),
               Expanded(
-                child: OutlinedButton.icon(
+                child: TallySoftButton.icon(
                   key: const Key('pick_end_date_button'),
-                  style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
                   onPressed: _busy ? null : () => _pickDate(isStart: false),
                   icon: const Icon(Icons.event_available, size: 16),
                   label: FittedBox(

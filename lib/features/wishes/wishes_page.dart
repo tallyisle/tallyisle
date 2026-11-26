@@ -164,14 +164,9 @@ class _WishesPageState extends ConsumerState<WishesPage>
         title: const Text('心愿单'),
         actions: isDesktop
             ? [
-                FilledButton.icon(
+                TallySoftButton.icon(
                   key: const Key('add_wish_fab'),
-                  style: FilledButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 8,
-                    ),
-                  ),
+                  compact: true,
                   onPressed: _openEditor,
                   icon: const Icon(Icons.add, size: 18),
                   label: const Text('新建心愿'),
@@ -340,16 +335,18 @@ class _WishListView extends StatelessWidget {
     final isDesktop = DesktopAdaptive.isDesktop(context);
     if (wishes.isEmpty) {
       return Center(
-        key: Key(
-          isRealizedTab ? 'wish_realized_empty' : 'wish_unrealized_empty',
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Text(
-            isRealizedTab
-                ? '暂无已实现的心愿'
-                : (isDesktop ? '还没有待实现的心愿，点击右上角新建一个吧' : '还没有待实现的心愿，点击右下角新建一个吧'),
-            textAlign: TextAlign.center,
+        child: SingleChildScrollView(
+          child: TallyEmptyState(
+            key: Key(
+              isRealizedTab ? 'wish_realized_empty' : 'wish_unrealized_empty',
+            ),
+            icon: isRealizedTab
+                ? Icons.task_alt_rounded
+                : Icons.auto_awesome_outlined,
+            title: isRealizedTab ? '暂无已实现的心愿' : '还没有待实现的心愿',
+            subtitle: isRealizedTab
+                ? '达成心愿并标记完成后，会在这里为你珍藏记录'
+                : '记录想要达成的目标心愿，让每一分储蓄更有动力',
           ),
         ),
       );

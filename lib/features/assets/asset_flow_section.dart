@@ -106,28 +106,20 @@ class AssetFlowSection extends ConsumerWidget {
         if (displayedRecords.isEmpty) {
           slivers.add(
             SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.all(32),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      activePeriod != null
-                          ? '该账期内暂无流水记录'
-                          : activeMonth != null
-                          ? '该月暂无流水记录'
-                          : '暂无账单明细',
-                      style: TextStyle(color: scheme.onSurfaceVariant),
-                    ),
-                    if (hasActiveFilter && onClearPeriodFilter != null) ...[
-                      const SizedBox(height: 8),
-                      OutlinedButton(
+              child: TallyEmptyState(
+                icon: Icons.receipt_long_outlined,
+                title: activePeriod != null
+                    ? '该账期内暂无流水记录'
+                    : activeMonth != null
+                    ? '该月暂无流水记录'
+                    : '暂无账单明细',
+                action: hasActiveFilter && onClearPeriodFilter != null
+                    ? TallySoftButton(
+                        compact: true,
                         onPressed: onClearPeriodFilter,
                         child: const Text('恢复查看全部流水'),
-                      ),
-                    ],
-                  ],
-                ),
+                      )
+                    : null,
               ),
             ),
           );

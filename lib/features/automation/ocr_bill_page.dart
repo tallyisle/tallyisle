@@ -386,11 +386,9 @@ class _OcrBillPageState extends ConsumerState<OcrBillPage> {
                 Row(
                   children: [
                     Expanded(
-                      child: FilledButton.icon(
+                      child: TallySoftButton.icon(
                         key: const Key('ocr_pick_image_button'),
-                        style: FilledButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(horizontal: 10),
-                        ),
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
                         onPressed: _recognizing ? null : _pickAndRecognizeImage,
                         icon: const Icon(Icons.image_search, size: 18),
                         label: FittedBox(
@@ -405,11 +403,9 @@ class _OcrBillPageState extends ConsumerState<OcrBillPage> {
                     ),
                     const SizedBox(width: 10),
                     Expanded(
-                      child: OutlinedButton.icon(
+                      child: TallySoftButton.icon(
                         key: const Key('ocr_parse_text_button'),
-                        style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(horizontal: 10),
-                        ),
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
                         onPressed: _recognizing ? null : _parseTextLocally,
                         icon: const Icon(Icons.notes, size: 18),
                         label: const FittedBox(

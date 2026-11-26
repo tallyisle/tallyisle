@@ -131,6 +131,7 @@ class _ImportBatchesPageState extends ConsumerState<ImportBatchesPage>
             (items) => _BatchListView(
               items: items,
               emptyText: '暂无导入批次记录',
+              emptySubtitle: '从微信、支付宝或表格导入账单后，批次记录会显示在此，支持随时整批撤销',
               busyBatchId: _busyBatchId,
               onToggleHidden: _toggleHidden,
               onUndo: _confirmAndUndo,
@@ -141,6 +142,7 @@ class _ImportBatchesPageState extends ConsumerState<ImportBatchesPage>
             (items) => _BatchListView(
               items: items,
               emptyText: '暂无已隐藏的导入批次',
+              emptySubtitle: '隐藏的历史导入批次会收纳于此，可随时取消隐藏或查看明细',
               busyBatchId: _busyBatchId,
               onToggleHidden: _toggleHidden,
               onUndo: _confirmAndUndo,
@@ -156,6 +158,7 @@ class _BatchListView extends StatelessWidget {
   const _BatchListView({
     required this.items,
     required this.emptyText,
+    required this.emptySubtitle,
     required this.busyBatchId,
     required this.onToggleHidden,
     required this.onUndo,
@@ -163,6 +166,7 @@ class _BatchListView extends StatelessWidget {
 
   final List<ImportBatchSummary> items;
   final String emptyText;
+  final String emptySubtitle;
   final int? busyBatchId;
   final ValueChanged<ImportBatchSummary> onToggleHidden;
   final ValueChanged<ImportBatchSummary> onUndo;
@@ -170,11 +174,10 @@ class _BatchListView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (items.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Text(emptyText),
-        ),
+      return TallyEmptyState(
+        icon: Icons.history_toggle_off_outlined,
+        title: emptyText,
+        subtitle: emptySubtitle,
       );
     }
 
@@ -236,8 +239,9 @@ class _BatchListView extends StatelessWidget {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.end,
                     children: [
-                      TextButton.icon(
+                      TallySoftButton.icon(
                         key: Key('toggle_hide_batch_${batch.id}'),
+                        compact: true,
                         onPressed: isBusy
                             ? null
                             : () => onToggleHidden(summary),
@@ -245,15 +249,16 @@ class _BatchListView extends StatelessWidget {
                           batch.hidden
                               ? Icons.visibility_outlined
                               : Icons.visibility_off_outlined,
-                          size: 18,
+                          size: 16,
                         ),
                         label: Text(batch.hidden ? '取消隐藏' : '隐藏批次'),
                       ),
                       const SizedBox(width: 8),
-                      OutlinedButton.icon(
+                      TallySoftButton.icon(
                         key: Key('undo_batch_button_${batch.id}'),
+                        compact: true,
                         onPressed: isBusy ? null : () => onUndo(summary),
-                        icon: const Icon(Icons.undo, size: 18),
+                        icon: const Icon(Icons.undo, size: 16),
                         label: const Text('撤销批次'),
                       ),
                     ],
@@ -356,11 +361,9 @@ class _ImportBatchDetailPageState extends ConsumerState<ImportBatchDetailPage> {
           ),
           body: asyncBody(recordsAsync, (records) {
             if (records.isEmpty) {
-              return const Center(
-                child: Padding(
-                  padding: EdgeInsets.all(24),
-                  child: Text('该批次下已无现存账单记录'),
-                ),
+              return const TallyEmptyState(
+                icon: Icons.receipt_long_outlined,
+                title: '该批次下已无现存账单记录',
               );
             }
             final list = ListView.builder(

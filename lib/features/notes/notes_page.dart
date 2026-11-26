@@ -113,18 +113,20 @@ class _NotesPageState extends ConsumerState<NotesPage> {
             if (notes.isEmpty) {
               final searching = query.trim().isNotEmpty;
               return Center(
-                key: Key(
-                  searching ? 'notes_search_empty_state' : 'notes_empty_state',
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Text(
-                    searching
-                        ? '未找到匹配的便签'
-                        : (isDesktop
-                              ? '还没有便签，点击右上角记录灵感或备忘'
-                              : '还没有便签，点击右下角记录灵感或备忘'),
-                    textAlign: TextAlign.center,
+                child: SingleChildScrollView(
+                  child: TallyEmptyState(
+                    key: Key(
+                      searching
+                          ? 'notes_search_empty_state'
+                          : 'notes_empty_state',
+                    ),
+                    icon: searching
+                        ? Icons.search_off_rounded
+                        : Icons.sticky_note_2_outlined,
+                    title: searching ? '未找到匹配的便签' : '还没有便签',
+                    subtitle: searching
+                        ? '换个关键词试试，或清空搜索查看全部便签'
+                        : '随手记录账务备忘、购物清单或日常灵感',
                   ),
                 ),
               );
@@ -162,14 +164,9 @@ class _NotesPageState extends ConsumerState<NotesPage> {
           ),
           if (isDesktop) ...[
             const SizedBox(width: 8),
-            FilledButton.icon(
+            TallySoftButton.icon(
               key: const Key('add_note_fab'),
-              style: FilledButton.styleFrom(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
-                ),
-              ),
+              compact: true,
               onPressed: _openEditor,
               icon: const Icon(Icons.edit_note, size: 18),
               label: const Text('新建便签'),

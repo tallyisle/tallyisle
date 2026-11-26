@@ -8,6 +8,7 @@ import '../../core/failure.dart';
 import '../../data/db/database.dart';
 import '../../domain/model/codes.dart';
 import '../../domain/rules/app_settings_rules.dart';
+import '../common/common.dart';
 import '../common/desktop_modal_page.dart';
 import 'settings_providers.dart';
 
@@ -141,30 +142,12 @@ class _StatStoriesPageState extends ConsumerState<StatStoriesPage> {
             error: (err, _) => Center(child: Text('读取失败：$err')),
             data: (stories) {
               if (stories.isEmpty) {
-                return Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.auto_stories_outlined,
-                          size: 52,
-                          color: scheme.outline,
-                        ),
-                        const SizedBox(height: 12),
-                        Text('暂无统计故事', style: theme.textTheme.titleMedium),
-                        const SizedBox(height: 4),
-                        Text(
-                          isDesktop
-                              ? '点击右上角“新增故事”，可根据所选账期自动汇总收支摘要并编辑留存。'
-                              : '点击右下角“新增故事”，可根据所选账期自动汇总收支摘要并编辑留存。',
-                          textAlign: TextAlign.center,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: scheme.onSurfaceVariant,
-                          ),
-                        ),
-                      ],
+                return const Center(
+                  child: SingleChildScrollView(
+                    child: TallyEmptyState(
+                      icon: Icons.auto_stories_outlined,
+                      title: '暂无统计故事',
+                      subtitle: '按所选账期自动汇总收支摘要并编辑留存',
                     ),
                   ),
                 );
@@ -286,14 +269,9 @@ class _StatStoriesPageState extends ConsumerState<StatStoriesPage> {
           title: const Text('统计故事'),
           actions: isDesktop
               ? [
-                  FilledButton.icon(
+                  TallySoftButton.icon(
                     key: const Key('stat_story_add_fab'),
-                    style: FilledButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 8,
-                      ),
-                    ),
+                    compact: true,
                     onPressed: () => _openEditor(books: books),
                     icon: const Icon(Icons.add, size: 18),
                     label: const Text('新增故事'),
@@ -507,14 +485,12 @@ class _StatStoryEditorDialogState
               Row(
                 children: [
                   Expanded(
-                    child: OutlinedButton.icon(
+                    child: TallySoftButton.icon(
                       key: const Key('stat_story_pick_sdate_button'),
-                      style: OutlinedButton.styleFrom(
-                        minimumSize: const Size(0, 40),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 10,
-                        ),
+                      minimumSize: const Size(0, 40),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 10,
                       ),
                       onPressed: _busy ? null : _pickStartDate,
                       icon: const Icon(Icons.calendar_today_outlined, size: 15),
@@ -530,14 +506,12 @@ class _StatStoryEditorDialogState
                   ),
                   const SizedBox(width: 8),
                   Expanded(
-                    child: OutlinedButton.icon(
+                    child: TallySoftButton.icon(
                       key: const Key('stat_story_pick_edate_button'),
-                      style: OutlinedButton.styleFrom(
-                        minimumSize: const Size(0, 40),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 10,
-                        ),
+                      minimumSize: const Size(0, 40),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 10,
                       ),
                       onPressed: _busy ? null : _pickEndDate,
                       icon: const Icon(Icons.event_outlined, size: 15),
@@ -568,11 +542,9 @@ class _StatStoryEditorDialogState
                 ),
               ),
               const SizedBox(height: 10),
-              OutlinedButton.icon(
+              TallySoftButton.icon(
                 key: const Key('stat_story_generate_button'),
-                style: OutlinedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 10),
-                ),
+                padding: const EdgeInsets.symmetric(horizontal: 10),
                 onPressed: _busy ? null : _generateNarrative,
                 icon: const Icon(Icons.auto_awesome_outlined, size: 18),
                 label: const FittedBox(

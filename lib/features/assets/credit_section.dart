@@ -85,12 +85,10 @@ class CreditPendingBanner extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
-            FilledButton.tonal(
+            TallySoftButton(
               key: const Key('credit-banner-repay'),
-              style: FilledButton.styleFrom(
-                visualDensity: VisualDensity.compact,
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-              ),
+              compact: true,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
               onPressed: () {
                 if (onRepay != null) {
                   onRepay!(banner.remainingAmount);
@@ -177,8 +175,9 @@ class _CreditSectionState extends ConsumerState<CreditSection> {
                 ),
               ),
               const SizedBox(width: 8),
-              OutlinedButton(
+              TallySoftButton(
                 key: const Key('credit-configure-btn'),
+                compact: true,
                 onPressed:
                     widget.onConfigureTap ??
                     () => context.push('/assets/${asset.id}/edit'),
@@ -474,12 +473,9 @@ class _StatementCard extends StatelessWidget {
                       ),
                     )
                   else if (item.isIssued && item.remainingAmount > BigInt.zero)
-                    OutlinedButton(
-                      style: OutlinedButton.styleFrom(
-                        visualDensity: VisualDensity.compact,
-                        padding: const EdgeInsets.symmetric(horizontal: 10),
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      ),
+                    TallySoftButton(
+                      compact: true,
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
                       onPressed: () {
                         if (onRepayAmount != null) {
                           onRepayAmount!(item.remainingAmount);

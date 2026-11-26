@@ -526,14 +526,9 @@ class _TagsPageState extends ConsumerState<TagsPage> {
             ),
             if (isDesktop) ...[
               const SizedBox(width: 4),
-              FilledButton.icon(
+              TallySoftButton.icon(
                 key: const Key('add-tag'),
-                style: FilledButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 8,
-                  ),
-                ),
+                compact: true,
                 onPressed: () => _addTag(),
                 icon: const Icon(Icons.add, size: 18),
                 label: const Text('新建标签'),
@@ -545,8 +540,10 @@ class _TagsPageState extends ConsumerState<TagsPage> {
         body: asyncBody(tagsAsync, (rawTags) {
           final allTags = _applyOptimisticTags(rawTags);
           if (allTags.isEmpty) {
-            return Center(
-              child: Text(isDesktop ? '暂无标签，点击右上角添加' : '暂无标签，点击右下角添加'),
+            return const TallyEmptyState(
+              icon: Icons.label_outline_rounded,
+              title: '还没有标签',
+              subtitle: '创建标签或标签组，按项目、出行或成员灵活归集账单',
             );
           }
 

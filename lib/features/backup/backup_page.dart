@@ -363,7 +363,7 @@ class _BackupPageState extends ConsumerState<BackupPage>
             onPressed: () => Navigator.of(ctx).pop(null),
             child: const Text('稍后处理'),
           ),
-          OutlinedButton(
+          TallySoftButton(
             key: const Key('conflict_use_remote_button'),
             onPressed: () =>
                 Navigator.of(ctx).pop(SyncConflictResolution.useRemote),
@@ -788,12 +788,6 @@ class _BackupPageState extends ConsumerState<BackupPage>
 
   static const int _maxInlineBackupItems = 3;
 
-  static const ButtonStyle _compactButtonStyle = ButtonStyle(
-    padding: WidgetStatePropertyAll(
-      EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-    ),
-  );
-
   static Widget _singleLineText(String text) => FittedBox(
     fit: BoxFit.scaleDown,
     child: Text(text, maxLines: 1, softWrap: false),
@@ -834,14 +828,6 @@ class _BackupPageState extends ConsumerState<BackupPage>
     final scheme = theme.colorScheme;
     final isDark = theme.brightness == Brightness.dark;
 
-    const compactActionStyle = ButtonStyle(
-      visualDensity: VisualDensity.compact,
-      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-      padding: WidgetStatePropertyAll(
-        EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      ),
-    );
-
     final Color bgColor;
     final Color borderColor;
     final Color fgColor;
@@ -857,9 +843,9 @@ class _BackupPageState extends ConsumerState<BackupPage>
       final pathHint = binding == null ? '' : '（${binding.displayPath}）';
       messageText = '外部备份目录不可访问$pathHint，近期自动备份已回退保存在应用沙盒，请重新绑定以免卸载丢失。';
       actions = <Widget>[
-        FilledButton.tonal(
+        TallySoftButton(
           key: const Key('rebind_external_backup_dir_button'),
-          style: compactActionStyle,
+          compact: true,
           onPressed: !effectiveBusy && canBind
               ? _handleBindOrChangeExternalDir
               : null,
@@ -876,15 +862,15 @@ class _BackupPageState extends ConsumerState<BackupPage>
       messageText = '外部安全目录：${binding.displayPath}';
       actions = <Widget>[
         if (canOpenFolder)
-          OutlinedButton(
+          TallySoftButton(
             key: const Key('open_external_backup_dir_button'),
-            style: compactActionStyle,
+            compact: true,
             onPressed: effectiveBusy ? null : _handleOpenExternalBackupDir,
             child: _singleLineText('打开文件夹'),
           ),
-        OutlinedButton(
+        TallySoftButton(
           key: const Key('change_external_backup_dir_button'),
-          style: compactActionStyle,
+          compact: true,
           onPressed: !effectiveBusy && canBind
               ? _handleBindOrChangeExternalDir
               : null,
@@ -900,9 +886,9 @@ class _BackupPageState extends ConsumerState<BackupPage>
       icon = Icons.folder_outlined;
       messageText = '尚未绑定外部目录：未绑定时备份保存在应用沙盒（卸载即清除），建议选择外部文件夹持久保存。';
       actions = <Widget>[
-        OutlinedButton(
+        TallySoftButton(
           key: const Key('bind_external_backup_dir_button'),
-          style: compactActionStyle,
+          compact: true,
           onPressed: !effectiveBusy && canBind
               ? _handleBindOrChangeExternalDir
               : null,
@@ -1367,11 +1353,10 @@ class _BackupPageState extends ConsumerState<BackupPage>
                               Row(
                                 children: [
                                   Expanded(
-                                    child: OutlinedButton.icon(
+                                    child: TallySoftButton.icon(
                                       key: const Key(
                                         'open_webdav_config_button',
                                       ),
-                                      style: _compactButtonStyle,
                                       onPressed: effectiveBusy
                                           ? null
                                           : () => _openWebDavConfig(davConfig),
@@ -1388,9 +1373,8 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                   ),
                                   const SizedBox(width: 10),
                                   Expanded(
-                                    child: OutlinedButton.icon(
+                                    child: TallySoftButton.icon(
                                       key: const Key('open_s3_config_button'),
-                                      style: _compactButtonStyle,
                                       onPressed: effectiveBusy
                                           ? null
                                           : () => _openS3Config(s3Config),
@@ -1410,7 +1394,7 @@ class _BackupPageState extends ConsumerState<BackupPage>
                               const SizedBox(height: 8),
                               SizedBox(
                                 width: double.infinity,
-                                child: FilledButton.icon(
+                                child: TallySoftButton.icon(
                                   key: const Key('cloud_sync_now_button'),
                                   onPressed:
                                       !effectiveBusy && isActiveCloudReady
@@ -1681,11 +1665,10 @@ class _BackupPageState extends ConsumerState<BackupPage>
                               Row(
                                 children: [
                                   Expanded(
-                                    child: FilledButton.icon(
+                                    child: TallySoftButton.icon(
                                       key: const Key(
                                         'local_backup_create_button',
                                       ),
-                                      style: _compactButtonStyle,
                                       onPressed: effectiveBusy
                                           ? null
                                           : _handleCreateLocalBackup,
@@ -1698,11 +1681,10 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                   ),
                                   const SizedBox(width: 10),
                                   Expanded(
-                                    child: OutlinedButton.icon(
+                                    child: TallySoftButton.icon(
                                       key: const Key(
                                         'local_backup_import_button',
                                       ),
-                                      style: _compactButtonStyle,
                                       onPressed: effectiveBusy
                                           ? null
                                           : _handleImportAndRestore,
@@ -1719,11 +1701,10 @@ class _BackupPageState extends ConsumerState<BackupPage>
                               Row(
                                 children: [
                                   Expanded(
-                                    child: OutlinedButton.icon(
+                                    child: TallySoftButton.icon(
                                       key: const Key(
                                         'local_backup_export_button',
                                       ),
-                                      style: _compactButtonStyle,
                                       onPressed:
                                           !effectiveBusy && canSaveExternal
                                           ? _handleExportSaveAs
@@ -1738,11 +1719,10 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                   if (!isDesktop || canShareExternal) ...[
                                     const SizedBox(width: 10),
                                     Expanded(
-                                      child: OutlinedButton.icon(
+                                      child: TallySoftButton.icon(
                                         key: const Key(
                                           'local_backup_share_button',
                                         ),
-                                        style: _compactButtonStyle,
                                         onPressed:
                                             !effectiveBusy && canShareExternal
                                             ? _handleShareBackup
@@ -2075,11 +2055,10 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                       const SizedBox(height: 6),
                                       SizedBox(
                                         width: double.infinity,
-                                        child: OutlinedButton.icon(
+                                        child: TallySoftButton.icon(
                                           key: const Key(
                                             'open_all_local_backups_button',
                                           ),
-                                          style: _compactButtonStyle,
                                           onPressed: effectiveBusy
                                               ? null
                                               : _openLocalBackupHistoryDialog,
@@ -2144,7 +2123,7 @@ class _BackupPageState extends ConsumerState<BackupPage>
                               if (!isActiveCloudReady)
                                 SizedBox(
                                   width: double.infinity,
-                                  child: FilledButton.icon(
+                                  child: TallySoftButton.icon(
                                     key: const Key('webdav_backup_now_button'),
                                     onPressed: null,
                                     icon: const Icon(
@@ -2158,11 +2137,10 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                 Row(
                                   children: [
                                     Expanded(
-                                      child: FilledButton.icon(
+                                      child: TallySoftButton.icon(
                                         key: const Key(
                                           'webdav_backup_now_button',
                                         ),
-                                        style: _compactButtonStyle,
                                         onPressed: effectiveBusy
                                             ? null
                                             : () => _handleCloudBackupUpload(
@@ -2177,9 +2155,8 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                     ),
                                     const SizedBox(width: 10),
                                     Expanded(
-                                      child: OutlinedButton.icon(
+                                      child: TallySoftButton.icon(
                                         key: const Key('webdav_refresh_button'),
-                                        style: _compactButtonStyle,
                                         onPressed: effectiveBusy
                                             ? null
                                             : _refreshAfterBackupChange,
@@ -2326,11 +2303,10 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                         const SizedBox(height: 6),
                                         SizedBox(
                                           width: double.infinity,
-                                          child: OutlinedButton.icon(
+                                          child: TallySoftButton.icon(
                                             key: const Key(
                                               'open_all_cloud_backups_button',
                                             ),
-                                            style: _compactButtonStyle,
                                             onPressed: effectiveBusy
                                                 ? null
                                                 : () =>

@@ -137,8 +137,9 @@ class _DebtPageState extends ConsumerState<DebtPage> {
           if (isDesktop)
             Padding(
               padding: const EdgeInsets.only(right: 12),
-              child: FilledButton.tonalIcon(
+              child: TallySoftButton.icon(
                 key: const Key('add_debt_button'),
+                compact: true,
                 onPressed: () async {
                   await pushDesktopModalOrMaterialRoute<bool>(
                     context,
@@ -334,27 +335,21 @@ class _DebtTabList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
     if (items.isEmpty) {
       return ListView(
         padding: EdgeInsets.fromLTRB(16, 0, 16, isDesktop ? 24 : 80),
         children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 48),
-            child: Center(
-              child: Text(
-                isSettledTab
-                    ? '暂无已结清的借贷项目'
-                    : isDesktop
-                    ? '暂无进行中的借贷项目，点击右上角“新建借贷”添加'
-                    : '暂无进行中的借贷项目，点击右下角新建',
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: colorScheme.onSurfaceVariant,
-                ),
-              ),
+          if (isSettledTab)
+            const TallyEmptyState(
+              icon: Icons.task_alt_rounded,
+              title: '暂无已结清的借贷项目',
+            )
+          else
+            const TallyEmptyState(
+              icon: Icons.swap_horiz_rounded,
+              title: '暂无进行中的借贷项目',
+              subtitle: '借出周转或日常借入后，可在此跟踪本息与收还款进度',
             ),
-          ),
         ],
       );
     }

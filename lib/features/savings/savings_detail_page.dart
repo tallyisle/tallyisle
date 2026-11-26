@@ -294,8 +294,9 @@ class _SavingsDetailPageState extends ConsumerState<SavingsDetailPage> {
                       fontWeight: FontWeight.bold,
                     ),
                   ),
-                  FilledButton.tonalIcon(
+                  TallySoftButton.icon(
                     key: const Key('free_plan_checkin_button'),
+                    compact: true,
                     onPressed: () => _showFreePlanCheckInDialog(detail),
                     icon: const Icon(Icons.savings_outlined, size: 18),
                     label: const Text('打卡存钱'),
@@ -304,9 +305,11 @@ class _SavingsDetailPageState extends ConsumerState<SavingsDetailPage> {
               ),
               const SizedBox(height: 8),
               if (detail.schedule.freePlanRows.isEmpty)
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 32),
-                  child: Center(child: Text('暂无存入记录，点击“打卡存钱”记录第一笔吧')),
+                const TallyEmptyState(
+                  icon: Icons.savings_outlined,
+                  title: '暂无存入记录',
+                  subtitle: '随时通过打卡存钱记录每一笔积蓄',
+                  padding: EdgeInsets.symmetric(horizontal: 24, vertical: 32),
                 )
               else
                 for (final row in detail.schedule.freePlanRows)
@@ -987,12 +990,10 @@ class _ScheduleSlotTile extends StatelessWidget {
                 onPressed: onCancel,
                 child: const Text('取消存入'),
               )
-            : FilledButton.tonal(
+            : TallySoftButton(
                 key: Key('checkin_slot_button_${slot.slotIndex}'),
-                style: FilledButton.styleFrom(
-                  visualDensity: isDesktop ? null : VisualDensity.compact,
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                ),
+                compact: true,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
                 onPressed: onCheckIn,
                 child: const Text('打卡'),
               ),

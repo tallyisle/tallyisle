@@ -851,26 +851,15 @@ class _PendingBillCard extends StatelessWidget {
               ),
               if (!batchMode) ...[
                 const SizedBox(width: 6),
-                FilledButton.tonal(
+                TallySoftButton(
                   key: Key('reimburse-action-${item.recordId}'),
-                  style: DesktopAdaptive.isDesktop(context)
-                      ? FilledButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 6,
-                          ),
-                          minimumSize: const Size(52, 34),
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        )
-                      : FilledButton.styleFrom(
-                          visualDensity: VisualDensity.compact,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 5,
-                          ),
-                          minimumSize: const Size(44, 30),
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        ),
+                  compact: true,
+                  padding: DesktopAdaptive.isDesktop(context)
+                      ? const EdgeInsets.symmetric(horizontal: 12, vertical: 6)
+                      : const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  minimumSize: DesktopAdaptive.isDesktop(context)
+                      ? const Size(52, 34)
+                      : const Size(44, 30),
                   onPressed: onReimburseTap,
                   child: const Text('报销'),
                 ),
@@ -1082,7 +1071,7 @@ class _BatchBottomActionBar extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 12),
-              FilledButton(
+              TallySoftButton(
                 key: const Key('reimburse-batch-submit'),
                 onPressed: onSubmit,
                 child: const Text('合并报销'),
@@ -1110,46 +1099,18 @@ class _EmptyReimburseState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
     return Center(
       child: SingleChildScrollView(
-        padding: const EdgeInsets.all(28),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 68,
-              height: 68,
-              decoration: BoxDecoration(
-                color: cs.primaryContainer.withValues(alpha: 0.45),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(icon, size: 34, color: cs.primary),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              title,
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              subtitle,
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: cs.onSurfaceVariant,
-              ),
-            ),
-            const SizedBox(height: 18),
-            FilledButton.tonalIcon(
-              key: const Key('reimburse-empty-add'),
-              onPressed: onAddPressed,
-              icon: const Icon(Icons.add_rounded, size: 18),
-              label: const Text('记一笔待报销支出'),
-            ),
-          ],
+        child: TallyEmptyState(
+          icon: icon,
+          title: title,
+          subtitle: subtitle,
+          action: TallySoftButton.icon(
+            key: const Key('reimburse-empty-add'),
+            onPressed: onAddPressed,
+            icon: const Icon(Icons.add_rounded, size: 18),
+            label: const Text('记一笔待报销支出'),
+          ),
         ),
       ),
     );
@@ -1374,13 +1335,9 @@ class _SingleReimburseSheetState extends ConsumerState<_SingleReimburseSheet> {
             Row(
               children: [
                 Expanded(
-                  child: OutlinedButton.icon(
+                  child: TallySoftButton.icon(
                     key: const Key('reimburse-dialog-date'),
-                    style: isDialog
-                        ? OutlinedButton.styleFrom(
-                            minimumSize: const Size.fromHeight(44),
-                          )
-                        : null,
+                    minimumSize: isDialog ? const Size.fromHeight(44) : null,
                     onPressed: _submitting ? null : _pickDate,
                     icon: const Icon(Icons.calendar_today_rounded, size: 16),
                     label: Text('收款日期 ${formatDate(_selectedDate)}'),
@@ -1596,13 +1553,9 @@ class _BatchReimburseSheetState extends ConsumerState<_BatchReimburseSheet> {
                   : (v) => setState(() => _selectedAssetId = v ?? noRef),
             ),
             const SizedBox(height: 12),
-            OutlinedButton.icon(
+            TallySoftButton.icon(
               key: const Key('reimburse-batch-date'),
-              style: isDialog
-                  ? OutlinedButton.styleFrom(
-                      minimumSize: const Size.fromHeight(44),
-                    )
-                  : null,
+              minimumSize: isDialog ? const Size.fromHeight(44) : null,
               onPressed: _submitting ? null : _pickDate,
               icon: const Icon(Icons.calendar_today_rounded, size: 16),
               label: Text('收款日期 ${formatDate(_selectedDate)}'),

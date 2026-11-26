@@ -6,8 +6,8 @@ import '../../app/adaptive.dart';
 import '../../core/failure.dart';
 import '../../domain/model/codes.dart';
 import '../../domain/rules/app_settings_rules.dart';
+import '../common/common.dart';
 import '../common/desktop_modal_page.dart';
-import '../common/tally_card.dart' show tallyNestedSurfaceColor;
 import '../me/me_page.dart' show MeEmbeddedNavigationScope;
 import '../security/app_lock_settings_page.dart';
 import 'about_help_page.dart';
@@ -464,14 +464,36 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                   altMod: DesktopAdaptive.altModifierLabel(context),
                 ),
               ],
-              const SizedBox(height: 20),
-              Align(
-                alignment: Alignment.center,
-                child: OutlinedButton.icon(
-                  key: const Key('setting_reset_defaults_button'),
-                  onPressed: _busy ? null : _confirmResetDefaults,
-                  icon: const Icon(Icons.restart_alt),
-                  label: const Text('恢复默认设置'),
+              const SizedBox(height: 16),
+              Card(
+                margin: EdgeInsets.zero,
+                elevation: 0,
+                surfaceTintColor: Colors.transparent,
+                clipBehavior: Clip.antiAlias,
+                color: _softCardColor(theme),
+                shape: _softCardShape,
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text('重置偏好设置', style: theme.textTheme.titleSmall),
+                      const SizedBox(height: 4),
+                      Text(
+                        '将首页展示开关、默认记账类型与外观主题恢复为初始状态（不影响账本数据或安全锁）',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TallySoftButton.icon(
+                        key: const Key('setting_reset_defaults_button'),
+                        onPressed: _busy ? null : _confirmResetDefaults,
+                        icon: const Icon(Icons.restart_alt, size: 18),
+                        label: const Text('恢复默认设置'),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ],

@@ -249,14 +249,9 @@ class _RemarksPageState extends ConsumerState<RemarksPage> {
           title: const Text('常用备注管理'),
           actions: isDesktop
               ? [
-                  FilledButton.icon(
+                  TallySoftButton.icon(
                     key: const Key('add_remark_fab'),
-                    style: FilledButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 8,
-                      ),
-                    ),
+                    compact: true,
                     onPressed: () => _openEditor(categories: bookCategories),
                     icon: const Icon(Icons.add, size: 18),
                     label: const Text('新增备注'),
@@ -419,16 +414,16 @@ class _RemarksPageState extends ConsumerState<RemarksPage> {
                               .toList();
                     if (filtered.isEmpty) {
                       return Center(
-                        key: const Key('remarks_empty_state'),
-                        child: Padding(
-                          padding: const EdgeInsets.all(24),
-                          child: Text(
-                            needle.isEmpty
-                                ? (isDesktop
-                                      ? '暂无常用备注，点击右上角“新增备注”添加'
-                                      : '暂无常用备注，点击右下角“新增备注”添加')
-                                : '未找到匹配的常用备注',
-                            style: Theme.of(context).textTheme.bodyMedium,
+                        child: SingleChildScrollView(
+                          child: TallyEmptyState(
+                            key: const Key('remarks_empty_state'),
+                            icon: needle.isEmpty
+                                ? Icons.comment_outlined
+                                : Icons.search_off_rounded,
+                            title: needle.isEmpty ? '暂无常用备注' : '未找到匹配的常用备注',
+                            subtitle: needle.isEmpty
+                                ? '添加常用备注后，记账时可直接点选联想，减少重复输入'
+                                : null,
                           ),
                         ),
                       );

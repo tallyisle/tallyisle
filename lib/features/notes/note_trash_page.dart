@@ -103,12 +103,11 @@ class NoteTrashPage extends ConsumerWidget {
     final isDesktop = DesktopAdaptive.isDesktop(context);
     final content = asyncBody(trashedAsync, (notes) {
       if (notes.isEmpty) {
-        return const Center(
+        return const TallyEmptyState(
           key: Key('note_trash_empty_state'),
-          child: Padding(
-            padding: EdgeInsets.all(24),
-            child: Text('回收站为空', textAlign: TextAlign.center),
-          ),
+          icon: Icons.delete_outline_rounded,
+          title: '回收站为空',
+          subtitle: '移入回收站的便签会暂存于此，可随时恢复或彻底清理',
         );
       }
 
