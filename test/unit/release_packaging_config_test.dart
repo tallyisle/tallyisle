@@ -134,9 +134,9 @@ void main() {
               )
               as Map<String, Object?>;
       expect(flatpak['app-id'], 'com.tallyisle.app');
-      expect(flatpak['runtime'], 'org.gnome.Platform');
-      expect(flatpak['runtime-version'], '47');
-      expect(flatpak['sdk'], 'org.gnome.Sdk');
+      expect(flatpak['runtime'], 'org.freedesktop.Platform');
+      expect(flatpak['runtime-version'], '26.08');
+      expect(flatpak['sdk'], 'org.freedesktop.Sdk');
       expect(flatpak['command'], 'tallyisle');
       final finishArgs = (flatpak['finish-args']! as List<Object?>)
           .cast<String>();
@@ -161,6 +161,38 @@ void main() {
           reason: 'Missing multi-size PNG icon app_icon_$size.png',
         );
       }
+
+      final linuxSh = File(
+        'tool/packaging/linux/package_linux.sh',
+      ).readAsStringSync();
+      expect(linuxSh, isNot(contains('org.gnome.')));
+      expect(linuxSh, isNot(contains('//47')));
+      expect(
+        linuxSh,
+        contains(r'FLATPAK_MANIFEST="$SCRIPT_DIR/${APP_ID}.flatpak.json"'),
+      );
+      expect(linuxSh, contains('"runtime"'));
+      expect(linuxSh, contains('"sdk"'));
+      expect(linuxSh, contains('"runtime-version"'));
+      expect(
+        linuxSh,
+        contains(
+          r'if [[ -z "$RUNTIME" || -z "$SDK" || -z "$RUNTIME_VERSION" ]]',
+        ),
+      );
+      expect(
+        linuxSh,
+        contains(
+          r'error: failed to parse runtime/sdk/runtime-version from $FLATPAK_MANIFEST',
+        ),
+      );
+      expect(
+        linuxSh,
+        contains(
+          r'flatpak install --user -y --noninteractive flathub "${RUNTIME}//${RUNTIME_VERSION}" "${SDK}//${RUNTIME_VERSION}"',
+        ),
+      );
+      expect(linuxSh, contains(r'"$FLATPAK_MANIFEST"'));
     });
 
     test(

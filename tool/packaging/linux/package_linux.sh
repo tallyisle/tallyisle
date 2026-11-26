@@ -340,14 +340,45 @@ if has_format "flatpak"; then
   FLATPAK_REPO="$WORK_DIR/flatpak-repo"
   FLATPAK_BUILD="$WORK_DIR/flatpak-build"
   FLATPAK_OUT="$OUT_DIR/TallyIsle-Linux-x64.flatpak"
+  FLATPAK_MANIFEST="$SCRIPT_DIR/${APP_ID}.flatpak.json"
+
+  if [[ ! -f "$FLATPAK_MANIFEST" ]]; then
+    echo "error: flatpak manifest not found at $FLATPAK_MANIFEST" >&2
+    exit 1
+  fi
+
+  RUNTIME=""
+  SDK=""
+  RUNTIME_VERSION=""
+  if command -v python3 >/dev/null 2>&1; then
+    IFS=$'\t' read -r RUNTIME SDK RUNTIME_VERSION < <(
+      python3 -c '
+import json, sys
+with open(sys.argv[1], "r", encoding="utf-8") as f:
+    data = json.load(f)
+vals = [data.get(k) for k in ("runtime", "sdk", "runtime-version")]
+if all(isinstance(v, str) and v.strip() for v in vals):
+    print("\t".join(v.strip() for v in vals))
+' "$FLATPAK_MANIFEST" 2>/dev/null
+    ) || true
+  else
+    RUNTIME="$(sed -n 's/^[[:space:]]*"runtime"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$FLATPAK_MANIFEST" | head -n1 | tr -d '\r')"
+    SDK="$(sed -n 's/^[[:space:]]*"sdk"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$FLATPAK_MANIFEST" | head -n1 | tr -d '\r')"
+    RUNTIME_VERSION="$(sed -n 's/^[[:space:]]*"runtime-version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$FLATPAK_MANIFEST" | head -n1 | tr -d '\r')"
+  fi
+
+  if [[ -z "$RUNTIME" || -z "$SDK" || -z "$RUNTIME_VERSION" ]]; then
+    echo "error: failed to parse runtime/sdk/runtime-version from $FLATPAK_MANIFEST" >&2
+    exit 1
+  fi
 
   flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-  flatpak install --user -y --noninteractive flathub org.gnome.Platform//47 org.gnome.Sdk//47
+  flatpak install --user -y --noninteractive flathub "${RUNTIME}//${RUNTIME_VERSION}" "${SDK}//${RUNTIME_VERSION}"
 
   flatpak-builder --user --force-clean --disable-rofiles-fuse \
     --repo="$FLATPAK_REPO" \
     "$FLATPAK_BUILD" \
-    "$SCRIPT_DIR/${APP_ID}.flatpak.json"
+    "$FLATPAK_MANIFEST"
 
   flatpak build-bundle "$FLATPAK_REPO" "$FLATPAK_OUT" "$APP_ID"
   assert_nonempty "$FLATPAK_OUT"

@@ -1,8 +1,8 @@
 {
   "app-id": "com.tallyisle.app",
-  "runtime": "org.gnome.Platform",
-  "runtime-version": "47",
-  "sdk": "org.gnome.Sdk",
+  "runtime": "org.freedesktop.Platform",
+  "runtime-version": "26.08",
+  "sdk": "org.freedesktop.Sdk",
   "command": "tallyisle",
   "finish-args": [
     "--share=ipc",
