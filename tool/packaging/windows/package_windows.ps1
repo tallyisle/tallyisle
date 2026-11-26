@@ -1,12 +1,14 @@
 <#
 .SYNOPSIS
-Packages the TallyIsle Windows x64 Flutter release bundle into:
-  - TallyIsle-Windows-x64-portable.zip
-  - TallyIsle-Windows-x64-setup.exe (Inno Setup 6)
-  - TallyIsle-Windows-x64.msi (WiX Toolset v5 via dotnet global tool)
+Packages the TallyIsle Windows (x64 or arm64) Flutter release bundle into:
+  - TallyIsle-Windows-<arch>-portable.zip
+  - TallyIsle-Windows-<arch>-setup.exe (Inno Setup 6)
+  - TallyIsle-Windows-<arch>.msi (WiX Toolset v5 via dotnet global tool)
 #>
 [CmdletBinding()]
 param(
+    [ValidateSet("", "x64", "arm64")]
+    [string]$Arch = "",
     [string]$ReleaseDir = "",
     [string]$OutDir = ""
 )
@@ -17,8 +19,11 @@ Set-StrictMode -Version Latest
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot = (Resolve-Path (Join-Path $ScriptDir "..\..\..")).Path
 
+if ([string]::IsNullOrWhiteSpace($Arch)) {
+    $Arch = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "x64" }
+}
 if ([string]::IsNullOrWhiteSpace($ReleaseDir)) {
-    $ReleaseDir = Join-Path $RepoRoot "build\windows\x64\runner\Release"
+    $ReleaseDir = Join-Path $RepoRoot "build\windows\$Arch\runner\Release"
 }
 if ([string]::IsNullOrWhiteSpace($OutDir)) {
     $OutDir = $RepoRoot
@@ -49,12 +54,12 @@ $AppVersion = $VersionMatch.Matches[0].Groups[1].Value
 $BuildNumber = $VersionMatch.Matches[0].Groups[2].Value
 $MsiVersion = "$AppVersion.$BuildNumber"
 
-Write-Host "Packaging TallyIsle $AppVersion+$BuildNumber (Windows x64)"
+Write-Host "Packaging TallyIsle $AppVersion+$BuildNumber (Windows $Arch)"
 Write-Host "  ReleaseDir : $ReleaseDir"
 Write-Host "  OutDir     : $OutDir"
 
 # 1. Portable ZIP
-$ZipPath = Join-Path $OutDir "TallyIsle-Windows-x64-portable.zip"
+$ZipPath = Join-Path $OutDir "TallyIsle-Windows-$Arch-portable.zip"
 if (Test-Path $ZipPath) {
     Remove-Item -Force $ZipPath
 }
@@ -92,7 +97,7 @@ if (-not $IsccPath) {
 }
 
 $IssPath = Join-Path $ScriptDir "tallyisle.iss"
-$SetupExePath = Join-Path $OutDir "TallyIsle-Windows-x64-setup.exe"
+$SetupExePath = Join-Path $OutDir "TallyIsle-Windows-$Arch-setup.exe"
 if (Test-Path $SetupExePath) {
     Remove-Item -Force $SetupExePath
 }
@@ -100,6 +105,7 @@ if (Test-Path $SetupExePath) {
 & $IsccPath `
     "/DMyAppVersion=$AppVersion" `
     "/DMyBuildNumber=$BuildNumber" `
+    "/DMyArch=$Arch" `
     "/DMySourceDir=$ReleaseDir" `
     "/DMyOutputDir=$OutDir" `
     "/DMyRepoRoot=$RepoRoot" `
@@ -273,12 +279,12 @@ try {
     $WxsPath = Join-Path $TempDir "tallyisle.wxs"
     [System.IO.File]::WriteAllText($WxsPath, $WxsContent, (New-Object System.Text.UTF8Encoding($false)))
 
-    $MsiPath = Join-Path $OutDir "TallyIsle-Windows-x64.msi"
+    $MsiPath = Join-Path $OutDir "TallyIsle-Windows-$Arch.msi"
     if (Test-Path $MsiPath) {
         Remove-Item -Force $MsiPath
     }
 
-    & wix build -arch x64 -o $MsiPath $WxsPath
+    & wix build -arch $Arch -o $MsiPath $WxsPath
     if ($LASTEXITCODE -ne 0) {
         throw "wix build failed with exit code $LASTEXITCODE"
     }
@@ -292,7 +298,7 @@ try {
 $Outputs = @(
     $ZipPath,
     $SetupExePath,
-    (Join-Path $OutDir "TallyIsle-Windows-x64.msi")
+    $MsiPath
 )
 foreach ($artifact in $Outputs) {
     if (-not (Test-Path $artifact)) {

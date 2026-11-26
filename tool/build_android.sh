@@ -1,10 +1,44 @@
 #!/usr/bin/env bash
-# Builds both the arm64 Debug APK (release/TallyIsle-debug.apk) and the slim arm64
-# Release APK (release/TallyIsle-release.apk), signed with the same debug.keystore so
-# Android devices can seamlessly overwrite-install between the two profiles.
+# Builds symmetric Android arm64 and x64 Debug/Release APKs in release/, signed
+# with the same debug.keystore so devices can overwrite-install between profiles.
+#
+# Usage:
+#   bash tool/build_android.sh [--arch arm64|x64|all] [extra flutter build flags...]
 set -euo pipefail
 source "$(dirname "$0")/env.sh"
 cd "$TALLYISLE_PROJECT"
+
+ARCH="all"
+EXTRA_ARGS=()
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --arch)
+      if [[ $# -lt 2 ]]; then
+        echo "error: --arch requires a value (arm64|x64|all)" >&2
+        exit 2
+      fi
+      ARCH="$2"
+      shift 2
+      ;;
+    --arch=*)
+      ARCH="${1#--arch=}"
+      shift
+      ;;
+    *)
+      EXTRA_ARGS+=("$1")
+      shift
+      ;;
+  esac
+done
+
+case "$ARCH" in
+  arm64|x64|all) ;;
+  *)
+    echo "error: unsupported --arch '$ARCH' (expected arm64, x64, or all)" >&2
+    exit 2
+    ;;
+esac
 
 # On ARM64 Linux hosts, Google's Flutter engine cache ships x86_64 host
 # gen_snapshot binaries under android-*-{release,profile}/linux-x64/. Ensure a
@@ -46,18 +80,67 @@ mkdir -p "$TALLYISLE_PROJECT/release"
 
 flutter pub get --enforce-lockfile --offline
 
-echo "==> [1/2] Building Debug APK (release/TallyIsle-debug.apk) ..."
-flutter build apk --debug --no-pub --target-platform android-arm64 "$@"
-cp "$TALLYISLE_PROJECT/build/app/outputs/flutter-apk/app-debug.apk" \
-  "$TALLYISLE_PROJECT/release/TallyIsle-debug.apk"
+verify_apk_abi() {
+  local apk="$1"
+  local expected_abi="$2"
+  local forbidden_abi="$3"
+  local listing
+  listing="$(python3 -m zipfile -l "$apk")"
+  if ! grep -q "lib/${expected_abi}/" <<< "$listing"; then
+    echo "error: $apk is missing expected ABI lib/${expected_abi}/" >&2
+    exit 1
+  fi
+  if grep -q "lib/${forbidden_abi}/" <<< "$listing"; then
+    echo "error: $apk unexpectedly contains forbidden ABI lib/${forbidden_abi}/" >&2
+    exit 1
+  fi
+  echo "  ABI OK: $(basename "$apk") (has lib/${expected_abi}/, no lib/${forbidden_abi}/)"
+}
 
-echo "==> [2/2] Building Slim Release APK (release/TallyIsle-release.apk) ..."
-flutter build apk --release --no-pub --target-platform android-arm64 --tree-shake-icons "$@"
-cp "$TALLYISLE_PROJECT/build/app/outputs/flutter-apk/app-release.apk" \
-  "$TALLYISLE_PROJECT/release/TallyIsle-release.apk"
+BUILT_APKS=()
+
+if [[ "$ARCH" == "arm64" || "$ARCH" == "all" ]]; then
+  ARM64_DEBUG="$TALLYISLE_PROJECT/release/TallyIsle-Android-arm64-debug.apk"
+  ARM64_RELEASE="$TALLYISLE_PROJECT/release/TallyIsle-Android-arm64-release.apk"
+
+  echo "==> Building Android arm64 Debug APK (release/TallyIsle-Android-arm64-debug.apk) ..."
+  flutter build apk --debug --no-pub --target-platform android-arm64 ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}
+  cp "$TALLYISLE_PROJECT/build/app/outputs/flutter-apk/app-debug.apk" "$ARM64_DEBUG"
+
+  echo "==> Building Android arm64 Release APK (release/TallyIsle-Android-arm64-release.apk) ..."
+  flutter build apk --release --no-pub --target-platform android-arm64 --tree-shake-icons ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}
+  cp "$TALLYISLE_PROJECT/build/app/outputs/flutter-apk/app-release.apk" "$ARM64_RELEASE"
+
+  BUILT_APKS+=("$ARM64_DEBUG" "$ARM64_RELEASE")
+fi
+
+if [[ "$ARCH" == "x64" || "$ARCH" == "all" ]]; then
+  X64_DEBUG="$TALLYISLE_PROJECT/release/TallyIsle-Android-x64-debug.apk"
+  X64_RELEASE="$TALLYISLE_PROJECT/release/TallyIsle-Android-x64-release.apk"
+
+  echo "==> Building Android x64 Debug APK (release/TallyIsle-Android-x64-debug.apk) ..."
+  flutter build apk --debug --no-pub --target-platform android-x64 ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}
+  cp "$TALLYISLE_PROJECT/build/app/outputs/flutter-apk/app-debug.apk" "$X64_DEBUG"
+
+  echo "==> Building Android x64 Release APK (release/TallyIsle-Android-x64-release.apk) ..."
+  flutter build apk --release --no-pub --target-platform android-x64 --tree-shake-icons ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}
+  cp "$TALLYISLE_PROJECT/build/app/outputs/flutter-apk/app-release.apk" "$X64_RELEASE"
+
+  BUILT_APKS+=("$X64_DEBUG" "$X64_RELEASE")
+fi
 
 # Refresh plugin registrant for local test/debug runs without touching pubspec.lock.
 flutter pub get --enforce-lockfile --offline >/dev/null
 
-ls -lh "$TALLYISLE_PROJECT/release/TallyIsle-debug.apk" "$TALLYISLE_PROJECT/release/TallyIsle-release.apk"
-sha256sum "$TALLYISLE_PROJECT/release/TallyIsle-debug.apk" "$TALLYISLE_PROJECT/release/TallyIsle-release.apk"
+echo "==> Verifying APK ABI isolation ..."
+if [[ "$ARCH" == "arm64" || "$ARCH" == "all" ]]; then
+  verify_apk_abi "$TALLYISLE_PROJECT/release/TallyIsle-Android-arm64-debug.apk" "arm64-v8a" "x86_64"
+  verify_apk_abi "$TALLYISLE_PROJECT/release/TallyIsle-Android-arm64-release.apk" "arm64-v8a" "x86_64"
+fi
+if [[ "$ARCH" == "x64" || "$ARCH" == "all" ]]; then
+  verify_apk_abi "$TALLYISLE_PROJECT/release/TallyIsle-Android-x64-debug.apk" "x86_64" "arm64-v8a"
+  verify_apk_abi "$TALLYISLE_PROJECT/release/TallyIsle-Android-x64-release.apk" "x86_64" "arm64-v8a"
+fi
+
+ls -lh "${BUILT_APKS[@]}"
+sha256sum "${BUILT_APKS[@]}"

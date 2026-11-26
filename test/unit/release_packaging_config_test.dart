@@ -5,6 +5,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:tallyisle/core/app_version.dart';
 
 const List<String> _packagingFiles = <String>[
+  'android/app/build.gradle.kts',
+  'tool/build_android.sh',
   'tool/packaging/linux/com.tallyisle.app.desktop',
   'tool/packaging/linux/com.tallyisle.app.metainfo.xml',
   'tool/packaging/linux/com.tallyisle.app.mime.xml',
@@ -18,16 +20,26 @@ const List<String> _packagingFiles = <String>[
 ];
 
 const List<String> _expectedBuildYmlAssets = <String>[
-  'TallyIsle-Android-release.apk',
-  'TallyIsle-Android-debug.apk',
+  'TallyIsle-Android-arm64-release.apk',
+  'TallyIsle-Android-arm64-debug.apk',
+  'TallyIsle-Android-x64-release.apk',
+  'TallyIsle-Android-x64-debug.apk',
   'TallyIsle-Windows-x64-setup.exe',
   'TallyIsle-Windows-x64.msi',
   'TallyIsle-Windows-x64-portable.zip',
+  'TallyIsle-Windows-arm64-setup.exe',
+  'TallyIsle-Windows-arm64.msi',
+  'TallyIsle-Windows-arm64-portable.zip',
   'TallyIsle-Linux-x64.deb',
   'TallyIsle-Linux-x64.rpm',
   'TallyIsle-Linux-x64.AppImage',
   'TallyIsle-Linux-x64.flatpak',
   'TallyIsle-Linux-x64-portable.tar.gz',
+  'TallyIsle-Linux-arm64.deb',
+  'TallyIsle-Linux-arm64.rpm',
+  'TallyIsle-Linux-arm64.AppImage',
+  'TallyIsle-Linux-arm64.flatpak',
+  'TallyIsle-Linux-arm64-portable.tar.gz',
   'TallyIsle-macOS.dmg',
   'TallyIsle-macOS.pkg',
   'TallyIsle-macOS-portable.zip',
@@ -72,9 +84,10 @@ void main() {
     );
 
     test(
-      'bash -n syntax validation passes on Linux & macOS packaging scripts',
+      'bash -n syntax validation passes on Android, Linux & macOS packaging scripts',
       () {
         for (final script in const <String>[
+          'tool/build_android.sh',
           'tool/packaging/linux/package_linux.sh',
           'tool/packaging/macos/package_macos.sh',
         ]) {
@@ -93,6 +106,32 @@ void main() {
             );
           }
         }
+      },
+    );
+
+    test(
+      'Android build.gradle.kts and build_android.sh support symmetric arm64 and x64 split APKs',
+      () {
+        final gradle = File('android/app/build.gradle.kts').readAsStringSync();
+        expect(gradle, contains('abiFilters.clear()'));
+        expect(gradle, contains('project.findProperty("target-platform")'));
+        expect(gradle, contains('"android-arm64" -> "arm64-v8a"'));
+        expect(gradle, contains('"android-x64" -> "x86_64"'));
+        expect(gradle, contains('"android-arm" -> "armeabi-v7a"'));
+        expect(gradle, contains('listOf("arm64-v8a", "x86_64")'));
+
+        final buildAndroid = File('tool/build_android.sh').readAsStringSync();
+        expect(buildAndroid, contains('--arch'));
+        expect(buildAndroid, contains('arm64|x64|all'));
+        expect(buildAndroid, contains('--target-platform android-arm64'));
+        expect(buildAndroid, contains('--target-platform android-x64'));
+        expect(buildAndroid, contains('TallyIsle-Android-arm64-debug.apk'));
+        expect(buildAndroid, contains('TallyIsle-Android-arm64-release.apk'));
+        expect(buildAndroid, contains('TallyIsle-Android-x64-debug.apk'));
+        expect(buildAndroid, contains('TallyIsle-Android-x64-release.apk'));
+        expect(buildAndroid, contains('python3 -m zipfile'));
+        expect(buildAndroid, contains('arm64-v8a'));
+        expect(buildAndroid, contains('x86_64'));
       },
     );
 
@@ -167,9 +206,24 @@ void main() {
       ).readAsStringSync();
       expect(linuxSh, isNot(contains('org.gnome.')));
       expect(linuxSh, isNot(contains('//47')));
+      expect(linuxSh, contains('--arch'));
+      expect(linuxSh, contains(r'DEB_ARCH="amd64"'));
+      expect(linuxSh, contains(r'DEB_ARCH="arm64"'));
+      expect(linuxSh, contains(r'RPM_ARCH="x86_64"'));
+      expect(linuxSh, contains(r'RPM_ARCH="aarch64"'));
+      expect(linuxSh, contains(r'APPIMAGE_ARCH="x86_64"'));
+      expect(linuxSh, contains(r'APPIMAGE_ARCH="aarch64"'));
+      expect(linuxSh, contains(r'rpmbuild -bb --target "$RPM_ARCH"'));
+      expect(linuxSh, contains(r'appimagetool-${APPIMAGE_ARCH}.AppImage'));
       expect(
         linuxSh,
-        contains(r'FLATPAK_MANIFEST="$SCRIPT_DIR/${APP_ID}.flatpak.json"'),
+        contains(
+          r'FLATPAK_MANIFEST_TEMPLATE="$SCRIPT_DIR/${APP_ID}.flatpak.json"',
+        ),
+      );
+      expect(
+        linuxSh,
+        contains(r'FLATPAK_MANIFEST="$WORK_DIR/${APP_ID}.flatpak.json"'),
       );
       expect(linuxSh, contains('"runtime"'));
       expect(linuxSh, contains('"sdk"'));
@@ -196,11 +250,16 @@ void main() {
     });
 
     test(
-      'Windows Inno Setup and WiX v5 scripts avoid CI pitfalls & register tallyisle://',
+      'Windows Inno Setup and WiX v5 scripts support x64 + arm64 & register tallyisle://',
       () {
         final iss = File(
           'tool/packaging/windows/tallyisle.iss',
         ).readAsStringSync();
+        expect(iss, contains('#ifndef MyArch'));
+        expect(iss, contains('#define MyArch "x64"'));
+        expect(iss, contains('#if MyArch == "arm64"'));
+        expect(iss, contains('ArchitecturesAllowed=arm64'));
+        expect(iss, contains('ArchitecturesInstallIn64BitMode=arm64'));
         expect(
           iss,
           contains(
@@ -214,15 +273,22 @@ void main() {
         expect(iss, contains(r'windows\runner\resources\app_icon.ico'));
         expect(iss, contains(r'Software\Classes\tallyisle'));
         expect(iss, contains(r'Software\Classes\.tally'));
-        expect(iss, contains('OutputBaseFilename=TallyIsle-Windows-x64-setup'));
+        expect(
+          iss,
+          contains('OutputBaseFilename=TallyIsle-Windows-{#MyArch}-setup'),
+        );
 
         final ps1 = File(
           'tool/packaging/windows/package_windows.ps1',
         ).readAsStringSync();
+        expect(ps1, contains('[ValidateSet("", "x64", "arm64")]'));
+        expect(ps1, contains(r'$env:PROCESSOR_ARCHITECTURE -eq "ARM64"'));
+        expect(ps1, contains(r'build\windows\$Arch\runner\Release'));
         expect(ps1, contains('pubspec.yaml'));
-        expect(ps1, contains('TallyIsle-Windows-x64-portable.zip'));
-        expect(ps1, contains('TallyIsle-Windows-x64-setup.exe'));
-        expect(ps1, contains('TallyIsle-Windows-x64.msi'));
+        expect(ps1, contains(r'TallyIsle-Windows-$Arch-portable.zip'));
+        expect(ps1, contains(r'TallyIsle-Windows-$Arch-setup.exe'));
+        expect(ps1, contains(r'TallyIsle-Windows-$Arch.msi'));
+        expect(ps1, contains(r'"/DMyArch=$Arch"'));
         expect(
           ps1,
           contains('dotnet tool update --global wix --version 5.0.2'),
@@ -250,7 +316,7 @@ void main() {
         expect(ps1, contains('AllowSameVersionUpgrades="yes"'));
         expect(ps1, contains('EmbedCab="yes"'));
         expect(ps1, contains('ARPPRODUCTICON'));
-        expect(ps1, contains('wix build -arch x64'));
+        expect(ps1, contains(r'wix build -arch $Arch'));
 
         final macSh = File(
           'tool/packaging/macos/package_macos.sh',
@@ -269,6 +335,12 @@ void main() {
           '.github/workflows/build-ohos.yml',
         ).readAsStringSync();
 
+        expect(
+          RegExp(r'^[\x09\x0A\x0D\x20-\x7E]*$').hasMatch(buildYml),
+          isTrue,
+          reason: '.github/workflows/build.yml must be 100% pure ASCII',
+        );
+
         for (final asset in _expectedBuildYmlAssets) {
           expect(
             buildYml,
@@ -281,9 +353,22 @@ void main() {
             reason: 'Non-ASCII release asset filename: $asset',
           );
         }
-        expect(buildYml, contains('package_windows.ps1'));
-        expect(buildYml, contains('package_linux.sh'));
+        expect(buildYml, contains('runner: windows-latest'));
+        expect(buildYml, contains('runner: windows-11-arm'));
+        expect(buildYml, contains('runner: ubuntu-latest'));
+        expect(buildYml, contains('runner: ubuntu-24.04-arm'));
+        expect(buildYml, contains("if: matrix.arch == 'x64'"));
+        expect(buildYml, contains("if: matrix.arch == 'arm64'"));
+        expect(
+          buildYml,
+          contains('package_windows.ps1 -Arch \${{ matrix.arch }}'),
+        );
+        expect(
+          buildYml,
+          contains('package_linux.sh --arch \${{ matrix.arch }}'),
+        );
         expect(buildYml, contains('package_macos.sh'));
+        expect(buildYml, contains('Verify Android APK ABI isolation'));
         expect(
           buildYml,
           contains('rpm flatpak flatpak-builder file desktop-file-utils'),
@@ -347,7 +432,7 @@ void main() {
     );
 
     test(
-      'dynamic version parsing matches pubspec.yaml and builds real Linux .deb + .tar.gz end-to-end',
+      'dynamic version parsing matches pubspec.yaml and builds real Linux x64 + arm64 .deb + .tar.gz end-to-end',
       () {
         final pubspec = File('pubspec.yaml').readAsStringSync();
         final match = RegExp(
@@ -384,81 +469,90 @@ void main() {
           '${bundleDir.path}/data/flutter_assets/placeholder.txt',
         ).writeAsStringSync('ok');
 
-        final pkgRes = Process.runSync('bash', <String>[
-          'tool/packaging/linux/package_linux.sh',
-          '--bundle-dir',
-          bundleDir.path,
-          '--out-dir',
-          outDir.path,
-          '--formats',
-          'tar.gz,deb',
-        ]);
-        expect(
-          pkgRes.exitCode,
-          0,
-          reason:
-              'package_linux.sh failed:\nstdout: ${pkgRes.stdout}\nstderr: ${pkgRes.stderr}',
-        );
-
-        final tarFile = File(
-          '${outDir.path}/TallyIsle-Linux-x64-portable.tar.gz',
-        );
-        final debFile = File('${outDir.path}/TallyIsle-Linux-x64.deb');
-        expect(tarFile.existsSync(), isTrue);
-        expect(tarFile.lengthSync(), greaterThan(0));
-        expect(debFile.existsSync(), isTrue);
-        expect(debFile.lengthSync(), greaterThan(0));
-
-        final controlRes = Process.runSync('dpkg-deb', <String>[
-          '-f',
-          debFile.path,
-          'Package',
-          'Version',
-          'Architecture',
-          'Depends',
-        ]);
-        expect(controlRes.exitCode, 0);
-        final controlText = controlRes.stdout as String;
-        expect(controlText, contains('Package: tallyisle'));
-        expect(
-          controlText,
-          contains('Version: $appVersionName-$appBuildNumber'),
-        );
-        expect(controlText, contains('Architecture: amd64'));
-        expect(
-          controlText,
-          contains(
-            'Depends: libgtk-3-0 | libgtk-3-0t64, libglib2.0-0 | libglib2.0-0t64, xdg-utils',
-          ),
-        );
-
-        final contentsRes = Process.runSync('dpkg-deb', <String>[
-          '-c',
-          debFile.path,
-        ]);
-        expect(contentsRes.exitCode, 0);
-        final contentsText = contentsRes.stdout as String;
-        expect(contentsText, contains('./opt/tallyisle/tallyisle'));
-        expect(contentsText, contains('./usr/bin/tallyisle'));
-        expect(
-          contentsText,
-          contains('./usr/share/applications/com.tallyisle.app.desktop'),
-        );
-        expect(
-          contentsText,
-          contains('./usr/share/metainfo/com.tallyisle.app.metainfo.xml'),
-        );
-        expect(
-          contentsText,
-          contains('./usr/share/mime/packages/com.tallyisle.app.mime.xml'),
-        );
-        for (final size in const <int>[16, 32, 64, 128, 256, 512]) {
+        for (final entry in const <({String arch, String debArch})>[
+          (arch: 'x64', debArch: 'amd64'),
+          (arch: 'arm64', debArch: 'arm64'),
+        ]) {
+          final pkgRes = Process.runSync('bash', <String>[
+            'tool/packaging/linux/package_linux.sh',
+            '--arch',
+            entry.arch,
+            '--bundle-dir',
+            bundleDir.path,
+            '--out-dir',
+            outDir.path,
+            '--formats',
+            'tar.gz,deb',
+          ]);
           expect(
-            contentsText,
+            pkgRes.exitCode,
+            0,
+            reason:
+                'package_linux.sh --arch ${entry.arch} failed:\nstdout: ${pkgRes.stdout}\nstderr: ${pkgRes.stderr}',
+          );
+
+          final tarFile = File(
+            '${outDir.path}/TallyIsle-Linux-${entry.arch}-portable.tar.gz',
+          );
+          final debFile = File(
+            '${outDir.path}/TallyIsle-Linux-${entry.arch}.deb',
+          );
+          expect(tarFile.existsSync(), isTrue);
+          expect(tarFile.lengthSync(), greaterThan(0));
+          expect(debFile.existsSync(), isTrue);
+          expect(debFile.lengthSync(), greaterThan(0));
+
+          final controlRes = Process.runSync('dpkg-deb', <String>[
+            '-f',
+            debFile.path,
+            'Package',
+            'Version',
+            'Architecture',
+            'Depends',
+          ]);
+          expect(controlRes.exitCode, 0);
+          final controlText = controlRes.stdout as String;
+          expect(controlText, contains('Package: tallyisle'));
+          expect(
+            controlText,
+            contains('Version: $appVersionName-$appBuildNumber'),
+          );
+          expect(controlText, contains('Architecture: ${entry.debArch}'));
+          expect(
+            controlText,
             contains(
-              './usr/share/icons/hicolor/${size}x$size/apps/com.tallyisle.app.png',
+              'Depends: libgtk-3-0 | libgtk-3-0t64, libglib2.0-0 | libglib2.0-0t64, xdg-utils',
             ),
           );
+
+          final contentsRes = Process.runSync('dpkg-deb', <String>[
+            '-c',
+            debFile.path,
+          ]);
+          expect(contentsRes.exitCode, 0);
+          final contentsText = contentsRes.stdout as String;
+          expect(contentsText, contains('./opt/tallyisle/tallyisle'));
+          expect(contentsText, contains('./usr/bin/tallyisle'));
+          expect(
+            contentsText,
+            contains('./usr/share/applications/com.tallyisle.app.desktop'),
+          );
+          expect(
+            contentsText,
+            contains('./usr/share/metainfo/com.tallyisle.app.metainfo.xml'),
+          );
+          expect(
+            contentsText,
+            contains('./usr/share/mime/packages/com.tallyisle.app.mime.xml'),
+          );
+          for (final size in const <int>[16, 32, 64, 128, 256, 512]) {
+            expect(
+              contentsText,
+              contains(
+                './usr/share/icons/hicolor/${size}x$size/apps/com.tallyisle.app.png',
+              ),
+            );
+          }
         }
       },
     );

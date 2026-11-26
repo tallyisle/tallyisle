@@ -46,8 +46,18 @@ void main() {
         isFalse,
         reason: 'tool/build_android.sh must not contain CJK filenames or paths',
       );
-      expect(content, contains('release/TallyIsle-release.apk'));
-      expect(content, contains('release/TallyIsle-debug.apk'));
+      for (final expectedApk in const <String>[
+        'TallyIsle-Android-arm64-release.apk',
+        'TallyIsle-Android-arm64-debug.apk',
+        'TallyIsle-Android-x64-release.apk',
+        'TallyIsle-Android-x64-debug.apk',
+      ]) {
+        expect(
+          content,
+          contains(expectedApk),
+          reason: 'Missing expected Android APK filename: $expectedApk',
+        );
+      }
     });
 
     test('.github/workflows/build.yml uses pure-ASCII artifact filenames', () {
@@ -57,17 +67,32 @@ void main() {
         isFalse,
         reason: '.github/workflows/build.yml must not contain CJK characters',
       );
+      expect(
+        RegExp(r'^[\x09\x0A\x0D\x20-\x7E]*$').hasMatch(content),
+        isTrue,
+        reason: '.github/workflows/build.yml must be 100% pure ASCII',
+      );
       for (final expectedArtifact in const <String>[
-        'TallyIsle-Android-release.apk',
-        'TallyIsle-Android-debug.apk',
+        'TallyIsle-Android-arm64-release.apk',
+        'TallyIsle-Android-arm64-debug.apk',
+        'TallyIsle-Android-x64-release.apk',
+        'TallyIsle-Android-x64-debug.apk',
         'TallyIsle-Windows-x64-setup.exe',
         'TallyIsle-Windows-x64.msi',
         'TallyIsle-Windows-x64-portable.zip',
+        'TallyIsle-Windows-arm64-setup.exe',
+        'TallyIsle-Windows-arm64.msi',
+        'TallyIsle-Windows-arm64-portable.zip',
         'TallyIsle-Linux-x64.deb',
         'TallyIsle-Linux-x64.rpm',
         'TallyIsle-Linux-x64.AppImage',
         'TallyIsle-Linux-x64.flatpak',
         'TallyIsle-Linux-x64-portable.tar.gz',
+        'TallyIsle-Linux-arm64.deb',
+        'TallyIsle-Linux-arm64.rpm',
+        'TallyIsle-Linux-arm64.AppImage',
+        'TallyIsle-Linux-arm64.flatpak',
+        'TallyIsle-Linux-arm64-portable.tar.gz',
         'TallyIsle-macOS.dmg',
         'TallyIsle-macOS.pkg',
         'TallyIsle-macOS-portable.zip',

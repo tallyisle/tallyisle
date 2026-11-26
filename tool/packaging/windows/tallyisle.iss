@@ -1,6 +1,6 @@
-; TallyIsle Windows x64 Inno Setup 6 Installer Script
-; Version, build number, source directory, output directory, and repo root are
-; injected dynamically by tool/packaging/windows/package_windows.ps1.
+; TallyIsle Windows Inno Setup 6 Installer Script (x64 / arm64)
+; Version, build number, arch, source directory, output directory, and repo root
+; are injected dynamically by tool/packaging/windows/package_windows.ps1.
 
 #ifndef MyAppVersion
   #error "MyAppVersion must be provided via /DMyAppVersion=X.Y.Z"
@@ -8,8 +8,11 @@
 #ifndef MyBuildNumber
   #error "MyBuildNumber must be provided via /DMyBuildNumber=N"
 #endif
+#ifndef MyArch
+  #define MyArch "x64"
+#endif
 #ifndef MySourceDir
-  #define MySourceDir "..\..\..\build\windows\x64\runner\Release"
+  #define MySourceDir "..\..\..\build\windows\" + MyArch + "\runner\Release"
 #endif
 #ifndef MyOutputDir
   #define MyOutputDir "..\..\.."
@@ -30,6 +33,10 @@ AppUpdatesURL=https://github.com/tallyisle/tallyisle/releases
 DefaultDirName={autopf}\TallyIsle
 DefaultGroupName=TallyIsle
 AllowNoIcons=yes
+#if MyArch == "arm64"
+ArchitecturesAllowed=arm64
+ArchitecturesInstallIn64BitMode=arm64
+#else
 #if Ver >= EncodeVer(6, 3, 0, 0)
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
@@ -37,10 +44,11 @@ ArchitecturesInstallIn64BitMode=x64compatible
 ArchitecturesAllowed=x64
 ArchitecturesInstallIn64BitMode=x64
 #endif
+#endif
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 OutputDir={#MyOutputDir}
-OutputBaseFilename=TallyIsle-Windows-x64-setup
+OutputBaseFilename=TallyIsle-Windows-{#MyArch}-setup
 SetupIconFile={#MyRepoRoot}\windows\runner\resources\app_icon.ico
 UninstallDisplayIcon={app}\tallyisle.exe
 Compression=lzma2

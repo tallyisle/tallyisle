@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
-# Package TallyIsle Linux x64 release bundle into:
-#   - TallyIsle-Linux-x64-portable.tar.gz
-#   - TallyIsle-Linux-x64.deb
-#   - TallyIsle-Linux-x64.rpm
-#   - TallyIsle-Linux-x64.AppImage
-#   - TallyIsle-Linux-x64.flatpak
+# Package TallyIsle Linux release bundle (x64 or arm64) into:
+#   - TallyIsle-Linux-<arch>-portable.tar.gz
+#   - TallyIsle-Linux-<arch>.deb
+#   - TallyIsle-Linux-<arch>.rpm
+#   - TallyIsle-Linux-<arch>.AppImage
+#   - TallyIsle-Linux-<arch>.flatpak
 #
 # Usage:
 #   bash tool/packaging/linux/package_linux.sh \
-#     [--bundle-dir build/linux/x64/release/bundle] \
+#     [--arch x64|arm64] \
+#     [--bundle-dir build/linux/<arch>/release/bundle] \
 #     [--out-dir .] \
 #     [--formats tar.gz,deb,rpm,appimage,flatpak]
 set -euo pipefail
@@ -19,14 +20,28 @@ PUBSPEC="$REPO_ROOT/pubspec.yaml"
 ICON_DIR="$REPO_ROOT/macos/Runner/Assets.xcassets/AppIcon.appiconset"
 APP_ID="com.tallyisle.app"
 
-BUNDLE_DIR="$REPO_ROOT/build/linux/x64/release/bundle"
+infer_default_arch() {
+  case "$(uname -m)" in
+    aarch64|arm64)
+      echo "arm64"
+      ;;
+    *)
+      echo "x64"
+      ;;
+  esac
+}
+
+ARCH="$(infer_default_arch)"
+BUNDLE_DIR=""
+BUNDLE_DIR_EXPLICIT=0
 OUT_DIR="$REPO_ROOT"
 FORMATS="tar.gz,deb,rpm,appimage,flatpak"
 
 usage() {
   cat <<EOF
 Usage: bash tool/packaging/linux/package_linux.sh [options]
-  --bundle-dir <dir>   Path to flutter build linux release bundle (default: build/linux/x64/release/bundle)
+  --arch <x64|arm64>   Target Linux architecture (default: inferred from uname -m)
+  --bundle-dir <dir>   Path to flutter build linux release bundle (default: build/linux/<arch>/release/bundle)
   --out-dir <dir>      Output directory for installers (default: repo root)
   --formats <csv>      Comma-separated subset of: tar.gz,deb,rpm,appimage,flatpak
   --help               Show this message
@@ -35,8 +50,17 @@ EOF
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --arch)
+      ARCH="$2"
+      shift 2
+      ;;
+    --arch=*)
+      ARCH="${1#--arch=}"
+      shift
+      ;;
     --bundle-dir)
       BUNDLE_DIR="$2"
+      BUNDLE_DIR_EXPLICIT=1
       shift 2
       ;;
     --out-dir)
@@ -58,6 +82,28 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+case "$ARCH" in
+  x64)
+    DEB_ARCH="amd64"
+    RPM_ARCH="x86_64"
+    APPIMAGE_ARCH="x86_64"
+    ;;
+  arm64)
+    DEB_ARCH="arm64"
+    RPM_ARCH="aarch64"
+    APPIMAGE_ARCH="aarch64"
+    ;;
+  *)
+    echo "error: unsupported --arch '$ARCH' (expected x64 or arm64)" >&2
+    usage >&2
+    exit 2
+    ;;
+esac
+
+if [[ "$BUNDLE_DIR_EXPLICIT" -eq 0 ]]; then
+  BUNDLE_DIR="$REPO_ROOT/build/linux/${ARCH}/release/bundle"
+fi
 
 if [[ ! -f "$PUBSPEC" ]]; then
   echo "error: pubspec.yaml not found at $PUBSPEC" >&2
@@ -120,14 +166,14 @@ assert_nonempty() {
   ls -lh "$path"
 }
 
-echo "Packaging TallyIsle ${APP_VERSION}+${BUILD_NUMBER} (Linux x64)"
+echo "Packaging TallyIsle ${APP_VERSION}+${BUILD_NUMBER} (Linux ${ARCH})"
 echo "  bundle : $BUNDLE_DIR"
 echo "  out    : $OUT_DIR"
 echo "  formats: $FORMATS"
 
 # 1. Portable tar.gz
 if has_format "tar.gz"; then
-  TAR_OUT="$OUT_DIR/TallyIsle-Linux-x64-portable.tar.gz"
+  TAR_OUT="$OUT_DIR/TallyIsle-Linux-${ARCH}-portable.tar.gz"
   tar -C "$BUNDLE_DIR" -czf "$TAR_OUT" .
   assert_nonempty "$TAR_OUT"
 fi
@@ -135,7 +181,7 @@ fi
 # 2. Debian / Ubuntu .deb
 if has_format "deb"; then
   DEB_STAGE="$WORK_DIR/deb"
-  DEB_OUT="$OUT_DIR/TallyIsle-Linux-x64.deb"
+  DEB_OUT="$OUT_DIR/TallyIsle-Linux-${ARCH}.deb"
 
   mkdir -p \
     "$DEB_STAGE/DEBIAN" \
@@ -168,7 +214,7 @@ Package: tallyisle
 Version: ${APP_VERSION}-${BUILD_NUMBER}
 Section: utils
 Priority: optional
-Architecture: amd64
+Architecture: ${DEB_ARCH}
 Installed-Size: ${INSTALLED_SIZE_KB}
 Maintainer: TallyIsle <support@tallyisle.com>
 Homepage: https://github.com/tallyisle/tallyisle
@@ -215,7 +261,7 @@ fi
 # 3. Fedora / RHEL / openSUSE .rpm
 if has_format "rpm"; then
   RPM_TOP="$WORK_DIR/rpmbuild"
-  RPM_OUT="$OUT_DIR/TallyIsle-Linux-x64.rpm"
+  RPM_OUT="$OUT_DIR/TallyIsle-Linux-${ARCH}.rpm"
   mkdir -p "$RPM_TOP"/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
 
   cat > "$RPM_TOP/SPECS/tallyisle.spec" <<EOF
@@ -230,7 +276,7 @@ Release:        ${BUILD_NUMBER}
 Summary:        TallyIsle - Local-first personal accounting and asset manager
 License:        PolyForm-Noncommercial-1.0.0
 URL:            https://github.com/tallyisle/tallyisle
-BuildArch:      x86_64
+BuildArch:      ${RPM_ARCH}
 Requires:       gtk3, glib2, xdg-utils
 
 %description
@@ -271,7 +317,7 @@ gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor 2>/dev/null || true
 /usr/share/icons/hicolor/*/apps/${APP_ID}.png
 EOF
 
-  rpmbuild -bb --define "_topdir $RPM_TOP" "$RPM_TOP/SPECS/tallyisle.spec"
+  rpmbuild -bb --target "$RPM_ARCH" --define "_topdir $RPM_TOP" "$RPM_TOP/SPECS/tallyisle.spec"
   BUILT_RPM="$(find "$RPM_TOP/RPMS" -name '*.rpm' | head -n1)"
   if [[ -z "$BUILT_RPM" || ! -f "$BUILT_RPM" ]]; then
     echo "error: rpmbuild produced no .rpm file" >&2
@@ -284,8 +330,8 @@ fi
 # 4. Universal Linux AppImage
 if has_format "appimage"; then
   APPDIR="$WORK_DIR/TallyIsle.AppDir"
-  APPIMAGE_OUT="$OUT_DIR/TallyIsle-Linux-x64.AppImage"
-  APPIMAGETOOL="$WORK_DIR/appimagetool-x86_64.AppImage"
+  APPIMAGE_OUT="$OUT_DIR/TallyIsle-Linux-${ARCH}.AppImage"
+  APPIMAGETOOL="$WORK_DIR/appimagetool-${APPIMAGE_ARCH}.AppImage"
 
   mkdir -p \
     "$APPDIR/usr/opt/tallyisle" \
@@ -325,11 +371,11 @@ EOF
   chmod +x "$APPDIR/AppRun"
 
   curl -fSL --retry 3 \
-    "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage" \
+    "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-${APPIMAGE_ARCH}.AppImage" \
     -o "$APPIMAGETOOL"
   chmod +x "$APPIMAGETOOL"
 
-  APPIMAGE_EXTRACT_AND_RUN=1 ARCH=x86_64 \
+  APPIMAGE_EXTRACT_AND_RUN=1 ARCH="$APPIMAGE_ARCH" \
     "$APPIMAGETOOL" --no-appstream "$APPDIR" "$APPIMAGE_OUT"
   chmod +x "$APPIMAGE_OUT"
   assert_nonempty "$APPIMAGE_OUT"
@@ -339,13 +385,46 @@ fi
 if has_format "flatpak"; then
   FLATPAK_REPO="$WORK_DIR/flatpak-repo"
   FLATPAK_BUILD="$WORK_DIR/flatpak-build"
-  FLATPAK_OUT="$OUT_DIR/TallyIsle-Linux-x64.flatpak"
-  FLATPAK_MANIFEST="$SCRIPT_DIR/${APP_ID}.flatpak.json"
+  FLATPAK_OUT="$OUT_DIR/TallyIsle-Linux-${ARCH}.flatpak"
+  FLATPAK_MANIFEST_TEMPLATE="$SCRIPT_DIR/${APP_ID}.flatpak.json"
+  FLATPAK_MANIFEST="$WORK_DIR/${APP_ID}.flatpak.json"
 
-  if [[ ! -f "$FLATPAK_MANIFEST" ]]; then
-    echo "error: flatpak manifest not found at $FLATPAK_MANIFEST" >&2
+  if [[ ! -f "$FLATPAK_MANIFEST_TEMPLATE" ]]; then
+    echo "error: flatpak manifest not found at $FLATPAK_MANIFEST_TEMPLATE" >&2
     exit 1
   fi
+
+  python3 - "$FLATPAK_MANIFEST_TEMPLATE" "$FLATPAK_MANIFEST" "$BUNDLE_DIR" "$ICON_DIR" "$SCRIPT_DIR" <<'PY'
+import json
+import os
+import sys
+
+src_path, dst_path, bundle_dir, icon_dir, script_dir = sys.argv[1:6]
+with open(src_path, "r", encoding="utf-8") as f:
+    data = json.load(f)
+
+for module in data.get("modules", []):
+    if not isinstance(module, dict):
+        continue
+    for source in module.get("sources", []):
+        if not isinstance(source, dict):
+            continue
+        src_type = source.get("type")
+        if src_type == "dir":
+            dest = source.get("dest")
+            if dest == "bundle":
+                source["path"] = bundle_dir
+            elif dest == "icons":
+                source["path"] = icon_dir
+        elif src_type == "file":
+            orig = source.get("path", "")
+            if orig and not os.path.isabs(orig):
+                source["path"] = os.path.join(script_dir, os.path.basename(orig))
+
+with open(dst_path, "w", encoding="utf-8") as f:
+    json.dump(data, f, indent=2)
+    f.write("\n")
+PY
 
   RUNTIME=""
   SDK=""

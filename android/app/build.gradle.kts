@@ -27,7 +27,28 @@ android {
         versionCode = flutter.versionCode
         versionName = flutter.versionName
         ndk {
-            abiFilters += listOf("arm64-v8a")
+            val targetPlatforms = (project.findProperty("target-platform") as? String)
+                ?.split(",")
+                ?.map { it.trim() }
+                ?.filter { it.isNotEmpty() }
+                .orEmpty()
+            val mappedAbis = targetPlatforms.mapNotNull { platform ->
+                when (platform) {
+                    "android-arm64" -> "arm64-v8a"
+                    "android-x64" -> "x86_64"
+                    "android-arm" -> "armeabi-v7a"
+                    else -> null
+                }
+            }
+            // FlutterPlugin.apply() pre-populates defaultConfig.ndk.abiFilters with
+            // PLATFORM_ABI_LIST (armeabi-v7a, arm64-v8a, x86_64) before this block runs,
+            // so clear it first before applying the target-platform ABI filter.
+            abiFilters.clear()
+            abiFilters += if (mappedAbis.isNotEmpty()) {
+                mappedAbis
+            } else {
+                listOf("arm64-v8a", "x86_64")
+            }
         }
     }
 
