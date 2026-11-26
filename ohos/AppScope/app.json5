@@ -2,8 +2,8 @@
   "app": {
     "bundleName": "com.tallyisle.app",
     "vendor": "tallyisle",
-    "versionCode": 13,
-    "versionName": "0.10.0",
+    "versionCode": 14,
+    "versionName": "0.10.1",
     "icon": "$media:app_icon",
     "label": "$string:app_name"
   }
