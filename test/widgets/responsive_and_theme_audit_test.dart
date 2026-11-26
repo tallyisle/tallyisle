@@ -594,6 +594,26 @@ void main() {
           harness: harness,
           pageBuilder: () => const SettingsPage(),
           expectedMinSegmentedButtons: 1,
+          onViewportReady: (tester, viewport, brightness, theme, ctx) async {
+            await tester.scrollUntilVisible(
+              find.byKey(const Key('theme_swatch_grid')),
+              180,
+              scrollable: find.byType(Scrollable).first,
+            );
+            await tester.pump(const Duration(milliseconds: 50));
+            expect(
+              find.byKey(const Key('theme_swatch_grid')),
+              findsOneWidget,
+              reason:
+                  '4x2 theme swatch grid must render on SettingsPage ($ctx)',
+            );
+            expect(find.text('海岛青'), findsOneWidget);
+            expect(find.text('自定义'), findsOneWidget);
+            expect(
+              find.byKey(const Key('setting_show_record_budget_hint_switch')),
+              findsNothing,
+            );
+          },
         );
       } finally {
         await harness.dispose(tester);
@@ -964,7 +984,7 @@ void main() {
   );
 
   testWidgets(
-    'AboutHelpPage: zero overflow & renders GitHub repo + feedback links across 360x640, 390x844, 960x800 in Light & Dark @ 1.2x',
+    'AboutHelpPage: zero overflow & renders feedback email + license entries across 360x640, 390x844, 960x800 in Light & Dark @ 1.2x',
     (tester) async {
       final harness = await _AuditHarness.create(tester);
       try {
@@ -975,10 +995,9 @@ void main() {
           pageBuilder: () => const AboutHelpPage(),
           onViewportReady: (tester, viewport, brightness, theme, ctx) async {
             expect(
-              find.text('https://github.com/tallyisle/tallyisle'),
+              find.text('support@tallyisle.com'),
               findsOneWidget,
-              reason:
-                  'GitHub repo URL must be rendered on AboutHelpPage ($ctx)',
+              reason: 'Feedback email must be rendered on AboutHelpPage ($ctx)',
             );
             expect(
               find.text('问题反馈与建议'),
@@ -987,12 +1006,16 @@ void main() {
                   '"问题反馈与建议" entry must be rendered on AboutHelpPage ($ctx)',
             );
             expect(
-              find.byKey(const Key('about_github_repo_tile')),
+              find.byKey(const Key('about_feedback_email_tile')),
               findsOneWidget,
             );
             expect(
-              find.byKey(const Key('about_github_issues_tile')),
+              find.byKey(const Key('about_copy_feedback_email_button')),
               findsOneWidget,
+            );
+            expect(
+              find.byKey(const Key('about_github_repo_tile')),
+              findsNothing,
             );
             expect(
               find.byKey(const Key('about_licenses_tile')),

@@ -519,7 +519,7 @@ class _McpSettingsPageState extends ConsumerState<McpSettingsPage> {
       key: const Key('mcp_settings_page'),
       appBar: AppBar(
         scrolledUnderElevation: isDesktop ? 0 : null,
-        title: const Text('MCP 服务 (AI Agents)'),
+        title: const Text('MCP 服务'),
       ),
       body: body,
     );

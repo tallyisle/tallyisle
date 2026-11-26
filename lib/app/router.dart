@@ -218,7 +218,7 @@ GoRouter buildRouter({
         final initialRemark = q['remark'] ?? q['note'];
         final initialRecordTimeMs = int.tryParse(q['time'] ?? '');
         final args = <String, String>{...state.pathParameters, ...q};
-        if (DesktopAdaptive.isDesktop(context)) {
+        if (DesktopAdaptive.useCenteredModalDialog(context)) {
           return DesktopRecordDialogPage<Object?>(
             key: state.pageKey,
             name: state.name ?? state.path,
@@ -270,7 +270,7 @@ GoRouter buildRouter({
           ...state.pathParameters,
           ...state.uri.queryParameters,
         };
-        if (DesktopAdaptive.isDesktop(context)) {
+        if (DesktopAdaptive.useCenteredModalDialog(context)) {
           return DesktopRecordDialogPage<Object?>(
             key: state.pageKey,
             name: state.name ?? state.path,

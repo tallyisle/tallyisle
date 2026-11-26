@@ -22,9 +22,9 @@ Future<void> showBookSwitcher(
     return;
   }
 
-  final isDesktop = DesktopAdaptive.isDesktop(context);
+  final useCenteredDialog = DesktopAdaptive.useCenteredModalDialog(context);
   final int? picked;
-  if (isDesktop) {
+  if (useCenteredDialog) {
     picked = await showDialog<int>(
       context: context,
       builder: (dialogCtx) => _DesktopBookSwitcherDialog(

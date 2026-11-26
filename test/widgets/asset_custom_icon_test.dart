@@ -295,8 +295,11 @@ void main() {
         await tester.tap(find.byKey(const Key('asset-save')));
         await _settle(tester);
 
-        // Back on AssetsPage: discoverability helper & customize badge are visible
-        expect(find.text('点击自定义图标'), findsOneWidget);
+        // Back on AssetsPage: section header no longer renders '点击自定义图标' text,
+        // while avatar customize badge & tooltip remain visible and interactive.
+        expect(find.text('资金账户'), findsOneWidget);
+        expect(find.text('点击自定义图标'), findsNothing);
+        expect(find.byTooltip('点击自定义图标'), findsWidgets);
         expect(
           find.byKey(const Key('asset-customize-icon-星巴克储值卡')),
           findsOneWidget,

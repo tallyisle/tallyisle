@@ -75,7 +75,7 @@ void main() {
 
         final pref = await (db.select(
           db.preferences,
-        )..where((t) => t.key.equals('current_book_id'))).getSingle();
+        )..where((t) => t.key.equals(prefKeyCurrentBookId))).getSingle();
         expect(pref.value, '$book2Id');
       },
     );

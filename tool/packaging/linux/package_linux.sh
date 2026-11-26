@@ -228,7 +228,7 @@ Name:           tallyisle
 Version:        ${APP_VERSION}
 Release:        ${BUILD_NUMBER}
 Summary:        TallyIsle - Local-first personal accounting and asset manager
-License:        Proprietary
+License:        PolyForm-Noncommercial-1.0.0
 URL:            https://github.com/tallyisle/tallyisle
 BuildArch:      x86_64
 Requires:       gtk3, glib2, xdg-utils

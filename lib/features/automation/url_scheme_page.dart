@@ -327,7 +327,7 @@ class _UrlSchemePageState extends ConsumerState<UrlSchemePage> {
       key: const Key('url_scheme_page'),
       appBar: AppBar(
         scrolledUnderElevation: isDesktop ? 0 : null,
-        title: const Text('URL Scheme 外部调用'),
+        title: const Text('快捷链接'),
       ),
       body: isDesktop
           ? Center(

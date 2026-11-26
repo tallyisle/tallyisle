@@ -172,10 +172,7 @@ void main() {
       expect(find.text('8.6.0'), findsOneWidget);
       expect(find.textContaining('一羽主账本'), findsOneWidget);
       expect(find.byKey(const Key('penny_overwrite_warning')), findsOneWidget);
-      expect(
-        find.textContaining('便签（note）与自定义汇率（currency）将完整保留'),
-        findsOneWidget,
-      );
+      expect(find.textContaining('便签与自定义汇率将完整保留'), findsOneWidget);
 
       // 2. Cancel leaves local DB untouched
       await tester.tap(find.byKey(const Key('cancel_penny_import_button')));

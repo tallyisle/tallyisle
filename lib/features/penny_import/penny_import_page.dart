@@ -169,7 +169,7 @@ class _PennyImportPageState extends ConsumerState<PennyImportPage> {
                   ),
                   child: Text(
                     '覆盖警告：确认恢复将以备份内容原子替换本地 20 张账务数据表（账本、账户、分类、账单、预算、分期、周期、存钱计划等）；'
-                    '本地已有的便签（note）与自定义汇率（currency）将完整保留，不会被清空。',
+                    '本地已有的便签与自定义汇率将完整保留，不会被清空。',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.colorScheme.onErrorContainer,
                     ),

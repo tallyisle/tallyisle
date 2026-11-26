@@ -194,7 +194,7 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
       final baseDesktopHeight = viewportHeight < 740 ? 52.0 : 58.0;
       return (baseDesktopHeight * textScale).clamp(48.0, 68.0);
     }
-    if (DesktopAdaptive.isDesktop(context) && viewportHeight < 680) {
+    if (DesktopAdaptive.useAdaptiveWorkspace(context) && viewportHeight < 680) {
       final maxCompactGridHeight = (viewportHeight - 385.0).clamp(180.0, 224.0);
       return (maxCompactGridHeight / rowCount).clamp(32.0, 40.0);
     }
@@ -237,7 +237,6 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
       });
     }
 
-    final isDesktop = DesktopAdaptive.isDesktop(context);
     final isExpandedDesktop = DesktopAdaptive.isExpandedDesktop(context);
     final targetPage = _kBasePage + activeOffset;
     _pageController.syncedInitialPage = targetPage;
@@ -376,7 +375,7 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
                 ),
               ),
             )
-          : (isDesktop
+          : (DesktopAdaptive.useSideNavigation(context)
                 ? Align(
                     alignment: Alignment.topCenter,
                     child: ConstrainedBox(
@@ -1003,7 +1002,9 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
     required int selectedDayNoonMs,
   }) {
     final theme = Theme.of(context);
-    final isDesktop = DesktopAdaptive.isDesktop(context);
+    final showCompactAddButton = DesktopAdaptive.useCenteredModalDialog(
+      context,
+    );
     final isDark = theme.brightness == Brightness.dark;
     final expenseColor = isDark ? Colors.red.shade300 : Colors.red.shade700;
     final incomeColor = isDark ? Colors.green.shade300 : Colors.green.shade700;
@@ -1061,9 +1062,9 @@ class _CalendarPageState extends ConsumerState<CalendarPage> {
                 ),
               ),
             ),
-          ] else if (isDesktop)
+          ] else if (showCompactAddButton)
             const Spacer(),
-          if (isDesktop) ...[
+          if (showCompactAddButton) ...[
             const SizedBox(width: 8),
             FilledButton.tonal(
               key: const Key('calendar-compact-add-for-day'),

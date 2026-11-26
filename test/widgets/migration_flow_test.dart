@@ -248,7 +248,7 @@ void main() {
         ),
         findsOneWidget,
       );
-      expect(find.textContaining('数据格式 100% 统一'), findsOneWidget);
+      expect(find.textContaining('数据格式完全一致'), findsOneWidget);
       expect(find.textContaining('.tally / WebDAV / S3'), findsOneWidget);
 
       // Local overview card

@@ -5,6 +5,7 @@ import '../../app/providers.dart' show currentBookProvider, databaseProvider;
 import '../../data/db/database.dart';
 import '../../domain/ledger/record_extra.dart';
 import '../../domain/ledger/record_relations.dart';
+import '../../domain/model/codes.dart';
 import '../../domain/rules/billing_period.dart';
 import '../../domain/rules/category_stats.dart';
 import '../../domain/rules/tag_stats.dart';
@@ -100,7 +101,7 @@ String formatTagStatsPeriodLabel(
 final tagStatsCurrentBookIdProvider = StreamProvider<int>((ref) async* {
   final db = await ref.watch(databaseProvider.future);
   final query = db.select(db.preferences)
-    ..where((t) => t.key.equals('current_book_id'));
+    ..where((t) => t.key.equals(prefKeyCurrentBookId));
   yield* query.watchSingleOrNull().map(
     (p) => int.tryParse(p?.value ?? '') ?? 1,
   );

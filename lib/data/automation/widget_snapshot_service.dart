@@ -29,7 +29,7 @@ final class WidgetSnapshotService {
 
         final pref = await (db.select(
           db.preferences,
-        )..where((t) => t.key.equals('current_book_id'))).getSingleOrNull();
+        )..where((t) => t.key.equals(prefKeyCurrentBookId))).getSingleOrNull();
         final currentBookId = int.tryParse(pref?.value ?? '') ?? 1;
 
         final book =

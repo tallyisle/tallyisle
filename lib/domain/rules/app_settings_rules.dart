@@ -67,7 +67,7 @@ final class ThemeSeedPreset {
 }
 
 const List<ThemeSeedPreset> themeSeedPresets = <ThemeSeedPreset>[
-  ThemeSeedPreset(hex: '138EAA', name: '海岛青（默认）'),
+  ThemeSeedPreset(hex: '138EAA', name: '海岛青'),
   ThemeSeedPreset(hex: '2E7D32', name: '松林绿'),
   ThemeSeedPreset(hex: '1565C0', name: '深海蓝'),
   ThemeSeedPreset(hex: '6A1B9A', name: '暮光紫'),

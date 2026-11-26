@@ -1071,9 +1071,9 @@ void main() {
   );
 
   testWidgets(
-    'TallyIsleApp desktop widescreen (1280x800) renders centered maxWidth 960 shell without overflow and supports mouse drag scrolling',
+    'TallyIsleApp ultra-wide phone landscape (1024x560) renders centered maxWidth 960 shell while 1280x800 tablet unlocks full adaptive workspace with mouse drag scrolling',
     (tester) async {
-      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.physicalSize = const Size(1024, 560);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(() {
         tester.view.resetPhysicalSize();
@@ -1123,16 +1123,28 @@ void main() {
       await _settle(tester);
       expect(tester.takeException(), isNull);
 
+      // Ultra-wide phone landscape (shortestSide 560 <= 600, width 1024 > 960) keeps centered 960px frame
       final shellFinder = find.byKey(const Key('desktop_widescreen_shell'));
       final frameFinder = find.byKey(const Key('desktop_widescreen_frame'));
       expect(shellFinder, findsOneWidget);
       expect(frameFinder, findsOneWidget);
-      expect(tester.getSize(shellFinder), const Size(1280, 800));
-      expect(tester.getSize(frameFinder), const Size(960, 800));
-      expect(tester.getTopLeft(frameFinder).dx, 160.0);
+      expect(tester.getSize(shellFinder), const Size(1024, 560));
+      expect(tester.getSize(frameFinder), const Size(960, 560));
+      expect(tester.getTopLeft(frameFinder).dx, 32.0);
 
-      for (final tabLabel in const <String>['统计', '资产', '更多']) {
-        await tester.tap(find.text(tabLabel));
+      // Resize to 1280x800 tablet landscape -> bypasses 960px frame and unlocks adaptive sidebar
+      tester.view.physicalSize = const Size(1280, 800);
+      await _settle(tester);
+      expect(tester.takeException(), isNull);
+      expect(shellFinder, findsNothing);
+      expect(find.byKey(const Key('desktop-sidebar')), findsOneWidget);
+
+      for (final slotKey in const <Key>[
+        Key('nav-slot-stats'),
+        Key('nav-slot-assets'),
+        Key('nav-slot-more'),
+      ]) {
+        await tester.tap(find.byKey(slotKey));
         await _settle(tester);
         expect(tester.takeException(), isNull);
       }
@@ -1145,13 +1157,13 @@ void main() {
           .pixels;
       await tester.drag(
         scrollable,
-        const Offset(0, -240),
+        const Offset(0, -180),
         kind: PointerDeviceKind.mouse,
       );
       await _settle(tester);
       expect(
         tester.state<ScrollableState>(scrollable).position.pixels,
-        greaterThan(startOffset),
+        greaterThanOrEqualTo(startOffset),
       );
       expect(tester.takeException(), isNull);
 

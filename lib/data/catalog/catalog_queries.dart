@@ -1,5 +1,6 @@
 import 'package:drift/drift.dart';
 
+import '../../domain/model/codes.dart';
 import '../db/database.dart';
 
 /// Read side queries for account books, categories, and tags (F-003, F-005, F-018).
@@ -12,14 +13,15 @@ final class CatalogQueries {
   // ---------------------------------------------------------------------------
 
   Stream<int> watchCurrentBookId() =>
-      (db.select(db.preferences)..where((t) => t.key.equals('current_book_id')))
+      (db.select(db.preferences)
+            ..where((t) => t.key.equals(prefKeyCurrentBookId)))
           .watchSingleOrNull()
           .map((p) => int.tryParse(p?.value ?? '') ?? 1);
 
   Future<int> getCurrentBookId() async {
     final p = await (db.select(
       db.preferences,
-    )..where((t) => t.key.equals('current_book_id'))).getSingleOrNull();
+    )..where((t) => t.key.equals(prefKeyCurrentBookId))).getSingleOrNull();
     final parsed = int.tryParse(p?.value ?? '');
     if (parsed != null) return parsed;
     final books = await getBooks();

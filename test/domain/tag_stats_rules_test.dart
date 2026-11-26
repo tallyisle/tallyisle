@@ -283,6 +283,14 @@ void main() {
         expect(flightChild.incomeMinor, BigInt.from(50000));
         expect(flightChild.billCount, 2);
 
+        final directChild = groupStats.childBreakdowns.firstWhere(
+          (c) => c.isDirectOnGroup,
+        );
+        expect(directChild.tagId, 'grp-trip');
+        expect(directChild.name, '2026日本旅行直属');
+        expect(directChild.expenseMinor, BigInt.from(150000)); // 1200 + 300
+        expect(directChild.billCount, 2);
+
         // 2. TagRankings with rollupGroups: true also deduplicates!
         final rolledRankings = computeTagRankings(
           entries: entries,

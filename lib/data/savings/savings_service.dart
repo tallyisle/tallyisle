@@ -984,7 +984,7 @@ final class SavingsService {
     }
     final pref = await (db.select(
       db.preferences,
-    )..where((t) => t.key.equals('current_book_id'))).getSingleOrNull();
+    )..where((t) => t.key.equals(prefKeyCurrentBookId))).getSingleOrNull();
     final prefId = int.tryParse(pref?.value ?? '');
     if (prefId != null) {
       final current = await (db.select(

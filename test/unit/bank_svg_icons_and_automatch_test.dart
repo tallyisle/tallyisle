@@ -426,6 +426,10 @@ void main() {
           ('建行龙卡', 'builtin:bank.ccb'),
           ('交通银行信用卡', 'builtin:bank.bocom'),
           ('交行沃尔玛卡', 'builtin:bank.bocom'),
+          ('交通储蓄卡', 'builtin:bank.bocom'),
+          ('交通工资卡', 'builtin:bank.bocom'),
+          ('交通信用卡', 'builtin:bank.bocom'),
+          ('交通信用卡（公交联名）', 'builtin:bank.bocom'),
           ('中信银行白金卡', 'builtin:bank.citic'),
           ('招商银行一卡通', 'builtin:bank.cmb'),
           ('招行掌上生活', 'builtin:bank.cmb'),
@@ -436,6 +440,11 @@ void main() {
           ('光大银行阳光卡', 'builtin:bank.ceb'),
           ('民生银行储蓄卡', 'builtin:bank.cmbc'),
           ('平安银行白金卡', 'builtin:bank.pingan'),
+          ('平安口袋', 'builtin:bank.pingan'),
+          ('平安口袋银行', 'builtin:bank.pingan'),
+          ('平安储蓄卡', 'builtin:bank.pingan'),
+          ('平安工资卡', 'builtin:bank.pingan'),
+          ('平安信用卡', 'builtin:bank.pingan'),
           ('华夏银行储蓄卡', 'builtin:bank.hxb'),
           ('浦发银行信用卡', 'builtin:bank.spdb'),
           ('兴业银行寰宇卡', 'builtin:bank.cib'),
@@ -624,6 +633,28 @@ void main() {
           'insurance',
         );
         expect(
+          resolveAssetVisual(name: '平安证券', assetType: AssetType.normal).iconKey,
+          'stock',
+        );
+        // Bare '平安' / '交通' without banking context must NOT auto-match bank logos on assets,
+        // while bank card memos (isBankCardMemo: true) still match their reviewed bank.
+        expect(
+          matchReviewedInstitution('平安', assetType: AssetType.normal),
+          isNull,
+        );
+        expect(
+          matchReviewedInstitution('平安', isBankCardMemo: true)?.iconKey,
+          'builtin:bank.pingan',
+        );
+        expect(
+          matchReviewedInstitution('交通', assetType: AssetType.normal),
+          isNull,
+        );
+        expect(
+          matchReviewedInstitution('交通', isBankCardMemo: true)?.iconKey,
+          'builtin:bank.bocom',
+        );
+        expect(
           resolveAssetVisual(
             name: '平安保险重疾险',
             assetType: AssetType.normal,
@@ -641,6 +672,20 @@ void main() {
           ).iconKey,
           'stored_card',
         );
+        for (final transitCard in const <String>[
+          '交通卡',
+          '市政交通卡',
+          '上海公共交通卡',
+          '地铁交通卡',
+          '交通出行卡',
+          '交通公交卡',
+        ]) {
+          expect(
+            matchReviewedInstitution(transitCard, assetType: AssetType.normal),
+            isNull,
+            reason: 'Transit card "$transitCard" must not auto-match BOCOM',
+          );
+        }
         expect(
           resolveAssetVisual(
             name: '华夏基金定投',

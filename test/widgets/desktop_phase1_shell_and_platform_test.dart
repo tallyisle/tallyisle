@@ -58,6 +58,65 @@ void main() {
       expect(isDesktopTargetPlatform(TargetPlatform.iOS), isFalse);
       expect(isDesktopTargetPlatform(TargetPlatform.fuchsia), isFalse);
     });
+
+    test(
+      'isMobileTabletViewport classifies tablets/foldables (> 600dp short side) without misclassifying phone landscape or desktop',
+      () {
+        expect(kTabletShortestSideBreakpoint, 600.0);
+        // Desktop OS never resolves as mobile tablet
+        expect(
+          isMobileTabletViewport(
+            platform: TargetPlatform.linux,
+            viewportSize: const Size(1180, 820),
+          ),
+          isFalse,
+        );
+        // Phone portrait, phone landscape, default 800x600 test surface, and narrow split-screen
+        expect(
+          isMobileTabletViewport(
+            platform: TargetPlatform.android,
+            viewportSize: const Size(390, 844),
+          ),
+          isFalse,
+        );
+        expect(
+          isMobileTabletViewport(
+            platform: TargetPlatform.android,
+            viewportSize: const Size(844, 390),
+          ),
+          isFalse,
+        );
+        expect(
+          isMobileTabletViewport(
+            platform: TargetPlatform.android,
+            viewportSize: const Size(800, 600),
+          ),
+          isFalse,
+        );
+        expect(
+          isMobileTabletViewport(
+            platform: TargetPlatform.iOS,
+            viewportSize: const Size(500, 1024),
+          ),
+          isFalse,
+        );
+        // Real Android tablets, iPads, and unfolded foldables
+        expect(
+          isMobileTabletViewport(
+            platform: TargetPlatform.android,
+            viewportSize: const Size(1180, 820),
+          ),
+          isTrue,
+        );
+        expect(
+          isMobileTabletViewport(
+            platform: TargetPlatform.iOS,
+            viewportSize: const Size(800, 1180),
+          ),
+          isTrue,
+        );
+      },
+    );
   });
 
   testWidgets(

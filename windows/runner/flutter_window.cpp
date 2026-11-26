@@ -19,9 +19,46 @@ namespace {
 
 constexpr const char kFilesChannelName[] = "com.tallyisle/files";
 
-bool HasAllowedHttpScheme(const std::string& url) {
-  if (url.find('\0') != std::string::npos) {
+bool IsValidMailtoAddress(const std::string& addr) {
+  if (addr.empty()) {
     return false;
+  }
+  const size_t at = addr.find('@');
+  if (at == std::string::npos || at == 0 || at + 1 >= addr.size() ||
+      addr.find('@', at + 1) != std::string::npos) {
+    return false;
+  }
+  const std::string local = addr.substr(0, at);
+  const std::string domain = addr.substr(at + 1);
+  for (unsigned char ch : local) {
+    if (!(std::isalnum(ch) || ch == '.' || ch == '_' || ch == '%' ||
+          ch == '+' || ch == '-')) {
+      return false;
+    }
+  }
+  const size_t last_dot = domain.rfind('.');
+  if (last_dot == std::string::npos || last_dot == 0 ||
+      domain.size() - last_dot - 1 < 2) {
+    return false;
+  }
+  for (unsigned char ch : domain) {
+    if (!(std::isalnum(ch) || ch == '.' || ch == '-')) {
+      return false;
+    }
+  }
+  for (size_t i = last_dot + 1; i < domain.size(); ++i) {
+    if (!std::isalpha(static_cast<unsigned char>(domain[i]))) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool HasAllowedExternalScheme(const std::string& url) {
+  for (unsigned char ch : url) {
+    if (ch <= 0x1F || ch == 0x7F) {
+      return false;
+    }
   }
   auto starts_with_ignore_case = [&](const char* prefix, size_t prefix_len) {
     if (url.size() <= prefix_len) {
@@ -33,10 +70,25 @@ bool HasAllowedHttpScheme(const std::string& url) {
         return false;
       }
     }
-    return url[prefix_len] != '/' && url[prefix_len] != ' ';
+    return true;
   };
-  return starts_with_ignore_case("https://", 8) ||
-         starts_with_ignore_case("http://", 7);
+  if (starts_with_ignore_case("https://", 8)) {
+    return url[8] != '/' && url[8] != ' ';
+  }
+  if (starts_with_ignore_case("http://", 7)) {
+    return url[7] != '/' && url[7] != ' ';
+  }
+  if (starts_with_ignore_case("mailto:", 7)) {
+    for (unsigned char ch : url) {
+      if (std::isspace(ch) || ch == '"' || ch == '\'' || ch == '`' ||
+          ch == '$' || ch == '|' || ch == '&' || ch == ';' || ch == '<' ||
+          ch == '>' || ch == '\\' || ch == '?' || ch == '#') {
+        return false;
+      }
+    }
+    return IsValidMailtoAddress(url.substr(7));
+  }
+  return false;
 }
 
 std::optional<std::wstring> WideFromUtf8(const std::string& utf8) {
@@ -103,8 +155,9 @@ bool FlutterWindow::OnCreate() {
             return;
           }
           const auto* url = std::get_if<std::string>(&url_it->second);
-          if (url == nullptr || !HasAllowedHttpScheme(*url)) {
-            result->Error("INVALID_URL", "Only HTTP/HTTPS URLs are allowed");
+          if (url == nullptr || !HasAllowedExternalScheme(*url)) {
+            result->Error("INVALID_URL",
+                          "Only HTTP/HTTPS or mailto URLs are allowed");
             return;
           }
           const auto wide_url = WideFromUtf8(*url);

@@ -197,6 +197,13 @@ void main() {
     // Card 2: 趋势图
     expect(find.byKey(const Key('trend-card-chart')), findsOneWidget);
     expect(find.text('净资产趋势'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('trend-card-chart')),
+        matching: find.text('月度期末趋势按已入账真实流水逆推，不含信用账户未入账分期'),
+      ),
+      findsOneWidget,
+    );
 
     // Card 3: 资产流水
     expect(find.byKey(const Key('trend-card-flow')), findsOneWidget);
@@ -204,6 +211,33 @@ void main() {
 
     await cleanUp(tester);
   });
+
+  testWidgets(
+    'AssetTrendPage methodology hint wraps cleanly at 360px narrow width without overflow',
+    (tester) async {
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+        tester.platformDispatcher.clearTextScaleFactorTestValue();
+      });
+
+      tester.view.physicalSize = const Size(360, 640);
+      tester.view.devicePixelRatio = 1.0;
+      tester.platformDispatcher.textScaleFactorTestValue = 1.2;
+
+      await tester.pumpWidget(buildApp());
+      await settle(tester);
+
+      expect(tester.takeException(), isNull);
+      expect(
+        find.byKey(const Key('trend-chart-methodology-hint')),
+        findsOneWidget,
+      );
+      expect(find.text('月度期末趋势按已入账真实流水逆推，不含信用账户未入账分期'), findsOneWidget);
+
+      await cleanUp(tester);
+    },
+  );
 
   testWidgets(
     'Perspective switching: net worth, total asset, total liability',

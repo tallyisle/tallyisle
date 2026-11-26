@@ -922,7 +922,7 @@ final class OcrService {
     }
     final pref = await (db.select(
       db.preferences,
-    )..where((t) => t.key.equals('current_book_id'))).getSingleOrNull();
+    )..where((t) => t.key.equals(prefKeyCurrentBookId))).getSingleOrNull();
     final currentId = int.tryParse(pref?.value ?? '') ?? 1;
     final current = await (db.select(
       db.accountBooks,

@@ -57,3 +57,7 @@ flutter build windows --release           # Windows x64
 flutter build macos --release             # macOS
 flutter build ios --release --no-codesign # iOS 无签名构建
 ```
+
+## 许可证
+
+帐屿源码按 [PolyForm Noncommercial License 1.0.0](LICENSE) 提供，允许个人学习、研究与其他非商业用途；商业授权及官方增值服务的相关权利归 TallyIsle 所有。应用内置的银行矢量图标遵循 MIT 协议，详见应用内「帮助与关于 → 第三方开源组件与图标许可」。

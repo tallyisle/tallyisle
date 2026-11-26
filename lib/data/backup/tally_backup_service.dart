@@ -28,7 +28,6 @@ const String prefKeyLastBackupDataSha256 = 'backup_last_data_sha256';
 const String prefKeyExternalBackupDirBinding = 'backup_external_dir_binding';
 const String prefKeyExternalBackupDirNeedsRebind =
     'backup_external_dir_needs_rebind';
-const String _prefKeyCurrentBookId = 'current_book_id';
 
 /// Local app-managed backup directory implementation of [BackupTarget] (ADR-017).
 final class LocalDirectoryBackupTarget implements BackupTarget {
@@ -2858,7 +2857,7 @@ final class TallyBackupService {
                 .into(db.preferences)
                 .insertOnConflictUpdate(
                   PreferencesCompanion.insert(
-                    key: _prefKeyCurrentBookId,
+                    key: prefKeyCurrentBookId,
                     value: '$activeBookId',
                   ),
                 );
@@ -3374,7 +3373,7 @@ final class TallyBackupService {
                 .into(db.preferences)
                 .insertOnConflictUpdate(
                   PreferencesCompanion.insert(
-                    key: _prefKeyCurrentBookId,
+                    key: prefKeyCurrentBookId,
                     value: '$activeBookId',
                   ),
                 );
@@ -3673,7 +3672,7 @@ final class TallyBackupService {
                 .into(db.preferences)
                 .insertOnConflictUpdate(
                   PreferencesCompanion.insert(
-                    key: _prefKeyCurrentBookId,
+                    key: prefKeyCurrentBookId,
                     value: '$activeBookId',
                   ),
                 );

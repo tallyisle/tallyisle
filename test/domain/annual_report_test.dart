@@ -355,5 +355,78 @@ void main() {
       expect(res.totalExpense, BigInt.from(70000));
       expect(res.monthlySummaries[5].expense, BigInt.from(70000));
     });
+
+    test(
+      'VEC-AR-06: foreign currency discounts use CurrencySnapshot.baseDiscount (curr.dbm) instead of raw discountMinor',
+      () {
+        final records = [
+          // Foreign USD expense: $10.00 discount (1000 minor USD) converted to ¥72.50 (7250 minor CNY in curr.dbm)
+          AnnualRecordItem(
+            id: 'usd-disc',
+            type: RecordType.expense,
+            moneyMinor: BigInt.from(9000),
+            discountMinor: BigInt.from(1000),
+            currency: CurrencySnapshot(
+              sourceCode: 'USD',
+              sourceGross: BigInt.from(10000),
+              baseCode: 'CNY',
+              baseAmount: BigInt.from(65250),
+              baseDiscount: BigInt.from(7250),
+            ),
+            recordTime: DateTime(2026, 6, 10).millisecondsSinceEpoch,
+            categoryName: '海淘',
+          ),
+          // Foreign EUR expense with raw discountMinor but no baseDiscount: must NOT add EUR minor into CNY totalDiscount
+          AnnualRecordItem(
+            id: 'eur-no-dbm',
+            type: RecordType.expense,
+            moneyMinor: BigInt.from(5000),
+            discountMinor: BigInt.from(500),
+            currency: CurrencySnapshot(
+              sourceCode: 'EUR',
+              sourceGross: BigInt.from(5500),
+              baseCode: 'CNY',
+              baseAmount: BigInt.from(39000),
+            ),
+            recordTime: DateTime(2026, 6, 11).millisecondsSinceEpoch,
+            categoryName: '海淘',
+          ),
+          // Base currency CNY expense without CurrencySnapshot: accumulates r.discountMinor (¥27.50)
+          AnnualRecordItem(
+            id: 'cny-disc',
+            type: RecordType.expense,
+            moneyMinor: BigInt.from(10000),
+            discountMinor: BigInt.from(2750),
+            recordTime: DateTime(2026, 6, 12).millisecondsSinceEpoch,
+            categoryName: '餐饮',
+          ),
+          // Base currency expense with matching CurrencySnapshot (case-insensitive): accumulates r.discountMinor (¥20.00)
+          AnnualRecordItem(
+            id: 'cny-snap-disc',
+            type: RecordType.expense,
+            moneyMinor: BigInt.from(10000),
+            discountMinor: BigInt.from(2000),
+            currency: CurrencySnapshot(
+              sourceCode: 'cny',
+              sourceGross: BigInt.from(12000),
+              baseCode: 'CNY',
+              baseAmount: BigInt.from(10000),
+            ),
+            recordTime: DateTime(2026, 6, 13).millisecondsSinceEpoch,
+            categoryName: '餐饮',
+          ),
+        ];
+
+        final res = computeAnnualReport(
+          year: 2026,
+          startDay: 1,
+          records: records,
+          baseCurrency: 'CNY',
+        );
+
+        // 7250 (USD curr.dbm) + 0 (EUR missing dbm) + 2750 (CNY) + 2000 (CNY snap) = 12000 (¥120.00)
+        expect(res.totalDiscount, BigInt.from(12000));
+      },
+    );
   });
 }

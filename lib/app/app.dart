@@ -608,29 +608,34 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
         final baseTheme = Theme.of(context);
         final isDesktop =
             desktopOverride ?? isDesktopTargetPlatform(baseTheme.platform);
-        Widget content = child ?? const SizedBox.shrink();
-        if (!isDesktop && MediaQuery.sizeOf(context).width > 960) {
-          content = ColoredBox(
-            key: const Key('desktop_widescreen_shell'),
-            color: baseTheme.colorScheme.surfaceContainerLowest,
-            child: Align(
-              alignment: Alignment.topCenter,
-              child: ConstrainedBox(
-                key: const Key('desktop_widescreen_frame'),
-                constraints: const BoxConstraints(maxWidth: 960),
-                child: ClipRect(child: content),
-              ),
-            ),
-          );
-        }
         final scoped = DesktopAdaptiveScope(
           isDesktop: isDesktop,
-          child: AppLockGate(
-            child: DesktopGlobalShortcuts(
-              router: router,
-              popupObserver: _popupObserver,
-              child: content,
-            ),
+          child: Builder(
+            builder: (context) {
+              Widget content = child ?? const SizedBox.shrink();
+              if (!DesktopAdaptive.useAdaptiveWorkspace(context) &&
+                  MediaQuery.sizeOf(context).width > 960) {
+                content = ColoredBox(
+                  key: const Key('desktop_widescreen_shell'),
+                  color: baseTheme.colorScheme.surfaceContainerLowest,
+                  child: Align(
+                    alignment: Alignment.topCenter,
+                    child: ConstrainedBox(
+                      key: const Key('desktop_widescreen_frame'),
+                      constraints: const BoxConstraints(maxWidth: 960),
+                      child: ClipRect(child: content),
+                    ),
+                  ),
+                );
+              }
+              return AppLockGate(
+                child: DesktopGlobalShortcuts(
+                  router: router,
+                  popupObserver: _popupObserver,
+                  child: content,
+                ),
+              );
+            },
           ),
         );
         if (!isDesktop) {

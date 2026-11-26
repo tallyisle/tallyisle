@@ -9,12 +9,11 @@ import '../../core/app_version.dart' show appVersionLabel;
 import '../../platform/files.dart';
 import '../common/desktop_modal_page.dart';
 
-const String tallyIsleRepoUrl = 'https://github.com/tallyisle/tallyisle';
-const String tallyIsleIssuesUrl =
-    'https://github.com/tallyisle/tallyisle/issues';
+const String tallyIsleFeedbackEmail = 'support@tallyisle.com';
+const String tallyIsleFeedbackMailto = 'mailto:support@tallyisle.com';
 
-/// Offline Help, Open-Source Project Links, Local-First Privacy Commitment,
-/// and All-Free Policy page.
+/// Offline Help, Feedback & License entries, Local-First Privacy Commitment,
+/// and FAQ page.
 class AboutHelpPage extends StatelessWidget {
   const AboutHelpPage({super.key, this.fileAccess = const FileAccess()});
 
@@ -34,13 +33,21 @@ class AboutHelpPage extends StatelessWidget {
 
   Future<void> _openExternalLink(BuildContext context, String url) async {
     final messenger = ScaffoldMessenger.maybeOf(context);
+    final isMail = url.startsWith('mailto:');
+    final copyText = isMail ? url.substring('mailto:'.length) : url;
     try {
       await fileAccess.openExternalUrl(url);
     } catch (_) {
-      await Clipboard.setData(ClipboardData(text: url));
+      await Clipboard.setData(ClipboardData(text: copyText));
       messenger
         ?..hideCurrentSnackBar()
-        ..showSnackBar(SnackBar(content: Text('未检测到可用浏览器，已复制链接：$url')));
+        ..showSnackBar(
+          SnackBar(
+            content: Text(
+              isMail ? '未检测到邮件应用，已复制反馈邮箱：$copyText' : '未检测到可用浏览器，已复制链接：$url',
+            ),
+          ),
+        );
     }
   }
 
@@ -112,7 +119,7 @@ class AboutHelpPage extends StatelessWidget {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  '本地优先、精确到分的开源个人记账与资产管理工具',
+                  '本地优先、精确到分的个人记账与资产管理工具',
                   textAlign: TextAlign.center,
                   style: theme.textTheme.bodyMedium?.copyWith(
                     color: scheme.onSurfaceVariant,
@@ -131,7 +138,7 @@ class AboutHelpPage extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 16),
-        const _AboutSectionHeader(title: '项目与开源'),
+        const _AboutSectionHeader(title: '反馈与许可'),
         Card(
           margin: EdgeInsets.zero,
           elevation: 0,
@@ -142,80 +149,36 @@ class AboutHelpPage extends StatelessWidget {
           child: Column(
             children: [
               ListTile(
-                key: const Key('about_github_repo_tile'),
-                leading: const Icon(Icons.code_rounded),
-                title: const Text('开源代码仓库'),
-                subtitle: const Text(
-                  'https://github.com/tallyisle/tallyisle',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                trailing: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    IconButton(
-                      key: const Key('about_copy_repo_url_button'),
-                      visualDensity: VisualDensity.compact,
-                      tooltip: '复制仓库地址',
-                      icon: const Icon(Icons.copy_rounded, size: 18),
-                      onPressed: () => unawaited(
-                        _copyLink(
-                          context,
-                          url: tallyIsleRepoUrl,
-                          message: '已复制开源仓库地址',
-                        ),
-                      ),
-                    ),
-                    Icon(
-                      Icons.open_in_new_rounded,
-                      size: 18,
-                      color: scheme.onSurfaceVariant,
-                    ),
-                  ],
-                ),
-                onTap: () =>
-                    unawaited(_openExternalLink(context, tallyIsleRepoUrl)),
-              ),
-              ListTile(
-                key: const Key('about_github_issues_tile'),
-                leading: const Icon(Icons.bug_report_outlined),
+                key: const Key('about_feedback_email_tile'),
+                leading: const Icon(Icons.mail_outline_rounded),
                 title: const Text('问题反馈与建议'),
                 subtitle: const Text(
-                  '前往 GitHub Issues 提交 Bug 或功能建议',
+                  tallyIsleFeedbackEmail,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
-                trailing: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    IconButton(
-                      key: const Key('about_copy_issues_url_button'),
-                      visualDensity: VisualDensity.compact,
-                      tooltip: '复制反馈地址',
-                      icon: const Icon(Icons.copy_rounded, size: 18),
-                      onPressed: () => unawaited(
-                        _copyLink(
-                          context,
-                          url: tallyIsleIssuesUrl,
-                          message: '已复制问题反馈地址',
-                        ),
-                      ),
+                trailing: IconButton(
+                  key: const Key('about_copy_feedback_email_button'),
+                  visualDensity: VisualDensity.compact,
+                  tooltip: '复制反馈邮箱',
+                  icon: const Icon(Icons.copy_rounded, size: 18),
+                  onPressed: () => unawaited(
+                    _copyLink(
+                      context,
+                      url: tallyIsleFeedbackEmail,
+                      message: '已复制反馈邮箱',
                     ),
-                    Icon(
-                      Icons.open_in_new_rounded,
-                      size: 18,
-                      color: scheme.onSurfaceVariant,
-                    ),
-                  ],
+                  ),
                 ),
-                onTap: () =>
-                    unawaited(_openExternalLink(context, tallyIsleIssuesUrl)),
+                onTap: () => unawaited(
+                  _openExternalLink(context, tallyIsleFeedbackMailto),
+                ),
               ),
               ListTile(
                 key: const Key('about_licenses_tile'),
                 leading: const Icon(Icons.description_outlined),
-                title: const Text('开源组件与图标许可'),
-                subtitle: const Text('查看帐屿所使用的开源软件及银行矢量图标许可证（MIT）'),
+                title: const Text('第三方开源组件与图标许可'),
+                subtitle: const Text('查看帐屿所使用的开源组件及银行矢量图标许可证（MIT）'),
                 trailing: const Icon(Icons.chevron_right),
                 onTap: () {
                   showLicensePage(
@@ -229,7 +192,7 @@ class AboutHelpPage extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 16),
-        const _AboutSectionHeader(title: '隐私与免费承诺'),
+        const _AboutSectionHeader(title: '隐私与数据承诺'),
         Card(
           margin: EdgeInsets.zero,
           elevation: 0,
@@ -248,9 +211,9 @@ class AboutHelpPage extends StatelessWidget {
               ),
               ListTile(
                 leading: Icon(Icons.verified_outlined),
-                title: Text('全功能永久免费 · 无会员门控'),
+                title: Text('本地核心功能完整开放 · 无广告干扰'),
                 subtitle: Text(
-                  '无需注册或登录账号，无广告、无订阅付费墙。多账本、多币种、信用账户账期、定期存款计息、预算结转、存钱计划、数据体检及备份导出等全部功能完整开放。',
+                  '无需强制注册或登录账号，无开屏与信息流广告；多账本、多币种、信用账户账期、预算统计、数据体检及标准备份导出等本地功能离线完整可用。',
                 ),
               ),
               ListTile(
@@ -286,7 +249,7 @@ class AboutHelpPage extends StatelessWidget {
                     '帐屿多端云同步（WebDAV / S3）采用「整库快照版本接力」机制，适用于「同一时段固定在一台主力设备记账，换用另一台设备前先同步接力」的场景：\n'
                     '1. 标准换机接力：在旧主力设备完成记账并执行一次同步推送（或开启空闲/退出自动同步），再在新设备打开应用拉取最新快照后继续记账。\n'
                     '2. 避免多机并发离线记账：请勿在多台设备离线或未同步状态下同时新增/修改账单，否则双端会产生快照版本分叉冲突。\n'
-                    '3. 冲突零丢数保护：一旦检测到双端均有未同步的新改动，系统绝不静默覆盖，会自动将本机完整数据（含图片附件）归档保存为 conflict_*.tally（同时留存于本机与云端备份列表），再由您显式选择保留版本。',
+                    '3. 冲突自动留档：一旦检测到双端均有未同步的新改动，系统不会静默覆盖，会自动将本机完整数据（含图片附件）归档保存为 conflict_*.tally（同时留存于本机与云端备份列表），再由您选择保留版本。',
                   ),
                 ],
               ),
@@ -298,7 +261,7 @@ class AboutHelpPage extends StatelessWidget {
                 childrenPadding: EdgeInsets.fromLTRB(16, 0, 16, 16),
                 children: [
                   Text(
-                    '信用账户的授信额度仅表示固定信用总额度，绝不作为期初余额计入欠款。余额为负数表示当前待还欠款，正数表示溢缴款，可用额度 = 授信额度 + 当前余额。',
+                    '信用账户的授信额度仅表示固定信用总额度，不作为期初余额计入欠款。余额为负数表示当前待还欠款，正数表示溢缴款，可用额度 = 授信额度 + 当前余额。',
                   ),
                 ],
               ),
@@ -310,7 +273,7 @@ class AboutHelpPage extends StatelessWidget {
                 childrenPadding: EdgeInsets.fromLTRB(16, 0, 16, 16),
                 children: [
                   Text(
-                    '不会。数据体检严格以您的真实账单流水为准：一键修复仅校准普通/储蓄/投资账户的缓存余额、重算借贷账户剩余本金与结清状态，并清理指向已删除记录的孤立标签关联；绝不删改任何账单流水，也绝不改动信用账户余额或授信额度。',
+                    '不会。数据体检严格以您的真实账单流水为准：一键修复仅校准普通/储蓄/投资账户的缓存余额、重算借贷账户剩余本金与结清状态，并清理指向已删除记录的孤立标签关联；不会删改任何账单流水，也不会改动信用账户余额或授信额度。',
                   ),
                 ],
               ),

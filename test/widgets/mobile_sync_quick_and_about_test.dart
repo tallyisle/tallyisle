@@ -120,7 +120,10 @@ void main() {
       await tester.tap(find.byKey(const Key('faq_cloud_sync_usage_tile')));
       await _settle(tester);
       expect(find.textContaining('整库快照版本接力'), findsOneWidget);
+      expect(find.textContaining('冲突自动留档'), findsOneWidget);
       expect(find.textContaining('conflict_*.tally'), findsOneWidget);
+      expect(find.textContaining('零丢数'), findsNothing);
+      expect(find.textContaining('绝不'), findsNothing);
 
       // 3. MigrationPage 6-platform HarmonyOS note
       await tester.pumpWidget(
@@ -341,6 +344,16 @@ void main() {
       await tester.tap(find.text('更多'));
       await _settle(tester);
       expect(find.byKey(const Key('me-mobile-sync-quick-card')), findsNothing);
+      await tester.scrollUntilVisible(
+        find.byKey(const Key('me-mcp')),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await _settle(tester);
+      expect(find.text('快捷链接'), findsOneWidget);
+      expect(find.text('外部快捷链接 (URL Scheme)'), findsNothing);
+      expect(find.text('MCP 服务'), findsOneWidget);
+      expect(find.text('MCP 服务 (AI Agents)'), findsNothing);
 
       // 2. Navigate to BackupPage via MePage -> 云同步与备份, scroll to bottom, toggle both ON
       await tester.scrollUntilVisible(

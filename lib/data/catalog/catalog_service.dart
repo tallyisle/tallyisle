@@ -6,6 +6,7 @@ import 'package:uuid/uuid.dart';
 
 import '../../core/failure.dart';
 import '../../core/money.dart';
+import '../../domain/model/codes.dart';
 import '../../domain/rules/budget_rules.dart' show BudgetExtra;
 import '../db/database.dart';
 import '../db/failures.dart';
@@ -224,7 +225,7 @@ final class CatalogService {
 
         final currentPref = await (db.select(
           db.preferences,
-        )..where((t) => t.key.equals('current_book_id'))).getSingleOrNull();
+        )..where((t) => t.key.equals(prefKeyCurrentBookId))).getSingleOrNull();
         if (currentPref?.value == '$bookId') {
           final remaining =
               await (db.select(db.accountBooks)
@@ -238,7 +239,7 @@ final class CatalogService {
               .into(db.preferences)
               .insertOnConflictUpdate(
                 PreferencesCompanion.insert(
-                  key: 'current_book_id',
+                  key: prefKeyCurrentBookId,
                   value: '${remaining.id}',
                 ),
               );
@@ -261,7 +262,10 @@ final class CatalogService {
     await db
         .into(db.preferences)
         .insertOnConflictUpdate(
-          PreferencesCompanion.insert(key: 'current_book_id', value: '$bookId'),
+          PreferencesCompanion.insert(
+            key: prefKeyCurrentBookId,
+            value: '$bookId',
+          ),
         );
     return '$bookId';
   }, (_) {});

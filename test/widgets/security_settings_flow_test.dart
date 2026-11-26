@@ -11,6 +11,7 @@ import 'package:tallyisle/data/db/seed.dart';
 import 'package:tallyisle/data/settings/app_lock_service.dart';
 import 'package:tallyisle/data/settings/app_settings_service.dart';
 import 'package:tallyisle/domain/model/codes.dart';
+import 'package:tallyisle/domain/rules/app_settings_rules.dart';
 import 'package:tallyisle/features/security/app_lock_gate.dart';
 import 'package:tallyisle/features/security/app_lock_providers.dart';
 import 'package:tallyisle/features/security/app_lock_settings_page.dart';
@@ -213,12 +214,22 @@ void main() {
   );
 
   testWidgets(
-    'SettingsPage persists toggles & custom hex theme, and navigates to AboutHelpPage verifying BRAND-001 & P-03',
+    'SettingsPage persists toggles, 4x2 theme swatch grid & live custom hex preview, preserves budget hint on reset, and navigates to AboutHelpPage',
     (tester) async {
       await tester.binding.setSurfaceSize(const Size(800, 1200));
       addTearDown(() => tester.binding.setSurfaceSize(null));
 
       final (db, closeCleanly) = openTestDb(tester);
+      final settingsService = AppSettingsService(db);
+      await tester.runAsync(
+        () => settingsService.saveSettings(
+          commandId: 'seed-budget-hint',
+          settings: AppSettings.defaults.copyWith(
+            showRecordBudgetHint: false,
+            recordBudgetHintMode: RecordBudgetHintMode.yearly,
+          ),
+        ),
+      );
 
       await tester.pumpWidget(
         ProviderScope(
@@ -229,29 +240,96 @@ void main() {
       );
       await settle(tester);
 
+      // Budget hint controls have moved to 记账工具栏自定义.
+      expect(
+        find.byKey(const Key('setting_show_record_budget_hint_switch')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const Key('setting_record_budget_mode_segmented')),
+        findsNothing,
+      );
+
+      // 4x2 theme swatch grid uses concise labels ('海岛青' & '自定义').
+      expect(find.byKey(const Key('theme_swatch_grid')), findsOneWidget);
+      expect(find.text('海岛青'), findsOneWidget);
+      expect(find.text('海岛青（默认）'), findsNothing);
+      expect(find.text('自定义'), findsOneWidget);
+      expect(find.textContaining('自定义 #'), findsNothing);
+      for (final preset in themeSeedPresets) {
+        expect(find.byKey(Key('theme_preset_${preset.hex}')), findsOneWidget);
+      }
+
       // Toggle showBalanceChangeRecordOnHome ON
       await tester.tap(
         find.byKey(const Key('setting_show_balance_change_switch')),
       );
       await settle(tester);
 
-      // Apply custom theme hex #6A1B9A
+      // Apply custom theme hex #6A1B9A and verify 38dp live preview updates
       await tester.tap(find.byKey(const Key('theme_custom_hex_chip')));
       await settle(tester);
+      expect(find.byKey(const Key('theme_custom_hex_preview')), findsOneWidget);
       await tester.enterText(
         find.byKey(const Key('theme_custom_hex_input')),
         '#6a1b9a',
       );
+      await tester.pump();
+      final previewDecoration =
+          tester
+                  .widget<Container>(
+                    find.byKey(const Key('theme_custom_hex_preview')),
+                  )
+                  .decoration!
+              as BoxDecoration;
+      expect(previewDecoration.color, const Color(0xFF6A1B9A));
       await tester.tap(
         find.byKey(const Key('theme_custom_hex_confirm_button')),
       );
       await settle(tester);
 
-      final persisted = await tester.runAsync(
-        () => AppSettingsService(db).getSettings(),
-      );
+      final persisted = await tester.runAsync(settingsService.getSettings);
       expect(persisted!.showBalanceChangeRecordOnHome, isTrue);
       expect(persisted.themeSeedHex, '6A1B9A');
+
+      // Reset defaults on SettingsPage preserves budget hint settings owned by DIY toolbar
+      final resetBtn = find.byKey(const Key('setting_reset_defaults_button'));
+      await tester.scrollUntilVisible(
+        resetBtn,
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await settle(tester);
+      await tester.tap(resetBtn);
+      await settle(tester);
+      await tester.tap(find.byKey(const Key('setting_confirm_reset_button')));
+      await settle(tester);
+
+      final afterReset = await tester.runAsync(settingsService.getSettings);
+      expect(afterReset!.showBalanceChangeRecordOnHome, isFalse);
+      expect(afterReset.themeSeedHex, defaultThemeSeedHex);
+      expect(afterReset.showRecordBudgetHint, isFalse);
+      expect(afterReset.recordBudgetHintMode, RecordBudgetHintMode.yearly);
+
+      // Verify SettingsPage renders zero overflow at 360x640 @ 1.2x text scale
+      await tester.binding.setSurfaceSize(const Size(360, 640));
+      await tester.pumpWidget(
+        ProviderScope(
+          retry: (_, _) => null,
+          overrides: [databaseProvider.overrideWith((ref) async => db)],
+          child: MaterialApp(
+            builder: (context, child) => MediaQuery(
+              data: MediaQuery.of(
+                context,
+              ).copyWith(textScaler: const TextScaler.linear(1.2)),
+              child: child!,
+            ),
+            home: const SettingsPage(),
+          ),
+        ),
+      );
+      await settle(tester);
+      expect(tester.takeException(), isNull);
 
       // Navigate to AboutHelpPage
       final aboutTile = find.byKey(const Key('nav_about_help_tile'));
@@ -262,16 +340,33 @@ void main() {
       );
       await tester.ensureVisible(aboutTile);
       await settle(tester);
+      expect(find.text('本地离线隐私说明、问题反馈与常见问题'), findsOneWidget);
       await tester.tap(aboutTile);
       await settle(tester);
 
       expect(find.text('帐屿 · TallyIsle'), findsOneWidget);
-      expect(find.text('项目与开源'), findsOneWidget);
-      expect(find.text('开源代码仓库'), findsOneWidget);
-      expect(find.text(tallyIsleRepoUrl), findsOneWidget);
+      expect(find.text('反馈与许可'), findsOneWidget);
+      expect(find.byKey(const Key('about_github_repo_tile')), findsNothing);
+      expect(find.text('开源代码仓库'), findsNothing);
       expect(find.text('问题反馈与建议'), findsOneWidget);
+      expect(find.text(tallyIsleFeedbackEmail), findsOneWidget);
       expect(find.byKey(const Key('about_licenses_tile')), findsOneWidget);
-      expect(find.text('全功能永久免费 · 无会员门控'), findsOneWidget);
+      expect(find.text('第三方开源组件与图标许可'), findsOneWidget);
+      final aboutScrollable = find.byType(Scrollable).last;
+      await tester.scrollUntilVisible(
+        find.text('隐私与数据承诺'),
+        160,
+        scrollable: aboutScrollable,
+      );
+      await settle(tester);
+      expect(find.text('隐私与数据承诺'), findsOneWidget);
+      await tester.scrollUntilVisible(
+        find.text('本地核心功能完整开放 · 无广告干扰'),
+        160,
+        scrollable: aboutScrollable,
+      );
+      await settle(tester);
+      expect(find.text('本地核心功能完整开放 · 无广告干扰'), findsOneWidget);
       expect(find.textContaining('一羽记账'), findsNothing);
       expect(find.textContaining('账屿'), findsNothing);
 
@@ -280,7 +375,7 @@ void main() {
   );
 
   testWidgets(
-    'AboutHelpPage opens GitHub repo & Issues URLs, supports one-tap copy buttons, and falls back to clipboard when browser launch fails',
+    'AboutHelpPage opens feedback mailto link, supports one-tap email copy, and falls back to clipboard when mail app launch fails',
     (tester) async {
       await tester.binding.setSurfaceSize(const Size(800, 1200));
       addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -302,11 +397,11 @@ void main() {
       });
 
       final openedUrls = <String>[];
-      var failBrowser = false;
+      var failMail = false;
       final fileAccess = FileAccess(
         onOpenExternalUrl: (url) async {
-          if (failBrowser) {
-            throw const Failure(FailureCode.unsupportedCapability, '无法调起系统浏览器');
+          if (failMail) {
+            throw const Failure(FailureCode.unsupportedCapability, '无法调起邮件应用');
           }
           openedUrls.add(url);
         },
@@ -317,57 +412,51 @@ void main() {
       );
       await settle(tester);
 
-      expect(find.text('本地优先、精确到分的开源个人记账与资产管理工具'), findsOneWidget);
+      expect(find.text('本地优先、精确到分的个人记账与资产管理工具'), findsOneWidget);
       expect(
         find.text(
           '基于 Flutter 构建 · 支持 Android / iOS / HarmonyOS / Windows / Linux / macOS 全平台',
         ),
         findsOneWidget,
       );
-      expect(find.text('项目与开源'), findsOneWidget);
-      expect(find.text('开源代码仓库'), findsOneWidget);
-      expect(
-        find.text('https://github.com/tallyisle/tallyisle'),
-        findsOneWidget,
-      );
+      expect(find.text('反馈与许可'), findsOneWidget);
+      expect(find.byKey(const Key('about_github_repo_tile')), findsNothing);
+      expect(find.text('开源代码仓库'), findsNothing);
+      expect(find.textContaining('https://github.com/tallyisle'), findsNothing);
       expect(find.text('问题反馈与建议'), findsOneWidget);
+      expect(find.text(tallyIsleFeedbackEmail), findsOneWidget);
       expect(find.byKey(const Key('about_licenses_tile')), findsOneWidget);
+      expect(find.text('第三方开源组件与图标许可'), findsOneWidget);
+      expect(find.text('隐私与数据承诺'), findsOneWidget);
+      expect(find.text('本地核心功能完整开放 · 无广告干扰'), findsOneWidget);
       expect(find.textContaining('一羽记账'), findsNothing);
       expect(find.textContaining('账屿'), findsNothing);
 
-      // 1. Tap repo & issues tiles -> launches external browser with exact URLs
-      await tester.tap(find.byKey(const Key('about_github_repo_tile')));
+      // 1. Tap feedback email tile -> launches external mailto URI
+      await tester.tap(find.byKey(const Key('about_feedback_email_tile')));
       await settle(tester);
-      await tester.tap(find.byKey(const Key('about_github_issues_tile')));
-      await settle(tester);
-      expect(openedUrls, const <String>[tallyIsleRepoUrl, tallyIsleIssuesUrl]);
+      expect(openedUrls, const <String>[tallyIsleFeedbackMailto]);
       expect(clipboardText, isEmpty);
 
-      // 2. Tap copy buttons -> copies to Clipboard + shows SnackBar without launching browser
-      await tester.tap(find.byKey(const Key('about_copy_repo_url_button')));
+      // 2. Tap copy button -> copies support@tallyisle.com + shows SnackBar without launching mail app
+      await tester.tap(
+        find.byKey(const Key('about_copy_feedback_email_button')),
+      );
       await settle(tester);
-      expect(clipboardText, tallyIsleRepoUrl);
-      expect(find.text('已复制开源仓库地址'), findsOneWidget);
-      expect(openedUrls, hasLength(2));
+      expect(clipboardText, tallyIsleFeedbackEmail);
+      expect(find.text('已复制反馈邮箱'), findsOneWidget);
+      expect(openedUrls, hasLength(1));
 
-      await tester.tap(find.byKey(const Key('about_copy_issues_url_button')));
-      await settle(tester);
-      expect(clipboardText, tallyIsleIssuesUrl);
-      expect(find.text('已复制问题反馈地址'), findsOneWidget);
-      expect(openedUrls, hasLength(2));
-
-      // 3. Browser launch throws -> automatically copies URL to Clipboard + fallback SnackBar
-      failBrowser = true;
+      // 3. Mail app launch throws -> automatically copies email to Clipboard + fallback SnackBar
+      failMail = true;
       clipboardText = '';
-      await tester.tap(find.byKey(const Key('about_github_repo_tile')));
+      await tester.tap(find.byKey(const Key('about_feedback_email_tile')));
       await settle(tester);
-      expect(clipboardText, tallyIsleRepoUrl);
-      expect(find.text('未检测到可用浏览器，已复制链接：$tallyIsleRepoUrl'), findsOneWidget);
-
-      await tester.tap(find.byKey(const Key('about_github_issues_tile')));
-      await settle(tester);
-      expect(clipboardText, tallyIsleIssuesUrl);
-      expect(find.text('未检测到可用浏览器，已复制链接：$tallyIsleIssuesUrl'), findsOneWidget);
+      expect(clipboardText, tallyIsleFeedbackEmail);
+      expect(
+        find.text('未检测到邮件应用，已复制反馈邮箱：$tallyIsleFeedbackEmail'),
+        findsOneWidget,
+      );
 
       // 4. Verify zero RenderFlex overflow across 360x640, 390x844, 960x800 in Light & Dark @ 1.2x text scale
       for (final viewport in const <Size>[
@@ -401,10 +490,7 @@ void main() {
           );
           await settle(tester);
           expect(tester.takeException(), isNull);
-          expect(
-            find.text('https://github.com/tallyisle/tallyisle'),
-            findsOneWidget,
-          );
+          expect(find.text(tallyIsleFeedbackEmail), findsOneWidget);
           expect(find.text('问题反馈与建议'), findsOneWidget);
 
           final scrollable = tester.state<ScrollableState>(

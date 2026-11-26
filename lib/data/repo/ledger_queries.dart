@@ -12,14 +12,15 @@ final class LedgerQueries {
   final AppDatabase db;
 
   Stream<int> watchCurrentBookId() =>
-      (db.select(db.preferences)..where((t) => t.key.equals('current_book_id')))
+      (db.select(db.preferences)
+            ..where((t) => t.key.equals(prefKeyCurrentBookId)))
           .watchSingleOrNull()
           .map((p) => int.tryParse(p?.value ?? '') ?? 1);
 
   Future<int> getCurrentBookId() async {
     final p = await (db.select(
       db.preferences,
-    )..where((t) => t.key.equals('current_book_id'))).getSingleOrNull();
+    )..where((t) => t.key.equals(prefKeyCurrentBookId))).getSingleOrNull();
     final parsed = int.tryParse(p?.value ?? '');
     if (parsed != null) return parsed;
     final books = await getBooks();
@@ -29,7 +30,10 @@ final class LedgerQueries {
   Future<void> setCurrentBook(int bookId) => db
       .into(db.preferences)
       .insertOnConflictUpdate(
-        PreferencesCompanion.insert(key: 'current_book_id', value: '$bookId'),
+        PreferencesCompanion.insert(
+          key: prefKeyCurrentBookId,
+          value: '$bookId',
+        ),
       );
 
   Stream<List<AccountBook>> watchBooks() =>

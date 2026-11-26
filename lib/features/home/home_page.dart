@@ -207,7 +207,7 @@ class _HomePageState extends ConsumerState<HomePage> {
         : (showHome: false, showMe: false);
 
     Widget body;
-    if (!isDesktop) {
+    if (!isDesktop && !isExpandedDesktop) {
       body = const _HomeBody();
     } else {
       final selectedId = isExpandedDesktop ? _selectedRecordId : null;
@@ -310,7 +310,7 @@ class _HomePageState extends ConsumerState<HomePage> {
       body: body,
     );
 
-    if (!isDesktop) {
+    if (!isDesktop && !isExpandedDesktop) {
       return scaffold;
     }
     return Focus(

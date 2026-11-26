@@ -12,6 +12,7 @@ import 'package:tallyisle/domain/rules/app_settings_rules.dart';
 import 'package:tallyisle/domain/rules/billing_period.dart';
 import 'package:tallyisle/domain/rules/budget_rules.dart';
 import 'package:tallyisle/features/budget/budget_widgets.dart';
+import 'package:tallyisle/features/receipt/diy_toolbar_settings_page.dart';
 import 'package:tallyisle/features/settings/settings_page.dart';
 
 void main() {
@@ -292,7 +293,7 @@ void main() {
                     categoryId: 2,
                     excludeBudget: false,
                   ),
-                  const Expanded(child: SettingsPage()),
+                  const Expanded(child: DiyToolbarSettingsPage()),
                 ],
               ),
             ),
@@ -307,9 +308,17 @@ void main() {
           const Key('setting_show_record_budget_hint_switch'),
         );
 
+        await tester.scrollUntilVisible(
+          modeSegmented,
+          200,
+          scrollable: find.byType(Scrollable).last,
+        );
+        await settle(tester);
+
         // Default is auto -> prefers monthly when both exist
         expect(hintSwitch, findsOneWidget);
         expect(modeSegmented, findsOneWidget);
+        expect(find.text('优先显示月预算，未设月预算时自动回退年预算'), findsOneWidget);
         expect(find.text('月总预算: 剩余 ¥2000.00 (0.0%)'), findsOneWidget);
 
         // Switch to 年预算 -> shows yearly total budget
@@ -317,6 +326,7 @@ void main() {
           find.descendant(of: modeSegmented, matching: find.text('年预算')),
         );
         await settle(tester);
+        expect(find.text('固定显示当前账期的年度分类或总预算进度'), findsOneWidget);
         expect(find.text('年总预算: 剩余 ¥36000.00 (0.0%)'), findsOneWidget);
 
         // Switch to 月预算 -> shows monthly total budget
@@ -324,6 +334,7 @@ void main() {
           find.descendant(of: modeSegmented, matching: find.text('月预算')),
         );
         await settle(tester);
+        expect(find.text('固定显示当前账期的月度分类或总预算进度'), findsOneWidget);
         expect(find.text('月总预算: 剩余 ¥2000.00 (0.0%)'), findsOneWidget);
 
         // Switch back to 自动 -> prefers monthly
@@ -331,6 +342,7 @@ void main() {
           find.descendant(of: modeSegmented, matching: find.text('自动')),
         );
         await settle(tester);
+        expect(find.text('优先显示月预算，未设月预算时自动回退年预算'), findsOneWidget);
         expect(find.text('月总预算: 剩余 ¥2000.00 (0.0%)'), findsOneWidget);
 
         // Toggle visibility switch OFF -> hides hint bar AND hides segmented mode selector
@@ -347,6 +359,8 @@ void main() {
         await settle(tester);
         expect(find.byKey(const Key('record_budget_hint_bar')), findsOneWidget);
         expect(modeSegmented, findsOneWidget);
+        await tester.ensureVisible(modeSegmented);
+        await settle(tester);
 
         // Delete monthly budget so only yearly remains:
         // auto shows yearly, selecting 月预算 hides hint cleanly
@@ -370,7 +384,7 @@ void main() {
     );
 
     testWidgets(
-      'SettingsPage renders record budget hint controls with zero overflow at 360x640 and 1.2x text scale',
+      'DiyToolbarSettingsPage renders record budget hint controls with zero overflow at 360x640 and 1.2x text scale, and SettingsPage omits them',
       (tester) async {
         await tester.binding.setSurfaceSize(const Size(360, 640));
         addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -388,9 +402,19 @@ void main() {
                 ).copyWith(textScaler: const TextScaler.linear(1.2)),
                 child: child!,
               ),
-              home: const SettingsPage(),
+              home: const DiyToolbarSettingsPage(),
             ),
           ),
+        );
+        await settle(tester);
+
+        final modeSegmented = find.byKey(
+          const Key('setting_record_budget_mode_segmented'),
+        );
+        await tester.scrollUntilVisible(
+          modeSegmented,
+          160,
+          scrollable: find.byType(Scrollable).last,
         );
         await settle(tester);
 
@@ -398,12 +422,24 @@ void main() {
           find.byKey(const Key('setting_show_record_budget_hint_switch')),
           findsOneWidget,
         );
-        expect(
-          find.byKey(const Key('setting_record_budget_mode_segmented')),
-          findsOneWidget,
-        );
-        expect(find.text('自动：优先显示月预算，未设月预算时自动显示年预算'), findsOneWidget);
+        expect(modeSegmented, findsOneWidget);
+        expect(find.text('优先显示月预算，未设月预算时自动回退年预算'), findsOneWidget);
         expect(tester.takeException(), isNull);
+
+        // SettingsPage no longer hosts record budget hint controls.
+        await tester.pumpWidget(
+          ProviderScope(
+            retry: (_, _) => null,
+            overrides: [databaseProvider.overrideWith((ref) async => db)],
+            child: const MaterialApp(home: SettingsPage()),
+          ),
+        );
+        await settle(tester);
+        expect(
+          find.byKey(const Key('setting_show_record_budget_hint_switch')),
+          findsNothing,
+        );
+        expect(modeSegmented, findsNothing);
 
         await closeCleanly();
       },

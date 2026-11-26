@@ -772,7 +772,7 @@ final class FixedDepositService {
 
     final prefRow = await (db.select(
       db.preferences,
-    )..where((t) => t.key.equals('current_book_id'))).getSingleOrNull();
+    )..where((t) => t.key.equals(prefKeyCurrentBookId))).getSingleOrNull();
     final currentPrefId = int.tryParse(prefRow?.value ?? '');
 
     final links = await (db.select(

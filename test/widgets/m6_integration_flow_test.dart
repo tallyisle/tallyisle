@@ -121,7 +121,7 @@ void main() {
           (Key('me-auto-bill'), '自动记账'),
           (Key('me-ocr'), '账单图 / 文本识别'),
           (Key('me-widgets'), '桌面小组件'),
-          (Key('me-url-scheme'), 'URL Scheme 外部调用'),
+          (Key('me-url-scheme'), '快捷链接'),
           (Key('me-app-lock'), '应用安全锁'),
           (Key('me-settings'), '系统与首页设置'),
           (Key('me-diy-toolbar'), '记账工具栏自定义'),

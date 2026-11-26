@@ -42,18 +42,42 @@ class AppDelegate: FlutterAppDelegate {
     }
   }
 
+  private func isValidMailtoUrl(_ rawUrl: String, url: URL) -> Bool {
+    guard url.scheme?.lowercased() == "mailto" else { return false }
+    let unsafeChars = CharacterSet.controlCharacters
+      .union(.whitespacesAndNewlines)
+      .union(CharacterSet(charactersIn: "\"'`$|&;<>\\?#"))
+    if rawUrl.rangeOfCharacter(from: unsafeChars) != nil { return false }
+    let address = String(rawUrl.dropFirst("mailto:".count))
+    return address.range(
+      of: "^[A-Za-z0-9._%+\\-]+@[A-Za-z0-9.\\-]+\\.[A-Za-z]{2,}$",
+      options: .regularExpression
+    ) != nil
+  }
+
   private func handleOpenExternalUrl(call: FlutterMethodCall, result: @escaping FlutterResult) {
     guard
       let args = call.arguments as? [String: Any],
-      let rawUrl = args["url"] as? String,
+      let rawUrl = (args["url"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
       let url = URL(string: rawUrl),
-      let scheme = url.scheme?.lowercased(),
-      scheme == "http" || scheme == "https"
+      let scheme = url.scheme?.lowercased()
     else {
       result(
         FlutterError(
           code: "INVALID_URL",
-          message: "仅支持打开 HTTP/HTTPS 网页链接",
+          message: "仅支持打开 HTTP/HTTPS 或邮件链接",
+          details: nil
+        )
+      )
+      return
+    }
+    let isHttp = (scheme == "http" || scheme == "https") && !(url.host?.isEmpty ?? true)
+    let isMailto = isValidMailtoUrl(rawUrl, url: url)
+    guard isHttp || isMailto else {
+      result(
+        FlutterError(
+          code: "INVALID_URL",
+          message: "仅支持打开 HTTP/HTTPS 或邮件链接",
           details: nil
         )
       )
@@ -65,7 +89,7 @@ class AppDelegate: FlutterAppDelegate {
       result(
         FlutterError(
           code: "OPEN_FAILED",
-          message: "无法调起系统浏览器",
+          message: isMailto ? "无法调起系统邮件应用" : "无法调起系统浏览器",
           details: nil
         )
       )

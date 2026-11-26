@@ -354,7 +354,7 @@ class _BackupPageState extends ConsumerState<BackupPage>
         content: Text(
           '本机与云端自上次同步后均产生了新的账务改动。\n\n'
           '• 云端状态：$remoteDesc\n'
-          '• 零丢数保护：已自动将本机当前完整数据（含附件）归档保存为「$backupName」，同时留存于本机与云端备份列表。\n\n'
+          '• 冲突自动留档：已自动将本机当前完整数据（含附件）归档保存为「$backupName」，同时留存于本机与云端备份列表。\n\n'
           '请选择如何处理当前同步冲突：',
         ),
         actions: [
@@ -1465,7 +1465,7 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                 dense: isDesktop ? null : true,
                                 title: const Text('退出 / 切入后台时自动同步'),
                                 subtitle: const Text(
-                                  '切入后台或桌面关窗时自动同步（含 5 秒超时保护，离线绝不卡死）',
+                                  '切入后台或桌面关窗时自动同步（超时 5 秒自动跳过，断网不影响关窗）',
                                 ),
                                 value: syncSettings.syncOnExit,
                                 onChanged: !effectiveBusy && isActiveCloudReady
@@ -2379,7 +2379,7 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                 ),
                                 const SizedBox(height: 4),
                                 Text(
-                                  '开启后在移动端对应页面顶部显示一键同步与本地备份入口（默认关闭）。',
+                                  '开启后在移动端对应页面顶部显示一键同步与本地备份入口。',
                                   style: Theme.of(context).textTheme.bodySmall,
                                 ),
                                 const SizedBox(height: 8),

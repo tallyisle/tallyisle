@@ -262,7 +262,8 @@ class _PeriodSwipeRegionState extends State<PeriodSwipeRegion> {
 /// Shared entry point for opening "记一笔" using the user's configured default
 /// record type (`支出` / `收入` / `转账`).
 ///
-/// On desktop (`DesktopAdaptive.isDesktop(context)`), opens the centered
+/// On desktop and medium/expanded tablets
+/// (`DesktopAdaptive.useCenteredModalDialog(context)`), opens the centered
 /// borderless `600px` modal dialog directly via [showDesktopRecordEditorDialog].
 void openNewRecordEntry(
   BuildContext context,
@@ -272,7 +273,7 @@ void openNewRecordEntry(
   final defaultType =
       ref.read(appSettingsProvider).value?.defaultRecordType ??
       RecordType.expense;
-  if (DesktopAdaptive.isDesktop(context)) {
+  if (DesktopAdaptive.useCenteredModalDialog(context)) {
     final dialogContext = Navigator.maybeOf(context) != null
         ? context
         : routerOverride?.routerDelegate.navigatorKey.currentContext;
@@ -608,6 +609,7 @@ class _DesktopNavigationScaffoldState
         ? null
         : rawSyncCursor?.scopedToTarget(targetFingerprint);
     final modLabel = DesktopAdaptive.primaryModifierLabel(context);
+    final showShortcutHints = DesktopAdaptive.isDesktop(context);
 
     return Scaffold(
       body: Row(
@@ -628,6 +630,7 @@ class _DesktopNavigationScaffoldState
                         selectedIndex: selectedIndex,
                         draftCount: draftCount,
                         modLabel: modLabel,
+                        showShortcutHints: showShortcutHints,
                         syncSettings: syncSettings,
                         syncCursor: syncCursor,
                         onSwitchBook: _handleSwitchBook,
@@ -642,6 +645,7 @@ class _DesktopNavigationScaffoldState
                         selectedIndex: selectedIndex,
                         draftCount: draftCount,
                         modLabel: modLabel,
+                        showShortcutHints: showShortcutHints,
                         syncSettings: syncSettings,
                         syncCursor: syncCursor,
                         onSwitchBook: _handleSwitchBook,
@@ -672,6 +676,7 @@ class _ExpandedDesktopSidebar extends StatelessWidget {
     required this.selectedIndex,
     required this.draftCount,
     required this.modLabel,
+    required this.showShortcutHints,
     required this.syncSettings,
     required this.syncCursor,
     required this.onSwitchBook,
@@ -686,6 +691,7 @@ class _ExpandedDesktopSidebar extends StatelessWidget {
   final int selectedIndex;
   final int draftCount;
   final String modLabel;
+  final bool showShortcutHints;
   final CloudSyncSettings? syncSettings;
   final LocalSyncCursor? syncCursor;
   final VoidCallback onSwitchBook;
@@ -773,7 +779,7 @@ class _ExpandedDesktopSidebar extends StatelessWidget {
               ),
               const SizedBox(height: 10),
               Tooltip(
-                message: '记一笔 ($modLabel+N)',
+                message: showShortcutHints ? '记一笔 ($modLabel+N)' : '记一笔',
                 child: FilledButton(
                   key: const Key('add-record'),
                   onPressed: onAddRecord,
@@ -796,24 +802,25 @@ class _ExpandedDesktopSidebar extends StatelessWidget {
                           style: TextStyle(fontWeight: FontWeight.w600),
                         ),
                       ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 6,
-                          vertical: 2,
-                        ),
-                        decoration: BoxDecoration(
-                          color: scheme.onPrimary.withValues(alpha: 0.16),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Text(
-                          '$modLabel+N',
-                          style: theme.textTheme.labelSmall?.copyWith(
-                            fontSize: 10.5,
-                            color: scheme.onPrimary,
-                            fontWeight: FontWeight.w600,
+                      if (showShortcutHints)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: scheme.onPrimary.withValues(alpha: 0.16),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            '$modLabel+N',
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              fontSize: 10.5,
+                              color: scheme.onPrimary,
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
                         ),
-                      ),
                     ],
                   ),
                 ),
@@ -832,7 +839,7 @@ class _ExpandedDesktopSidebar extends StatelessWidget {
                   icon: Icons.receipt_long_outlined,
                   selectedIcon: Icons.receipt_long,
                   label: '明细',
-                  shortcutHint: '$modLabel+1',
+                  shortcutHint: showShortcutHints ? '$modLabel+1' : null,
                   selected: selectedIndex == 0,
                   onTap: () => onSelectBranch(0),
                 ),
@@ -842,7 +849,7 @@ class _ExpandedDesktopSidebar extends StatelessWidget {
                   icon: Icons.pie_chart_outline,
                   selectedIcon: Icons.pie_chart,
                   label: '统计',
-                  shortcutHint: '$modLabel+2',
+                  shortcutHint: showShortcutHints ? '$modLabel+2' : null,
                   selected: selectedIndex == 1,
                   onTap: () => onSelectBranch(1),
                 ),
@@ -852,7 +859,7 @@ class _ExpandedDesktopSidebar extends StatelessWidget {
                   icon: Icons.account_balance_wallet_outlined,
                   selectedIcon: Icons.account_balance_wallet,
                   label: '资产',
-                  shortcutHint: '$modLabel+3',
+                  shortcutHint: showShortcutHints ? '$modLabel+3' : null,
                   selected: selectedIndex == 2,
                   onTap: () => onSelectBranch(2),
                 ),
@@ -862,7 +869,7 @@ class _ExpandedDesktopSidebar extends StatelessWidget {
                   icon: Icons.grid_view_outlined,
                   selectedIcon: Icons.grid_view_rounded,
                   label: '更多',
-                  shortcutHint: '$modLabel+4',
+                  shortcutHint: showShortcutHints ? '$modLabel+4' : null,
                   badgeCount: draftCount,
                   selected: selectedIndex == 3,
                   onTap: () => onSelectBranch(3),
@@ -884,7 +891,9 @@ class _ExpandedDesktopSidebar extends StatelessWidget {
                       buttonKey: const Key('desktop-nav-search'),
                       icon: Icons.search_rounded,
                       label: '搜索',
-                      tooltip: '搜索账单 ($modLabel+F)',
+                      tooltip: showShortcutHints
+                          ? '搜索账单 ($modLabel+F)'
+                          : '搜索账单',
                       onTap: onOpenSearch,
                     ),
                   ),
@@ -963,6 +972,7 @@ class _CompactDesktopRail extends StatelessWidget {
     required this.selectedIndex,
     required this.draftCount,
     required this.modLabel,
+    required this.showShortcutHints,
     required this.syncSettings,
     required this.syncCursor,
     required this.onSwitchBook,
@@ -977,6 +987,7 @@ class _CompactDesktopRail extends StatelessWidget {
   final int selectedIndex;
   final int draftCount;
   final String modLabel;
+  final bool showShortcutHints;
   final CloudSyncSettings? syncSettings;
   final LocalSyncCursor? syncCursor;
   final VoidCallback onSwitchBook;
@@ -1004,7 +1015,7 @@ class _CompactDesktopRail extends StatelessWidget {
         ),
         const SizedBox(height: 8),
         Tooltip(
-          message: '记一笔 ($modLabel+N)',
+          message: showShortcutHints ? '记一笔 ($modLabel+N)' : '记一笔',
           child: Material(
             color: scheme.primary,
             borderRadius: BorderRadius.circular(14),
@@ -1079,7 +1090,7 @@ class _CompactDesktopRail extends StatelessWidget {
               IconButton(
                 key: const Key('desktop-nav-search'),
                 visualDensity: VisualDensity.compact,
-                tooltip: '搜索账单 ($modLabel+F)',
+                tooltip: showShortcutHints ? '搜索账单 ($modLabel+F)' : '搜索账单',
                 onPressed: onOpenSearch,
                 icon: const Icon(Icons.search_rounded, size: 20),
               ),
@@ -1119,7 +1130,7 @@ class _SidebarNavTile extends StatelessWidget {
     required this.icon,
     required this.selectedIcon,
     required this.label,
-    required this.shortcutHint,
+    this.shortcutHint,
     required this.selected,
     required this.onTap,
     this.badgeCount = 0,
@@ -1129,7 +1140,7 @@ class _SidebarNavTile extends StatelessWidget {
   final IconData icon;
   final IconData selectedIcon;
   final String label;
-  final String shortcutHint;
+  final String? shortcutHint;
   final bool selected;
   final VoidCallback onTap;
   final int badgeCount;
@@ -1177,17 +1188,18 @@ class _SidebarNavTile extends StatelessWidget {
                     ),
                   ),
                 ),
-                Text(
-                  shortcutHint,
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    fontSize: 10.5,
-                    color:
-                        (selected
-                                ? scheme.onSecondaryContainer
-                                : scheme.onSurfaceVariant)
-                            .withValues(alpha: 0.65),
+                if (shortcutHint != null)
+                  Text(
+                    shortcutHint!,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      fontSize: 10.5,
+                      color:
+                          (selected
+                                  ? scheme.onSecondaryContainer
+                                  : scheme.onSurfaceVariant)
+                              .withValues(alpha: 0.65),
+                    ),
                   ),
-                ),
               ],
             ),
           ),

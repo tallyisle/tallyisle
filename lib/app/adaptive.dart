@@ -9,7 +9,18 @@ const double kDesktopMediumBreakpoint = 720.0;
 /// full sidebar and main workspaces unlock Master-Detail two-column layouts.
 const double kDesktopExpandedBreakpoint = 1080.0;
 
-/// Three-tier responsive window width classification used on desktop platforms.
+/// Logical shortest-side breakpoint above which mobile / foldable screens
+/// (`Android`, `iOS` / `iPadOS`, `HarmonyOS`) enter tablet adaptive workspace
+/// mode (`shortestSide > 600.0`).
+///
+/// Using strict `>` keeps standard phone landscape viewports (`<= 600dp` short
+/// side, as well as default `800×600` widget test surfaces) in phone mode while
+/// unlocking adaptive navigation and Master-Detail workspaces on real tablets
+/// and unfolded foldables.
+const double kTabletShortestSideBreakpoint = 600.0;
+
+/// Three-tier responsive window width classification used on desktop and tablet
+/// adaptive workspaces.
 enum DesktopWindowSizeClass {
   /// `< 720px`: Narrow utility window; smoothly falls back to 5-slot bottom bar.
   compact,
@@ -47,6 +58,16 @@ bool isDesktopTargetPlatform(TargetPlatform platform) {
     _ => false,
   };
 }
+
+/// Returns `true` when [platform] is a non-desktop target (`Android`, `iOS` /
+/// `iPadOS`, `HarmonyOS`, etc.) and [viewportSize] has
+/// `shortestSide > kTabletShortestSideBreakpoint`.
+bool isMobileTabletViewport({
+  required TargetPlatform platform,
+  required Size viewportSize,
+}) =>
+    !isDesktopTargetPlatform(platform) &&
+    viewportSize.shortestSide > kTabletShortestSideBreakpoint;
 
 /// Returns `true` when [platform] is HarmonyOS (`TargetPlatform.ohos`), using
 /// `.name` comparison for bidirectional upstream Flutter compatibility.
@@ -97,12 +118,17 @@ class DesktopAdaptiveScope extends InheritedWidget {
       isDesktop != oldWidget.isDesktop;
 }
 
-/// Unified dual-axis adaptive query helper (`Platform` × `Viewport Width`).
+/// Unified dual-axis adaptive query helper (`Platform Ergonomics` × `Viewport`).
 ///
-/// Mobile (`Android` / `iOS` / `HarmonyOS`) always resolves [isDesktop] to
-/// `false`, guaranteeing zero visual or behavioral changes on phones and tablets.
+/// - [isDesktop] identifies true desktop keyboard/mouse operating systems
+///   (`Windows` / `Linux` / `macOS`, or test override), preserving touch
+///   `RecordKeypad`, drag-reorder, biometrics, home-screen widgets, offline OCR,
+///   and Android Accessibility auto-bill on all mobile/tablet targets.
+/// - [isTablet] and [useAdaptiveWorkspace] unlock responsive side navigation,
+///   centered modal dialogs, and Master-Detail split panes on large-screen
+///   `Android` / `iPadOS` / `HarmonyOS` tablets and unfolded foldables.
 abstract final class DesktopAdaptive {
-  /// Whether desktop UI & keyboard-first ergonomics are active.
+  /// Whether desktop OS & keyboard-first ergonomics are active.
   static bool isDesktop(BuildContext context) {
     final scoped = DesktopAdaptiveScope.maybeOf(context);
     if (scoped != null) {
@@ -110,6 +136,16 @@ abstract final class DesktopAdaptive {
     }
     return isDesktopTargetPlatform(Theme.of(context).platform);
   }
+
+  /// Whether the current viewport is a mobile/foldable tablet workspace
+  /// (`!isDesktop` and `shortestSide > 600dp`).
+  static bool isTablet(BuildContext context) =>
+      !isDesktop(context) &&
+      MediaQuery.sizeOf(context).shortestSide > kTabletShortestSideBreakpoint;
+
+  /// Whether desktop or tablet adaptive multi-pane workspace shells apply.
+  static bool useAdaptiveWorkspace(BuildContext context) =>
+      isDesktop(context) || isTablet(context);
 
   /// Whether the active platform is HarmonyOS (`TargetPlatform.ohos`).
   static bool isOhos(BuildContext context) =>
@@ -143,13 +179,28 @@ abstract final class DesktopAdaptive {
   static DesktopWindowSizeClass sizeClassOf(BuildContext context) =>
       classifyDesktopWindowWidth(MediaQuery.sizeOf(context).width);
 
-  /// Returns `true` when running on desktop and viewport width `>= 720px`.
+  /// Returns `true` when running in an adaptive workspace (desktop or tablet)
+  /// and viewport width `>= 720px`.
   static bool useSideNavigation(BuildContext context) =>
-      isDesktop(context) &&
+      useAdaptiveWorkspace(context) &&
       sizeClassOf(context) != DesktopWindowSizeClass.compact;
 
-  /// Returns `true` when running on desktop and viewport width `>= 1080px`.
-  static bool isExpandedDesktop(BuildContext context) =>
-      isDesktop(context) &&
+  /// Returns `true` when running in an adaptive workspace (desktop or tablet)
+  /// and viewport width `>= 1080px`.
+  static bool isExpandedWorkspace(BuildContext context) =>
+      useAdaptiveWorkspace(context) &&
       sizeClassOf(context) == DesktopWindowSizeClass.expanded;
+
+  /// Alias of [isExpandedWorkspace] unlocking widescreen Master-Detail layouts
+  /// (`>= 1080px`) on both desktop and landscape tablets.
+  static bool isExpandedDesktop(BuildContext context) =>
+      isExpandedWorkspace(context);
+
+  /// Returns `true` when compact forms and record editors should open as
+  /// centered modal dialogs (always on desktop, and on medium/expanded tablets
+  /// `>= 720px`; compact split-screen tablets `< 720px` fall back to full page).
+  static bool useCenteredModalDialog(BuildContext context) =>
+      isDesktop(context) ||
+      (isTablet(context) &&
+          sizeClassOf(context) != DesktopWindowSizeClass.compact);
 }

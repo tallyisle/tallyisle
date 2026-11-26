@@ -72,27 +72,44 @@ class FileBridge(private val activity: Activity) {
         }
     }
 
+    private fun isValidMailtoUrl(url: String): Boolean {
+        if (!url.startsWith("mailto:", ignoreCase = true)) return false
+        if (url.any { it.code <= 0x1F || it.code == 0x7F || it.isWhitespace() || it in "\"'`\$|&;<>\\?#" }) {
+            return false
+        }
+        return MAILTO_ADDRESS_REGEX.matches(url.substring(7))
+    }
+
     private fun handleOpenExternalUrl(call: MethodCall, result: MethodChannel.Result) {
         val url = call.argument<String>("url")?.trim().orEmpty()
-        if (!url.startsWith("https://", ignoreCase = true) &&
-            !url.startsWith("http://", ignoreCase = true)
-        ) {
-            result.error(ERROR_INVALID_ARGS, "仅支持打开 HTTP/HTTPS 网页链接", null)
+        val isHttp = url.startsWith("https://", ignoreCase = true) ||
+            url.startsWith("http://", ignoreCase = true)
+        val isMailto = isValidMailtoUrl(url)
+        if (!isHttp && !isMailto) {
+            result.error(ERROR_INVALID_ARGS, "仅支持打开 HTTP/HTTPS 或邮件链接", null)
             return
         }
         try {
             val uri = Uri.parse(url)
-            if (uri.host.isNullOrBlank()) {
-                result.error(ERROR_INVALID_ARGS, "仅支持打开 HTTP/HTTPS 网页链接", null)
+            if (isHttp && uri.host.isNullOrBlank()) {
+                result.error(ERROR_INVALID_ARGS, "仅支持打开 HTTP/HTTPS 或邮件链接", null)
                 return
             }
-            val intent = Intent(Intent.ACTION_VIEW, uri).apply {
-                addCategory(Intent.CATEGORY_BROWSABLE)
+            val intent = if (isMailto) {
+                Intent(Intent.ACTION_SENDTO, uri)
+            } else {
+                Intent(Intent.ACTION_VIEW, uri).apply {
+                    addCategory(Intent.CATEGORY_BROWSABLE)
+                }
             }
             activity.startActivity(intent)
             result.success(null)
         } catch (e: Exception) {
-            result.error(ERROR_UNAVAILABLE, e.message ?: "无法调起系统浏览器", null)
+            result.error(
+                ERROR_UNAVAILABLE,
+                e.message ?: if (isMailto) "无法调起系统邮件应用" else "无法调起系统浏览器",
+                null
+            )
         }
     }
 
@@ -556,6 +573,9 @@ class FileBridge(private val activity: Activity) {
         private const val ERROR_INVALID_ARGS = "INVALID_ARGS"
         private const val ERROR_IO = "IO_ERROR"
         private const val ERROR_UNAVAILABLE = "UNAVAILABLE"
+
+        private val MAILTO_ADDRESS_REGEX =
+            Regex("^[A-Za-z0-9._%+\\-]+@[A-Za-z0-9.\\-]+\\.[A-Za-z]{2,}$")
 
         fun buildTreeDisplayPath(treeUri: Uri): String {
             val docId = try {

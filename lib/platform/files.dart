@@ -978,13 +978,40 @@ class FileAccess {
     });
   }
 
+  static final RegExp _mailtoAddressPattern = RegExp(
+    r'^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$',
+  );
+  static final RegExp _unsafeExternalUrlChars = RegExp(
+    r'''[\x00-\x1F\x7F\s"'`$|&;<>\\]''',
+  );
+
+  static bool _isValidMailtoUri(String trimmed, Uri uri) {
+    if (uri.scheme != 'mailto' ||
+        uri.host.isNotEmpty ||
+        uri.hasQuery ||
+        uri.hasFragment) {
+      return false;
+    }
+    if (trimmed.contains('?') ||
+        trimmed.contains('#') ||
+        _unsafeExternalUrlChars.hasMatch(trimmed)) {
+      return false;
+    }
+    return _mailtoAddressPattern.hasMatch(uri.path);
+  }
+
+  /// Opens an external `http://`, `https://`, or `mailto:` URI using the host
+  /// OS browser or mail app.
   Future<void> openExternalUrl(String rawUrl) async {
     final trimmed = rawUrl.trim();
     final uri = Uri.tryParse(trimmed);
-    if (uri == null ||
-        (uri.scheme != 'https' && uri.scheme != 'http') ||
-        uri.host.isEmpty) {
-      throw const Failure(FailureCode.validation, '仅支持打开 HTTP/HTTPS 网页链接');
+    final isHttp =
+        uri != null &&
+        (uri.scheme == 'https' || uri.scheme == 'http') &&
+        uri.host.isNotEmpty;
+    final isMailto = uri != null && _isValidMailtoUri(trimmed, uri);
+    if (!isHttp && !isMailto) {
+      throw const Failure(FailureCode.validation, '仅支持打开 HTTP/HTTPS 或邮件链接');
     }
     final normalizedUrl = uri.toString();
 

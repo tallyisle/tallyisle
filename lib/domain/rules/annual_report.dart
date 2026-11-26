@@ -337,8 +337,19 @@ AnnualReportResult computeAnnualReport({
       assetCounts[assetName] = (assetCounts[assetName] ?? 0) + 1;
     }
 
-    // Discounts
-    if (r.discountMinor != null && r.discountMinor! > BigInt.zero) {
+    // Discounts (use converted baseDiscount / curr.dbm for foreign currency bills)
+    final curr = r.currency;
+    final isForeignSnapshot =
+        curr != null &&
+        curr.isValid &&
+        curr.sourceCode.trim().toUpperCase() !=
+            baseCurrency.trim().toUpperCase();
+    if (isForeignSnapshot) {
+      final baseDisc = curr.baseDiscount;
+      if (baseDisc != null && baseDisc > BigInt.zero) {
+        totalDiscount += baseDisc;
+      }
+    } else if (r.discountMinor != null && r.discountMinor! > BigInt.zero) {
       totalDiscount += r.discountMinor!;
     }
 

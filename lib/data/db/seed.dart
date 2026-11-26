@@ -1,5 +1,6 @@
 import 'package:drift/drift.dart';
 
+import '../../domain/model/codes.dart';
 import 'database.dart';
 
 /// Default initial account book id (日常账本).
@@ -56,7 +57,7 @@ Future<void> seedDefaults(AppDatabase db, int nowMs) async {
       .into(db.preferences)
       .insert(
         PreferencesCompanion.insert(
-          key: 'current_book_id',
+          key: prefKeyCurrentBookId,
           value: '$defaultBookId',
         ),
       );

@@ -16,8 +16,16 @@ void registerBundledIconLicenses() {
   if (_bankLogoLicenseRegistered) return;
   _bankLogoLicenseRegistered = true;
   LicenseRegistry.addLicense(() async* {
-    final text = await rootBundle.loadString(BankIconCatalog.licenseAssetPath);
-    yield LicenseEntryWithLineBreaks(const <String>['icongo/bank-logos'], text);
+    try {
+      final text = await rootBundle.loadString(
+        BankIconCatalog.licenseAssetPath,
+      );
+      yield LicenseEntryWithLineBreaks(const <String>[
+        'icongo/bank-logos',
+      ], text);
+    } catch (_) {
+      // Missing license asset must never break the license page or startup.
+    }
   });
 }
 

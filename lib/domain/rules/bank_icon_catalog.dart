@@ -2680,7 +2680,7 @@ const List<(String, List<String>)> _reviewedBankCjkKeywords =
       ('builtin:bank.cmb', <String>['招商银行', '招行', '招商']),
       ('builtin:bank.citic', <String>['中信银行', '中信']),
       ('builtin:bank.cib', <String>['兴业银行', '兴业']),
-      ('builtin:bank.pingan', <String>['平安银行', '平安']),
+      ('builtin:bank.pingan', <String>['平安银行', '平安口袋']),
       ('builtin:bank.hxb', <String>['华夏银行', '华夏']),
       ('builtin:bank.czbank', <String>['浙商银行', '浙商']),
       ('builtin:bank.bohai', <String>['渤海银行', '渤海']),
@@ -2693,6 +2693,8 @@ const List<(String, String)> _contextualBankCjkStems = <(String, String)>[
   ('builtin:bank.ccb', '建设'),
   ('builtin:bank.abc', '农业'),
   ('builtin:bank.psbc', '邮政'),
+  ('builtin:bank.pingan', '平安'),
+  ('builtin:bank.bocom', '交通'),
 ];
 
 const List<String> _bankingContextWords = <String>[
@@ -2703,6 +2705,17 @@ const List<String> _bankingContextWords = <String>[
   '信用',
   '贷记',
   '存折',
+  '工资',
+];
+
+const List<String> _transitCardContextWords = <String>['交通卡', '公交', '地铁', '出行'];
+
+const List<String> _strictBankingContextWords = <String>[
+  '银行',
+  '储蓄',
+  '借记',
+  '信用',
+  '贷记',
   '工资',
 ];
 
@@ -2892,9 +2905,16 @@ InstitutionAutoMatch? matchReviewedInstitution(
     }
   }
 
-  // 2. Check contextual CJK stems (e.g. "工商工资卡", "建设储蓄卡").
+  // 2. Check contextual CJK stems (e.g. "工商工资卡", "建设储蓄卡", "平安储蓄卡", "交通信用卡").
   if (hasBankContext) {
+    final isTransitCardContext =
+        !isBankCardMemo &&
+        _containsAny(name, _transitCardContextWords) &&
+        !_containsAny(name, _strictBankingContextWords);
     for (final (ref, stem) in _contextualBankCjkStems) {
+      if (ref == 'builtin:bank.bocom' && isTransitCardContext) {
+        continue;
+      }
       if (name.contains(stem)) {
         return _bankMatchFor(ref);
       }

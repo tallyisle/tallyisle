@@ -2091,7 +2091,7 @@ final class CrossMigrationService {
               .into(db.preferences)
               .insertOnConflictUpdate(
                 PreferencesCompanion.insert(
-                  key: 'current_book_id',
+                  key: prefKeyCurrentBookId,
                   value: '$activeBookId',
                 ),
               );

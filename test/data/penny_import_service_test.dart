@@ -620,11 +620,13 @@ void main() {
         );
         expect((await db.select(db.autoMaps).get()).single.key, '美团外卖');
 
-        // R7: current_book_id reset to 1
+        // R7: current_book_id reset to 1, and obsolete month_start_day is not written
         final currentBookId = await LedgerQueries(
           db,
         ).watchCurrentBookId().first;
         expect(currentBookId, 1);
+        final allPrefs = await db.select(db.preferences).get();
+        expect(allPrefs.any((p) => p.key == 'month_start_day'), isFalse);
 
         // ReminderService.resyncAll() called with active reminder 20:30
         expect(scheduler.scheduledList.length, 1);

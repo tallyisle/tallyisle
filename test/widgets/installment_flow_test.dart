@@ -119,14 +119,32 @@ void main() {
       );
       await tester.pump();
 
+      final editorScrollable = find
+          .descendant(
+            of: find.byKey(const Key('installment_editor_page')),
+            matching: find.byType(Scrollable),
+          )
+          .first;
+
       // Enable uncredited fee counting on credit card (`ci = true`)
+      await tester.scrollUntilVisible(
+        find.byKey(const Key('installment_ci_switch')),
+        220,
+        scrollable: editorScrollable,
+      );
       await tester.ensureVisible(
         find.byKey(const Key('installment_ci_switch')),
       );
+      await tester.pump();
       await tester.tap(find.byKey(const Key('installment_ci_switch')));
       await tester.pump();
 
       // Schedule preview card shows exact 420.00 per period & 1260.00 total
+      await tester.scrollUntilVisible(
+        find.byKey(const Key('installment_preview_card')),
+        220,
+        scrollable: editorScrollable,
+      );
       expect(find.byKey(const Key('installment_preview_card')), findsOneWidget);
       expect(find.textContaining('合计应还 ¥1260.00'), findsOneWidget);
 

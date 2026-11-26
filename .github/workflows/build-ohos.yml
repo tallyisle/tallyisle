@@ -303,3 +303,84 @@ jobs:
             dist-ohos/TallyIsle-HarmonyOS-*.hap
             dist-ohos/TallyIsle-HarmonyOS-installer-kit.zip
           generate_release_notes: true
+
+      - name: Merge and upload SHA256SUMS.txt
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          MERGE_WORK="$RUNNER_TEMP/checksums"
+          mkdir -p "$MERGE_WORK"
+          LOCAL_SUMS="$MERGE_WORK/local.txt"
+          EXISTING_SUMS="$MERGE_WORK/existing.txt"
+
+          (
+            cd dist-ohos
+            shopt -s nullglob
+            files=(TallyIsle-HarmonyOS-*.hap TallyIsle-HarmonyOS-installer-kit.zip)
+            if [ "${#files[@]}" -eq 0 ]; then
+              echo "::error::No HarmonyOS release assets found in dist-ohos/."
+              exit 1
+            fi
+            sha256sum "${files[@]}" > "$LOCAL_SUMS"
+          )
+
+          uploaded=0
+          for attempt in 1 2 3; do
+            rm -f "$EXISTING_SUMS" "$MERGE_WORK/SHA256SUMS.txt"
+            if gh release download "${GITHUB_REF_NAME}" \
+                --pattern 'SHA256SUMS.txt' \
+                --output "$EXISTING_SUMS" \
+                --clobber 2>/dev/null; then
+              echo "Downloaded existing SHA256SUMS.txt (attempt ${attempt})."
+            else
+              echo "No existing SHA256SUMS.txt on release ${GITHUB_REF_NAME} yet (attempt ${attempt})."
+              rm -f "$EXISTING_SUMS"
+            fi
+
+            python3 - "$EXISTING_SUMS" "$LOCAL_SUMS" "$MERGE_WORK/SHA256SUMS.txt" <<'PY'
+          import pathlib
+          import sys
+
+          existing_path, local_path, out_path = map(pathlib.Path, sys.argv[1:4])
+          entries = {}
+          for path in (existing_path, local_path):
+              if not path.is_file():
+                  continue
+              for raw in path.read_text(encoding='utf-8').splitlines():
+                  line = raw.strip()
+                  if not line:
+                      continue
+                  parts = line.split(None, 1)
+                  if len(parts) != 2:
+                      continue
+                  digest, name = parts[0], parts[1].lstrip('*')
+                  if name.startswith('./'):
+                      name = name[2:]
+                  if name == 'SHA256SUMS.txt':
+                      continue
+                  entries[name] = digest
+
+          with out_path.open('w', encoding='utf-8', newline='\n') as f:
+              for name in sorted(entries):
+                  f.write(f'{entries[name]}  {name}\n')
+          PY
+
+            cp "$MERGE_WORK/SHA256SUMS.txt" SHA256SUMS.txt
+            if gh release upload "${GITHUB_REF_NAME}" SHA256SUMS.txt --clobber; then
+              uploaded=1
+              break
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              backoff=$((attempt * 5))
+              echo "::warning::gh release upload failed (attempt ${attempt}/3), retrying in ${backoff}s..."
+              sleep "$backoff"
+            fi
+          done
+
+          if [ "$uploaded" -ne 1 ]; then
+            echo "::error::Failed to upload merged SHA256SUMS.txt after 3 attempts."
+            exit 1
+          fi
+          cat SHA256SUMS.txt

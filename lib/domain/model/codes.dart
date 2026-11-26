@@ -67,3 +67,6 @@ abstract final class AssetStatus {
 
 /// "No reference" sentinel used by integer foreign-key columns.
 const noRef = -1;
+
+/// Preference key for the active account book ID in `ti_preference`.
+const String prefKeyCurrentBookId = 'current_book_id';

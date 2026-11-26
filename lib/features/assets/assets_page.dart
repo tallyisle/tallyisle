@@ -113,7 +113,7 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
       ModalRoute.of(context)?.settings is Page;
 
   bool get _isDesktopPopupModal =>
-      DesktopAdaptive.isDesktop(context) &&
+      DesktopAdaptive.useCenteredModalDialog(context) &&
       ModalRoute.of(context) is PopupRoute;
 
   Future<void> _openCreateAsset({int? initialType}) {
@@ -211,7 +211,9 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
     final theme = Theme.of(context);
     final isDesktop = DesktopAdaptive.isDesktop(context);
     final isExpandedDesktop = DesktopAdaptive.isExpandedDesktop(context);
-    final isPopupModal = isDesktop && ModalRoute.of(context) is PopupRoute;
+    final isPopupModal =
+        DesktopAdaptive.useCenteredModalDialog(context) &&
+        ModalRoute.of(context) is PopupRoute;
     final isManagementMode = widget.standaloneManagement || isPopupModal;
     final useMasterDetail = isExpandedDesktop && !isManagementMode;
 
@@ -320,35 +322,17 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
           borderRadius: BorderRadius.circular(16),
         );
 
-        var hintShown = false;
         Widget header(String text, {String? subtitle}) {
-          final showHint = !hintShown;
-          hintShown = true;
           return Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        text,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.labelLarge,
-                      ),
-                    ),
-                    if (showHint) ...[
-                      const SizedBox(width: 8),
-                      Text(
-                        '点击自定义图标',
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: theme.colorScheme.outline,
-                        ),
-                      ),
-                    ],
-                  ],
+                Text(
+                  text,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelLarge,
                 ),
                 if (subtitle != null && subtitle.isNotEmpty) ...[
                   const SizedBox(height: 2),
@@ -373,6 +357,8 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
           bool showCreditBadge = false,
         }) {
           final isDebt = isDebtSection || a.type == AssetType.debt;
+          final isSelectedInPane =
+              useMasterDetail && !isDebt && effectiveSelectedAssetId == a.id;
           void openAssetOrDebtDetail() {
             if (isDebt) {
               _pushFullPageOrModal(
@@ -391,6 +377,14 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
             }
           }
 
+          void openOrSelectAccount() {
+            if (useMasterDetail && !isDebt) {
+              setState(() => _selectedAssetId = a.id);
+            } else {
+              openAssetOrDebtDetail();
+            }
+          }
+
           if (!isDesktop) {
             return ReorderableDelayedDragStartListener(
               key: ValueKey('asset-item-${a.id}'),
@@ -398,10 +392,11 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
               child: _AssetTile(
                 asset: a,
                 hidden: hidden,
+                selected: isSelectedInPane,
                 isDebtSection: isDebtSection,
                 showCreditBadge: showCreditBadge,
                 onCustomizeIcon: () => _customizeAssetIcon(a),
-                onTap: openAssetOrDebtDetail,
+                onTap: openOrSelectAccount,
               ),
             );
           }
@@ -413,16 +408,9 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
             isDebtSection: isDebt,
             showCreditBadge: showCreditBadge,
             standaloneManagement: isManagementMode,
-            selected:
-                useMasterDetail && !isDebt && effectiveSelectedAssetId == a.id,
+            selected: isSelectedInPane,
             onCustomizeIcon: () => _customizeAssetIcon(a),
-            onOpenOrSelect: () {
-              if (useMasterDetail && !isDebt) {
-                setState(() => _selectedAssetId = a.id);
-              } else {
-                openAssetOrDebtDetail();
-              }
-            },
+            onOpenOrSelect: openOrSelectAccount,
             onEdit: () => isDebt ? _openEditDebt(a.id) : _openEditAsset(a.id),
             onOpenTrend: () => _pushFullPageOrModal(
               '/stats/trend?assetId=${a.id}',
@@ -708,7 +696,7 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
         );
 
         if (!useMasterDetail) {
-          if (!isDesktop) {
+          if (!DesktopAdaptive.useSideNavigation(context)) {
             return accountTreeList;
           }
           return Align(
@@ -1209,6 +1197,7 @@ class _AssetTile extends StatelessWidget {
     required this.hidden,
     required this.onCustomizeIcon,
     required this.onTap,
+    this.selected = false,
     this.isDebtSection = false,
     this.showCreditBadge = false,
   });
@@ -1217,11 +1206,13 @@ class _AssetTile extends StatelessWidget {
   final bool hidden;
   final VoidCallback onCustomizeIcon;
   final VoidCallback onTap;
+  final bool selected;
   final bool isDebtSection;
   final bool showCreditBadge;
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     final isArchived = asset.status != AssetStatus.active;
     final statusLabel = switch (asset.status) {
       AssetStatus.hidden => '已隐藏',
@@ -1264,8 +1255,17 @@ class _AssetTile extends StatelessWidget {
       if (asset.remark != null && asset.remark!.isNotEmpty) asset.remark!,
     ];
 
-    return ListTile(
+    final tile = ListTile(
       key: Key('asset-${asset.name}'),
+      selected: selected,
+      selectedColor: scheme.onSurface,
+      selectedTileColor: scheme.secondaryContainer.withValues(alpha: 0.5),
+      contentPadding: selected
+          ? const EdgeInsets.symmetric(horizontal: 10)
+          : null,
+      shape: selected
+          ? RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))
+          : null,
       leading: _CustomizableAssetAvatar(
         asset: asset,
         isArchived: isArchived,
@@ -1279,13 +1279,21 @@ class _AssetTile extends StatelessWidget {
                     asset.name,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
+                    style: selected
+                        ? const TextStyle(fontWeight: FontWeight.w600)
+                        : null,
                   ),
                 ),
                 const SizedBox(width: 6),
                 _CreditTypeBadge(key: Key('asset-credit-badge-${asset.id}')),
               ],
             )
-          : Text(asset.name),
+          : Text(
+              asset.name,
+              style: selected
+                  ? const TextStyle(fontWeight: FontWeight.w600)
+                  : null,
+            ),
       subtitle: subtitleParts.isEmpty ? null : Text(subtitleParts.join(' · ')),
       trailing: Text(
         hidden
@@ -1293,8 +1301,16 @@ class _AssetTile extends StatelessWidget {
             : credit
             ? creditBalanceLabel(asset.balanceMinor)
             : formatMinor(asset.balanceMinor),
+        style: selected ? const TextStyle(fontWeight: FontWeight.w600) : null,
       ),
       onTap: onTap,
+    );
+    if (!selected) {
+      return tile;
+    }
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+      child: tile,
     );
   }
 }

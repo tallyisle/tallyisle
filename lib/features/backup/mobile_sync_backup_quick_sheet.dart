@@ -168,7 +168,7 @@ Future<SyncConflictResolution?> _promptQuickConflictResolution(
       content: Text(
         '本机与云端自上次同步后均产生了新的账务改动。\n\n'
         '• 云端状态：$remoteDesc\n'
-        '• 零丢数保护：已自动将本机当前完整数据归档保存为「$backupName」。\n\n'
+        '• 冲突自动留档：已自动将本机当前完整数据归档保存为「$backupName」。\n\n'
         '请选择如何处理当前同步冲突：',
       ),
       actions: [

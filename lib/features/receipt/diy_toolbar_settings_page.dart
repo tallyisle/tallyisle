@@ -3,9 +3,12 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/adaptive.dart';
+import '../../domain/rules/app_settings_rules.dart';
 import '../attachments/attachment_providers.dart'
     show billAttachmentServiceProvider;
 import '../common/common.dart';
+import '../settings/settings_providers.dart'
+    show appSettingsProvider, appSettingsServiceProvider;
 import 'receipt_diy_providers.dart';
 
 /// Settings page for customizing the record-editor function toolbar (`F-036`, `/bkp/ARPFDAct`).
@@ -64,6 +67,175 @@ class _DiyToolbarSettingsPageState
         });
       }
     }
+  }
+
+  Future<void> _saveAppSettings(AppSettings next) async {
+    setState(() => _busy = true);
+    try {
+      final service = await ref.read(appSettingsServiceProvider.future);
+      await service.saveSettings(
+        commandId: _ids.forPayload([
+          'ui-diy-budget-hint',
+          _saveSeq++,
+          next.recordBudgetHintMode.code,
+          next.showRecordBudgetHint,
+        ]),
+        settings: next,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(safeMessage(e))));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _resetAll(DiyToolbarConfig current) async {
+    final reset = DiyToolbarConfig.defaults()
+        .copyWithStyles(
+          datePickerStyle: current.datePickerStyle,
+          timePickerStyle: current.timePickerStyle,
+        )
+        .copyWithDefaultAccount(
+          autoSelectDefaultAccount: current.autoSelectDefaultAccount,
+          defaultAccountId: current.defaultAccountId,
+        );
+    setState(() {
+      _busy = true;
+      _optimisticConfig = reset;
+    });
+    try {
+      final settingsService = await ref.read(appSettingsServiceProvider.future);
+      final currentSettings = await settingsService.getSettings();
+      if (!currentSettings.showRecordBudgetHint ||
+          currentSettings.recordBudgetHintMode != RecordBudgetHintMode.auto) {
+        await settingsService.saveSettings(
+          commandId: _ids.forPayload(['ui-diy-budget-hint-reset', _saveSeq++]),
+          settings: currentSettings.copyWith(
+            showRecordBudgetHint: true,
+            recordBudgetHintMode: RecordBudgetHintMode.auto,
+          ),
+        );
+      }
+      final service = await ref.read(billAttachmentServiceProvider.future);
+      final seq = _saveSeq++;
+      await service.saveDiyToolbarConfig(
+        commandId: _ids.forPayload(['ui-diy-toolbar', seq, reset.toJson()]),
+        config: reset,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _optimisticConfig = null);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(safeMessage(e))));
+    } finally {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _optimisticConfig = null;
+        });
+      }
+    }
+  }
+
+  static String _budgetModeDescription(RecordBudgetHintMode mode) =>
+      switch (mode) {
+        RecordBudgetHintMode.auto => '优先显示月预算，未设月预算时自动回退年预算',
+        RecordBudgetHintMode.monthly => '固定显示当前账期的月度分类或总预算进度',
+        RecordBudgetHintMode.yearly => '固定显示当前账期的年度分类或总预算进度',
+      };
+
+  Widget _buildBudgetHintRows(BuildContext context, {required bool isDesktop}) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final settings = ref.watch(appSettingsProvider).value;
+    final enabled = settings?.showRecordBudgetHint ?? true;
+    final mode = settings?.recordBudgetHintMode ?? RecordBudgetHintMode.auto;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        ListTile(
+          visualDensity: isDesktop ? null : const VisualDensity(vertical: -1),
+          contentPadding: const EdgeInsets.only(left: 16, right: 12),
+          leading: const Icon(Icons.donut_small_outlined),
+          title: const Text('记账页显示预算提示'),
+          subtitle: const Text('在记一笔面板实时显示当前分类或总预算剩余进度'),
+          onTap: _busy || settings == null
+              ? null
+              : () => _saveAppSettings(
+                  settings.copyWith(showRecordBudgetHint: !enabled),
+                ),
+          trailing: Switch(
+            key: const Key('setting_show_record_budget_hint_switch'),
+            value: enabled,
+            onChanged: _busy || settings == null
+                ? null
+                : (val) => _saveAppSettings(
+                    settings.copyWith(showRecordBudgetHint: val),
+                  ),
+          ),
+        ),
+        AnimatedSize(
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOutCubic,
+          alignment: Alignment.topCenter,
+          child: enabled
+              ? Container(
+                  key: const Key('setting_record_budget_panel'),
+                  width: double.infinity,
+                  margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: tallyNestedSurfaceColor(scheme),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      SegmentedButton<RecordBudgetHintMode>(
+                        key: const Key('setting_record_budget_mode_segmented'),
+                        showSelectedIcon: false,
+                        segments: [
+                          for (final m in RecordBudgetHintMode.values)
+                            ButtonSegment<RecordBudgetHintMode>(
+                              value: m,
+                              label: FittedBox(
+                                fit: BoxFit.scaleDown,
+                                child: Text(
+                                  m.label,
+                                  maxLines: 1,
+                                  softWrap: false,
+                                ),
+                              ),
+                            ),
+                        ],
+                        selected: <RecordBudgetHintMode>{mode},
+                        onSelectionChanged: _busy || settings == null
+                            ? null
+                            : (selected) => _saveAppSettings(
+                                settings.copyWith(
+                                  recordBudgetHintMode: selected.first,
+                                ),
+                              ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        _budgetModeDescription(mode),
+                        key: const Key('setting_record_budget_mode_desc'),
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              : const SizedBox(width: double.infinity),
+        ),
+      ],
+    );
   }
 
   static Color _groupColor(ColorScheme scheme, bool isDark) => isDark
@@ -234,6 +406,7 @@ class _DiyToolbarSettingsPageState
                     ),
                   ),
                 ],
+                _buildBudgetHintRows(context, isDesktop: isDesktop),
               ],
             ),
           ),
@@ -261,20 +434,7 @@ class _DiyToolbarSettingsPageState
             key: const Key('diy-toolbar-reset-btn'),
             onPressed: _busy || !configAsync.hasValue
                 ? null
-                : () {
-                    final current = configAsync.requireValue;
-                    final reset = DiyToolbarConfig.defaults()
-                        .copyWithStyles(
-                          datePickerStyle: current.datePickerStyle,
-                          timePickerStyle: current.timePickerStyle,
-                        )
-                        .copyWithDefaultAccount(
-                          autoSelectDefaultAccount:
-                              current.autoSelectDefaultAccount,
-                          defaultAccountId: current.defaultAccountId,
-                        );
-                    _persist(reset);
-                  },
+                : () => _resetAll(configAsync.requireValue),
             child: const Text('恢复默认'),
           ),
         ],

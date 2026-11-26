@@ -503,27 +503,40 @@ void main() {
           'tallyisle://add?money=10',
           'https://',
           'http:///missing-host',
+          'mailto:',
+          'mailto:not-an-email',
+          'mailto:support@tallyisle.com\ncc=bad',
+          'mailto:support@tallyisle.com;whoami',
+          'mailto:support@tallyisle.com?attach=/etc/passwd',
+          'mailto:support@tallyisle.com?bcc=evil@example.com',
+          'mailto:support@tallyisle.com#frag',
         ]) {
           await expectLater(
             access.openExternalUrl(invalid),
             throwsA(
               isA<Failure>()
                   .having((f) => f.code, 'code', FailureCode.validation)
-                  .having((f) => f.message, 'message', '仅支持打开 HTTP/HTTPS 网页链接'),
+                  .having(
+                    (f) => f.message,
+                    'message',
+                    '仅支持打开 HTTP/HTTPS 或邮件链接',
+                  ),
             ),
             reason: 'Expected validation failure for "$invalid"',
           );
         }
         expect(opened, isEmpty);
 
-        // Valid trimmed HTTP/HTTPS URLs invoke onOpenExternalUrl override
+        // Valid trimmed HTTP/HTTPS and mailto URLs invoke onOpenExternalUrl override
         await access.openExternalUrl(
           '  https://github.com/tallyisle/tallyisle  ',
         );
         await access.openExternalUrl('http://example.com/issues');
+        await access.openExternalUrl('  mailto:support@tallyisle.com  ');
         expect(opened, const <String>[
           'https://github.com/tallyisle/tallyisle',
           'http://example.com/issues',
+          'mailto:support@tallyisle.com',
         ]);
       },
     );

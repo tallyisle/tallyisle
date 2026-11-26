@@ -6,13 +6,13 @@
   <summary>Local-first, cent-accurate personal accounting and asset manager</summary>
   <summary xml:lang="zh-CN">本地优先、精确到分的个人记账与资产管理工具</summary>
   <metadata_license>CC0-1.0</metadata_license>
-  <project_license>LicenseRef-proprietary</project_license>
+  <project_license>LicenseRef-PolyForm-Noncommercial-1.0.0=https://polyformproject.org/licenses/noncommercial/1.0.0/</project_license>
   <description>
     <p>TallyIsle is a local-first, cent-accurate personal accounting and asset management application built with Flutter, supporting multi-ledger accounting, credit card statement cycles, budgets, analytics, and portable offline backups.</p>
     <p xml:lang="zh-CN">帐屿是一款本地优先、精确到分的个人记账与资产管理工具，支持多账本记账、信用卡账单周期、预算统计与便携离线备份。</p>
   </description>
   <launchable type="desktop-id">com.tallyisle.app.desktop</launchable>
-  <url type="homepage">https://github.com/tallyisle/tallyisle</url>
+  <url type="homepage">https://tallyisle.com</url>
   <provides>
     <binary>tallyisle</binary>
     <mediatype>x-scheme-handler/tallyisle</mediatype>

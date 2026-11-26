@@ -87,7 +87,7 @@ Future<T?> pushDesktopModalOrMaterialRoute<T>(
   double maxHeight = 700,
   bool barrierDismissible = false,
 }) {
-  if (DesktopAdaptive.isDesktop(context)) {
+  if (DesktopAdaptive.useCenteredModalDialog(context)) {
     final nav = Navigator.of(context, rootNavigator: true);
     final navContext = nav.context;
     return nav.push<T>(
@@ -124,7 +124,7 @@ Page<T> buildDesktopModalOrMaterialPage<T>({
   double maxWidth = 560,
   double maxHeight = 700,
 }) {
-  if (DesktopAdaptive.isDesktop(context)) {
+  if (DesktopAdaptive.useCenteredModalDialog(context)) {
     return DesktopModalDialogPage<T>(
       key: key,
       name: name,

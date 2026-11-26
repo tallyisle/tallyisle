@@ -309,13 +309,13 @@ List<_MeSectionData> _buildMeSections({
       const _MeMenuEntry(
         key: Key('me-url-scheme'),
         icon: Icons.link_outlined,
-        title: '外部快捷链接 (URL Scheme)',
+        title: '快捷链接',
         route: '/automation/url-scheme',
       ),
       const _MeMenuEntry(
         key: Key('me-mcp'),
         icon: Icons.hub_outlined,
-        title: 'MCP 服务 (AI Agents)',
+        title: 'MCP 服务',
         route: '/automation/mcp',
       ),
     ],
@@ -762,7 +762,7 @@ class _MePageState extends ConsumerState<MePage> {
             0.55,
           )!;
 
-    if (isDesktop &&
+    if (DesktopAdaptive.useSideNavigation(context) &&
         DesktopAdaptive.sizeClassOf(context) == DesktopWindowSizeClass.medium) {
       final leftSections = sections.sublist(0, 3);
       final rightSections = sections.sublist(3);

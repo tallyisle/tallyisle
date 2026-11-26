@@ -562,7 +562,7 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        '1. 帐屿全平台（Android / iOS / HarmonyOS / Windows / Linux / macOS）数据格式 100% 统一，'
+                        '1. 帐屿全平台（Android / iOS / HarmonyOS / Windows / Linux / macOS）数据格式完全一致，'
                         '日常多设备流转请使用「云同步与备份（.tally / WebDAV / S3）」；\n'
                         '2. 本页专用于第三方记账软件与外部平台历史数据迁入'
                         '（全量迁入采用单事务安全替换，并自动保留本机已有便签与自定义汇率）。',
@@ -1044,7 +1044,7 @@ class _MigrationConfirmDialog extends StatelessWidget {
                 ),
                 child: Text(
                   '覆盖警告：确认迁入将在单一数据库事务内原子替换本地账本、账户、分类、账单、预算与计划业务表（若异常立即完整回滚）；'
-                  '本机已有的「随手记」便签（note）与自定义汇率将 100% 保留，缺失外币币种会自动补充。',
+                  '本机已有的「随手记」便签与自定义汇率将完整保留，缺失外币币种会自动补充。',
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: theme.colorScheme.onErrorContainer,
                   ),

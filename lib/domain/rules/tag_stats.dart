@@ -703,7 +703,7 @@ SingleTagStatsResult computeSingleTagStats({
       childBreakdowns.add(
         TagChildBreakdownItem(
           tagId: targetTagId,
-          name: '${targetTag.name}（直属）',
+          name: '${targetTag.name}直属',
           color: targetTag.color,
           isDirectOnGroup: true,
           expenseMinor: directExp,

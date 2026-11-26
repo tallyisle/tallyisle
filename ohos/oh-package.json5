@@ -5,7 +5,7 @@
   "description": "Please describe the basic information.",
   "main": "",
   "author": "",
-  "license": "",
+  "license": "PolyForm-Noncommercial-1.0.0",
   "dependencies": {},
   "devDependencies": {
     "@ohos/hypium": "1.0.6"

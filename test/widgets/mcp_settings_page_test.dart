@@ -141,7 +141,8 @@ void main() {
       await settle(tester);
 
       expect(find.byKey(const Key('mcp_settings_page')), findsOneWidget);
-      expect(find.text('MCP 服务 (AI Agents)'), findsOneWidget);
+      expect(find.text('MCP 服务'), findsOneWidget);
+      expect(find.text('MCP 服务 (AI Agents)'), findsNothing);
       expect(find.text('已停止'), findsOneWidget);
 
       // Enable server -> status badge updates to 运行中

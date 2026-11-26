@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../app/adaptive.dart';
 import 'record_editor_page.dart';
 
 /// Default width constraint for the desktop centered record editor modal dialog.
@@ -7,6 +8,10 @@ const double kDesktopRecordDialogMaxWidth = 600.0;
 
 /// Default height constraint for the desktop centered record editor modal dialog.
 const double kDesktopRecordDialogMaxHeight = 760.0;
+
+/// Relaxed default height constraint on touch tablets so the category grid,
+/// budget hint bar, and touch arithmetic `RecordKeypad` fit comfortably.
+const double kTabletRecordDialogMaxHeight = 820.0;
 
 /// Inherited marker indicating that a descendant [RecordEditorPage] is hosted
 /// inside the desktop centered modal dialog shell.
@@ -25,11 +30,16 @@ Widget _buildDesktopRecordDialogShell(
   BuildContext dialogContext, {
   required Widget child,
   double maxWidth = kDesktopRecordDialogMaxWidth,
-  double maxHeight = kDesktopRecordDialogMaxHeight,
+  double? maxHeight,
 }) {
   final scheme = Theme.of(dialogContext).colorScheme;
   final mediaSize = MediaQuery.sizeOf(dialogContext);
   final compactWindow = mediaSize.width < 640 || mediaSize.height < 660;
+  final effectiveMaxHeight =
+      maxHeight ??
+      (DesktopAdaptive.isTablet(dialogContext)
+          ? kTabletRecordDialogMaxHeight
+          : kDesktopRecordDialogMaxHeight);
   return Dialog(
     key: const Key('desktop-record-editor-dialog'),
     insetPadding: compactWindow
@@ -43,7 +53,10 @@ Widget _buildDesktopRecordDialogShell(
     ),
     clipBehavior: Clip.antiAlias,
     child: ConstrainedBox(
-      constraints: BoxConstraints(maxWidth: maxWidth, maxHeight: maxHeight),
+      constraints: BoxConstraints(
+        maxWidth: maxWidth,
+        maxHeight: effectiveMaxHeight,
+      ),
       child: ScaffoldMessenger(child: DesktopRecordDialogScope(child: child)),
     ),
   );
@@ -145,7 +158,7 @@ class DesktopRecordDialogPage<T> extends Page<T> {
     this.initialRemark,
     this.initialRecordTimeMs,
     this.maxWidth = kDesktopRecordDialogMaxWidth,
-    this.maxHeight = kDesktopRecordDialogMaxHeight,
+    this.maxHeight,
     this.barrierDismissible = false,
   });
 
@@ -161,7 +174,7 @@ class DesktopRecordDialogPage<T> extends Page<T> {
   final String? initialRemark;
   final int? initialRecordTimeMs;
   final double maxWidth;
-  final double maxHeight;
+  final double? maxHeight;
   final bool barrierDismissible;
 
   @override

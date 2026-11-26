@@ -88,6 +88,8 @@ void main() {
       await settle(tester);
 
       expect(find.byKey(const Key('url_scheme_page')), findsOneWidget);
+      expect(find.text('快捷链接'), findsOneWidget);
+      expect(find.text('URL Scheme 外部调用'), findsNothing);
       expect(find.textContaining('yyjz'), findsNothing);
       expect(find.textContaining('双协议'), findsNothing);
       expect(find.text('复制 yyjz://'), findsNothing);

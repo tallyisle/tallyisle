@@ -264,7 +264,7 @@ class _StatsPageState extends ConsumerState<StatsPage> {
                 ),
               ),
             )
-          : (isDesktop
+          : (DesktopAdaptive.useSideNavigation(context)
                 ? Center(
                     child: ConstrainedBox(
                       constraints: const BoxConstraints(maxWidth: 760),

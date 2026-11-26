@@ -7,6 +7,7 @@ import '../../core/failure.dart';
 import '../../domain/model/codes.dart';
 import '../../domain/rules/app_settings_rules.dart';
 import '../common/desktop_modal_page.dart';
+import '../common/tally_card.dart' show tallyNestedSurfaceColor;
 import '../me/me_page.dart' show MeEmbeddedNavigationScope;
 import '../security/app_lock_settings_page.dart';
 import 'about_help_page.dart';
@@ -112,7 +113,15 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     setState(() => _busy = true);
     try {
       final svc = await ref.read(appSettingsServiceProvider.future);
-      await svc.resetSettings(commandId: _uuid.v4());
+      final current = await svc.getSettings();
+      // Record budget hint prefs live in 记账工具栏自定义; keep them untouched.
+      await svc.saveSettings(
+        commandId: _uuid.v4(),
+        settings: AppSettings.defaults.copyWith(
+          showRecordBudgetHint: current.showRecordBudgetHint,
+          recordBudgetHintMode: current.recordBudgetHintMode,
+        ),
+      );
       _toast('已恢复默认设置');
     } on Failure catch (f) {
       _toast(f.message);
@@ -208,67 +217,6 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                               settings.copyWith(showHomeBudgetCard: val),
                             ),
                     ),
-                    SwitchListTile(
-                      key: const Key('setting_show_record_budget_hint_switch'),
-                      title: const Text('记账页显示预算提示'),
-                      subtitle: const Text('在“记一笔”面板实时显示当前分类或总预算剩余进度'),
-                      value: settings.showRecordBudgetHint,
-                      onChanged: _busy
-                          ? null
-                          : (val) => _updateSettings(
-                              settings.copyWith(showRecordBudgetHint: val),
-                            ),
-                    ),
-                    if (settings.showRecordBudgetHint)
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            SizedBox(
-                              width: double.infinity,
-                              child: SegmentedButton<RecordBudgetHintMode>(
-                                key: const Key(
-                                  'setting_record_budget_mode_segmented',
-                                ),
-                                showSelectedIcon: false,
-                                segments: [
-                                  for (final mode
-                                      in RecordBudgetHintMode.values)
-                                    ButtonSegment<RecordBudgetHintMode>(
-                                      value: mode,
-                                      label: FittedBox(
-                                        fit: BoxFit.scaleDown,
-                                        child: Text(
-                                          mode.label,
-                                          maxLines: 1,
-                                          softWrap: false,
-                                        ),
-                                      ),
-                                    ),
-                                ],
-                                selected: <RecordBudgetHintMode>{
-                                  settings.recordBudgetHintMode,
-                                },
-                                onSelectionChanged: _busy
-                                    ? null
-                                    : (selected) => _updateSettings(
-                                        settings.copyWith(
-                                          recordBudgetHintMode: selected.first,
-                                        ),
-                                      ),
-                              ),
-                            ),
-                            const SizedBox(height: 6),
-                            Text(
-                              '自动：优先显示月预算，未设月预算时自动显示年预算',
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: theme.colorScheme.onSurfaceVariant,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
                     Padding(
                       padding: const EdgeInsets.all(16),
                       child: Column(
@@ -391,40 +339,56 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                       const SizedBox(height: 16),
                       Text('品牌与主题色板', style: theme.textTheme.titleSmall),
                       const SizedBox(height: 8),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          for (final preset in themeSeedPresets)
-                            ChoiceChip(
-                              key: Key('theme_preset_${preset.hex}'),
-                              avatar: CircleAvatar(
-                                backgroundColor: Color(preset.argb32),
-                                radius: 8,
+                      LayoutBuilder(
+                        builder: (context, constraints) {
+                          const columns = 4;
+                          const gap = 8.0;
+                          final tileWidth =
+                              ((constraints.maxWidth - gap * (columns - 1)) /
+                                          columns -
+                                      0.01)
+                                  .clamp(0.0, double.infinity);
+                          return Wrap(
+                            key: const Key('theme_swatch_grid'),
+                            spacing: gap,
+                            runSpacing: gap,
+                            children: [
+                              for (final preset in themeSeedPresets)
+                                SizedBox(
+                                  width: tileWidth,
+                                  child: _ThemeSwatchTile(
+                                    key: Key('theme_preset_${preset.hex}'),
+                                    label: preset.name,
+                                    color: Color(preset.argb32),
+                                    selected:
+                                        settings.themeSeedHex == preset.hex,
+                                    onTap: _busy
+                                        ? null
+                                        : () => _updateSettings(
+                                            settings.copyWith(
+                                              themeSeedHex: preset.hex,
+                                            ),
+                                          ),
+                                  ),
+                                ),
+                              SizedBox(
+                                width: tileWidth,
+                                child: _ThemeSwatchTile(
+                                  key: const Key('theme_custom_hex_chip'),
+                                  label: '自定义',
+                                  color: isPreset
+                                      ? null
+                                      : Color(settings.themeSeedArgb32),
+                                  selected: !isPreset,
+                                  custom: true,
+                                  onTap: _busy
+                                      ? null
+                                      : () => _openCustomHexDialog(settings),
+                                ),
                               ),
-                              label: Text(preset.name),
-                              selected: settings.themeSeedHex == preset.hex,
-                              onSelected: _busy
-                                  ? null
-                                  : (_) => _updateSettings(
-                                      settings.copyWith(
-                                        themeSeedHex: preset.hex,
-                                      ),
-                                    ),
-                            ),
-                          ChoiceChip(
-                            key: const Key('theme_custom_hex_chip'),
-                            avatar: CircleAvatar(
-                              backgroundColor: Color(settings.themeSeedArgb32),
-                              radius: 8,
-                            ),
-                            label: Text('自定义 #${settings.themeSeedHex}'),
-                            selected: !isPreset,
-                            onSelected: _busy
-                                ? null
-                                : (_) => _openCustomHexDialog(settings),
-                          ),
-                        ],
+                            ],
+                          );
+                        },
                       ),
                     ],
                   ),
@@ -481,7 +445,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                       key: const Key('nav_about_help_tile'),
                       leading: const Icon(Icons.help_outline),
                       title: const Text('帮助与关于帐屿'),
-                      subtitle: const Text('本地离线隐私承诺、全免费无门控说明与常见问题'),
+                      subtitle: const Text('本地离线隐私说明、问题反馈与常见问题'),
                       trailing: const Icon(Icons.chevron_right),
                       onTap: () => _navigateSibling(
                         context,
@@ -625,6 +589,137 @@ class _DesktopShortcutsCard extends StatelessWidget {
   }
 }
 
+/// Borderless 12dp swatch cell used by the 4x2 theme color grid.
+class _ThemeSwatchTile extends StatelessWidget {
+  const _ThemeSwatchTile({
+    super.key,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+    this.color,
+    this.custom = false,
+  });
+
+  final String label;
+
+  /// Swatch color; `null` renders the neutral multi-color custom dot.
+  final Color? color;
+  final bool selected;
+  final bool custom;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final nested = tallyNestedSurfaceColor(scheme);
+    final accent = color ?? scheme.primary;
+    final background = selected
+        ? Color.alphaBlend(
+            accent.withValues(
+              alpha: theme.brightness == Brightness.dark ? 0.28 : 0.16,
+            ),
+            nested,
+          )
+        : nested;
+    final onDot = color == null
+        ? scheme.onSurface
+        : (ThemeData.estimateBrightnessForColor(color!) == Brightness.dark
+              ? Colors.white
+              : Colors.black87);
+    const dotSize = 32.0;
+    final dot = Container(
+      width: dotSize,
+      height: dotSize,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: color,
+        gradient: color == null
+            ? const SweepGradient(
+                colors: <Color>[
+                  Color(0xFFEF5350),
+                  Color(0xFFFFCA28),
+                  Color(0xFF66BB6A),
+                  Color(0xFF42A5F5),
+                  Color(0xFFAB47BC),
+                  Color(0xFFEF5350),
+                ],
+              )
+            : null,
+      ),
+      child: selected
+          ? Icon(Icons.check_rounded, size: 20, color: onDot)
+          : null,
+    );
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: label,
+      child: Material(
+        color: background,
+        borderRadius: BorderRadius.circular(12),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SizedBox(
+                  width: dotSize + 4,
+                  height: dotSize + 4,
+                  child: Stack(
+                    clipBehavior: Clip.none,
+                    alignment: Alignment.center,
+                    children: [
+                      dot,
+                      if (custom)
+                        Positioned(
+                          right: -2,
+                          bottom: -2,
+                          child: Container(
+                            width: 16,
+                            height: 16,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: scheme.surface,
+                            ),
+                            child: Icon(
+                              Icons.palette_outlined,
+                              size: 11,
+                              color: scheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 6),
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    softWrap: false,
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                      color: selected
+                          ? scheme.onSurface
+                          : scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _SectionHeader extends StatelessWidget {
   const _SectionHeader({required this.title});
 
@@ -660,11 +755,22 @@ class _CustomThemeHexDialog extends StatefulWidget {
 class _CustomThemeHexDialogState extends State<_CustomThemeHexDialog> {
   late final TextEditingController _hexCtrl;
   String? _errorText;
+  Color? _previewColor;
+
+  static Color? _tryParseHex(String raw) {
+    try {
+      final hex = normalizeThemeSeedHex(raw);
+      return Color(0xFF000000 | int.parse(hex, radix: 16));
+    } on Failure {
+      return null;
+    }
+  }
 
   @override
   void initState() {
     super.initState();
     _hexCtrl = TextEditingController(text: widget.initialHex);
+    _previewColor = _tryParseHex(widget.initialHex);
   }
 
   @override
@@ -699,7 +805,36 @@ class _CustomThemeHexDialogState extends State<_CustomThemeHexDialog> {
           vertical: 14,
         ),
       ),
+      onChanged: (value) => setState(() {
+        _previewColor = _tryParseHex(value);
+        _errorText = null;
+      }),
       onSubmitted: (_) => _submit(),
+    );
+    final scheme = Theme.of(context).colorScheme;
+    final preview = Container(
+      key: const Key('theme_custom_hex_preview'),
+      width: 38,
+      height: 38,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: _previewColor ?? tallyNestedSurfaceColor(scheme),
+      ),
+      child: _previewColor == null
+          ? Icon(
+              Icons.palette_outlined,
+              size: 20,
+              color: scheme.onSurfaceVariant,
+            )
+          : null,
+    );
+    final fieldRow = Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(padding: const EdgeInsets.only(top: 9), child: preview),
+        const SizedBox(width: 12),
+        Expanded(child: field),
+      ],
     );
     return AlertDialog(
       title: const Text('自定义主题色'),
@@ -707,9 +842,9 @@ class _CustomThemeHexDialogState extends State<_CustomThemeHexDialog> {
         child: isDesktop
             ? ConstrainedBox(
                 constraints: const BoxConstraints(minWidth: 320, maxWidth: 380),
-                child: field,
+                child: fieldRow,
               )
-            : field,
+            : fieldRow,
       ),
       actions: [
         TextButton(

@@ -17,8 +17,10 @@ import 'package:tallyisle/data/catalog/catalog_service.dart';
 import 'package:tallyisle/data/db/database.dart';
 import 'package:tallyisle/data/db/seed.dart';
 import 'package:tallyisle/data/ledger/ledger_service.dart';
+import 'package:tallyisle/data/settings/app_settings_service.dart';
 import 'package:tallyisle/domain/ledger/record_extra.dart';
 import 'package:tallyisle/domain/model/codes.dart';
+import 'package:tallyisle/domain/rules/app_settings_rules.dart';
 import 'package:tallyisle/features/attachments/attachment_providers.dart';
 import 'package:tallyisle/features/batch_edit/batch_edit_page.dart';
 import 'package:tallyisle/features/category_transfer/category_transfer_page.dart';
@@ -648,6 +650,40 @@ void main() {
       await settle(tester);
       expect(switchFor('auto_select_first_cat').value, isTrue);
 
+      // Budget hint switch & mode segmented control live at the end of 记账辅助开关.
+      final budgetModeSeg = find.byKey(
+        const Key('setting_record_budget_mode_segmented'),
+      );
+      await tester.scrollUntilVisible(
+        budgetModeSeg,
+        160,
+        scrollable: find.byType(Scrollable).last,
+      );
+      await settle(tester);
+      expect(
+        find.byKey(const Key('setting_show_record_budget_hint_switch')),
+        findsOneWidget,
+      );
+      await tester.tap(
+        find.descendant(of: budgetModeSeg, matching: find.text('年预算')),
+      );
+      await settle(tester);
+      await tester.tap(
+        find.byKey(const Key('setting_show_record_budget_hint_switch')),
+      );
+      await settle(tester);
+      expect(budgetModeSeg, findsNothing);
+
+      final appSettingsService = AppSettingsService(db);
+      final appSettingsBeforeReset = await tester.runAsync(
+        appSettingsService.getSettings,
+      );
+      expect(appSettingsBeforeReset!.showRecordBudgetHint, isFalse);
+      expect(
+        appSettingsBeforeReset.recordBudgetHintMode,
+        RecordBudgetHintMode.yearly,
+      );
+
       final persistedAfterEdits = await tester.runAsync(
         attService.getDiyToolbarConfig,
       );
@@ -698,6 +734,16 @@ void main() {
       expect(persistedAfterReset.timePickerStyle, RecordTimePickerStyle.dial);
       expect(persistedAfterReset.autoSelectDefaultAccount, isTrue);
       expect(persistedAfterReset.defaultAccountId, 1);
+
+      // Resetting DIY toolbar also restores budget hint switch & mode to defaults.
+      final appSettingsAfterReset = await tester.runAsync(
+        appSettingsService.getSettings,
+      );
+      expect(appSettingsAfterReset!.showRecordBudgetHint, isTrue);
+      expect(
+        appSettingsAfterReset.recordBudgetHintMode,
+        RecordBudgetHintMode.auto,
+      );
 
       await unmountCleanly(tester);
 

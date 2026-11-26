@@ -83,6 +83,19 @@ function hasValidHttpHost(url: string): boolean {
   return authority.length > 0;
 }
 
+const MAILTO_ADDRESS_REGEX: RegExp = /^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$/;
+const UNSAFE_EXTERNAL_URL_REGEX: RegExp = /[\x00-\x1F\x7F\s"'`$|&;<>\\?#]/;
+
+function isValidMailtoUrl(url: string): boolean {
+  if (!url.toLowerCase().startsWith('mailto:')) {
+    return false;
+  }
+  if (UNSAFE_EXTERNAL_URL_REGEX.test(url)) {
+    return false;
+  }
+  return MAILTO_ADDRESS_REGEX.test(url.substring(7));
+}
+
 function resolveUniformTypeId(fileName: string): string {
   const ext: string = extractExtension(fileName);
   if (ext.length > 0) {
@@ -492,21 +505,28 @@ export class FileBridge implements MethodCallHandler {
   private handleOpenExternalUrl(call: MethodCall, result: MethodResult): void {
     const urlArg: Any = call.argument('url');
     const url: string = typeof urlArg === 'string' ? urlArg.trim() : '';
-    if (!hasValidHttpHost(url)) {
-      result.error(ERROR_INVALID_ARGS, '仅支持打开 HTTP/HTTPS 网页链接', null);
+    const isHttp: boolean = hasValidHttpHost(url);
+    const isMailto: boolean = isValidMailtoUrl(url);
+    if (!isHttp && !isMailto) {
+      result.error(ERROR_INVALID_ARGS, '仅支持打开 HTTP/HTTPS 或邮件链接', null);
       return;
     }
 
-    const want: Want = {
-      action: 'ohos.want.action.viewData',
-      entities: ['entity.system.browsable'],
-      uri: url,
-    };
+    const want: Want = isMailto
+      ? {
+          action: 'ohos.want.action.sendToData',
+          uri: url,
+        }
+      : {
+          action: 'ohos.want.action.viewData',
+          entities: ['entity.system.browsable'],
+          uri: url,
+        };
     this.context.startAbility(want).then((): void => {
       result.success(null);
     }).catch((err: Error): void => {
-      Log.e(TAG, 'startAbility browser failed: ' + JSON.stringify(err));
-      result.error(ERROR_UNAVAILABLE, '无法调起系统浏览器', null);
+      Log.e(TAG, 'startAbility external url failed: ' + JSON.stringify(err));
+      result.error(ERROR_UNAVAILABLE, isMailto ? '无法调起系统邮件应用' : '无法调起系统浏览器', null);
     });
   }
 

@@ -575,6 +575,10 @@ void main() {
       () {
         expect(normalizeThemeSeedHex('#138eaa'), '138EAA');
         expect(normalizeThemeSeedHex(' 2e7d32 '), '2E7D32');
+        expect(themeSeedPresets, hasLength(7));
+        expect(themeSeedPresets.first.hex, '138EAA');
+        expect(themeSeedPresets.first.name, '海岛青');
+        expect(themeSeedPresets.every((p) => !p.name.contains('默认')), isTrue);
         expect(() => normalizeThemeSeedHex('ZZZZZZ'), throwsA(isA<Failure>()));
         expect(() => normalizeThemeSeedHex('123'), throwsA(isA<Failure>()));
 

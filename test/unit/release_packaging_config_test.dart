@@ -262,7 +262,13 @@ void main() {
             'sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true',
           ),
         );
-        expect(buildYml, contains('sha256sum * > SHA256SUMS.txt'));
+        expect(buildYml, contains('Merge and upload SHA256SUMS.txt'));
+        expect(
+          buildYml,
+          contains(
+            r'gh release upload "${GITHUB_REF_NAME}" SHA256SUMS.txt --clobber',
+          ),
+        );
         expect(buildYml, contains('softprops/action-gh-release@v2'));
         expect(buildYml, contains('ANDROID_KEYSTORE_BASE64'));
         expect(
@@ -296,6 +302,13 @@ void main() {
           ohosYml,
           contains(
             'zip -j dist-ohos/TallyIsle-HarmonyOS-installer-kit.zip dist-ohos/TallyIsle-HarmonyOS-*.hap dist-ohos/install-hap-windows.bat dist-ohos/install-hap-unix.sh',
+          ),
+        );
+        expect(ohosYml, contains('Merge and upload SHA256SUMS.txt'));
+        expect(
+          ohosYml,
+          contains(
+            r'gh release upload "${GITHUB_REF_NAME}" SHA256SUMS.txt --clobber',
           ),
         );
       },

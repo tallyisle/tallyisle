@@ -821,7 +821,9 @@ void main() {
       final neverConfig = Completer<DiyToolbarConfig>();
       await tester.pumpWidget(
         ProviderScope(
+          retry: (_, _) => null,
           overrides: [
+            databaseProvider.overrideWith((ref) async => db),
             diyToolbarConfigProvider.overrideWith(
               (ref) => Stream<DiyToolbarConfig>.fromFuture(neverConfig.future),
             ),

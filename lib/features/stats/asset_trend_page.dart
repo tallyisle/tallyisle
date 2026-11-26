@@ -708,6 +708,14 @@ class _AssetTrendPageState extends ConsumerState<AssetTrendPage> {
                 );
               },
             ),
+            const SizedBox(height: 10),
+            Text(
+              '月度期末趋势按已入账真实流水逆推，不含信用账户未入账分期',
+              key: const Key('trend-chart-methodology-hint'),
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
           ],
         ),
       ),

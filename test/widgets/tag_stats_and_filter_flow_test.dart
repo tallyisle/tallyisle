@@ -647,4 +647,86 @@ void main() {
       await tester.runAsync(() => db.close());
     },
   );
+
+  testWidgets(
+    'TagDetailStatsPage renders direct-on-group chip as "XX直属" without parentheses',
+    (tester) async {
+      final db = AppDatabase(NativeDatabase.memory());
+      final catalog = CatalogService(db);
+      final ledger = LedgerService(db);
+
+      final grpId = await catalog.createTag(
+        commandId: 'mk-direct-grp',
+        name: '2026日本旅行',
+        isGroup: true,
+        color: '#1E88E5',
+      );
+      final childId = await catalog.createTag(
+        commandId: 'mk-direct-child',
+        name: '机票',
+        parentTagId: grpId,
+        color: '#E53935',
+      );
+
+      final cats = await db.select(db.recordCategories).get();
+      final catId = cats.firstWhere((c) => c.type == 0).id;
+      final nowMs = DateTime.now().millisecondsSinceEpoch;
+
+      await ledger.saveRecord(
+        commandId: 'mk-direct-bill-1',
+        draft: RecordDraft(
+          type: RecordType.expense,
+          money: Money.parse('120.00'),
+          bookId: 1,
+          recordTime: nowMs,
+          categoryId: catId,
+          remark: '直属标签组开销',
+          tagIds: [grpId],
+        ),
+      );
+      await ledger.saveRecord(
+        commandId: 'mk-direct-bill-2',
+        draft: RecordDraft(
+          type: RecordType.expense,
+          money: Money.parse('800.00'),
+          bookId: 1,
+          recordTime: nowMs + 1000,
+          categoryId: catId,
+          remark: '子标签机票',
+          tagIds: [childId],
+        ),
+      );
+
+      Future<void> settle() async {
+        for (var i = 0; i < 10; i++) {
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 20)),
+          );
+          await tester.pump();
+        }
+      }
+
+      await tester.pumpWidget(
+        ProviderScope(
+          retry: (_, _) => null,
+          overrides: [databaseProvider.overrideWith((ref) async => db)],
+          child: MaterialApp(home: TagDetailStatsPage(tagId: grpId)),
+        ),
+      );
+      await settle();
+
+      expect(
+        find.byKey(const Key('tag-detail-children-section')),
+        findsOneWidget,
+      );
+      expect(find.byKey(Key('tag-detail-child-$grpId')), findsOneWidget);
+      expect(find.textContaining('#2026日本旅行直属'), findsOneWidget);
+      expect(find.textContaining('（直属）'), findsNothing);
+
+      await tester.pumpWidget(const SizedBox());
+      await settle();
+      await tester.pump(const Duration(seconds: 1));
+      await tester.runAsync(() => db.close());
+    },
+  );
 }

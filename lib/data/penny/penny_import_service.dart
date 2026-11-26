@@ -512,19 +512,14 @@ final class PennyImportService {
           }
         });
 
-        // Reset active book ID & month start day in preferences (R7, §6.2).
+        // Reset active book ID in preferences (R7, §6.2).
         await db
             .into(db.preferences)
             .insertOnConflictUpdate(
               PreferencesCompanion.insert(
-                key: 'current_book_id',
+                key: prefKeyCurrentBookId,
                 value: '${staged.targetBookId}',
               ),
-            );
-        await db
-            .into(db.preferences)
-            .insertOnConflictUpdate(
-              PreferencesCompanion.insert(key: 'month_start_day', value: '1'),
             );
 
         // Clear stale defaultAccountId since `db.assets` was wiped & replaced.

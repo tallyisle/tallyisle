@@ -138,7 +138,7 @@ final class UrlSchemeService {
                 .into(db.preferences)
                 .insertOnConflictUpdate(
                   PreferencesCompanion.insert(
-                    key: 'current_book_id',
+                    key: prefKeyCurrentBookId,
                     value: '${resolvedBook.id}',
                   ),
                 );
@@ -321,7 +321,7 @@ final class UrlSchemeService {
     }
     final pref = await (db.select(
       db.preferences,
-    )..where((t) => t.key.equals('current_book_id'))).getSingleOrNull();
+    )..where((t) => t.key.equals(prefKeyCurrentBookId))).getSingleOrNull();
     final currentId = int.tryParse(pref?.value ?? '') ?? 1;
     final byCurrent = await (db.select(
       db.accountBooks,

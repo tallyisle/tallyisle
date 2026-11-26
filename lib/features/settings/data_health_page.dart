@@ -57,7 +57,7 @@ class _DataHealthPageState extends ConsumerState<DataHealthPage> {
                   ),
                 const SizedBox(height: 12),
                 Text(
-                  '承诺：绝不修改或删除任何账单流水记录，绝不改动信用账户余额或授信额度。',
+                  '说明：不会修改或删除任何账单流水记录，也不会改动信用账户余额或授信额度。',
                   style: Theme.of(dialogContext).textTheme.bodySmall?.copyWith(
                     color: Theme.of(dialogContext).colorScheme.onSurfaceVariant,
                   ),
@@ -264,7 +264,7 @@ class _DataHealthPageState extends ConsumerState<DataHealthPage> {
                         const SizedBox(width: 10),
                         Expanded(
                           child: Text(
-                            '核对口径：普通/储蓄/投资账户核对「期初金额 + 流水变动」；借贷账户重算本金与结清状态；信用账户的授信额度绝不计入余额，建卡期初欠款仅作提示、绝不自动覆盖。',
+                            '核对口径：普通/储蓄/投资账户核对「期初金额 + 流水变动」；借贷账户重算本金与结清状态；信用账户的授信额度不计入余额，建卡期初欠款仅作提示、不会自动覆盖。',
                             style: theme.textTheme.bodySmall?.copyWith(
                               color: scheme.onSurfaceVariant,
                             ),

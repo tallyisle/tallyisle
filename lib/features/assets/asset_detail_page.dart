@@ -81,7 +81,7 @@ Money _parseAmount(String text) {
 Future<int> _readCurrentBookId(AppDatabase db) async {
   final pref = await (db.select(
     db.preferences,
-  )..where((t) => t.key.equals('current_book_id'))).getSingleOrNull();
+  )..where((t) => t.key.equals(prefKeyCurrentBookId))).getSingleOrNull();
   final parsed = int.tryParse(pref?.value ?? '');
   if (parsed != null) return parsed;
   final firstBook =
