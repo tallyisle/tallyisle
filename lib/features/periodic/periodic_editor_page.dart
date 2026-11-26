@@ -375,94 +375,52 @@ class _PeriodicEditorPageState extends ConsumerState<PeriodicEditorPage> {
           final row = Row(
             children: [
               Expanded(
-                child: InputDecorator(
-                  decoration: isDesktop
-                      ? const InputDecoration(
-                          labelText: '月份',
-                          border: OutlineInputBorder(),
-                          contentPadding: EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 16,
-                          ),
-                        )
-                      : const InputDecoration(labelText: '月份'),
-                  child: DropdownButtonHideUnderline(
-                    child: DropdownButton<int>(
-                      key: const Key('yearly_month_picker'),
-                      value: selectedMonth,
-                      isDense: true,
-                      isExpanded: true,
-                      items: [
-                        for (var m = 1; m <= 12; m++)
-                          DropdownMenuItem(value: m, child: Text('$m 月')),
-                      ],
-                      onChanged: (val) {
-                        if (val != null) {
-                          setDialogState(() {
-                            selectedMonth = val;
-                            final nextMax = daysInMonth(2024, selectedMonth);
-                            if (selectedDay > nextMax) {
-                              selectedDay = nextMax;
-                            }
-                          });
-                        }
-                      },
-                    ),
-                  ),
+                child: TallySelectField<int>(
+                  key: const Key('yearly_month_picker'),
+                  label: '月份',
+                  value: selectedMonth,
+                  isDense: true,
+                  options: [
+                    for (var m = 1; m <= 12; m++)
+                      TallySelectOption(value: m, label: '$m 月'),
+                  ],
+                  onChanged: (val) {
+                    setDialogState(() {
+                      selectedMonth = val;
+                      final nextMax = daysInMonth(2024, selectedMonth);
+                      if (selectedDay > nextMax) {
+                        selectedDay = nextMax;
+                      }
+                    });
+                  },
                 ),
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: InputDecorator(
-                  decoration: isDesktop
-                      ? const InputDecoration(
-                          labelText: '日期',
-                          border: OutlineInputBorder(),
-                          contentPadding: EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 16,
-                          ),
-                        )
-                      : const InputDecoration(labelText: '日期'),
-                  child: DropdownButtonHideUnderline(
-                    child: DropdownButton<int>(
-                      key: const Key('yearly_day_picker'),
-                      value: selectedDay,
-                      isDense: true,
-                      isExpanded: true,
-                      items: [
-                        for (var d = 1; d <= maxDay; d++)
-                          DropdownMenuItem(
-                            value: d,
-                            child: Text(
-                              selectedMonth == 2 && d == 29
-                                  ? '29 日(闰)'
-                                  : '$d 日',
-                            ),
-                          ),
-                      ],
-                      onChanged: (val) {
-                        if (val != null) {
-                          setDialogState(() => selectedDay = val);
-                        }
-                      },
-                    ),
-                  ),
+                child: TallySelectField<int>(
+                  key: const Key('yearly_day_picker'),
+                  label: '日期',
+                  value: selectedDay,
+                  isDense: true,
+                  options: [
+                    for (var d = 1; d <= maxDay; d++)
+                      TallySelectOption(
+                        value: d,
+                        label: selectedMonth == 2 && d == 29
+                            ? '29 日(闰)'
+                            : '$d 日',
+                      ),
+                  ],
+                  onChanged: (val) {
+                    setDialogState(() => selectedDay = val);
+                  },
                 ),
               ),
             ],
           );
           return AlertDialog(
             title: const Text('添加每年记账月日'),
-            content: isDesktop
-                ? ConstrainedBox(
-                    constraints: const BoxConstraints(
-                      minWidth: 380,
-                      maxWidth: 420,
-                    ),
-                    child: row,
-                  )
-                : row,
+            content: SizedBox(width: isDesktop ? 400 : 300, child: row),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(dialogCtx),
@@ -543,121 +501,132 @@ class _PeriodicEditorPageState extends ConsumerState<PeriodicEditorPage> {
                           ? const EdgeInsets.fromLTRB(16, 12, 16, 16)
                           : const EdgeInsets.all(16),
                       children: [
-                        Wrap(
-                          spacing: 8,
+                        TallyFormCard(
+                          title: '账单信息',
+                          spacing: 12,
                           children: [
-                            for (final (val, label) in const [
-                              (RecordType.expense, '支出'),
-                              (RecordType.income, '收入'),
-                              (RecordType.transfer, '转账'),
-                            ])
-                              ChoiceChip(
-                                key: Key('periodic_type_$val'),
-                                label: Text(label),
-                                selected: _recordType == val,
-                                onSelected: _busy
-                                    ? null
-                                    : (_) => setState(() {
-                                        _recordType = val;
-                                        _categoryId = null;
-                                        _parentCatId = null;
-                                      }),
+                            Wrap(
+                              spacing: 8,
+                              children: [
+                                for (final (val, label) in const [
+                                  (RecordType.expense, '支出'),
+                                  (RecordType.income, '收入'),
+                                  (RecordType.transfer, '转账'),
+                                ])
+                                  ChoiceChip(
+                                    key: Key('periodic_type_$val'),
+                                    label: Text(label),
+                                    selected: _recordType == val,
+                                    onSelected: _busy
+                                        ? null
+                                        : (_) => setState(() {
+                                            _recordType = val;
+                                            _categoryId = null;
+                                            _parentCatId = null;
+                                          }),
+                                  ),
+                              ],
+                            ),
+                            TextField(
+                              key: const Key('periodic_amount_input'),
+                              controller: _amountCtrl,
+                              enabled: !_busy,
+                              keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                    decimal: true,
+                                  ),
+                              inputFormatters: _amountFormatters,
+                              style: Theme.of(context).textTheme.headlineSmall,
+                              decoration: InputDecoration(
+                                labelText: '每期金额',
+                                prefixText: '${_currencyPrefix(allAssets)} ',
+                              ),
+                            ),
+                            if (_recordType == RecordType.transfer)
+                              ..._buildTransferSection(allAssets, activeAssets)
+                            else
+                              ..._buildCategoryAndAssetSection(
+                                categories,
+                                allAssets,
+                                activeAssets,
                               ),
                           ],
                         ),
-                        const SizedBox(height: 16),
-                        TextField(
-                          key: const Key('periodic_amount_input'),
-                          controller: _amountCtrl,
-                          enabled: !_busy,
-                          keyboardType: const TextInputType.numberWithOptions(
-                            decimal: true,
-                          ),
-                          inputFormatters: _amountFormatters,
-                          style: Theme.of(context).textTheme.headlineSmall,
-                          decoration: InputDecoration(
-                            labelText: '每期金额',
-                            prefixText: '${_currencyPrefix(allAssets)} ',
-                            border: const OutlineInputBorder(),
-                          ),
+                        const SizedBox(height: 12),
+                        TallyFormCard(
+                          title: '重复周期',
+                          spacing: 12,
+                          children: _buildCycleSection(),
                         ),
-                        const SizedBox(height: 16),
-                        if (_recordType == RecordType.transfer)
-                          ..._buildTransferSection(allAssets, activeAssets)
-                        else
-                          ..._buildCategoryAndAssetSection(
-                            categories,
-                            allAssets,
-                            activeAssets,
-                          ),
-                        const SizedBox(height: 24),
-                        ..._buildCycleSection(),
-                        const SizedBox(height: 24),
-                        ..._buildScheduleBoundsSection(),
-                        const SizedBox(height: 24),
-                        TextField(
-                          key: const Key('periodic_remark_input'),
-                          controller: _remarkCtrl,
-                          enabled: !_busy,
-                          maxLength: 200,
-                          decoration: isDesktop
-                              ? const InputDecoration(
-                                  labelText: '备注',
-                                  border: OutlineInputBorder(),
-                                  contentPadding: EdgeInsets.symmetric(
-                                    horizontal: 12,
-                                    vertical: 16,
-                                  ),
-                                )
-                              : const InputDecoration(labelText: '备注'),
+                        const SizedBox(height: 12),
+                        TallyFormCard(
+                          title: '起止与时间',
+                          spacing: 12,
+                          children: _buildScheduleBoundsSection(),
                         ),
-                        SwitchListTile(
-                          key: const Key('periodic_exclude_exin_switch'),
-                          contentPadding: EdgeInsets.zero,
-                          title: const Text('不计入收支'),
-                          value: _excludeExIn,
-                          onChanged: _busy
-                              ? null
-                              : (v) => setState(() => _excludeExIn = v),
-                        ),
-                        SwitchListTile(
-                          key: const Key('periodic_exclude_budget_switch'),
-                          contentPadding: EdgeInsets.zero,
-                          title: const Text('不计入预算'),
-                          value: _excludeBudget,
-                          onChanged: _busy
-                              ? null
-                              : (v) => setState(() => _excludeBudget = v),
-                        ),
-                        if (tags.isNotEmpty) ...[
-                          const SizedBox(height: 8),
-                          Text(
-                            '标签',
-                            style: Theme.of(context).textTheme.labelLarge,
-                          ),
-                          const SizedBox(height: 8),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: [
-                              for (final t in tags)
-                                FilterChip(
-                                  key: Key('periodic_tag_${t.name}'),
-                                  label: Text(t.name),
-                                  selected: _selectedTagIds.contains(t.tagId),
-                                  onSelected: _busy
-                                      ? null
-                                      : (sel) => setState(() {
-                                          if (sel) {
-                                            _selectedTagIds.add(t.tagId);
-                                          } else {
-                                            _selectedTagIds.remove(t.tagId);
-                                          }
-                                        }),
-                                ),
+                        const SizedBox(height: 12),
+                        TallyFormCard(
+                          title: '备注与统计',
+                          spacing: 8,
+                          children: [
+                            TextField(
+                              key: const Key('periodic_remark_input'),
+                              controller: _remarkCtrl,
+                              enabled: !_busy,
+                              maxLength: 200,
+                              decoration: const InputDecoration(
+                                labelText: '备注',
+                              ),
+                            ),
+                            SwitchListTile(
+                              key: const Key('periodic_exclude_exin_switch'),
+                              contentPadding: EdgeInsets.zero,
+                              title: const Text('不计入收支'),
+                              value: _excludeExIn,
+                              onChanged: _busy
+                                  ? null
+                                  : (v) => setState(() => _excludeExIn = v),
+                            ),
+                            SwitchListTile(
+                              key: const Key('periodic_exclude_budget_switch'),
+                              contentPadding: EdgeInsets.zero,
+                              title: const Text('不计入预算'),
+                              value: _excludeBudget,
+                              onChanged: _busy
+                                  ? null
+                                  : (v) => setState(() => _excludeBudget = v),
+                            ),
+                            if (tags.isNotEmpty) ...[
+                              Text(
+                                '标签',
+                                style: Theme.of(context).textTheme.labelLarge,
+                              ),
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: [
+                                  for (final t in tags)
+                                    FilterChip(
+                                      key: Key('periodic_tag_${t.name}'),
+                                      label: Text(t.name),
+                                      selected: _selectedTagIds.contains(
+                                        t.tagId,
+                                      ),
+                                      onSelected: _busy
+                                          ? null
+                                          : (sel) => setState(() {
+                                              if (sel) {
+                                                _selectedTagIds.add(t.tagId);
+                                              } else {
+                                                _selectedTagIds.remove(t.tagId);
+                                              }
+                                            }),
+                                    ),
+                                ],
+                              ),
                             ],
-                          ),
-                        ],
+                          ],
+                        ),
                         if (_error != null)
                           Padding(
                             padding: const EdgeInsets.only(top: 12),
@@ -678,7 +647,7 @@ class _PeriodicEditorPageState extends ConsumerState<PeriodicEditorPage> {
     );
   }
 
-  DropdownMenuItem<int>? _fallbackAssetItem(
+  TallySelectOption<int>? _fallbackAssetOption(
     int selectedId,
     List<Asset> allAssets,
     List<Asset> activeAssets,
@@ -690,7 +659,7 @@ class _PeriodicEditorPageState extends ConsumerState<PeriodicEditorPage> {
     final label = inactive != null
         ? '${inactive.name} (已停用)'
         : '账户#$selectedId (已删除)';
-    return DropdownMenuItem<int>(value: selectedId, child: Text(label));
+    return TallySelectOption<int>(value: selectedId, label: label);
   }
 
   List<Widget> _buildCategoryAndAssetSection(
@@ -715,84 +684,76 @@ class _PeriodicEditorPageState extends ConsumerState<PeriodicEditorPage> {
         ? const <RecordCategory>[]
         : all.where((c) => c.parentCatId == _parentCatId && !c.isHide).toList();
 
-    final fallbackAsset = _fallbackAssetItem(_assetId, allAssets, activeAssets);
+    final fallbackAsset = _fallbackAssetOption(
+      _assetId,
+      allAssets,
+      activeAssets,
+    );
 
     return [
-      Text('分类', style: Theme.of(context).textTheme.labelLarge),
-      const SizedBox(height: 8),
-      Wrap(
-        spacing: 8,
-        runSpacing: 8,
+      Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          for (final c in topCats)
-            ChoiceChip(
-              key: Key('periodic_cat_${c.name}'),
-              label: Text(c.name),
-              selected: _parentCatId == c.id,
-              onSelected: _busy
-                  ? null
-                  : (_) => setState(() {
-                      _parentCatId = c.id;
-                      _categoryId = c.id;
-                    }),
+          Text('分类', style: Theme.of(context).textTheme.labelLarge),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final c in topCats)
+                ChoiceChip(
+                  key: Key('periodic_cat_${c.name}'),
+                  label: Text(c.name),
+                  selected: _parentCatId == c.id,
+                  onSelected: _busy
+                      ? null
+                      : (_) => setState(() {
+                          _parentCatId = c.id;
+                          _categoryId = c.id;
+                        }),
+                ),
+            ],
+          ),
+          if (subCats.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                ChoiceChip(
+                  key: const Key('periodic_subcat_all'),
+                  label: const Text('全部'),
+                  selected: _categoryId == _parentCatId,
+                  onSelected: _busy
+                      ? null
+                      : (_) => setState(() => _categoryId = _parentCatId),
+                ),
+                for (final s in subCats)
+                  ChoiceChip(
+                    key: Key('periodic_cat_${s.name}'),
+                    label: Text(s.name),
+                    selected: _categoryId == s.id,
+                    onSelected: _busy
+                        ? null
+                        : (_) => setState(() => _categoryId = s.id),
+                  ),
+              ],
             ),
+          ],
         ],
       ),
-      if (subCats.isNotEmpty) ...[
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            ChoiceChip(
-              key: const Key('periodic_subcat_all'),
-              label: const Text('全部'),
-              selected: _categoryId == _parentCatId,
-              onSelected: _busy
-                  ? null
-                  : (_) => setState(() => _categoryId = _parentCatId),
-            ),
-            for (final s in subCats)
-              ChoiceChip(
-                key: Key('periodic_cat_${s.name}'),
-                label: Text(s.name),
-                selected: _categoryId == s.id,
-                onSelected: _busy
-                    ? null
-                    : (_) => setState(() => _categoryId = s.id),
-              ),
-          ],
-        ),
-      ],
-      const SizedBox(height: 16),
-      InputDecorator(
-        decoration: DesktopAdaptive.isDesktop(context)
-            ? const InputDecoration(
-                labelText: '关联账户',
-                border: OutlineInputBorder(),
-                contentPadding: EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 16,
-                ),
-              )
-            : const InputDecoration(labelText: '关联账户'),
-        child: DropdownButtonHideUnderline(
-          child: DropdownButton<int>(
-            key: const Key('periodic_asset_picker'),
-            value: _assetId,
-            isDense: true,
-            isExpanded: true,
-            items: [
-              const DropdownMenuItem(value: noRef, child: Text('不选账户')),
-              for (final a in activeAssets)
-                DropdownMenuItem(value: a.id, child: Text(a.name)),
-              if (fallbackAsset != null) fallbackAsset,
-            ],
-            onChanged: _busy
-                ? null
-                : (v) => setState(() => _assetId = v ?? noRef),
-          ),
-        ),
+      TallySelectField<int>(
+        key: const Key('periodic_asset_picker'),
+        label: '关联账户',
+        value: _assetId,
+        enabled: !_busy,
+        options: [
+          const TallySelectOption(value: noRef, label: '不选账户'),
+          for (final a in activeAssets)
+            TallySelectOption(value: a.id, label: a.name),
+          if (fallbackAsset != null) fallbackAsset,
+        ],
+        onChanged: (v) => setState(() => _assetId = v),
       ),
     ];
   }
@@ -801,97 +762,57 @@ class _PeriodicEditorPageState extends ConsumerState<PeriodicEditorPage> {
     List<Asset> allAssets,
     List<Asset> activeAssets,
   ) {
-    final fromFallback = _fallbackAssetItem(
+    final fromFallback = _fallbackAssetOption(
       _fromAssetId,
       allAssets,
       activeAssets,
     );
-    final toFallback = _fallbackAssetItem(_toAssetId, allAssets, activeAssets);
+    final toFallback = _fallbackAssetOption(
+      _toAssetId,
+      allAssets,
+      activeAssets,
+    );
     final fromValue = _fromAssetId == noRef ? null : _fromAssetId;
     final toValue = _toAssetId == noRef ? null : _toAssetId;
 
-    final isDesktop = DesktopAdaptive.isDesktop(context);
     return [
-      if (activeAssets.length < 2)
-        const Padding(
-          padding: EdgeInsets.only(bottom: 8),
-          child: Text('周期转账至少需要两个启用状态的账户。'),
-        ),
-      InputDecorator(
-        decoration: isDesktop
-            ? const InputDecoration(
-                labelText: '转出账户',
-                border: OutlineInputBorder(),
-                contentPadding: EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 16,
-                ),
-              )
-            : const InputDecoration(labelText: '转出账户'),
-        child: DropdownButtonHideUnderline(
-          child: DropdownButton<int>(
-            key: const Key('periodic_from_asset_picker'),
-            value: fromValue,
-            isDense: true,
-            isExpanded: true,
-            items: [
-              for (final a in activeAssets)
-                DropdownMenuItem(value: a.id, child: Text(a.name)),
-              if (fromFallback != null) fromFallback,
-            ],
-            onChanged: _busy
-                ? null
-                : (v) => setState(() => _fromAssetId = v ?? noRef),
-          ),
-        ),
+      if (activeAssets.length < 2) const Text('周期转账至少需要两个启用状态的账户。'),
+      TallySelectField<int>(
+        key: const Key('periodic_from_asset_picker'),
+        label: '转出账户',
+        hintText: '请选择转出账户',
+        value: fromValue,
+        enabled: !_busy,
+        options: [
+          for (final a in activeAssets)
+            TallySelectOption(value: a.id, label: a.name),
+          if (fromFallback != null) fromFallback,
+        ],
+        onChanged: (v) => setState(() => _fromAssetId = v),
       ),
-      const SizedBox(height: 12),
-      InputDecorator(
-        decoration: isDesktop
-            ? const InputDecoration(
-                labelText: '转入账户',
-                border: OutlineInputBorder(),
-                contentPadding: EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 16,
-                ),
-              )
-            : const InputDecoration(labelText: '转入账户'),
-        child: DropdownButtonHideUnderline(
-          child: DropdownButton<int>(
-            key: const Key('periodic_to_asset_picker'),
-            value: toValue,
-            isDense: true,
-            isExpanded: true,
-            items: [
-              for (final a in activeAssets)
-                DropdownMenuItem(value: a.id, child: Text(a.name)),
-              if (toFallback != null) toFallback,
-            ],
-            onChanged: _busy
-                ? null
-                : (v) => setState(() => _toAssetId = v ?? noRef),
-          ),
-        ),
+      TallySelectField<int>(
+        key: const Key('periodic_to_asset_picker'),
+        label: '转入账户',
+        hintText: '请选择转入账户',
+        value: toValue,
+        enabled: !_busy,
+        options: [
+          for (final a in activeAssets)
+            TallySelectOption(value: a.id, label: a.name),
+          if (toFallback != null) toFallback,
+        ],
+        onChanged: (v) => setState(() => _toAssetId = v),
       ),
-      const SizedBox(height: 12),
       TextField(
         key: const Key('periodic_fee_input'),
         controller: _feeCtrl,
         enabled: !_busy,
         keyboardType: const TextInputType.numberWithOptions(decimal: true),
         inputFormatters: _amountFormatters,
-        decoration: isDesktop
-            ? const InputDecoration(
-                labelText: '转账手续费（可选）',
-                prefixText: '¥ ',
-                border: OutlineInputBorder(),
-                contentPadding: EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 16,
-                ),
-              )
-            : const InputDecoration(labelText: '转账手续费（可选）', prefixText: '¥ '),
+        decoration: const InputDecoration(
+          labelText: '转账手续费（可选）',
+          prefixText: '¥ ',
+        ),
       ),
       SwitchListTile(
         key: const Key('periodic_fee_from_target_switch'),
@@ -913,8 +834,6 @@ class _PeriodicEditorPageState extends ConsumerState<PeriodicEditorPage> {
     };
 
     return [
-      Text('重复周期', style: Theme.of(context).textTheme.titleMedium),
-      const SizedBox(height: 8),
       Wrap(
         spacing: 8,
         children: [
@@ -929,203 +848,201 @@ class _PeriodicEditorPageState extends ConsumerState<PeriodicEditorPage> {
             ),
         ],
       ),
-      const SizedBox(height: 12),
       TextField(
         key: const Key('periodic_frequency_input'),
         controller: _freqCtrl,
         enabled: !_busy,
         keyboardType: TextInputType.number,
         inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-        decoration: DesktopAdaptive.isDesktop(context)
-            ? InputDecoration(
-                labelText: '重复间隔步长',
-                helperText: freqHint,
-                border: const OutlineInputBorder(),
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 16,
-                ),
-              )
-            : InputDecoration(labelText: '重复间隔步长', helperText: freqHint),
+        decoration: InputDecoration(labelText: '重复间隔步长', helperText: freqHint),
       ),
-      const SizedBox(height: 12),
-      if (_periodType == PeriodType.weekly) ...[
-        const Text('选择星期（可多选）'),
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
+      if (_periodType == PeriodType.weekly)
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            for (final (d, name) in const [
-              ('1', '周一'),
-              ('2', '周二'),
-              ('3', '周三'),
-              ('4', '周四'),
-              ('5', '周五'),
-              ('6', '周六'),
-              ('7', '周日'),
-            ])
-              FilterChip(
-                key: Key('weekly_day_$d'),
-                label: Text(name),
-                selected: _weeklyDays.contains(d),
-                onSelected: _busy
-                    ? null
-                    : (sel) => setState(() {
-                        if (sel) {
-                          _weeklyDays.add(d);
-                        } else if (_weeklyDays.length > 1) {
-                          _weeklyDays.remove(d);
-                        }
-                      }),
-              ),
+            const Text('选择星期（可多选）'),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final (d, name) in const [
+                  ('1', '周一'),
+                  ('2', '周二'),
+                  ('3', '周三'),
+                  ('4', '周四'),
+                  ('5', '周五'),
+                  ('6', '周六'),
+                  ('7', '周日'),
+                ])
+                  FilterChip(
+                    key: Key('weekly_day_$d'),
+                    label: Text(name),
+                    selected: _weeklyDays.contains(d),
+                    onSelected: _busy
+                        ? null
+                        : (sel) => setState(() {
+                            if (sel) {
+                              _weeklyDays.add(d);
+                            } else if (_weeklyDays.length > 1) {
+                              _weeklyDays.remove(d);
+                            }
+                          }),
+                  ),
+              ],
+            ),
           ],
-        ),
-      ] else if (_periodType == PeriodType.monthly) ...[
-        const Text('选择每月日期（可多选，不足月自动取当月末日并锚定初始日）'),
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 6,
-          runSpacing: 6,
+        )
+      else if (_periodType == PeriodType.monthly)
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            for (var d = 1; d <= 31; d++)
-              FilterChip(
-                key: Key('monthly_day_$d'),
-                label: Text('$d日'),
-                selected: _monthlyDays.contains('$d'),
-                onSelected: _busy
-                    ? null
-                    : (sel) => setState(() {
-                        if (sel) {
-                          _monthlyDays.add('$d');
-                        } else if (_monthlyDays.length > 1) {
-                          _monthlyDays.remove('$d');
-                        }
-                      }),
-              ),
-            FilterChip(
-              key: const Key('monthly_day_-12'),
-              label: const Text('月末'),
-              selected: _monthlyDays.contains(monthEndToken),
-              onSelected: _busy
-                  ? null
-                  : (sel) => setState(() {
-                      if (sel) {
-                        _monthlyDays.add(monthEndToken);
-                      } else if (_monthlyDays.length > 1) {
-                        _monthlyDays.remove(monthEndToken);
-                      }
-                    }),
+            const Text('选择每月日期（可多选，不足月自动取当月末日并锚定初始日）'),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                for (var d = 1; d <= 31; d++)
+                  FilterChip(
+                    key: Key('monthly_day_$d'),
+                    label: Text('$d日'),
+                    selected: _monthlyDays.contains('$d'),
+                    onSelected: _busy
+                        ? null
+                        : (sel) => setState(() {
+                            if (sel) {
+                              _monthlyDays.add('$d');
+                            } else if (_monthlyDays.length > 1) {
+                              _monthlyDays.remove('$d');
+                            }
+                          }),
+                  ),
+                FilterChip(
+                  key: const Key('monthly_day_-12'),
+                  label: const Text('月末'),
+                  selected: _monthlyDays.contains(monthEndToken),
+                  onSelected: _busy
+                      ? null
+                      : (sel) => setState(() {
+                          if (sel) {
+                            _monthlyDays.add(monthEndToken);
+                          } else if (_monthlyDays.length > 1) {
+                            _monthlyDays.remove(monthEndToken);
+                          }
+                        }),
+                ),
+              ],
+            ),
+          ],
+        )
+      else if (_periodType == PeriodType.yearly)
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Expanded(child: Text('选择每年月日（02-29 平年自动于 02-28 触发）')),
+                const SizedBox(width: 8),
+                TallySoftButton.icon(
+                  key: const Key('add_yearly_date_button'),
+                  compact: true,
+                  onPressed: _busy ? null : _showAddYearlyDateDialog,
+                  icon: const Icon(Icons.add, size: 18),
+                  label: const Text('添加月日'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final md in _yearlyDates)
+                  InputChip(
+                    key: Key('yearly_date_chip_$md'),
+                    label: Text(md),
+                    onDeleted: _busy || _yearlyDates.length <= 1
+                        ? null
+                        : () => setState(() {
+                            _yearlyDates = [
+                              for (final x in _yearlyDates)
+                                if (x != md) x,
+                            ];
+                          }),
+                  ),
+              ],
             ),
           ],
         ),
-      ] else if (_periodType == PeriodType.yearly) ...[
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            const Expanded(child: Text('选择每年月日（02-29 平年自动于 02-28 触发）')),
-            TextButton.icon(
-              key: const Key('add_yearly_date_button'),
-              onPressed: _busy ? null : _showAddYearlyDateDialog,
-              icon: const Icon(Icons.add, size: 18),
-              label: const Text('添加月日'),
-            ),
-          ],
-        ),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            for (final md in _yearlyDates)
-              InputChip(
-                key: Key('yearly_date_chip_$md'),
-                label: Text(md),
-                onDeleted: _busy || _yearlyDates.length <= 1
-                    ? null
-                    : () => setState(() {
-                        _yearlyDates = [
-                          for (final x in _yearlyDates)
-                            if (x != md) x,
-                        ];
-                      }),
-              ),
-          ],
-        ),
-      ],
     ];
   }
 
   List<Widget> _buildScheduleBoundsSection() {
     return [
-      ListTile(
-        key: const Key('periodic_start_date_tile'),
-        contentPadding: EdgeInsets.zero,
+      TallyFormTile(
+        tileKey: const Key('periodic_start_date_tile'),
         leading: const Icon(Icons.play_circle_outline),
-        title: const Text('开始日期'),
+        title: '开始日期',
         trailing: Text(_startDate.formatIso()),
-        onTap: _busy ? null : _pickStartDate,
+        enabled: !_busy,
+        onTap: _pickStartDate,
       ),
-      const SizedBox(height: 8),
-      Text('结束条件', style: Theme.of(context).textTheme.labelLarge),
-      const SizedBox(height: 8),
-      Wrap(
-        spacing: 8,
+      Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          ChoiceChip(
-            key: const Key('periodic_end_mode_0'),
-            label: const Text('永不结束'),
-            selected: _endMode == PeriodEndMode.never,
-            onSelected: _busy
-                ? null
-                : (_) => setState(() => _endMode = PeriodEndMode.never),
-          ),
-          ChoiceChip(
-            key: const Key('periodic_end_mode_1'),
-            label: const Text('按次数结束'),
-            selected: _endMode == PeriodEndMode.count,
-            onSelected: _busy
-                ? null
-                : (_) => setState(() => _endMode = PeriodEndMode.count),
-          ),
-          ChoiceChip(
-            key: const Key('periodic_end_mode_2'),
-            label: const Text('按截止日期'),
-            selected: _endMode == PeriodEndMode.date,
-            onSelected: _busy
-                ? null
-                : (_) => setState(() => _endMode = PeriodEndMode.date),
+          Text('结束条件', style: Theme.of(context).textTheme.labelLarge),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            children: [
+              ChoiceChip(
+                key: const Key('periodic_end_mode_0'),
+                label: const Text('永不结束'),
+                selected: _endMode == PeriodEndMode.never,
+                onSelected: _busy
+                    ? null
+                    : (_) => setState(() => _endMode = PeriodEndMode.never),
+              ),
+              ChoiceChip(
+                key: const Key('periodic_end_mode_1'),
+                label: const Text('按次数结束'),
+                selected: _endMode == PeriodEndMode.count,
+                onSelected: _busy
+                    ? null
+                    : (_) => setState(() => _endMode = PeriodEndMode.count),
+              ),
+              ChoiceChip(
+                key: const Key('periodic_end_mode_2'),
+                label: const Text('按截止日期'),
+                selected: _endMode == PeriodEndMode.date,
+                onSelected: _busy
+                    ? null
+                    : (_) => setState(() => _endMode = PeriodEndMode.date),
+              ),
+            ],
           ),
         ],
       ),
-      if (_endMode == PeriodEndMode.count) ...[
-        const SizedBox(height: 12),
+      if (_endMode == PeriodEndMode.count)
         TextField(
           key: const Key('periodic_end_count_input'),
           controller: _endCountCtrl,
           enabled: !_busy,
           keyboardType: TextInputType.number,
           inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-          decoration: DesktopAdaptive.isDesktop(context)
-              ? const InputDecoration(
-                  labelText: '累计执行次数上限（1–366）',
-                  border: OutlineInputBorder(),
-                  contentPadding: EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 16,
-                  ),
-                )
-              : const InputDecoration(labelText: '累计执行次数上限（1–366）'),
-        ),
-      ] else if (_endMode == PeriodEndMode.date) ...[
-        ListTile(
-          key: const Key('periodic_end_date_tile'),
-          contentPadding: EdgeInsets.zero,
+          decoration: const InputDecoration(labelText: '累计执行次数上限（1–366）'),
+        )
+      else if (_endMode == PeriodEndMode.date)
+        TallyFormTile(
+          tileKey: const Key('periodic_end_date_tile'),
           leading: const Icon(Icons.event_busy_outlined),
-          title: const Text('截止日期'),
+          title: '截止日期',
           trailing: Text(_endDate.formatIso()),
-          onTap: _busy ? null : _pickEndDate,
+          enabled: !_busy,
+          onTap: _pickEndDate,
         ),
-      ],
       SwitchListTile(
         key: const Key('periodic_rte_switch'),
         contentPadding: EdgeInsets.zero,
@@ -1135,13 +1052,13 @@ class _PeriodicEditorPageState extends ConsumerState<PeriodicEditorPage> {
         onChanged: _busy ? null : (v) => setState(() => _recordTimeEnabled = v),
       ),
       if (_recordTimeEnabled)
-        ListTile(
-          key: const Key('periodic_rt_tile'),
-          contentPadding: EdgeInsets.zero,
+        TallyFormTile(
+          tileKey: const Key('periodic_rt_tile'),
           leading: const Icon(Icons.access_time),
-          title: const Text('记账时间'),
+          title: '记账时间',
           trailing: Text(formatHourMinute(_rtHour, _rtMinute)),
-          onTap: _busy ? null : _pickRecordTime,
+          enabled: !_busy,
+          onTap: _pickRecordTime,
         ),
     ];
   }

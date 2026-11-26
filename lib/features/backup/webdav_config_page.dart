@@ -270,116 +270,95 @@ class _WebDavConfigPageState extends ConsumerState<WebDavConfigPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          TextField(
-            key: const Key('webdav_url_input'),
-            controller: _urlController,
-            enabled: !_busy,
-            keyboardType: TextInputType.url,
-            onChanged: (_) => _userTouched = true,
-            decoration: InputDecoration(
-              labelText: '服务器地址',
-              hintText: 'https://dav.jianguoyun.com/dav/',
-              border: const OutlineInputBorder(),
-              contentPadding: isDesktop
-                  ? const EdgeInsets.symmetric(horizontal: 12, vertical: 16)
-                  : null,
-            ),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            key: const Key('webdav_username_input'),
-            controller: _usernameController,
-            enabled: !_busy,
-            onChanged: (_) => _userTouched = true,
-            decoration: InputDecoration(
-              labelText: '用户名 / 账号',
-              border: const OutlineInputBorder(),
-              contentPadding: isDesktop
-                  ? const EdgeInsets.symmetric(horizontal: 12, vertical: 16)
-                  : null,
-            ),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            key: const Key('webdav_password_input'),
-            controller: _passwordController,
-            enabled: !_busy,
-            obscureText: _obscurePassword,
-            onChanged: (_) => _userTouched = true,
-            decoration: InputDecoration(
-              labelText: '密码 / 应用专用密码',
-              border: const OutlineInputBorder(),
-              contentPadding: isDesktop
-                  ? const EdgeInsets.symmetric(horizontal: 12, vertical: 16)
-                  : null,
-              suffixIcon: IconButton(
-                visualDensity: isDesktop ? VisualDensity.compact : null,
-                icon: Icon(
-                  _obscurePassword ? Icons.visibility : Icons.visibility_off,
+          TallyFormCard(
+            title: '服务器连接',
+            spacing: 12,
+            children: [
+              TextField(
+                key: const Key('webdav_url_input'),
+                controller: _urlController,
+                enabled: !_busy,
+                keyboardType: TextInputType.url,
+                onChanged: (_) => _userTouched = true,
+                decoration: const InputDecoration(
+                  labelText: '服务器地址',
+                  hintText: 'https://dav.jianguoyun.com/dav/',
                 ),
-                onPressed: () =>
-                    setState(() => _obscurePassword = !_obscurePassword),
               ),
-            ),
+              TextField(
+                key: const Key('webdav_username_input'),
+                controller: _usernameController,
+                enabled: !_busy,
+                onChanged: (_) => _userTouched = true,
+                decoration: const InputDecoration(labelText: '用户名 / 账号'),
+              ),
+              TextField(
+                key: const Key('webdav_password_input'),
+                controller: _passwordController,
+                enabled: !_busy,
+                obscureText: _obscurePassword,
+                onChanged: (_) => _userTouched = true,
+                decoration: InputDecoration(
+                  labelText: '密码 / 应用专用密码',
+                  suffixIcon: IconButton(
+                    visualDensity: isDesktop ? VisualDensity.compact : null,
+                    icon: Icon(
+                      _obscurePassword
+                          ? Icons.visibility
+                          : Icons.visibility_off,
+                    ),
+                    onPressed: () =>
+                        setState(() => _obscurePassword = !_obscurePassword),
+                  ),
+                ),
+              ),
+              TextField(
+                key: const Key('webdav_remote_dir_input'),
+                controller: _remoteDirController,
+                enabled: !_busy,
+                onChanged: (_) => _userTouched = true,
+                decoration: const InputDecoration(
+                  labelText: '远端存储目录',
+                  hintText: '/TallyIsle',
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 12),
-          TextField(
-            key: const Key('webdav_remote_dir_input'),
-            controller: _remoteDirController,
-            enabled: !_busy,
-            onChanged: (_) => _userTouched = true,
-            decoration: InputDecoration(
-              labelText: '远端存储目录',
-              hintText: '/TallyIsle',
-              border: const OutlineInputBorder(),
-              contentPadding: isDesktop
-                  ? const EdgeInsets.symmetric(horizontal: 12, vertical: 16)
-                  : null,
-            ),
-          ),
-          const SizedBox(height: 16),
-          InputDecorator(
-            decoration: InputDecoration(
-              labelText: '远端自动保留备份份数',
-              border: const OutlineInputBorder(),
-              contentPadding: isDesktop
-                  ? const EdgeInsets.symmetric(horizontal: 12, vertical: 16)
-                  : null,
-            ),
-            child: DropdownButtonHideUnderline(
-              child: DropdownButton<int>(
+          TallyFormCard(
+            title: '备份策略',
+            spacing: 8,
+            children: [
+              TallySelectField<int>(
                 key: const Key('webdav_keep_count_dropdown'),
-                isExpanded: true,
-                isDense: true,
+                label: '远端自动保留备份份数',
                 value: _keepCount,
-                items: [
+                enabled: !_busy,
+                options: [
                   for (final n in keepOptions)
-                    DropdownMenuItem<int>(value: n, child: Text('保留最近 $n 份备份')),
+                    TallySelectOption<int>(value: n, label: '保留最近 $n 份备份'),
                 ],
                 onChanged: _busy
                     ? null
                     : (val) {
-                        if (val != null) {
-                          _userTouched = true;
-                          setState(() => _keepCount = val);
-                        }
+                        _userTouched = true;
+                        setState(() => _keepCount = val);
                       },
               ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          SwitchListTile(
-            key: const Key('webdav_auto_backup_switch'),
-            contentPadding: EdgeInsets.zero,
-            title: const Text('开启自动静默云备份'),
-            subtitle: const Text('距上次备份超过 24 小时且本地产生新账单变动时自动上传'),
-            value: _autoBackupEnabled,
-            onChanged: _busy
-                ? null
-                : (val) {
-                    _userTouched = true;
-                    setState(() => _autoBackupEnabled = val);
-                  },
+              SwitchListTile(
+                key: const Key('webdav_auto_backup_switch'),
+                contentPadding: EdgeInsets.zero,
+                title: const Text('开启自动静默云备份'),
+                subtitle: const Text('距上次备份超过 24 小时且本地产生新账单变动时自动上传'),
+                value: _autoBackupEnabled,
+                onChanged: _busy
+                    ? null
+                    : (val) {
+                        _userTouched = true;
+                        setState(() => _autoBackupEnabled = val);
+                      },
+              ),
+            ],
           ),
           if (_testStatusMessage != null) ...[
             const SizedBox(height: 12),
@@ -390,7 +369,7 @@ class _WebDavConfigPageState extends ConsumerState<WebDavConfigPage> {
                 color: _testSucceeded
                     ? Colors.green.withValues(alpha: isDark ? 0.18 : 0.12)
                     : Theme.of(context).colorScheme.errorContainer,
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.circular(12),
               ),
               child: Text(
                 _testStatusMessage!,

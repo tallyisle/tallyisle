@@ -71,6 +71,7 @@ import 'package:tallyisle/features/calendar/calendar_page.dart';
 import 'package:tallyisle/features/categories/categories_page.dart';
 import 'package:tallyisle/features/category_transfer/category_transfer_page.dart';
 import 'package:tallyisle/features/common/desktop_modal_page.dart';
+import 'package:tallyisle/features/common/tally_form_fields.dart';
 import 'package:tallyisle/features/csv_transfer/csv_export_page.dart';
 import 'package:tallyisle/features/csv_transfer/csv_import_page.dart';
 import 'package:tallyisle/features/csv_transfer/import_batches_page.dart';
@@ -171,18 +172,14 @@ ThemeData _buildDesktopAppTheme(Brightness brightness) {
     primaryTextTheme: base.primaryTextTheme.apply(
       fontFamilyFallback: _desktopCjkFontFallback,
     ),
-    inputDecorationTheme: base.inputDecorationTheme.copyWith(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+    inputDecorationTheme: tallyInputDecorationTheme(
+      base.colorScheme,
+      isDesktop: true,
     ),
-    segmentedButtonTheme: const SegmentedButtonThemeData(
-      style: ButtonStyle(
-        visualDensity: VisualDensity.standard,
-        minimumSize: WidgetStatePropertyAll(Size(0, 36)),
-        padding: WidgetStatePropertyAll(
-          EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        ),
-        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-      ),
+    chipTheme: tallyChipTheme(base.colorScheme, isDesktop: true),
+    segmentedButtonTheme: tallySegmentedButtonTheme(
+      base.colorScheme,
+      isDesktop: true,
     ),
   );
 }
@@ -897,6 +894,22 @@ Rect _globalRectOf(RenderBox box) {
   );
 }
 
+Finder _resolveFieldBoxFinder(Key key) {
+  final target = find.byKey(key);
+  final matches = target.evaluate();
+  if (matches.isNotEmpty && matches.first.widget is TallySelectField) {
+    return target.first;
+  }
+  final ancestors = find.ancestor(
+    of: target,
+    matching: find.byType(InputDecorator),
+  );
+  if (ancestors.evaluate().isNotEmpty) {
+    return ancestors.first;
+  }
+  return target.first;
+}
+
 void _probeCurrentTree(
   WidgetTester tester, {
   required String scene,
@@ -932,6 +945,7 @@ void _probeCurrentTree(
     final isInteractiveControl =
         w is InputDecorator ||
         w is DropdownButton ||
+        w is TallySelectField ||
         w is SegmentedButton ||
         w is Chip ||
         w is ChoiceChip ||
@@ -986,7 +1000,9 @@ void _probeCurrentTree(
       void findContentChild(Element node) {
         if (contentChildEl != null) return;
         final nw = node.widget;
-        if (nw is DropdownButton || nw is EditableText) {
+        if (nw is DropdownButton ||
+            nw is TallySelectField ||
+            nw is EditableText) {
           contentChildEl = node;
           return;
         }
@@ -1286,12 +1302,9 @@ void main() {
 
               if (keyName == 'me-templates') {
                 // Hard assertion 1a: TemplatesPage book filter dropdown >= 44px
-                final tplDecorator = find
-                    .ancestor(
-                      of: find.byKey(const Key('templates_book_filter')),
-                      matching: find.byType(InputDecorator),
-                    )
-                    .first;
+                final tplDecorator = _resolveFieldBoxFinder(
+                  const Key('templates_book_filter'),
+                );
                 final tplHeight = tester.getSize(tplDecorator).height;
                 expect(
                   tplHeight,
@@ -1322,12 +1335,9 @@ void main() {
 
                 // Hard assertion 1b: RemarksPage filter dropdown & search box
                 // both >= 44px and row sibling height diff <= 2.0px
-                final remFilterDec = find
-                    .ancestor(
-                      of: find.byKey(const Key('remarks_category_filter')),
-                      matching: find.byType(InputDecorator),
-                    )
-                    .first;
+                final remFilterDec = _resolveFieldBoxFinder(
+                  const Key('remarks_category_filter'),
+                );
                 final remSearchDec = find
                     .descendant(
                       of: find.byKey(const Key('remarks_search_input')),

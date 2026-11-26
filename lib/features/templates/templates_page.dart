@@ -454,8 +454,9 @@ class _TemplatesPageState extends ConsumerState<TemplatesPage> {
           scrolledUnderElevation: isDesktop ? 0 : null,
           title: const Text('账单模板'),
           actions: [
-            TextButton.icon(
+            TallySoftButton.icon(
               key: const Key('open_remarks_page_button'),
+              compact: true,
               onPressed: () {
                 if (meScope != null) {
                   meScope.onSelectRoute('/remarks');
@@ -485,7 +486,8 @@ class _TemplatesPageState extends ConsumerState<TemplatesPage> {
                 label: const Text('新建模板'),
               ),
               const SizedBox(width: 12),
-            ],
+            ] else
+              const SizedBox(width: 12),
           ],
         ),
         floatingActionButton: isDesktop
@@ -503,73 +505,53 @@ class _TemplatesPageState extends ConsumerState<TemplatesPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-                  child: InputDecorator(
-                    decoration: const InputDecoration(
-                      labelText: '筛选账本',
-                      border: OutlineInputBorder(),
-                      contentPadding: EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 14,
-                      ),
+                TallyFormCard(
+                  margin: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                  padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
+                  spacing: 10,
+                  children: [
+                    TallySelectField<int>(
+                      key: const Key('templates_book_filter'),
+                      label: '筛选账本',
+                      value: controlledBookFilter,
+                      options: [
+                        const TallySelectOption<int>(
+                          value: _allBooksSentinel,
+                          label: '全部账本',
+                        ),
+                        for (final b in books)
+                          TallySelectOption<int>(value: b.id, label: b.name),
+                      ],
+                      onChanged: (v) => setState(() => _selectedBookFilter = v),
                     ),
-                    child: DropdownButtonHideUnderline(
-                      child: DropdownButton<int>(
-                        key: const Key('templates_book_filter'),
-                        isExpanded: true,
-                        isDense: true,
-                        value: controlledBookFilter,
-                        items: [
-                          const DropdownMenuItem<int>(
-                            value: _allBooksSentinel,
-                            child: Text('全部账本'),
-                          ),
-                          for (final b in books)
-                            DropdownMenuItem<int>(
-                              value: b.id,
-                              child: Text(b.name),
+                    SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        children: [
+                          for (final (value, label) in const <(int?, String)>[
+                            (null, '全部'),
+                            (RecordType.expense, '支出'),
+                            (RecordType.income, '收入'),
+                            (RecordType.transfer, '转账'),
+                            (RecordType.reimbursable, '报销'),
+                            (RecordType.advanceExpense, '预支'),
+                            (RecordType.advanceIncome, '预收'),
+                          ])
+                            Padding(
+                              padding: const EdgeInsets.only(right: 8),
+                              child: ChoiceChip(
+                                key: Key('template_filter_${value ?? "all"}'),
+                                label: Text(label),
+                                selected: selectedType == value,
+                                onSelected: (_) => ref
+                                    .read(templateTypeFilterProvider.notifier)
+                                    .select(value),
+                              ),
                             ),
                         ],
-                        onChanged: (v) {
-                          if (v != null) {
-                            setState(() => _selectedBookFilter = v);
-                          }
-                        },
                       ),
                     ),
-                  ),
-                ),
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 8,
-                  ),
-                  child: Row(
-                    children: [
-                      for (final (value, label) in const <(int?, String)>[
-                        (null, '全部'),
-                        (RecordType.expense, '支出'),
-                        (RecordType.income, '收入'),
-                        (RecordType.transfer, '转账'),
-                        (RecordType.reimbursable, '报销'),
-                        (RecordType.advanceExpense, '预支'),
-                        (RecordType.advanceIncome, '预收'),
-                      ])
-                        Padding(
-                          padding: const EdgeInsets.only(right: 8),
-                          child: ChoiceChip(
-                            key: Key('template_filter_${value ?? "all"}'),
-                            label: Text(label),
-                            selected: selectedType == value,
-                            onSelected: (_) => ref
-                                .read(templateTypeFilterProvider.notifier)
-                                .select(value),
-                          ),
-                        ),
-                    ],
-                  ),
+                  ],
                 ),
                 Expanded(
                   child: asyncBody(allTemplatesAsync, (rawAll) {
@@ -822,21 +804,11 @@ class _TemplateCardTile extends StatelessWidget {
                   spacing: 6,
                   runSpacing: 4,
                   children: [
-                    for (final tag in tagNames)
-                      Chip(
-                        visualDensity: VisualDensity.compact,
-                        label: Text('#$tag'),
-                      ),
+                    for (final tag in tagNames) _TemplateBadge(label: '#$tag'),
                     if (template.excludeExIn)
-                      const Chip(
-                        visualDensity: VisualDensity.compact,
-                        label: Text('不计收支'),
-                      ),
+                      const _TemplateBadge(label: '不计收支'),
                     if (template.excludeBudget)
-                      const Chip(
-                        visualDensity: VisualDensity.compact,
-                        label: Text('不计预算'),
-                      ),
+                      const _TemplateBadge(label: '不计预算'),
                   ],
                 ),
               ],
@@ -857,15 +829,11 @@ class _TemplateCardTile extends StatelessWidget {
                       alignment: Alignment.centerRight,
                       child: FittedBox(
                         fit: BoxFit.scaleDown,
-                        child: TextButton.icon(
+                        child: TallySoftButton.icon(
                           key: Key('template_apply_button_${template.id}'),
-                          style: TextButton.styleFrom(
-                            visualDensity: VisualDensity.compact,
-                            padding: const EdgeInsets.symmetric(horizontal: 8),
-                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          ),
+                          compact: true,
                           onPressed: busy ? null : onApplyInstant,
-                          icon: const Icon(Icons.playlist_add_check, size: 18),
+                          icon: const Icon(Icons.playlist_add_check, size: 16),
                           label: const Text(
                             '记一笔',
                             maxLines: 1,
@@ -893,6 +861,30 @@ class _TemplateCardTile extends StatelessWidget {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _TemplateBadge extends StatelessWidget {
+  const _TemplateBadge({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: tallyNestedSurfaceColor(theme.colorScheme),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Text(
+        label,
+        style: theme.textTheme.labelSmall?.copyWith(
+          color: theme.colorScheme.onSurfaceVariant,
         ),
       ),
     );

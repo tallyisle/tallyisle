@@ -10,6 +10,7 @@ import 'package:tallyisle/data/deposit/fixed_deposit_service.dart';
 import 'package:tallyisle/data/ledger/ledger_service.dart';
 import 'package:tallyisle/domain/model/codes.dart';
 import 'package:tallyisle/domain/rules/fixed_deposit.dart';
+import 'package:tallyisle/features/common/tally_form_fields.dart';
 import 'package:tallyisle/features/deposit/fixed_deposit_editor_page.dart';
 import 'package:tallyisle/features/deposit/fixed_deposit_page.dart';
 
@@ -305,7 +306,7 @@ void main() {
       await settle(tester);
       expect(tester.takeException(), isNull);
 
-      final currencyDropdown = tester.widget<DropdownButton<String>>(
+      final currencyDropdown = tester.widget<TallySelectField<String>>(
         find.byKey(const Key('deposit_currency_dropdown')),
       );
       expect(currencyDropdown.value, 'USD');
@@ -355,7 +356,7 @@ void main() {
       await tester.tap(find.text('建设银行卡B（CNY）').last);
       await settle(tester);
       expect(tester.takeException(), isNull);
-      expect(tester.widget<DropdownButton<int>>(fromFinder).value, cardB);
+      expect(tester.widget<TallySelectField<int>>(fromFinder).value, cardB);
 
       // 2. Switch hostAsset to cardB -> fromAsset must cleanly reset to noRef without assertion crash!
       final hostFinder = find.byKey(const Key('deposit_host_asset_dropdown'));
@@ -365,8 +366,8 @@ void main() {
       await tester.tap(find.text('建设银行卡B（CNY）').last);
       await settle(tester);
       expect(tester.takeException(), isNull);
-      expect(tester.widget<DropdownButton<int>>(hostFinder).value, cardB);
-      expect(tester.widget<DropdownButton<int>>(fromFinder).value, noRef);
+      expect(tester.widget<TallySelectField<int>>(hostFinder).value, cardB);
+      expect(tester.widget<TallySelectField<int>>(fromFinder).value, noRef);
 
       // Pop back to FixedDepositPage(initialAssetId: cardA)
       await tester.tap(find.byType(BackButton));
@@ -382,7 +383,7 @@ void main() {
       expect(tester.takeException(), isNull);
       expect(
         tester
-            .widget<DropdownButton<int>>(
+            .widget<TallySelectField<int>>(
               find.byKey(const Key('deposit_asset_filter')),
             )
             .value,

@@ -21,6 +21,8 @@ import '../features/common/tally_button.dart'
         tallySoftOutlinedButtonTheme,
         tallyTextButtonTheme;
 import '../features/common/tally_card.dart' show tallyCardTheme;
+import '../features/common/tally_form_fields.dart'
+    show tallyChipTheme, tallyInputDecorationTheme, tallySegmentedButtonTheme;
 import '../features/currencies/currency_rate_providers.dart';
 import '../features/deposit/fixed_deposit_providers.dart';
 import '../features/installment/installment_providers.dart';
@@ -52,10 +54,12 @@ ThemeData _buildDesktopTheme(ThemeData base) => base.copyWith(
   primaryTextTheme: base.primaryTextTheme.apply(
     fontFamilyFallback: _desktopCjkFontFallback,
   ),
-  inputDecorationTheme: base.inputDecorationTheme.copyWith(
-    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+  inputDecorationTheme: tallyInputDecorationTheme(
+    base.colorScheme,
+    isDesktop: true,
   ),
   cardTheme: tallyCardTheme(base.colorScheme),
+  chipTheme: tallyChipTheme(base.colorScheme, isDesktop: true),
   filledButtonTheme: tallyPrimaryButtonTheme(base.colorScheme, isDesktop: true),
   outlinedButtonTheme: tallySoftOutlinedButtonTheme(
     base.colorScheme,
@@ -63,15 +67,9 @@ ThemeData _buildDesktopTheme(ThemeData base) => base.copyWith(
   ),
   textButtonTheme: tallyTextButtonTheme(base.colorScheme),
   floatingActionButtonTheme: tallyFabTheme(base.colorScheme),
-  segmentedButtonTheme: const SegmentedButtonThemeData(
-    style: ButtonStyle(
-      visualDensity: VisualDensity.standard,
-      minimumSize: WidgetStatePropertyAll(Size(0, 36)),
-      padding: WidgetStatePropertyAll(
-        EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      ),
-      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-    ),
+  segmentedButtonTheme: tallySegmentedButtonTheme(
+    base.colorScheme,
+    isDesktop: true,
   ),
 );
 
@@ -575,16 +573,6 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
       AppThemeModePreference.dark => ThemeMode.dark,
     };
 
-    const segmentedButtonTheme = SegmentedButtonThemeData(
-      style: ButtonStyle(
-        visualDensity: VisualDensity.compact,
-        padding: WidgetStatePropertyAll(
-          EdgeInsets.symmetric(horizontal: 10, vertical: 0),
-        ),
-        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-      ),
-    );
-
     final lightScheme = ColorScheme.fromSeed(
       seedColor: seedColor,
       brightness: Brightness.light,
@@ -607,7 +595,15 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
       themeMode: themeMode,
       theme: ThemeData(
         colorScheme: lightScheme,
-        segmentedButtonTheme: segmentedButtonTheme,
+        inputDecorationTheme: tallyInputDecorationTheme(
+          lightScheme,
+          isDesktop: false,
+        ),
+        chipTheme: tallyChipTheme(lightScheme, isDesktop: false),
+        segmentedButtonTheme: tallySegmentedButtonTheme(
+          lightScheme,
+          isDesktop: false,
+        ),
         cardTheme: tallyCardTheme(lightScheme),
         filledButtonTheme: tallyPrimaryButtonTheme(
           lightScheme,
@@ -623,7 +619,15 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
       ),
       darkTheme: ThemeData(
         colorScheme: darkScheme,
-        segmentedButtonTheme: segmentedButtonTheme,
+        inputDecorationTheme: tallyInputDecorationTheme(
+          darkScheme,
+          isDesktop: false,
+        ),
+        chipTheme: tallyChipTheme(darkScheme, isDesktop: false),
+        segmentedButtonTheme: tallySegmentedButtonTheme(
+          darkScheme,
+          isDesktop: false,
+        ),
         cardTheme: tallyCardTheme(darkScheme),
         filledButtonTheme: tallyPrimaryButtonTheme(
           darkScheme,

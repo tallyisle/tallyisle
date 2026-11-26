@@ -277,126 +277,105 @@ class _BatchEditPageState extends ConsumerState<BatchEditPage> {
 
             final bodyColumn = Column(
               children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: InputDecorator(
-                          decoration: const InputDecoration(
-                            labelText: '当前账本',
-                            border: OutlineInputBorder(),
-                            contentPadding: EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 14,
-                            ),
-                          ),
-                          child: DropdownButtonHideUnderline(
-                            child: DropdownButton<int>(
-                              key: const Key('batch-book-dropdown'),
-                              isExpanded: true,
-                              isDense: true,
-                              style: Theme.of(context).textTheme.bodyLarge,
-                              value: effectiveBookId,
-                              items: [
-                                for (final b in books)
-                                  DropdownMenuItem(
-                                    value: b.id,
-                                    child: Text(
-                                      b.name,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ),
-                              ],
-                              onChanged: _busy
-                                  ? null
-                                  : (id) {
-                                      if (id == null) return;
-                                      setState(() {
-                                        _bookId = id;
-                                        _selectedIds.clear();
-                                      });
-                                    },
-                            ),
+                TallyFormCard(
+                  margin: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                  padding: const EdgeInsets.all(12),
+                  spacing: 10,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TallySelectField<int>(
+                            key: const Key('batch-book-dropdown'),
+                            label: '当前账本',
+                            enabled: !_busy,
+                            value: effectiveBookId,
+                            options: [
+                              for (final b in books)
+                                TallySelectOption<int>(
+                                  value: b.id,
+                                  label: b.name,
+                                ),
+                            ],
+                            onChanged: (id) {
+                              setState(() {
+                                _bookId = id;
+                                _selectedIds.clear();
+                              });
+                            },
                           ),
                         ),
-                      ),
-                      const SizedBox(width: 6),
-                      TextButton(
-                        key: const Key('batch-select-all'),
-                        style: TextButton.styleFrom(
-                          visualDensity: isDesktop
+                        const SizedBox(width: 8),
+                        TallySoftButton(
+                          key: const Key('batch-select-all'),
+                          compact: true,
+                          onPressed: _busy || visibleRecords.isEmpty
                               ? null
-                              : VisualDensity.compact,
-                          minimumSize: isDesktop ? const Size(0, 40) : null,
-                          padding: const EdgeInsets.symmetric(horizontal: 10),
-                        ),
-                        onPressed: _busy || visibleRecords.isEmpty
-                            ? null
-                            : () => setState(() {
-                                for (final r in visibleRecords) {
-                                  _selectedIds.add(r.recordId);
-                                }
-                              }),
-                        child: const Text('全选'),
-                      ),
-                      TextButton(
-                        key: const Key('batch-invert-select'),
-                        style: TextButton.styleFrom(
-                          visualDensity: isDesktop
-                              ? null
-                              : VisualDensity.compact,
-                          minimumSize: isDesktop ? const Size(0, 40) : null,
-                          padding: const EdgeInsets.symmetric(horizontal: 10),
-                        ),
-                        onPressed: _busy || visibleRecords.isEmpty
-                            ? null
-                            : () => setState(() {
-                                for (final r in visibleRecords) {
-                                  if (!_selectedIds.remove(r.recordId)) {
+                              : () => setState(() {
+                                  for (final r in visibleRecords) {
                                     _selectedIds.add(r.recordId);
                                   }
-                                }
-                              }),
-                        child: const Text('反选'),
-                      ),
-                    ],
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: TextField(
-                    key: const Key('batch-search-input'),
-                    controller: _searchController,
-                    decoration: InputDecoration(
-                      hintText: '搜索分类、备注、账户或金额',
-                      prefixIcon: const Icon(Icons.search),
-                      isDense: !isDesktop,
-                      contentPadding: isDesktop
-                          ? const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 12,
-                            )
-                          : null,
-                      border: const OutlineInputBorder(),
-                      suffixIcon: _keyword.isEmpty
-                          ? null
-                          : IconButton(
-                              onPressed: () {
-                                _searchController.clear();
-                                setState(() => _keyword = '');
-                              },
-                              icon: const Icon(Icons.clear),
-                            ),
+                                }),
+                          child: const Text('全选'),
+                        ),
+                        const SizedBox(width: 6),
+                        TallySoftButton(
+                          key: const Key('batch-invert-select'),
+                          compact: true,
+                          onPressed: _busy || visibleRecords.isEmpty
+                              ? null
+                              : () => setState(() {
+                                  for (final r in visibleRecords) {
+                                    if (!_selectedIds.remove(r.recordId)) {
+                                      _selectedIds.add(r.recordId);
+                                    }
+                                  }
+                                }),
+                          child: const Text('反选'),
+                        ),
+                      ],
                     ),
-                    onChanged: (v) => setState(() => _keyword = v),
-                  ),
+                    TextField(
+                      key: const Key('batch-search-input'),
+                      controller: _searchController,
+                      decoration: InputDecoration(
+                        hintText: '搜索分类、备注、账户或金额',
+                        prefixIcon: const Icon(Icons.search),
+                        isDense: !isDesktop,
+                        contentPadding: isDesktop
+                            ? const EdgeInsets.symmetric(
+                                horizontal: 14,
+                                vertical: 12,
+                              )
+                            : const EdgeInsets.symmetric(
+                                horizontal: 14,
+                                vertical: 10,
+                              ),
+                        suffixIcon: _keyword.isEmpty
+                            ? null
+                            : IconButton(
+                                onPressed: () {
+                                  _searchController.clear();
+                                  setState(() => _keyword = '');
+                                },
+                                icon: const Icon(Icons.clear),
+                              ),
+                      ),
+                      onChanged: (v) => setState(() => _keyword = v),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 8),
                 Expanded(
                   child: visibleRecords.isEmpty
-                      ? const Center(child: Text('当前条件下暂无可操作的账单'))
+                      ? const Center(
+                          child: SingleChildScrollView(
+                            child: TallyEmptyState(
+                              icon: Icons.receipt_long_outlined,
+                              title: '当前条件下暂无可操作的账单',
+                              subtitle: '切换账本或调整搜索关键词后再试',
+                            ),
+                          ),
+                        )
                       : ListView.builder(
                           padding: const EdgeInsets.symmetric(vertical: 4),
                           itemCount: visibleRecords.length,
@@ -716,33 +695,20 @@ class _BatchEditConfigSheetState extends ConsumerState<_BatchEditConfigSheet> {
       ),
       if (_editCategory && catDir != null && matchingCats.isNotEmpty) ...[
         const SizedBox(height: 8),
-        InputDecorator(
-          decoration: const InputDecoration(
-            labelText: '目标分类',
-            border: OutlineInputBorder(),
-            contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-          ),
-          child: DropdownButtonHideUnderline(
-            child: DropdownButton<int>(
-              key: const Key('batch-target-category'),
-              isExpanded: true,
-              isDense: true,
-              style: Theme.of(context).textTheme.bodyLarge,
-              value: validCatId,
-              items: [
-                for (final c in matchingCats)
-                  DropdownMenuItem(
-                    value: c.id,
-                    child: Text(
-                      c.parentCatId != -1 && catById[c.parentCatId] != null
-                          ? '${catById[c.parentCatId]!.name} · ${c.name}'
-                          : c.name,
-                    ),
-                  ),
-              ],
-              onChanged: (v) => setState(() => _targetCategoryId = v),
-            ),
-          ),
+        TallySelectField<int>(
+          key: const Key('batch-target-category'),
+          label: '目标分类',
+          value: validCatId,
+          options: [
+            for (final c in matchingCats)
+              TallySelectOption<int>(
+                value: c.id,
+                label: c.parentCatId != -1 && catById[c.parentCatId] != null
+                    ? '${catById[c.parentCatId]!.name} · ${c.name}'
+                    : c.name,
+              ),
+          ],
+          onChanged: (v) => setState(() => _targetCategoryId = v),
         ),
         const SizedBox(height: 6),
       ],
@@ -760,29 +726,16 @@ class _BatchEditConfigSheetState extends ConsumerState<_BatchEditConfigSheet> {
       ),
       if (_editAsset && _canEditAsset) ...[
         const SizedBox(height: 8),
-        InputDecorator(
-          decoration: const InputDecoration(
-            labelText: '目标资金账户',
-            border: OutlineInputBorder(),
-            contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-          ),
-          child: DropdownButtonHideUnderline(
-            child: DropdownButton<int>(
-              key: const Key('batch-target-asset'),
-              isExpanded: true,
-              isDense: true,
-              style: Theme.of(context).textTheme.bodyLarge,
-              value: effectiveAssetId,
-              items: [
-                const DropdownMenuItem(value: noRef, child: Text('无账户')),
-                for (final a in fundingAssets)
-                  DropdownMenuItem(value: a.id, child: Text(a.name)),
-              ],
-              onChanged: (v) {
-                if (v != null) setState(() => _targetAssetId = v);
-              },
-            ),
-          ),
+        TallySelectField<int>(
+          key: const Key('batch-target-asset'),
+          label: '目标资金账户',
+          value: effectiveAssetId,
+          options: [
+            const TallySelectOption<int>(value: noRef, label: '无账户'),
+            for (final a in fundingAssets)
+              TallySelectOption<int>(value: a.id, label: a.name),
+          ],
+          onChanged: (v) => setState(() => _targetAssetId = v),
         ),
         const SizedBox(height: 6),
       ],
@@ -803,32 +756,18 @@ class _BatchEditConfigSheetState extends ConsumerState<_BatchEditConfigSheet> {
         ),
         if (_editBook && effectiveTargetBookId != null) ...[
           const SizedBox(height: 8),
-          InputDecorator(
-            decoration: const InputDecoration(
-              labelText: '目标账本',
-              border: OutlineInputBorder(),
-              contentPadding: EdgeInsets.symmetric(
-                horizontal: 12,
-                vertical: 14,
-              ),
-            ),
-            child: DropdownButtonHideUnderline(
-              child: DropdownButton<int>(
-                key: const Key('batch-target-book'),
-                isExpanded: true,
-                isDense: true,
-                style: Theme.of(context).textTheme.bodyLarge,
-                value: effectiveTargetBookId,
-                items: [
-                  for (final b in otherBooks)
-                    DropdownMenuItem(value: b.id, child: Text(b.name)),
-                ],
-                onChanged: (v) => setState(() {
-                  _targetBookId = v;
-                  _targetCategoryId = null;
-                }),
-              ),
-            ),
+          TallySelectField<int>(
+            key: const Key('batch-target-book'),
+            label: '目标账本',
+            value: effectiveTargetBookId,
+            options: [
+              for (final b in otherBooks)
+                TallySelectOption<int>(value: b.id, label: b.name),
+            ],
+            onChanged: (v) => setState(() {
+              _targetBookId = v;
+              _targetCategoryId = null;
+            }),
           ),
           const SizedBox(height: 6),
         ],

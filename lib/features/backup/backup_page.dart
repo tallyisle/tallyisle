@@ -1244,11 +1244,6 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                               alpha: 0.62,
                                             ),
                                       borderRadius: BorderRadius.circular(12),
-                                      border: Border.all(
-                                        color: scheme.tertiary.withValues(
-                                          alpha: isDark ? 0.45 : 0.3,
-                                        ),
-                                      ),
                                     ),
                                     child: Row(
                                       crossAxisAlignment:
@@ -1476,47 +1471,25 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                   top: isDesktop ? 6 : 0,
                                   bottom: 8,
                                 ),
-                                child: InputDecorator(
-                                  decoration: isDesktop
-                                      ? const InputDecoration(
-                                          labelText: '记账静置同步等待时长',
-                                          border: OutlineInputBorder(),
-                                          contentPadding: EdgeInsets.symmetric(
-                                            horizontal: 12,
-                                            vertical: 16,
-                                          ),
-                                        )
-                                      : const InputDecoration(
-                                          labelText: '记账静置同步等待时长',
-                                          border: OutlineInputBorder(),
-                                          isDense: true,
-                                        ),
-                                  child: DropdownButtonHideUnderline(
-                                    child: DropdownButton<int>(
-                                      key: const Key(
-                                        'cloud_sync_idle_minutes_selector',
-                                      ),
-                                      isExpanded: true,
-                                      isDense: true,
-                                      value: syncSettings.idleMinutes,
-                                      items: [
-                                        for (final m in cloudIdleOptions)
-                                          DropdownMenuItem<int>(
-                                            value: m,
-                                            child: Text('$m 分钟'),
-                                          ),
-                                      ],
-                                      onChanged: effectiveBusy
-                                          ? null
-                                          : (val) {
-                                              if (val != null) {
-                                                _updateCloudSyncTriggers(
-                                                  idleMinutes: val,
-                                                );
-                                              }
-                                            },
-                                    ),
+                                child: TallySelectField<int>(
+                                  key: const Key(
+                                    'cloud_sync_idle_minutes_selector',
                                   ),
+                                  label: '记账静置同步等待时长',
+                                  value: syncSettings.idleMinutes,
+                                  enabled: !effectiveBusy,
+                                  options: [
+                                    for (final m in cloudIdleOptions)
+                                      TallySelectOption<int>(
+                                        value: m,
+                                        label: '$m 分钟',
+                                      ),
+                                  ],
+                                  onChanged: effectiveBusy
+                                      ? null
+                                      : (val) => _updateCloudSyncTriggers(
+                                          idleMinutes: val,
+                                        ),
                                 ),
                               ),
                               SwitchListTile(
@@ -1537,50 +1510,25 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                   top: isDesktop ? 6 : 0,
                                   bottom: 4,
                                 ),
-                                child: InputDecorator(
-                                  decoration: isDesktop
-                                      ? const InputDecoration(
-                                          labelText: '定时自动同步周期',
-                                          border: OutlineInputBorder(),
-                                          contentPadding: EdgeInsets.symmetric(
-                                            horizontal: 12,
-                                            vertical: 16,
-                                          ),
-                                        )
-                                      : const InputDecoration(
-                                          labelText: '定时自动同步周期',
-                                          border: OutlineInputBorder(),
-                                          isDense: true,
-                                        ),
-                                  child: DropdownButtonHideUnderline(
-                                    child: DropdownButton<int>(
-                                      key: const Key(
-                                        'cloud_sync_schedule_interval_selector',
-                                      ),
-                                      isExpanded: true,
-                                      isDense: true,
-                                      value:
-                                          syncSettings.scheduleIntervalMinutes,
-                                      items: [
-                                        for (final m in cloudScheduleOptions)
-                                          DropdownMenuItem<int>(
-                                            value: m,
-                                            child: Text(
-                                              _formatIntervalMinutes(m),
-                                            ),
-                                          ),
-                                      ],
-                                      onChanged: effectiveBusy
-                                          ? null
-                                          : (val) {
-                                              if (val != null) {
-                                                _updateCloudSyncTriggers(
-                                                  scheduleIntervalMinutes: val,
-                                                );
-                                              }
-                                            },
-                                    ),
+                                child: TallySelectField<int>(
+                                  key: const Key(
+                                    'cloud_sync_schedule_interval_selector',
                                   ),
+                                  label: '定时自动同步周期',
+                                  value: syncSettings.scheduleIntervalMinutes,
+                                  enabled: !effectiveBusy,
+                                  options: [
+                                    for (final m in cloudScheduleOptions)
+                                      TallySelectOption<int>(
+                                        value: m,
+                                        label: _formatIntervalMinutes(m),
+                                      ),
+                                  ],
+                                  onChanged: effectiveBusy
+                                      ? null
+                                      : (val) => _updateCloudSyncTriggers(
+                                          scheduleIntervalMinutes: val,
+                                        ),
                                 ),
                               ),
                               if (hasPersistentConflict) ...[
@@ -1743,49 +1691,25 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                 style: Theme.of(context).textTheme.titleSmall,
                               ),
                               const SizedBox(height: 8),
-                              InputDecorator(
-                                decoration: isDesktop
-                                    ? const InputDecoration(
-                                        labelText: '本地备份保留份数',
-                                        border: OutlineInputBorder(),
-                                        contentPadding: EdgeInsets.symmetric(
-                                          horizontal: 12,
-                                          vertical: 16,
-                                        ),
-                                      )
-                                    : const InputDecoration(
-                                        labelText: '本地备份保留份数',
-                                        border: OutlineInputBorder(),
-                                        isDense: true,
-                                      ),
-                                child: DropdownButtonHideUnderline(
-                                  child: DropdownButton<int>(
-                                    key: const Key(
-                                      'local_backup_keep_count_selector',
-                                    ),
-                                    isExpanded: true,
-                                    isDense: true,
-                                    value: localPolicy.keepCount,
-                                    items: [
-                                      for (final n in localKeepOptions)
-                                        DropdownMenuItem<int>(
-                                          value: n,
-                                          child: Text('$n 份'),
-                                        ),
-                                    ],
-                                    onChanged: effectiveBusy
-                                        ? null
-                                        : (val) {
-                                            if (val != null) {
-                                              _updateLocalAutoBackupPolicy(
-                                                localPolicy.copyWith(
-                                                  keepCount: val,
-                                                ),
-                                              );
-                                            }
-                                          },
-                                  ),
+                              TallySelectField<int>(
+                                key: const Key(
+                                  'local_backup_keep_count_selector',
                                 ),
+                                label: '本地备份保留份数',
+                                value: localPolicy.keepCount,
+                                enabled: !effectiveBusy,
+                                options: [
+                                  for (final n in localKeepOptions)
+                                    TallySelectOption<int>(
+                                      value: n,
+                                      label: '$n 份',
+                                    ),
+                                ],
+                                onChanged: effectiveBusy
+                                    ? null
+                                    : (val) => _updateLocalAutoBackupPolicy(
+                                        localPolicy.copyWith(keepCount: val),
+                                      ),
                               ),
                               const SizedBox(height: 4),
                               SwitchListTile(
@@ -1834,49 +1758,27 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                   top: isDesktop ? 6 : 0,
                                   bottom: 8,
                                 ),
-                                child: InputDecorator(
-                                  decoration: isDesktop
-                                      ? const InputDecoration(
-                                          labelText: '本地静置备份等待时长',
-                                          border: OutlineInputBorder(),
-                                          contentPadding: EdgeInsets.symmetric(
-                                            horizontal: 12,
-                                            vertical: 16,
-                                          ),
-                                        )
-                                      : const InputDecoration(
-                                          labelText: '本地静置备份等待时长',
-                                          border: OutlineInputBorder(),
-                                          isDense: true,
-                                        ),
-                                  child: DropdownButtonHideUnderline(
-                                    child: DropdownButton<int>(
-                                      key: const Key(
-                                        'local_backup_idle_minutes_selector',
-                                      ),
-                                      isExpanded: true,
-                                      isDense: true,
-                                      value: localPolicy.idleMinutes,
-                                      items: [
-                                        for (final m in localIdleOptions)
-                                          DropdownMenuItem<int>(
-                                            value: m,
-                                            child: Text('$m 分钟'),
-                                          ),
-                                      ],
-                                      onChanged: effectiveBusy
-                                          ? null
-                                          : (val) {
-                                              if (val != null) {
-                                                _updateLocalAutoBackupPolicy(
-                                                  localPolicy.copyWith(
-                                                    idleMinutes: val,
-                                                  ),
-                                                );
-                                              }
-                                            },
-                                    ),
+                                child: TallySelectField<int>(
+                                  key: const Key(
+                                    'local_backup_idle_minutes_selector',
                                   ),
+                                  label: '本地静置备份等待时长',
+                                  value: localPolicy.idleMinutes,
+                                  enabled: !effectiveBusy,
+                                  options: [
+                                    for (final m in localIdleOptions)
+                                      TallySelectOption<int>(
+                                        value: m,
+                                        label: '$m 分钟',
+                                      ),
+                                  ],
+                                  onChanged: effectiveBusy
+                                      ? null
+                                      : (val) => _updateLocalAutoBackupPolicy(
+                                          localPolicy.copyWith(
+                                            idleMinutes: val,
+                                          ),
+                                        ),
                                 ),
                               ),
                               SwitchListTile(
@@ -1899,53 +1801,27 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                   top: isDesktop ? 6 : 0,
                                   bottom: 4,
                                 ),
-                                child: InputDecorator(
-                                  decoration: isDesktop
-                                      ? const InputDecoration(
-                                          labelText: '本地定时备份周期',
-                                          border: OutlineInputBorder(),
-                                          contentPadding: EdgeInsets.symmetric(
-                                            horizontal: 12,
-                                            vertical: 16,
-                                          ),
-                                        )
-                                      : const InputDecoration(
-                                          labelText: '本地定时备份周期',
-                                          border: OutlineInputBorder(),
-                                          isDense: true,
-                                        ),
-                                  child: DropdownButtonHideUnderline(
-                                    child: DropdownButton<int>(
-                                      key: const Key(
-                                        'local_backup_schedule_interval_selector',
-                                      ),
-                                      isExpanded: true,
-                                      isDense: true,
-                                      value:
-                                          localPolicy.scheduleIntervalMinutes,
-                                      items: [
-                                        for (final m in localScheduleOptions)
-                                          DropdownMenuItem<int>(
-                                            value: m,
-                                            child: Text(
-                                              _formatIntervalMinutes(m),
-                                            ),
-                                          ),
-                                      ],
-                                      onChanged: effectiveBusy
-                                          ? null
-                                          : (val) {
-                                              if (val != null) {
-                                                _updateLocalAutoBackupPolicy(
-                                                  localPolicy.copyWith(
-                                                    scheduleIntervalMinutes:
-                                                        val,
-                                                  ),
-                                                );
-                                              }
-                                            },
-                                    ),
+                                child: TallySelectField<int>(
+                                  key: const Key(
+                                    'local_backup_schedule_interval_selector',
                                   ),
+                                  label: '本地定时备份周期',
+                                  value: localPolicy.scheduleIntervalMinutes,
+                                  enabled: !effectiveBusy,
+                                  options: [
+                                    for (final m in localScheduleOptions)
+                                      TallySelectOption<int>(
+                                        value: m,
+                                        label: _formatIntervalMinutes(m),
+                                      ),
+                                  ],
+                                  onChanged: effectiveBusy
+                                      ? null
+                                      : (val) => _updateLocalAutoBackupPolicy(
+                                          localPolicy.copyWith(
+                                            scheduleIntervalMinutes: val,
+                                          ),
+                                        ),
                                 ),
                               ),
                               const SizedBox(height: 12),

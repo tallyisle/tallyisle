@@ -309,98 +309,81 @@ class _RemarksPageState extends ConsumerState<RemarksPage> {
                               _toggleFrequentRemarks(diyConfig, enabled),
                   ),
                 ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      Expanded(
-                        flex: 5,
-                        child: InputDecorator(
-                          decoration: const InputDecoration(
-                            labelText: '筛选分类',
-                            border: OutlineInputBorder(),
-                            contentPadding: EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 14,
-                            ),
-                          ),
-                          child: DropdownButtonHideUnderline(
-                            child: DropdownButton<int>(
-                              key: const Key('remarks_category_filter'),
-                              isExpanded: true,
-                              isDense: true,
-                              style: Theme.of(context).textTheme.bodyLarge,
-                              value: controlledFilter,
-                              items: [
-                                const DropdownMenuItem<int>(
-                                  value: _filterAll,
-                                  child: Text('全部分类'),
+                TallyFormCard(
+                  margin: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                  padding: const EdgeInsets.all(12),
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        Expanded(
+                          flex: 5,
+                          child: TallySelectField<int>(
+                            key: const Key('remarks_category_filter'),
+                            label: '筛选分类',
+                            value: controlledFilter,
+                            options: [
+                              const TallySelectOption<int>(
+                                value: _filterAll,
+                                label: '全部分类',
+                              ),
+                              const TallySelectOption<int>(
+                                value: noRef,
+                                label: '通用备注',
+                              ),
+                              for (final c in bookCategories)
+                                TallySelectOption<int>(
+                                  value: c.id,
+                                  label: c.name,
                                 ),
-                                const DropdownMenuItem<int>(
-                                  value: noRef,
-                                  child: Text('通用备注'),
-                                ),
-                                for (final c in bookCategories)
-                                  DropdownMenuItem<int>(
-                                    value: c.id,
-                                    child: Text(c.name),
-                                  ),
-                              ],
-                              onChanged: (v) {
-                                if (v == null) return;
-                                setState(() => _selectedFilter = v);
-                              },
-                            ),
+                            ],
+                            onChanged: (v) =>
+                                setState(() => _selectedFilter = v),
                           ),
                         ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        flex: 6,
-                        child: TextField(
-                          key: const Key('remarks_search_input'),
-                          controller: _searchController,
-                          style: Theme.of(context).textTheme.bodyLarge,
-                          decoration: InputDecoration(
-                            labelText: '搜索备注',
-                            border: const OutlineInputBorder(),
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 14,
-                            ),
-                            prefixIcon: const Icon(Icons.search, size: 20),
-                            prefixIconConstraints: const BoxConstraints(
-                              minWidth: 40,
-                              minHeight: 0,
-                            ),
-                            suffixIconConstraints: const BoxConstraints(
-                              minWidth: 36,
-                              minHeight: 0,
-                              maxHeight: 24,
-                            ),
-                            suffixIcon: _keyword.isEmpty
-                                ? null
-                                : IconButton(
-                                    visualDensity: VisualDensity.compact,
-                                    padding: EdgeInsets.zero,
-                                    constraints: const BoxConstraints(
-                                      minWidth: 32,
-                                      minHeight: 24,
-                                      maxHeight: 24,
+                        const SizedBox(width: 10),
+                        Expanded(
+                          flex: 6,
+                          child: TextField(
+                            key: const Key('remarks_search_input'),
+                            controller: _searchController,
+                            style: Theme.of(context).textTheme.bodyLarge,
+                            decoration: InputDecoration(
+                              labelText: '搜索备注',
+                              prefixIcon: const Icon(Icons.search, size: 20),
+                              prefixIconConstraints: const BoxConstraints(
+                                minWidth: 40,
+                                minHeight: 0,
+                              ),
+                              suffixIconConstraints: const BoxConstraints(
+                                minWidth: 36,
+                                minHeight: 0,
+                                maxHeight: 24,
+                              ),
+                              suffixIcon: _keyword.isEmpty
+                                  ? null
+                                  : IconButton(
+                                      visualDensity: VisualDensity.compact,
+                                      padding: EdgeInsets.zero,
+                                      constraints: const BoxConstraints(
+                                        minWidth: 32,
+                                        minHeight: 24,
+                                        maxHeight: 24,
+                                      ),
+                                      icon: const Icon(Icons.clear, size: 18),
+                                      onPressed: () {
+                                        _searchController.clear();
+                                        setState(() => _keyword = '');
+                                      },
                                     ),
-                                    icon: const Icon(Icons.clear, size: 18),
-                                    onPressed: () {
-                                      _searchController.clear();
-                                      setState(() => _keyword = '');
-                                    },
-                                  ),
+                            ),
+                            onChanged: (v) =>
+                                setState(() => _keyword = v.trim()),
                           ),
-                          onChanged: (v) => setState(() => _keyword = v.trim()),
                         ),
-                      ),
-                    ],
-                  ),
+                      ],
+                    ),
+                  ],
                 ),
                 Expanded(
                   child: asyncBody(remarksAsync, (rows) {
@@ -604,10 +587,10 @@ class _RemarkEditDialogState extends ConsumerState<_RemarkEditDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final categoryItems = <DropdownMenuItem<int>>[
-      const DropdownMenuItem<int>(value: noRef, child: Text('通用备注（全部分类可用）')),
+    final categoryOptions = <TallySelectOption<int>>[
+      const TallySelectOption<int>(value: noRef, label: '通用备注（全部分类可用）'),
       for (final c in widget.categories)
-        DropdownMenuItem<int>(value: c.id, child: Text(c.name)),
+        TallySelectOption<int>(value: c.id, label: c.name),
     ];
     final hasSelected =
         _categoryId == noRef ||
@@ -625,33 +608,16 @@ class _RemarkEditDialogState extends ConsumerState<_RemarkEditDialog> {
           enabled: !_busy,
           autofocus: true,
           maxLength: 200,
-          decoration: const InputDecoration(
-            labelText: '备注内容',
-            border: OutlineInputBorder(),
-            contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-          ),
+          decoration: const InputDecoration(labelText: '备注内容'),
         ),
         const SizedBox(height: 12),
-        InputDecorator(
-          decoration: const InputDecoration(
-            labelText: '归属分类',
-            border: OutlineInputBorder(),
-            contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-          ),
-          child: DropdownButtonHideUnderline(
-            child: DropdownButton<int>(
-              key: const Key('remark_dialog_category_dropdown'),
-              isExpanded: true,
-              isDense: true,
-              value: effectiveCatId,
-              items: categoryItems,
-              onChanged: _busy
-                  ? null
-                  : (v) {
-                      if (v != null) setState(() => _categoryId = v);
-                    },
-            ),
-          ),
+        TallySelectField<int>(
+          key: const Key('remark_dialog_category_dropdown'),
+          label: '归属分类',
+          enabled: !_busy,
+          value: effectiveCatId,
+          options: categoryOptions,
+          onChanged: (v) => setState(() => _categoryId = v),
         ),
         const SizedBox(height: 12),
         TextField(
@@ -659,11 +625,7 @@ class _RemarkEditDialogState extends ConsumerState<_RemarkEditDialog> {
           controller: _usedTimesController,
           enabled: !_busy,
           keyboardType: TextInputType.number,
-          decoration: const InputDecoration(
-            labelText: '累计使用次数',
-            border: OutlineInputBorder(),
-            contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-          ),
+          decoration: const InputDecoration(labelText: '累计使用次数'),
         ),
         if (_error != null) ...[
           const SizedBox(height: 8),
@@ -678,13 +640,9 @@ class _RemarkEditDialogState extends ConsumerState<_RemarkEditDialog> {
 
     return AlertDialog(
       title: Text(widget.existing == null ? '新增常用备注' : '编辑常用备注'),
-      content: SingleChildScrollView(
-        child: isDesktop
-            ? ConstrainedBox(
-                constraints: const BoxConstraints(minWidth: 360, maxWidth: 420),
-                child: dialogColumn,
-              )
-            : dialogColumn,
+      content: SizedBox(
+        width: isDesktop ? 380 : double.maxFinite,
+        child: SingleChildScrollView(child: dialogColumn),
       ),
       actions: [
         TextButton(

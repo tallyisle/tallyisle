@@ -356,37 +356,35 @@ class _FixedDepositEditorPageState
     final validHostAssetId = eligibleAssets.any((a) => a.id == _hostAssetId)
         ? _hostAssetId
         : noRef;
-    final hostItems = <DropdownMenuItem<int>>[
+    final hostOptions = <TallySelectOption<int>>[
       if (validHostAssetId == noRef)
-        DropdownMenuItem(
+        TallySelectOption(
           value: noRef,
-          child: Text(eligibleAssets.isEmpty ? '暂无可用普通账户' : '请选择定存宿主账户'),
+          label: eligibleAssets.isEmpty ? '暂无可用普通账户' : '请选择定存宿主账户',
         ),
       for (final a in eligibleAssets)
-        DropdownMenuItem(
+        TallySelectOption(
           value: a.id,
-          child: Text(
-            '${a.name}（${normalizeCurrency(a.currency) ?? baseCurrency}）',
-          ),
+          label: '${a.name}（${normalizeCurrency(a.currency) ?? baseCurrency}）',
         ),
     ];
 
     final seenCurrencyCodes = <String>{'', baseCurrency};
-    final currencyItems = <DropdownMenuItem<String>>[
-      const DropdownMenuItem(value: '', child: Text('跟随宿主账户币种')),
-      const DropdownMenuItem(value: baseCurrency, child: Text('人民币（CNY）')),
+    final currencyOptions = <TallySelectOption<String>>[
+      const TallySelectOption(value: '', label: '跟随宿主账户币种'),
+      const TallySelectOption(value: baseCurrency, label: '人民币（CNY）'),
       for (final c in currencies)
         if (c.enable && seenCurrencyCodes.add(c.code))
-          DropdownMenuItem(value: c.code, child: Text('${c.name}（${c.code}）')),
+          TallySelectOption(value: c.code, label: '${c.name}（${c.code}）'),
       if (_currency.isNotEmpty && seenCurrencyCodes.add(_currency))
-        DropdownMenuItem(
+        TallySelectOption(
           value: _currency,
-          child: Text(() {
+          label: () {
             final match = currencies
                 .where((c) => c.code == _currency)
                 .firstOrNull;
             return match != null ? '${match.name}（${match.code}）' : _currency;
-          }()),
+          }(),
         ),
     ];
 
@@ -403,24 +401,21 @@ class _FixedDepositEditorPageState
         sourceCandidates.any((a) => a.id == _fromAssetId) || hasHistoricalFrom
         ? _fromAssetId
         : noRef;
-    final fromItems = <DropdownMenuItem<int>>[
-      const DropdownMenuItem(value: noRef, child: Text('不选择（无转出账户）')),
+    final fromOptions = <TallySelectOption<int>>[
+      const TallySelectOption(value: noRef, label: '不选择（无转出账户）'),
       for (final a in sourceCandidates)
-        DropdownMenuItem(
+        TallySelectOption(
           value: a.id,
-          child: Text(
-            '${a.name}（${normalizeCurrency(a.currency) ?? baseCurrency}）',
-          ),
+          label: '${a.name}（${normalizeCurrency(a.currency) ?? baseCurrency}）',
         ),
       if (hasHistoricalFrom)
-        DropdownMenuItem(
+        TallySelectOption(
           value: _fromAssetId,
-          child: Text(
-            _historicalFromAsset != null &&
-                    _historicalFromAsset!.id == _fromAssetId
-                ? '${_historicalFromAsset!.name}（${normalizeCurrency(_historicalFromAsset!.currency) ?? baseCurrency}）'
-                : '账户#$_fromAssetId',
-          ),
+          label:
+              _historicalFromAsset != null &&
+                  _historicalFromAsset!.id == _fromAssetId
+              ? '${_historicalFromAsset!.name}（${normalizeCurrency(_historicalFromAsset!.currency) ?? baseCurrency}）'
+              : '账户#$_fromAssetId',
         ),
     ];
 
@@ -464,329 +459,237 @@ class _FixedDepositEditorPageState
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          if (_isSettled)
-                            Padding(
-                              padding: const EdgeInsets.only(bottom: 12),
-                              child: Text(
-                                '该笔定期存款已到期结清，仅支持修改备注（将同步更新关联流水备注）。',
-                                style: Theme.of(context).textTheme.bodySmall,
-                              ),
-                            ),
-                          _ControlledDropdownField<int>(
-                            fieldKey: const Key('deposit_host_asset_dropdown'),
-                            label: '定存宿主账户',
-                            value: validHostAssetId,
-                            items: hostItems,
-                            enabled: editableFinancials && !_editing,
-                            onChanged: (v) {
-                              if (v == null) return;
-                              setState(() {
-                                _hostAssetId = v;
-                                if (_fromAssetId == v) _fromAssetId = noRef;
-                              });
-                            },
-                          ),
-                          const SizedBox(height: 12),
-                          _ControlledDropdownField<String>(
-                            fieldKey: const Key('deposit_currency_dropdown'),
-                            label: '定存币种',
-                            value: _currency,
-                            items: currencyItems,
-                            enabled: editableFinancials,
-                            onChanged: (v) =>
-                                setState(() => _currency = v ?? ''),
-                          ),
-                          const SizedBox(height: 12),
-                          TextField(
-                            key: const Key('deposit_principal_input'),
-                            controller: _principalCtrl,
-                            enabled: editableFinancials,
-                            keyboardType: const TextInputType.numberWithOptions(
-                              decimal: true,
-                            ),
-                            inputFormatters: amountInputFormatters,
-                            decoration: isDesktop
-                                ? const InputDecoration(
-                                    labelText: '定存本金',
-                                    border: OutlineInputBorder(),
-                                    contentPadding: EdgeInsets.symmetric(
-                                      horizontal: 12,
-                                      vertical: 16,
-                                    ),
-                                  )
-                                : const InputDecoration(labelText: '定存本金'),
-                          ),
-                          const SizedBox(height: 12),
-                          TextField(
-                            key: const Key('deposit_rate_input'),
-                            controller: _rateCtrl,
-                            enabled: editableFinancials,
-                            keyboardType: const TextInputType.numberWithOptions(
-                              decimal: true,
-                            ),
-                            inputFormatters: _rateInputFormatters,
-                            decoration: isDesktop
-                                ? const InputDecoration(
-                                    labelText: '年化利率',
-                                    suffixText: '%',
-                                    border: OutlineInputBorder(),
-                                    contentPadding: EdgeInsets.symmetric(
-                                      horizontal: 12,
-                                      vertical: 16,
-                                    ),
-                                  )
-                                : const InputDecoration(
-                                    labelText: '年化利率',
-                                    suffixText: '%',
-                                  ),
-                          ),
-                          const SizedBox(height: 12),
-                          if (isDesktop)
-                            Row(
+                          if (_isSettled) ...[
+                            TallyFormCard(
+                              padding: const EdgeInsets.all(12),
                               children: [
-                                Expanded(
-                                  child: TextField(
-                                    key: const Key(
-                                      'deposit_period_count_input',
-                                    ),
-                                    controller: _periodCountCtrl,
-                                    enabled: editableFinancials,
-                                    keyboardType: TextInputType.number,
-                                    inputFormatters: _intInputFormatters,
-                                    decoration: const InputDecoration(
-                                      labelText: '存期',
-                                      border: OutlineInputBorder(),
-                                      contentPadding: EdgeInsets.symmetric(
-                                        horizontal: 12,
-                                        vertical: 16,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                SegmentedButton<int>(
-                                  key: const Key(
-                                    'deposit_period_unit_selector',
-                                  ),
-                                  showSelectedIcon: false,
-                                  style: const ButtonStyle(
-                                    visualDensity: VisualDensity.standard,
-                                    tapTargetSize:
-                                        MaterialTapTargetSize.shrinkWrap,
-                                    minimumSize: WidgetStatePropertyAll(
-                                      Size(0, 48),
-                                    ),
-                                    fixedSize: WidgetStatePropertyAll(
-                                      Size.fromHeight(48),
-                                    ),
-                                    padding: WidgetStatePropertyAll(
-                                      EdgeInsets.symmetric(horizontal: 14),
-                                    ),
-                                  ),
-                                  segments: const [
-                                    ButtonSegment(
-                                      value: DepositPeriodUnit.month,
-                                      label: FittedBox(
-                                        fit: BoxFit.scaleDown,
-                                        child: Text(
-                                          '按月',
-                                          maxLines: 1,
-                                          softWrap: false,
-                                        ),
-                                      ),
-                                    ),
-                                    ButtonSegment(
-                                      value: DepositPeriodUnit.year,
-                                      label: FittedBox(
-                                        fit: BoxFit.scaleDown,
-                                        child: Text(
-                                          '按年',
-                                          maxLines: 1,
-                                          softWrap: false,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                  selected: {_periodUnit},
-                                  onSelectionChanged: !editableFinancials
-                                      ? null
-                                      : (s) => setState(() {
-                                          _periodUnit = s.first;
-                                          _recalculateDerived();
-                                        }),
-                                ),
-                              ],
-                            )
-                          else
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: TextField(
-                                    key: const Key(
-                                      'deposit_period_count_input',
-                                    ),
-                                    controller: _periodCountCtrl,
-                                    enabled: editableFinancials,
-                                    keyboardType: TextInputType.number,
-                                    inputFormatters: _intInputFormatters,
-                                    decoration: const InputDecoration(
-                                      labelText: '存期',
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                SegmentedButton<int>(
-                                  key: const Key(
-                                    'deposit_period_unit_selector',
-                                  ),
-                                  showSelectedIcon: false,
-                                  style: const ButtonStyle(
-                                    visualDensity: VisualDensity.compact,
-                                    tapTargetSize:
-                                        MaterialTapTargetSize.shrinkWrap,
-                                    padding: WidgetStatePropertyAll(
-                                      EdgeInsets.symmetric(horizontal: 10),
-                                    ),
-                                  ),
-                                  segments: const [
-                                    ButtonSegment(
-                                      value: DepositPeriodUnit.month,
-                                      label: FittedBox(
-                                        fit: BoxFit.scaleDown,
-                                        child: Text(
-                                          '按月',
-                                          maxLines: 1,
-                                          softWrap: false,
-                                        ),
-                                      ),
-                                    ),
-                                    ButtonSegment(
-                                      value: DepositPeriodUnit.year,
-                                      label: FittedBox(
-                                        fit: BoxFit.scaleDown,
-                                        child: Text(
-                                          '按年',
-                                          maxLines: 1,
-                                          softWrap: false,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                  selected: {_periodUnit},
-                                  onSelectionChanged: !editableFinancials
-                                      ? null
-                                      : (s) => setState(() {
-                                          _periodUnit = s.first;
-                                          _recalculateDerived();
-                                        }),
+                                Text(
+                                  '该笔定期存款已到期结清，仅支持修改备注（将同步更新关联流水备注）。',
+                                  style: Theme.of(context).textTheme.bodySmall,
                                 ),
                               ],
                             ),
-                          const SizedBox(height: 12),
-                          ListTile(
-                            key: const Key('deposit_date_tile'),
-                            contentPadding: EdgeInsets.zero,
-                            title: const Text('存入日期'),
-                            trailing: Text(
-                              formatDate(
-                                DateTime.fromMillisecondsSinceEpoch(
-                                  _depositDateMs,
-                                ),
-                              ),
-                            ),
-                            onTap: editableFinancials ? _pickDepositDate : null,
-                          ),
-                          ListTile(
-                            key: const Key('deposit_due_date_tile'),
-                            contentPadding: EdgeInsets.zero,
-                            title: const Text('到期日期'),
-                            subtitle: const Text('系统自动推算，点击可手动覆盖'),
-                            trailing: Text(
-                              formatDate(
-                                DateTime.fromMillisecondsSinceEpoch(_dueDateMs),
-                              ),
-                            ),
-                            onTap: editableFinancials ? _pickDueDate : null,
-                          ),
-                          const SizedBox(height: 8),
-                          TextField(
-                            key: const Key('deposit_expected_income_input'),
-                            controller: _expectedIncomeCtrl,
-                            enabled: editableFinancials,
-                            keyboardType: const TextInputType.numberWithOptions(
-                              decimal: true,
-                            ),
-                            inputFormatters: amountInputFormatters,
-                            decoration: isDesktop
-                                ? const InputDecoration(
-                                    labelText: '预期总收益',
-                                    helperText: '按单利自动计算，支持手动修改覆盖',
-                                    border: OutlineInputBorder(),
-                                    contentPadding: EdgeInsets.symmetric(
-                                      horizontal: 12,
-                                      vertical: 16,
-                                    ),
-                                  )
-                                : const InputDecoration(
-                                    labelText: '预期总收益',
-                                    helperText: '按单利自动计算，支持手动修改覆盖',
-                                  ),
-                          ),
-                          const SizedBox(height: 12),
-                          _ControlledDropdownField<int>(
-                            fieldKey: const Key('deposit_from_asset_dropdown'),
-                            label: '本金转出账户（可选）',
-                            value: validFromAsset,
-                            items: fromItems,
-                            enabled: editableFinancials,
-                            onChanged: (v) => setState(() {
-                              _fromAssetId = v ?? noRef;
-                              if (_fromAssetId != noRef) {
-                                _updateAssetBalance = false;
-                              }
-                            }),
-                          ),
-                          if (validFromAsset == noRef) ...[
-                            SwitchListTile(
-                              key: const Key('deposit_update_balance_switch'),
-                              contentPadding: EdgeInsets.zero,
-                              title: const Text('直接增加宿主账户余额'),
-                              subtitle: const Text('不选转出账户时，将本金计入宿主账户余额'),
-                              value: _updateAssetBalance,
-                              onChanged: !editableFinancials
-                                  ? null
-                                  : (v) =>
-                                        setState(() => _updateAssetBalance = v),
-                            ),
-                            if (_updateAssetBalance)
-                              SwitchListTile(
-                                key: const Key('deposit_record_adjust_switch'),
-                                contentPadding: EdgeInsets.zero,
-                                title: const Text('生成平账调整记录（推荐）'),
-                                subtitle: const Text('避免账户对账出现无单据差额'),
-                                value: _createBalanceAdjustRecord,
-                                onChanged: !editableFinancials
-                                    ? null
-                                    : (v) => setState(
-                                        () => _createBalanceAdjustRecord = v,
-                                      ),
-                              ),
+                            const SizedBox(height: 12),
                           ],
-                          const SizedBox(height: 12),
-                          TextField(
-                            key: const Key('deposit_remark_input'),
-                            controller: _remarkCtrl,
-                            enabled: !_busy,
-                            decoration: isDesktop
-                                ? const InputDecoration(
-                                    labelText: '备注（可选）',
-                                    border: OutlineInputBorder(),
-                                    contentPadding: EdgeInsets.symmetric(
-                                      horizontal: 12,
-                                      vertical: 16,
+                          TallyFormCard(
+                            title: '存单信息',
+                            spacing: 12,
+                            children: [
+                              TallySelectField<int>(
+                                key: const Key('deposit_host_asset_dropdown'),
+                                label: '定存宿主账户',
+                                value: validHostAssetId,
+                                options: hostOptions,
+                                enabled: editableFinancials && !_editing,
+                                onChanged: (v) {
+                                  setState(() {
+                                    _hostAssetId = v;
+                                    if (_fromAssetId == v) _fromAssetId = noRef;
+                                  });
+                                },
+                              ),
+                              TallySelectField<String>(
+                                key: const Key('deposit_currency_dropdown'),
+                                label: '定存币种',
+                                value: _currency,
+                                options: currencyOptions,
+                                enabled: editableFinancials,
+                                onChanged: (v) => setState(() => _currency = v),
+                              ),
+                              TextField(
+                                key: const Key('deposit_principal_input'),
+                                controller: _principalCtrl,
+                                enabled: editableFinancials,
+                                keyboardType:
+                                    const TextInputType.numberWithOptions(
+                                      decimal: true,
                                     ),
-                                  )
-                                : const InputDecoration(labelText: '备注（可选）'),
+                                inputFormatters: amountInputFormatters,
+                                decoration: const InputDecoration(
+                                  labelText: '定存本金',
+                                ),
+                              ),
+                              TextField(
+                                key: const Key('deposit_rate_input'),
+                                controller: _rateCtrl,
+                                enabled: editableFinancials,
+                                keyboardType:
+                                    const TextInputType.numberWithOptions(
+                                      decimal: true,
+                                    ),
+                                inputFormatters: _rateInputFormatters,
+                                decoration: const InputDecoration(
+                                  labelText: '年化利率',
+                                  suffixText: '%',
+                                ),
+                              ),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: TextField(
+                                      key: const Key(
+                                        'deposit_period_count_input',
+                                      ),
+                                      controller: _periodCountCtrl,
+                                      enabled: editableFinancials,
+                                      keyboardType: TextInputType.number,
+                                      inputFormatters: _intInputFormatters,
+                                      decoration: const InputDecoration(
+                                        labelText: '存期',
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  SegmentedButton<int>(
+                                    key: const Key(
+                                      'deposit_period_unit_selector',
+                                    ),
+                                    showSelectedIcon: false,
+                                    segments: const [
+                                      ButtonSegment(
+                                        value: DepositPeriodUnit.month,
+                                        label: FittedBox(
+                                          fit: BoxFit.scaleDown,
+                                          child: Text(
+                                            '按月',
+                                            maxLines: 1,
+                                            softWrap: false,
+                                          ),
+                                        ),
+                                      ),
+                                      ButtonSegment(
+                                        value: DepositPeriodUnit.year,
+                                        label: FittedBox(
+                                          fit: BoxFit.scaleDown,
+                                          child: Text(
+                                            '按年',
+                                            maxLines: 1,
+                                            softWrap: false,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                    selected: {_periodUnit},
+                                    onSelectionChanged: !editableFinancials
+                                        ? null
+                                        : (s) => setState(() {
+                                            _periodUnit = s.first;
+                                            _recalculateDerived();
+                                          }),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          TallyFormCard(
+                            title: '期限与预期收益',
+                            spacing: 12,
+                            children: [
+                              TallyFormTile(
+                                tileKey: const Key('deposit_date_tile'),
+                                leading: const Icon(Icons.event),
+                                title: '存入日期',
+                                trailing: Text(
+                                  formatDate(
+                                    DateTime.fromMillisecondsSinceEpoch(
+                                      _depositDateMs,
+                                    ),
+                                  ),
+                                ),
+                                enabled: editableFinancials,
+                                onTap: _pickDepositDate,
+                              ),
+                              TallyFormTile(
+                                tileKey: const Key('deposit_due_date_tile'),
+                                leading: const Icon(Icons.event_available),
+                                title: '到期日期',
+                                subtitle: '系统自动推算，点击可手动覆盖',
+                                trailing: Text(
+                                  formatDate(
+                                    DateTime.fromMillisecondsSinceEpoch(
+                                      _dueDateMs,
+                                    ),
+                                  ),
+                                ),
+                                enabled: editableFinancials,
+                                onTap: _pickDueDate,
+                              ),
+                              TextField(
+                                key: const Key('deposit_expected_income_input'),
+                                controller: _expectedIncomeCtrl,
+                                enabled: editableFinancials,
+                                keyboardType:
+                                    const TextInputType.numberWithOptions(
+                                      decimal: true,
+                                    ),
+                                inputFormatters: amountInputFormatters,
+                                decoration: const InputDecoration(
+                                  labelText: '预期总收益',
+                                  helperText: '按单利自动计算，支持手动修改覆盖',
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          TallyFormCard(
+                            title: '资金来源与备注',
+                            spacing: 12,
+                            children: [
+                              TallySelectField<int>(
+                                key: const Key('deposit_from_asset_dropdown'),
+                                label: '本金转出账户（可选）',
+                                value: validFromAsset,
+                                options: fromOptions,
+                                enabled: editableFinancials,
+                                onChanged: (v) => setState(() {
+                                  _fromAssetId = v;
+                                  if (_fromAssetId != noRef) {
+                                    _updateAssetBalance = false;
+                                  }
+                                }),
+                              ),
+                              if (validFromAsset == noRef) ...[
+                                SwitchListTile(
+                                  key: const Key(
+                                    'deposit_update_balance_switch',
+                                  ),
+                                  contentPadding: EdgeInsets.zero,
+                                  title: const Text('直接增加宿主账户余额'),
+                                  subtitle: const Text('不选转出账户时，将本金计入宿主账户余额'),
+                                  value: _updateAssetBalance,
+                                  onChanged: !editableFinancials
+                                      ? null
+                                      : (v) => setState(
+                                          () => _updateAssetBalance = v,
+                                        ),
+                                ),
+                                if (_updateAssetBalance)
+                                  SwitchListTile(
+                                    key: const Key(
+                                      'deposit_record_adjust_switch',
+                                    ),
+                                    contentPadding: EdgeInsets.zero,
+                                    title: const Text('生成平账调整记录（推荐）'),
+                                    subtitle: const Text('避免账户对账出现无单据差额'),
+                                    value: _createBalanceAdjustRecord,
+                                    onChanged: !editableFinancials
+                                        ? null
+                                        : (v) => setState(
+                                            () =>
+                                                _createBalanceAdjustRecord = v,
+                                          ),
+                                  ),
+                              ],
+                              TextField(
+                                key: const Key('deposit_remark_input'),
+                                controller: _remarkCtrl,
+                                enabled: !_busy,
+                                decoration: const InputDecoration(
+                                  labelText: '备注（可选）',
+                                ),
+                              ),
+                            ],
                           ),
                           if (_error != null) ...[
                             const SizedBox(height: 12),
@@ -803,49 +706,6 @@ class _FixedDepositEditorPageState
                     ),
                   ),
                 ),
-        ),
-      ),
-    );
-  }
-}
-
-class _ControlledDropdownField<T> extends StatelessWidget {
-  const _ControlledDropdownField({
-    required this.fieldKey,
-    required this.label,
-    required this.value,
-    required this.items,
-    required this.onChanged,
-    this.enabled = true,
-  });
-
-  final Key fieldKey;
-  final String label;
-  final T value;
-  final List<DropdownMenuItem<T>> items;
-  final ValueChanged<T?>? onChanged;
-  final bool enabled;
-
-  @override
-  Widget build(BuildContext context) {
-    final isDesktop = DesktopAdaptive.isDesktop(context);
-    return InputDecorator(
-      decoration: InputDecoration(
-        labelText: label,
-        border: const OutlineInputBorder(),
-        contentPadding: EdgeInsets.symmetric(
-          horizontal: 12,
-          vertical: isDesktop ? 16 : 4,
-        ),
-      ),
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<T>(
-          key: fieldKey,
-          isExpanded: true,
-          isDense: true,
-          value: value,
-          items: items,
-          onChanged: enabled ? onChanged : null,
         ),
       ),
     );

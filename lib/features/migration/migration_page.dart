@@ -1153,10 +1153,6 @@ class _LanPasswordDialogState extends State<_LanPasswordDialog> {
             decoration: InputDecoration(
               labelText: '解密密码',
               errorText: _errorText,
-              border: isDesktop ? const OutlineInputBorder() : null,
-              contentPadding: isDesktop
-                  ? const EdgeInsets.symmetric(horizontal: 12, vertical: 16)
-                  : null,
               suffixIcon: IconButton(
                 key: const Key('lan_password_toggle_visibility'),
                 visualDensity: isDesktop ? VisualDensity.compact : null,

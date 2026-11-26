@@ -224,66 +224,40 @@ class _CategoriesPageState extends ConsumerState<CategoriesPage>
                   const SizedBox(height: 8),
                   const Text('删除前请选择将历史账单迁移至的目标分类：'),
                   const SizedBox(height: 12),
-                  DropdownButtonFormField<int>(
+                  TallySelectField<int>(
                     key: const Key('target-category-dropdown'),
-                    isExpanded: true,
-                    initialValue: selectedTarget,
-                    decoration: isDesktop
-                        ? const InputDecoration(
-                            labelText: '目标分类',
-                            border: OutlineInputBorder(),
-                            contentPadding: EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 15,
-                            ),
-                          )
-                        : const InputDecoration(),
-                    items: [
+                    label: '目标分类',
+                    value: selectedTarget,
+                    options: [
                       for (final cand in candidates)
-                        DropdownMenuItem(
+                        TallySelectOption<int>(
                           value: cand.id,
-                          child: Row(
-                            children: [
-                              if (cand.parentCatId != -1)
-                                const SizedBox(width: 12),
-                              CategoryIconAvatar(
-                                iconKey: cand.icon,
-                                colorHex: cand.colorFill,
-                                name: cand.name,
-                                type: cand.type,
-                                size: 22,
-                              ),
-                              const SizedBox(width: 8),
-                              Flexible(
-                                child: Text(
-                                  cand.name,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                            ],
+                          label: cand.name,
+                          leading: Padding(
+                            padding: EdgeInsets.only(
+                              left: cand.parentCatId != -1 ? 12 : 0,
+                            ),
+                            child: CategoryIconAvatar(
+                              iconKey: cand.icon,
+                              colorHex: cand.colorFill,
+                              name: cand.name,
+                              type: cand.type,
+                              size: 22,
+                            ),
                           ),
                         ),
                     ],
-                    onChanged: (val) {
-                      if (val != null) {
-                        setDialogState(() => selectedTarget = val);
-                      }
-                    },
+                    onChanged: (val) =>
+                        setDialogState(() => selectedTarget = val),
                   ),
                 ],
               );
               return AlertDialog(
                 title: const Text('迁移并删除分类'),
-                content: isDesktop
-                    ? ConstrainedBox(
-                        constraints: const BoxConstraints(
-                          minWidth: 360,
-                          maxWidth: 420,
-                        ),
-                        child: migrateBody,
-                      )
-                    : migrateBody,
+                content: SizedBox(
+                  width: isDesktop ? 380 : double.maxFinite,
+                  child: SingleChildScrollView(child: migrateBody),
+                ),
                 actions: [
                   TextButton(
                     onPressed: () => Navigator.pop(dialogCtx, false),
@@ -1019,55 +993,56 @@ class _CategoryEditorDialogState extends State<_CategoryEditorDialog> {
             key: widget.nameFieldKey,
             controller: _nameController,
             autofocus: true,
-            decoration: isDesktop
-                ? const InputDecoration(
-                    labelText: '分类名称',
-                    border: OutlineInputBorder(),
-                    contentPadding: EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 15,
-                    ),
-                  )
-                : const InputDecoration(labelText: '分类名称'),
+            decoration: const InputDecoration(labelText: '分类名称'),
             onChanged: (_) => setState(() {}),
           ),
           const SizedBox(height: 16),
-          InkWell(
-            key: const Key('category-visual-picker-trigger'),
-            borderRadius: BorderRadius.circular(12),
-            onTap: _openPicker,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: theme.colorScheme.outlineVariant),
-              ),
-              child: Row(
-                children: [
-                  CategoryIconAvatar(
-                    iconKey: visual.iconKey,
-                    colorHex: visual.colorHex,
-                    name: visual.label,
-                    type: widget.type,
-                    size: 38,
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('图标与配色', style: theme.textTheme.bodyMedium),
-                        Text(
-                          '${visual.label} · 点击更换图标或颜色',
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: theme.colorScheme.outline,
-                          ),
-                        ),
-                      ],
+          Material(
+            color: tallyNestedSurfaceColor(theme.colorScheme),
+            elevation: 0,
+            surfaceTintColor: Colors.transparent,
+            borderRadius: BorderRadius.circular(kTallyNestedRadius),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              key: const Key('category-visual-picker-trigger'),
+              borderRadius: BorderRadius.circular(kTallyNestedRadius),
+              onTap: _openPicker,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+                child: Row(
+                  children: [
+                    CategoryIconAvatar(
+                      iconKey: visual.iconKey,
+                      colorHex: visual.colorHex,
+                      name: visual.label,
+                      type: widget.type,
+                      size: 38,
                     ),
-                  ),
-                  const Icon(Icons.chevron_right),
-                ],
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('图标与配色', style: theme.textTheme.bodyMedium),
+                          Text(
+                            '${visual.label} · 点击更换图标或颜色',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Icon(
+                      Icons.chevron_right_rounded,
+                      size: 20,
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ],
+                ),
               ),
             ),
           ),

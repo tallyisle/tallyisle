@@ -323,33 +323,30 @@ class _CsvImportPageState extends ConsumerState<CsvImportPage> {
                 child: Text('表格账单导入与导出', maxLines: 1, softWrap: false),
               ),
         actions: [
-          TextButton.icon(
+          TallySoftButton.icon(
             key: const Key('open_csv_export_button'),
-            style: isDesktop
+            compact: true,
+            padding: isDesktop
                 ? null
-                : TextButton.styleFrom(
-                    visualDensity: VisualDensity.compact,
-                    padding: const EdgeInsets.symmetric(horizontal: 6),
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
+                : const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            minimumSize: isDesktop ? null : const Size(0, 32),
             onPressed: _openCsvExport,
-            icon: Icon(Icons.upload_file_outlined, size: isDesktop ? 18 : 16),
+            icon: Icon(Icons.upload_file_outlined, size: isDesktop ? 18 : 15),
             label: const Text('导出 CSV', maxLines: 1, softWrap: false),
           ),
-          TextButton.icon(
+          const SizedBox(width: 6),
+          TallySoftButton.icon(
             key: const Key('open_import_batches_button'),
-            style: isDesktop
+            compact: true,
+            padding: isDesktop
                 ? null
-                : TextButton.styleFrom(
-                    visualDensity: VisualDensity.compact,
-                    padding: const EdgeInsets.symmetric(horizontal: 6),
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
+                : const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            minimumSize: isDesktop ? null : const Size(0, 32),
             onPressed: _openImportBatches,
-            icon: Icon(Icons.history, size: isDesktop ? 18 : 16),
+            icon: Icon(Icons.history, size: isDesktop ? 18 : 15),
             label: const Text('导入记录', maxLines: 1, softWrap: false),
           ),
-          SizedBox(width: isDesktop ? 8 : 4),
+          SizedBox(width: isDesktop ? 8 : 6),
         ],
       ),
       body: asyncBody(booksAsync, (books) {
@@ -600,34 +597,19 @@ class _PreviewCard extends StatelessWidget {
             ],
             const SizedBox(height: 16),
             if (books.isNotEmpty && targetBookId != null)
-              InputDecorator(
-                decoration: InputDecoration(
-                  labelText: preview.hasBookColumn && restoreFileBooks
-                      ? '默认回退账本（文件账本列为空时使用）'
-                      : '导入目标账本',
-                  border: const OutlineInputBorder(),
-                  contentPadding: EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: DesktopAdaptive.isDesktop(context) ? 16 : 4,
-                  ),
-                ),
-                child: DropdownButtonHideUnderline(
-                  child: DropdownButton<int>(
-                    key: const Key('import_target_book_dropdown'),
-                    isExpanded: true,
-                    isDense: DesktopAdaptive.isDesktop(context),
-                    value: targetBookId,
-                    items: [
-                      for (final b in books)
-                        DropdownMenuItem<int>(value: b.id, child: Text(b.name)),
-                    ],
-                    onChanged: busy
-                        ? null
-                        : (v) {
-                            if (v != null) onBookChanged(v);
-                          },
-                  ),
-                ),
+              TallySelectField<int>(
+                key: const Key('import_target_book_dropdown'),
+                label: preview.hasBookColumn && restoreFileBooks
+                    ? '默认回退账本（文件账本列为空时使用）'
+                    : '导入目标账本',
+                sheetTitle: '选择目标账本',
+                value: targetBookId,
+                enabled: !busy,
+                options: [
+                  for (final b in books)
+                    TallySelectOption<int>(value: b.id, label: b.name),
+                ],
+                onChanged: busy ? null : onBookChanged,
               ),
             const SizedBox(height: 8),
             SwitchListTile(

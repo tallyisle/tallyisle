@@ -1684,7 +1684,6 @@ class _AdjustBalanceDialogState extends State<_AdjustBalanceDialog> {
         signed: true,
       ),
       decoration: InputDecoration(
-        border: isDesktop ? const OutlineInputBorder() : null,
         helperText: widget.isCredit
             ? '填当前实际欠款（溢存款填负数）；会生成一条“余额变更”记录'
             : '会生成一条“余额变更”记录',

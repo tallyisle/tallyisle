@@ -807,10 +807,6 @@ class _EarlySettleDialogState extends State<_EarlySettleDialog> {
               labelText: '结清实收手续费',
               prefixText: '¥ ',
               errorText: _error,
-              border: const OutlineInputBorder(),
-              contentPadding: isDesktop
-                  ? const EdgeInsets.symmetric(horizontal: 12, vertical: 16)
-                  : null,
             ),
           ),
         ],

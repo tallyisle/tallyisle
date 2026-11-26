@@ -3481,9 +3481,6 @@ class _AssetVisualPickerSheetState extends State<_AssetVisualPickerSheet> {
                 minHeight: 34,
               ),
               hintText: '搜索银行、支付或图标（如：招行、CMB、上海）',
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
-              ),
             ),
           ),
         ),
@@ -3645,7 +3642,6 @@ class _AssetVisualPickerSheetState extends State<_AssetVisualPickerSheet> {
           decoration: InputDecoration(
             labelText: '自定义文字或 Emoji（1~2 字）',
             hintText: '输入 1~2 个字或 Emoji，如：招行、工资、💳',
-            border: const OutlineInputBorder(),
             suffixIcon: _customTextController.text.isEmpty
                 ? null
                 : IconButton(

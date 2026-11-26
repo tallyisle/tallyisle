@@ -1030,7 +1030,6 @@ class _LinkDialogState extends State<_LinkDialog> {
   @override
   Widget build(BuildContext context) {
     final isDesktop = DesktopAdaptive.isDesktop(context);
-    final fieldBorder = isDesktop ? const OutlineInputBorder() : null;
     Widget content = Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -1044,35 +1043,25 @@ class _LinkDialogState extends State<_LinkDialog> {
             labelText: '金额',
             prefixText: '${widget.currencySymbol} ',
             errorText: error,
-            border: fieldBorder,
           ),
         ),
-        if (isDesktop) const SizedBox(height: 12),
-        DropdownButtonFormField<int>(
-          isExpanded: true,
-          initialValue: assetId,
-          decoration: InputDecoration(labelText: '入账账户', border: fieldBorder),
-          items: [
-            const DropdownMenuItem(
-              value: noRef,
-              child: Text('不选账户', overflow: TextOverflow.ellipsis),
-            ),
+        const SizedBox(height: 12),
+        TallySelectField<int>(
+          label: '入账账户',
+          value: assetId,
+          options: [
+            const TallySelectOption<int>(value: noRef, label: '不选账户'),
             for (final a in widget.assets)
-              DropdownMenuItem(
-                value: a.id,
-                child: Text(a.name, overflow: TextOverflow.ellipsis),
-              ),
+              TallySelectOption<int>(value: a.id, label: a.name),
           ],
-          onChanged: (v) => setState(() => assetId = v ?? noRef),
+          onChanged: (v) => setState(() => assetId = v),
         ),
       ],
     );
-    if (isDesktop) {
-      content = ConstrainedBox(
-        constraints: const BoxConstraints(minWidth: 360, maxWidth: 420),
-        child: content,
-      );
-    }
+    content = SizedBox(
+      width: isDesktop ? 380 : double.maxFinite,
+      child: SingleChildScrollView(child: content),
+    );
     return AlertDialog(
       title: Text(widget.title),
       content: content,
@@ -1136,7 +1125,6 @@ class _SettleAdvanceDialogState extends State<_SettleAdvanceDialog> {
   @override
   Widget build(BuildContext context) {
     final isDesktop = DesktopAdaptive.isDesktop(context);
-    final fieldBorder = isDesktop ? const OutlineInputBorder() : null;
     Widget content = Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -1150,29 +1138,18 @@ class _SettleAdvanceDialogState extends State<_SettleAdvanceDialog> {
             labelText: '实际结算金额',
             prefixText: '${widget.currencySymbol} ',
             errorText: error,
-            border: fieldBorder,
           ),
         ),
-        if (isDesktop) const SizedBox(height: 12),
-        DropdownButtonFormField<int>(
-          isExpanded: true,
-          initialValue: assetId,
-          decoration: InputDecoration(
-            labelText: widget.isIncome ? '收款账户' : '扣款账户',
-            border: fieldBorder,
-          ),
-          items: [
-            const DropdownMenuItem(
-              value: noRef,
-              child: Text('不选账户', overflow: TextOverflow.ellipsis),
-            ),
+        const SizedBox(height: 12),
+        TallySelectField<int>(
+          label: widget.isIncome ? '收款账户' : '扣款账户',
+          value: assetId,
+          options: [
+            const TallySelectOption<int>(value: noRef, label: '不选账户'),
             for (final a in widget.assets)
-              DropdownMenuItem(
-                value: a.id,
-                child: Text(a.name, overflow: TextOverflow.ellipsis),
-              ),
+              TallySelectOption<int>(value: a.id, label: a.name),
           ],
-          onChanged: (v) => setState(() => assetId = v ?? noRef),
+          onChanged: (v) => setState(() => assetId = v),
         ),
         if (isDesktop) const SizedBox(height: 6),
         CheckboxListTile(
@@ -1184,12 +1161,10 @@ class _SettleAdvanceDialogState extends State<_SettleAdvanceDialog> {
         ),
       ],
     );
-    if (isDesktop) {
-      content = ConstrainedBox(
-        constraints: const BoxConstraints(minWidth: 360, maxWidth: 420),
-        child: content,
-      );
-    }
+    content = SizedBox(
+      width: isDesktop ? 380 : double.maxFinite,
+      child: SingleChildScrollView(child: content),
+    );
     return AlertDialog(
       title: Text(widget.isIncome ? '结算预收款' : '结算预支款'),
       content: content,

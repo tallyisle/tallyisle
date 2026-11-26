@@ -149,40 +149,40 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
           ),
           const SizedBox(height: 16),
         ],
-        TextField(
-          key: const Key('note_title_input'),
-          controller: _titleCtrl,
-          maxLength: maxNoteTitleLength,
-          decoration: const InputDecoration(
-            labelText: '标题（可选）',
-            hintText: '输入便签标题…',
-            border: OutlineInputBorder(),
-          ),
-        ),
-        const SizedBox(height: 12),
-        TextField(
-          key: const Key('note_content_input'),
-          controller: _contentCtrl,
-          minLines: 8,
-          maxLines: null,
-          keyboardType: TextInputType.multiline,
-          decoration: const InputDecoration(
-            labelText: '便签正文',
-            hintText: '写下备忘、清单或灵感…',
-            alignLabelWithHint: true,
-            border: OutlineInputBorder(),
-          ),
-        ),
-        if (_createTimeMs != null && _updateTimeMs != null) ...[
-          const SizedBox(height: 12),
-          Text(
-            '创建于 ${formatDateTime(DateTime.fromMillisecondsSinceEpoch(_createTimeMs!))} · '
-            '最后修改 ${formatDateTime(DateTime.fromMillisecondsSinceEpoch(_updateTimeMs!))}',
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
+        TallyFormCard(
+          spacing: 12,
+          children: [
+            TextField(
+              key: const Key('note_title_input'),
+              controller: _titleCtrl,
+              maxLength: maxNoteTitleLength,
+              decoration: const InputDecoration(
+                labelText: '标题（可选）',
+                hintText: '输入便签标题…',
+              ),
             ),
-          ),
-        ],
+            TextField(
+              key: const Key('note_content_input'),
+              controller: _contentCtrl,
+              minLines: 8,
+              maxLines: null,
+              keyboardType: TextInputType.multiline,
+              decoration: const InputDecoration(
+                labelText: '便签正文',
+                hintText: '写下备忘、清单或灵感…',
+                alignLabelWithHint: true,
+              ),
+            ),
+            if (_createTimeMs != null && _updateTimeMs != null)
+              Text(
+                '创建于 ${formatDateTime(DateTime.fromMillisecondsSinceEpoch(_createTimeMs!))} · '
+                '最后修改 ${formatDateTime(DateTime.fromMillisecondsSinceEpoch(_updateTimeMs!))}',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+          ],
+        ),
       ],
     );
 
@@ -204,12 +204,6 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
                   onPressed: _busy ? null : _moveToTrash,
                   icon: const Icon(Icons.delete_outline),
                 ),
-              if (!isDesktop)
-                TextButton(
-                  key: const Key('save_note_button'),
-                  onPressed: _busy || _loading ? null : _save,
-                  child: Text(_busy ? '保存中' : '保存'),
-                ),
             ],
           ),
           body: _loading
@@ -222,11 +216,13 @@ class _NoteEditorPageState extends ConsumerState<NoteEditorPage> {
                         ),
                       )
                     : formBody),
-          bottomNavigationBar: !isDesktop || _loading
+          bottomNavigationBar: _loading
               ? null
               : SafeArea(
                   child: Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 8, 20, 14),
+                    padding: isDesktop
+                        ? const EdgeInsets.fromLTRB(20, 8, 20, 14)
+                        : const EdgeInsets.fromLTRB(16, 8, 16, 16),
                     child: FilledButton.icon(
                       key: const Key('save_note_button'),
                       onPressed: _busy ? null : _save,

@@ -439,7 +439,6 @@ class _OcrBillPageState extends ConsumerState<OcrBillPage> {
                   decoration: const InputDecoration(
                     labelText: '账单明细、小票或口语文本（支持直接离线解析）',
                     hintText: '例如：\n11月10日 09:15\n瑞幸咖啡\n-18.50',
-                    border: OutlineInputBorder(),
                   ),
                 ),
               ],
@@ -516,33 +515,16 @@ class _OcrBillPageState extends ConsumerState<OcrBillPage> {
             ],
           ),
           const SizedBox(height: 10),
-          InputDecorator(
-            decoration: const InputDecoration(
-              labelText: '默认入账资金账户（单笔未指定时生效）',
-              border: OutlineInputBorder(),
-              contentPadding: EdgeInsets.symmetric(
-                horizontal: 12,
-                vertical: 14,
-              ),
-            ),
-            child: DropdownButtonHideUnderline(
-              child: DropdownButton<int?>(
-                key: const Key('ocr_default_asset_dropdown'),
-                isExpanded: true,
-                isDense: true,
-                style: theme.textTheme.bodyLarge,
-                value: validDefaultAssetId,
-                items: [
-                  const DropdownMenuItem<int?>(
-                    value: null,
-                    child: Text('不指定默认账户'),
-                  ),
-                  for (final a in assets)
-                    DropdownMenuItem<int?>(value: a.id, child: Text(a.name)),
-                ],
-                onChanged: (v) => setState(() => _defaultAssetId = v),
-              ),
-            ),
+          TallySelectField<int?>(
+            key: const Key('ocr_default_asset_dropdown'),
+            label: '默认入账资金账户（单笔未指定时生效）',
+            value: validDefaultAssetId,
+            options: [
+              const TallySelectOption<int?>(value: null, label: '不指定默认账户'),
+              for (final a in assets)
+                TallySelectOption<int?>(value: a.id, label: a.name),
+            ],
+            onChanged: (v) => setState(() => _defaultAssetId = v),
           ),
           const SizedBox(height: 12),
           for (final candidate in _candidates) ...[
@@ -893,7 +875,6 @@ class _OcrConfigDialogState extends ConsumerState<_OcrConfigDialog> {
                   decoration: const InputDecoration(
                     labelText: 'HTTP/HTTPS OCR 接口地址',
                     hintText: 'https://ocr.example.com/v1/recognize',
-                    border: OutlineInputBorder(),
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -903,7 +884,6 @@ class _OcrConfigDialogState extends ConsumerState<_OcrConfigDialog> {
                   obscureText: true,
                   decoration: const InputDecoration(
                     labelText: 'Bearer API Key（可选）',
-                    border: OutlineInputBorder(),
                   ),
                 ),
               ],
@@ -928,7 +908,6 @@ class _OcrConfigDialogState extends ConsumerState<_OcrConfigDialog> {
                   decoration: const InputDecoration(
                     labelText: 'OpenAI 兼容 Base URL',
                     hintText: 'https://api.deepseek.com/v1',
-                    border: OutlineInputBorder(),
                   ),
                 ),
                 const SizedBox(height: 10),
@@ -938,7 +917,6 @@ class _OcrConfigDialogState extends ConsumerState<_OcrConfigDialog> {
                   decoration: const InputDecoration(
                     labelText: '模型名称 (Model)',
                     hintText: 'deepseek-chat 或 qwen-vl-max',
-                    border: OutlineInputBorder(),
                   ),
                 ),
                 const SizedBox(height: 10),
@@ -948,7 +926,6 @@ class _OcrConfigDialogState extends ConsumerState<_OcrConfigDialog> {
                   obscureText: true,
                   decoration: const InputDecoration(
                     labelText: 'API Key（可选，本地模型可留空）',
-                    border: OutlineInputBorder(),
                   ),
                 ),
                 SwitchListTile(
@@ -1105,75 +1082,41 @@ class _CandidateReviewCard extends StatelessWidget {
             Row(
               children: [
                 Expanded(
-                  child: InputDecorator(
-                    decoration: const InputDecoration(
-                      labelText: '分类',
-                      border: OutlineInputBorder(),
-                      contentPadding: EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 14,
-                      ),
-                    ),
-                    child: DropdownButtonHideUnderline(
-                      child: DropdownButton<int>(
-                        isExpanded: true,
-                        isDense: true,
-                        style: theme.textTheme.bodyLarge,
-                        value: validCatId,
-                        items: [
-                          for (final c in dirCats)
-                            DropdownMenuItem(value: c.id, child: Text(c.name)),
-                        ],
-                        onChanged: (v) =>
-                            onChanged(candidate.copyWith(categoryId: v)),
-                      ),
-                    ),
+                  child: TallySelectField<int>(
+                    label: '分类',
+                    value: validCatId,
+                    options: [
+                      for (final c in dirCats)
+                        TallySelectOption<int>(value: c.id, label: c.name),
+                    ],
+                    onChanged: (v) =>
+                        onChanged(candidate.copyWith(categoryId: v)),
                   ),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
-                  child: InputDecorator(
-                    decoration: const InputDecoration(
-                      labelText: '账户（可选）',
-                      border: OutlineInputBorder(),
-                      contentPadding: EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 14,
-                      ),
-                    ),
-                    child: DropdownButtonHideUnderline(
-                      child: DropdownButton<int?>(
-                        isExpanded: true,
-                        isDense: true,
-                        style: theme.textTheme.bodyLarge,
-                        value: validAssetId,
-                        items: [
-                          const DropdownMenuItem<int?>(
-                            value: null,
-                            child: Text('跟随默认'),
-                          ),
-                          for (final a in assets)
-                            DropdownMenuItem<int?>(
-                              value: a.id,
-                              child: Text(a.name),
-                            ),
-                        ],
-                        onChanged: (v) => onChanged(
-                          OcrBillCandidate(
-                            index: candidate.index,
-                            type: candidate.type,
-                            money: candidate.money,
-                            discount: candidate.discount,
-                            recordTimeMs: candidate.recordTimeMs,
-                            merchant: candidate.merchant,
-                            remark: candidate.remark,
-                            categoryHint: candidate.categoryHint,
-                            accountHint: candidate.accountHint,
-                            categoryId: validCatId,
-                            assetId: v,
-                            selected: candidate.selected,
-                          ),
-                        ),
+                  child: TallySelectField<int?>(
+                    label: '账户（可选）',
+                    value: validAssetId,
+                    options: [
+                      const TallySelectOption<int?>(value: null, label: '跟随默认'),
+                      for (final a in assets)
+                        TallySelectOption<int?>(value: a.id, label: a.name),
+                    ],
+                    onChanged: (v) => onChanged(
+                      OcrBillCandidate(
+                        index: candidate.index,
+                        type: candidate.type,
+                        money: candidate.money,
+                        discount: candidate.discount,
+                        recordTimeMs: candidate.recordTimeMs,
+                        merchant: candidate.merchant,
+                        remark: candidate.remark,
+                        categoryHint: candidate.categoryHint,
+                        accountHint: candidate.accountHint,
+                        categoryId: validCatId,
+                        assetId: v,
+                        selected: candidate.selected,
                       ),
                     ),
                   ),
@@ -1247,19 +1190,13 @@ class _EditCandidateDialogState extends State<_EditCandidateDialog> {
               keyboardType: const TextInputType.numberWithOptions(
                 decimal: true,
               ),
-              decoration: const InputDecoration(
-                labelText: '金额（元）',
-                border: OutlineInputBorder(),
-              ),
+              decoration: const InputDecoration(labelText: '金额（元）'),
             ),
             const SizedBox(height: 12),
             TextField(
               key: const Key('ocr_edit_remark_input'),
               controller: _remarkController,
-              decoration: const InputDecoration(
-                labelText: '备注',
-                border: OutlineInputBorder(),
-              ),
+              decoration: const InputDecoration(labelText: '备注'),
             ),
             if (_error != null) ...[
               const SizedBox(height: 8),

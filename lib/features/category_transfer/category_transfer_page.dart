@@ -834,36 +834,34 @@ class _CategoryTransferPageState extends ConsumerState<CategoryTransferPage>
                 ),
               )
             else ...[
-              _ControlledDropdownField<int>(
-                fieldKey: const Key('cat-migrate-source'),
+              TallySelectField<int>(
+                key: const Key('cat-migrate-source'),
                 label: '迁出源分类',
+                enabled: !_busy,
                 value: effectiveSource?.id,
-                items: [
+                options: [
                   for (final c in typedCats)
-                    DropdownMenuItem(
+                    TallySelectOption<int>(
                       value: c.id,
-                      child: Text(_formatCategoryOption(c, byId)),
+                      label: _formatCategoryOption(c, byId),
                     ),
                 ],
-                onChanged: _busy
-                    ? null
-                    : (id) => setState(() => _migrateSourceCatId = id),
+                onChanged: (id) => setState(() => _migrateSourceCatId = id),
               ),
               const SizedBox(height: 12),
-              _ControlledDropdownField<int>(
-                fieldKey: const Key('cat-migrate-target'),
+              TallySelectField<int>(
+                key: const Key('cat-migrate-target'),
                 label: '迁入目标分类',
+                enabled: !_busy,
                 value: effectiveTarget?.id,
-                items: [
+                options: [
                   for (final c in targetCandidates)
-                    DropdownMenuItem(
+                    TallySelectOption<int>(
                       value: c.id,
-                      child: Text(_formatCategoryOption(c, byId)),
+                      label: _formatCategoryOption(c, byId),
                     ),
                 ],
-                onChanged: _busy
-                    ? null
-                    : (id) => setState(() => _migrateTargetCatId = id),
+                onChanged: (id) => setState(() => _migrateTargetCatId = id),
               ),
               const SizedBox(height: 12),
               _tonalCard(
@@ -935,63 +933,16 @@ class _BookDropdownField extends StatelessWidget {
     final valid = books.any((b) => b.id == selectedBookId)
         ? selectedBookId
         : books.firstOrNull?.id;
-    return _ControlledDropdownField<int>(
-      fieldKey: fieldKey,
+    return TallySelectField<int>(
+      key: fieldKey,
       label: label,
+      enabled: enabled,
       value: valid,
-      items: [
+      options: [
         for (final b in books)
-          DropdownMenuItem(value: b.id, child: Text(b.name)),
+          TallySelectOption<int>(value: b.id, label: b.name),
       ],
-      onChanged: enabled
-          ? (v) {
-              if (v != null) onChanged(v);
-            }
-          : null,
-    );
-  }
-}
-
-class _ControlledDropdownField<T> extends StatelessWidget {
-  const _ControlledDropdownField({
-    required this.fieldKey,
-    required this.label,
-    required this.value,
-    required this.items,
-    required this.onChanged,
-  });
-
-  final Key fieldKey;
-  final String label;
-  final T? value;
-  final List<DropdownMenuItem<T>> items;
-  final ValueChanged<T?>? onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final effectiveValue = items.any((item) => item.value == value)
-        ? value
-        : null;
-    return InputDecorator(
-      decoration: InputDecoration(
-        labelText: label,
-        border: const OutlineInputBorder(),
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 12,
-          vertical: 14,
-        ),
-      ),
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<T>(
-          key: fieldKey,
-          isExpanded: true,
-          isDense: true,
-          style: Theme.of(context).textTheme.bodyLarge,
-          value: effectiveValue,
-          items: items,
-          onChanged: onChanged,
-        ),
-      ),
+      onChanged: onChanged,
     );
   }
 }

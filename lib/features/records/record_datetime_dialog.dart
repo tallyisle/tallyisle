@@ -1285,14 +1285,6 @@ class _RecordDateTimeDialogState extends State<RecordDateTimeDialog> {
                   horizontal: 8,
                   vertical: 12,
                 ),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide.none,
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide.none,
-                ),
               ),
               onChanged: (raw) {
                 final trimmed = raw.trim();

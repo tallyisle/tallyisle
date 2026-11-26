@@ -851,7 +851,6 @@ class _McpPortEditDialogState extends State<_McpPortEditDialog> {
               labelText: '端口号 (1024–65535)',
               hintText: '$defaultMcpPort',
               errorText: _error,
-              border: const OutlineInputBorder(),
             ),
           ),
         ],

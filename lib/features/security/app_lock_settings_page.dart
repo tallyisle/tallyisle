@@ -507,14 +507,7 @@ class _SetNewPinDialogState extends State<_SetNewPinDialog> {
           obscureText: true,
           maxLength: _pinLength,
           inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-          decoration: InputDecoration(
-            labelText: '输入 $_pinLength 位数字密码',
-            border: const OutlineInputBorder(),
-            contentPadding: const EdgeInsets.symmetric(
-              horizontal: 12,
-              vertical: 14,
-            ),
-          ),
+          decoration: InputDecoration(labelText: '输入 $_pinLength 位数字密码'),
         ),
         const SizedBox(height: 12),
         TextField(
@@ -526,11 +519,6 @@ class _SetNewPinDialogState extends State<_SetNewPinDialog> {
           inputFormatters: [FilteringTextInputFormatter.digitsOnly],
           decoration: InputDecoration(
             labelText: '再次确认 $_pinLength 位数字密码',
-            border: const OutlineInputBorder(),
-            contentPadding: const EdgeInsets.symmetric(
-              horizontal: 12,
-              vertical: 14,
-            ),
             errorText: _error,
           ),
         ),
@@ -619,11 +607,6 @@ class _ChangePinDialogState extends State<_ChangePinDialog> {
           inputFormatters: [FilteringTextInputFormatter.digitsOnly],
           decoration: InputDecoration(
             labelText: '当前 ${widget.currentPinLength} 位密码',
-            border: const OutlineInputBorder(),
-            contentPadding: const EdgeInsets.symmetric(
-              horizontal: 12,
-              vertical: 14,
-            ),
           ),
         ),
         const SizedBox(height: 12),
@@ -664,14 +647,7 @@ class _ChangePinDialogState extends State<_ChangePinDialog> {
           obscureText: true,
           maxLength: _newLength,
           inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-          decoration: InputDecoration(
-            labelText: '输入新 $_newLength 位密码',
-            border: const OutlineInputBorder(),
-            contentPadding: const EdgeInsets.symmetric(
-              horizontal: 12,
-              vertical: 14,
-            ),
-          ),
+          decoration: InputDecoration(labelText: '输入新 $_newLength 位密码'),
         ),
         const SizedBox(height: 12),
         TextField(
@@ -683,11 +659,6 @@ class _ChangePinDialogState extends State<_ChangePinDialog> {
           inputFormatters: [FilteringTextInputFormatter.digitsOnly],
           decoration: InputDecoration(
             labelText: '确认新 $_newLength 位密码',
-            border: const OutlineInputBorder(),
-            contentPadding: const EdgeInsets.symmetric(
-              horizontal: 12,
-              vertical: 14,
-            ),
             errorText: _error,
           ),
         ),
@@ -762,11 +733,6 @@ class _VerifyCurrentPinDialogState extends State<_VerifyCurrentPinDialog> {
       inputFormatters: [FilteringTextInputFormatter.digitsOnly],
       decoration: InputDecoration(
         labelText: '请输入当前 ${widget.pinLength} 位密码确认',
-        border: const OutlineInputBorder(),
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 12,
-          vertical: 14,
-        ),
         errorText: _error,
       ),
     );

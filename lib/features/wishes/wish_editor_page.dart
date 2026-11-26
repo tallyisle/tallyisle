@@ -214,91 +214,138 @@ class _WishEditorPageState extends ConsumerState<WishEditorPage> {
           ),
           const SizedBox(height: 16),
         ],
-        TextField(
-          key: const Key('wish_content_input'),
-          controller: _contentCtrl,
-          maxLength: maxWishContentLength,
-          decoration: const InputDecoration(
-            labelText: '心愿内容',
-            hintText: '例如：降噪耳机、海岛旅行',
-            border: OutlineInputBorder(),
-          ),
-        ),
-        const SizedBox(height: 12),
-        TextField(
-          key: const Key('wish_amount_input'),
-          controller: _amountCtrl,
-          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          decoration: const InputDecoration(
-            labelText: '目标金额（元）',
-            prefixText: '¥ ',
-            border: OutlineInputBorder(),
-          ),
-        ),
-        const SizedBox(height: 16),
-        Text('心愿图标', style: theme.textTheme.titleSmall),
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
+        TallyFormCard(
+          title: '心愿信息',
+          spacing: 12,
           children: [
-            for (final option in presetWishIcons)
-              ChoiceChip(
-                key: Key('wish_icon_chip_${option.key}'),
-                avatar: Icon(wishIconData(option.key), size: 18),
-                label: Text(option.label),
-                selected: _selectedIcon == option.key,
-                onSelected: (_) => setState(() => _selectedIcon = option.key),
+            TextField(
+              key: const Key('wish_content_input'),
+              controller: _contentCtrl,
+              maxLength: maxWishContentLength,
+              decoration: const InputDecoration(
+                labelText: '心愿内容',
+                hintText: '例如：降噪耳机、海岛旅行',
               ),
-            if (hasCustomLegacyIcon)
-              ChoiceChip(
-                key: const Key('wish_icon_chip_legacy'),
-                avatar: const Icon(Icons.auto_awesome, size: 18),
-                label: Text('原图标 (${_selectedIcon!})'),
-                selected: true,
-                onSelected: (_) {},
+            ),
+            TextField(
+              key: const Key('wish_amount_input'),
+              controller: _amountCtrl,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
               ),
+              decoration: const InputDecoration(
+                labelText: '目标金额（元）',
+                prefixText: '¥ ',
+              ),
+            ),
           ],
         ),
-        const SizedBox(height: 16),
-        Card(
-          margin: EdgeInsets.zero,
-          child: ListTile(
-            leading: const Icon(Icons.event_outlined),
-            title: const Text('目标日期（可选）'),
-            subtitle: Text(
-              _targetDate == null ? '未设置' : formatDate(_targetDate!),
-              key: const Key('wish_target_date_text'),
-            ),
-            trailing: Row(
-              mainAxisSize: MainAxisSize.min,
+        const SizedBox(height: 12),
+        TallyFormCard(
+          title: '心愿图标',
+          children: [
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
               children: [
-                if (_targetDate != null)
-                  IconButton(
-                    key: const Key('wish_clear_target_date'),
-                    tooltip: '清除目标日期',
-                    onPressed: () => setState(() => _targetDate = null),
-                    icon: const Icon(Icons.clear),
+                for (final option in presetWishIcons)
+                  ChoiceChip(
+                    key: Key('wish_icon_chip_${option.key}'),
+                    avatar: Icon(wishIconData(option.key), size: 18),
+                    label: Text(option.label),
+                    selected: _selectedIcon == option.key,
+                    onSelected: (_) =>
+                        setState(() => _selectedIcon = option.key),
                   ),
-                TextButton(
-                  key: const Key('wish_pick_target_date'),
-                  onPressed: _pickTargetDate,
-                  child: Text(_targetDate == null ? '选择日期' : '修改'),
-                ),
+                if (hasCustomLegacyIcon)
+                  ChoiceChip(
+                    key: const Key('wish_icon_chip_legacy'),
+                    avatar: const Icon(Icons.auto_awesome, size: 18),
+                    label: Text('原图标 (${_selectedIcon!})'),
+                    selected: true,
+                    onSelected: (_) {},
+                  ),
               ],
             ),
-          ),
+          ],
         ),
-        const SizedBox(height: 16),
-        TextField(
-          key: const Key('wish_sort_input'),
-          controller: _sortCtrl,
-          keyboardType: const TextInputType.numberWithOptions(signed: true),
-          decoration: const InputDecoration(
-            labelText: '排序权重（可选，数值越小越靠前）',
-            hintText: '留空则默认置顶',
-            border: OutlineInputBorder(),
-          ),
+        const SizedBox(height: 12),
+        TallyFormCard(
+          title: '目标与排序',
+          spacing: 12,
+          children: [
+            Material(
+              color: tallyNestedSurfaceColor(theme.colorScheme),
+              elevation: 0,
+              surfaceTintColor: Colors.transparent,
+              borderRadius: BorderRadius.circular(kTallyNestedRadius),
+              clipBehavior: Clip.antiAlias,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 10,
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.event_outlined,
+                      size: 20,
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '目标日期（可选）',
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            _targetDate == null
+                                ? '未设置'
+                                : formatDate(_targetDate!),
+                            key: const Key('wish_target_date_text'),
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (_targetDate != null)
+                      IconButton(
+                        key: const Key('wish_clear_target_date'),
+                        visualDensity: VisualDensity.compact,
+                        tooltip: '清除目标日期',
+                        onPressed: () => setState(() => _targetDate = null),
+                        icon: const Icon(Icons.clear, size: 18),
+                      ),
+                    const SizedBox(width: 4),
+                    TallySoftButton(
+                      key: const Key('wish_pick_target_date'),
+                      compact: true,
+                      onPressed: _pickTargetDate,
+                      child: Text(_targetDate == null ? '选择日期' : '修改'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            TextField(
+              key: const Key('wish_sort_input'),
+              controller: _sortCtrl,
+              keyboardType: const TextInputType.numberWithOptions(signed: true),
+              decoration: const InputDecoration(
+                labelText: '排序权重（可选，数值越小越靠前）',
+                hintText: '留空则默认置顶',
+              ),
+            ),
+          ],
         ),
       ],
     );

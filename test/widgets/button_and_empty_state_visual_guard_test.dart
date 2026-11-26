@@ -11,6 +11,7 @@ import 'package:path/path.dart' as p;
 import 'package:tallyisle/app/adaptive.dart';
 import 'package:tallyisle/app/providers.dart';
 import 'package:tallyisle/data/db/database.dart';
+import 'package:tallyisle/domain/ledger/asset_json.dart' show endOfMonthDay;
 import 'package:tallyisle/domain/model/codes.dart';
 import 'package:tallyisle/features/assets/asset_editor_page.dart';
 import 'package:tallyisle/features/assets/assets_page.dart';
@@ -20,7 +21,9 @@ import 'package:tallyisle/features/category_transfer/category_transfer_page.dart
 import 'package:tallyisle/features/category_transfer/category_transfer_providers.dart';
 import 'package:tallyisle/features/common/tally_button.dart';
 import 'package:tallyisle/features/common/tally_card.dart';
+import 'package:tallyisle/features/common/tally_form_fields.dart';
 import 'package:tallyisle/features/csv_transfer/csv_export_page.dart';
+import 'package:tallyisle/features/csv_transfer/csv_import_page.dart';
 import 'package:tallyisle/features/migration/migration_page.dart';
 import 'package:tallyisle/features/migration/migration_providers.dart';
 import 'package:tallyisle/features/reminder/reminder_providers.dart';
@@ -45,6 +48,16 @@ ThemeData _guardTheme(Brightness brightness, {required bool isDesktop}) {
   return ThemeData(
     colorScheme: scheme,
     useMaterial3: true,
+    cardTheme: tallyCardTheme(scheme),
+    inputDecorationTheme: tallyInputDecorationTheme(
+      scheme,
+      isDesktop: isDesktop,
+    ),
+    chipTheme: tallyChipTheme(scheme, isDesktop: isDesktop),
+    segmentedButtonTheme: tallySegmentedButtonTheme(
+      scheme,
+      isDesktop: isDesktop,
+    ),
     filledButtonTheme: tallyPrimaryButtonTheme(scheme, isDesktop: isDesktop),
     outlinedButtonTheme: tallySoftOutlinedButtonTheme(
       scheme,
@@ -136,7 +149,7 @@ void _expectSameFill(
 void main() {
   driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
 
-  group('Global button theme', () {
+  group('Global button & borderless form themes', () {
     for (final brightness in Brightness.values) {
       testWidgets(
         'TallySoftButton / FilledButton / OutlinedButton share 12dp radius, soft ones stay borderless ($brightness)',
@@ -254,11 +267,505 @@ void main() {
           await tester.pumpWidget(const SizedBox());
         },
       );
+
+      testWidgets(
+        'InputDecorationTheme, ChipTheme, and SegmentedButtonTheme stay borderless ($brightness)',
+        (tester) async {
+          for (final isDesktop in const [false, true]) {
+            final theme = _guardTheme(brightness, isDesktop: isDesktop);
+            final scheme = theme.colorScheme;
+            final nestedFill = tallyNestedSurfaceColor(scheme);
+            final softFill = tallySoftButtonFillColor(scheme);
+
+            await tester.pumpWidget(
+              DesktopAdaptiveScope(
+                isDesktop: isDesktop,
+                child: MaterialApp(
+                  theme: theme,
+                  home: Scaffold(
+                    body: SingleChildScrollView(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          const TextField(
+                            key: Key('g-textfield'),
+                            decoration: InputDecoration(labelText: '名称'),
+                          ),
+                          const SizedBox(height: 12),
+                          TallySelectField<int>(
+                            key: const Key('g-select'),
+                            label: '分类',
+                            value: 1,
+                            options: const [
+                              TallySelectOption(value: 1, label: '餐饮'),
+                            ],
+                            onChanged: (_) {},
+                          ),
+                          const SizedBox(height: 12),
+                          Wrap(
+                            spacing: 8,
+                            children: [
+                              const Chip(key: Key('g-chip'), label: Text('标签')),
+                              ChoiceChip(
+                                key: const Key('g-choice-selected'),
+                                label: const Text('已选'),
+                                selected: true,
+                                onSelected: (_) {},
+                              ),
+                              ChoiceChip(
+                                key: const Key('g-choice-unselected'),
+                                label: const Text('未选'),
+                                selected: false,
+                                onSelected: (_) {},
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          SegmentedButton<int>(
+                            key: const Key('g-segmented'),
+                            showSelectedIcon: false,
+                            segments: const [
+                              ButtonSegment(value: 0, label: Text('支出')),
+                              ButtonSegment(value: 1, label: Text('收入')),
+                            ],
+                            selected: const {0},
+                            onSelectionChanged: (_) {},
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            );
+            await tester.pump();
+            expect(tester.takeException(), isNull);
+
+            // 1. InputDecorationTheme checks
+            final inputTheme = theme.inputDecorationTheme;
+            expect(inputTheme.filled, isTrue);
+            expect(inputTheme.fillColor, nestedFill);
+            expect(
+              inputTheme.contentPadding,
+              EdgeInsets.symmetric(horizontal: 14, vertical: isDesktop ? 8 : 7),
+            );
+            for (final b in [
+              inputTheme.border,
+              inputTheme.enabledBorder,
+              inputTheme.disabledBorder,
+            ]) {
+              expect(b, isA<OutlineInputBorder>());
+              final ob = b! as OutlineInputBorder;
+              expect(ob.isOutline, isFalse);
+              expect(ob.borderSide, BorderSide.none);
+              expect(
+                ob.borderRadius,
+                BorderRadius.circular(kTallyNestedRadius),
+              );
+            }
+            final focused = inputTheme.focusedBorder! as OutlineInputBorder;
+            expect(focused.isOutline, isFalse);
+            expect(focused.borderSide.width, 1.2);
+            expect(
+              focused.borderSide.color,
+              scheme.primary.withValues(alpha: 0.65),
+            );
+            final errBorder = inputTheme.errorBorder! as OutlineInputBorder;
+            expect(errBorder.isOutline, isFalse);
+            expect(errBorder.borderSide.width, 1.2);
+            expect(errBorder.borderSide.color, scheme.error);
+
+            // Floating labelText stays strictly INSIDE the 12dp tonal fill box
+            await tester.enterText(
+              find.byKey(const Key('g-textfield')),
+              '日常开销',
+            );
+            await tester.pumpAndSettle();
+            final tfRect = tester.getRect(find.byKey(const Key('g-textfield')));
+            final labelRect = tester.getRect(find.text('名称'));
+            expect(labelRect.top, greaterThanOrEqualTo(tfRect.top + 4.0));
+            expect(labelRect.bottom, lessThanOrEqualTo(tfRect.bottom - 16.0));
+
+            // TextField & TallySelectField visual height parity
+            final tfHeight = tfRect.height;
+            final sfHeight = tester
+                .getSize(find.byKey(const Key('g-select')))
+                .height;
+            expect((tfHeight - sfHeight).abs(), lessThanOrEqualTo(2.0));
+
+            // 2. ChipTheme checks
+            final chipTheme = theme.chipTheme;
+            expect(chipTheme.side, BorderSide.none);
+            expect(chipTheme.showCheckmark, isFalse);
+            expect(chipTheme.backgroundColor, nestedFill);
+            expect(chipTheme.selectedColor, softFill);
+            expect(chipTheme.elevation, 0);
+            expect(chipTheme.pressElevation, 0);
+            expect(chipTheme.shape, isA<RoundedRectangleBorder>());
+            expect(
+              (chipTheme.shape! as RoundedRectangleBorder).borderRadius,
+              BorderRadius.circular(10),
+            );
+
+            // 3. SegmentedButtonTheme checks
+            final segStyle = theme.segmentedButtonTheme.style!;
+            expect(segStyle.side!.resolve(<WidgetState>{}), BorderSide.none);
+            expect(
+              segStyle.side!.resolve({WidgetState.selected}),
+              BorderSide.none,
+            );
+            _expectNestedRadius(
+              segStyle.shape!.resolve(<WidgetState>{}),
+              label: 'segmented shape',
+            );
+            expect(
+              segStyle.backgroundColor!.resolve({WidgetState.selected}),
+              softFill,
+            );
+            expect(
+              segStyle.backgroundColor!.resolve(<WidgetState>{}),
+              nestedFill,
+            );
+            expect(
+              segStyle.backgroundColor!.resolve({WidgetState.disabled}),
+              scheme.onSurface.withValues(alpha: 0.05),
+            );
+            expect(
+              segStyle.foregroundColor!.resolve({WidgetState.selected}),
+              scheme.onPrimaryContainer,
+            );
+            expect(
+              segStyle.foregroundColor!.resolve(<WidgetState>{}),
+              scheme.onSurfaceVariant,
+            );
+            expect(
+              segStyle.minimumSize!.resolve(<WidgetState>{}),
+              Size(0, isDesktop ? 38 : 36),
+            );
+          }
+          await tester.pumpWidget(const SizedBox());
+        },
+      );
     }
+  });
+
+  group('TallySelectField, CreditDayPicker & TallyFormCard/Tile', () {
+    testWidgets(
+      'TallySelectField supports mobile sheet (<=35 non-lazy & >35 searchable), desktop dialog, nullable T?, and 96px narrow safety',
+      (tester) async {
+        addTearDown(() {
+          tester.view.resetPhysicalSize();
+          tester.view.resetDevicePixelRatio();
+        });
+
+        // 1. Mobile bottom sheet: <= 35 items rendered non-lazily + nullable int? round-trip
+        tester.view.physicalSize = const Size(390, 844);
+        tester.view.devicePixelRatio = 1.0;
+
+        int? selectedNullable = 2;
+        var customTapped = 0;
+
+        await tester.pumpWidget(
+          DesktopAdaptiveScope(
+            isDesktop: false,
+            child: MaterialApp(
+              theme: _guardTheme(Brightness.light, isDesktop: false),
+              home: StatefulBuilder(
+                builder: (context, setState) => Scaffold(
+                  body: ListView(
+                    padding: const EdgeInsets.all(16),
+                    children: [
+                      TallyFormCard(
+                        title: '筛选条件',
+                        subtitle: '测试无边框表单卡片',
+                        spacing: 10,
+                        children: [
+                          TallySelectField<int?>(
+                            key: const Key('nullable-select'),
+                            label: '关联账户',
+                            value: selectedNullable,
+                            helperText: '支持空值回传',
+                            options: [
+                              const TallySelectOption<int?>(
+                                value: null,
+                                label: '不限账户',
+                              ),
+                              for (var i = 1; i <= 30; i++)
+                                TallySelectOption<int?>(
+                                  value: i,
+                                  label: '测试账户 $i',
+                                  subtitle: i == 30 ? '第 30 个非懒加载项' : null,
+                                ),
+                            ],
+                            onChanged: (v) =>
+                                setState(() => selectedNullable = v),
+                          ),
+                          TallyFormTile(
+                            tileKey: const Key('custom-form-tile'),
+                            leading: const Icon(Icons.palette_outlined),
+                            title: '图标与颜色',
+                            subtitle: '点击更换',
+                            onTap: () => setState(() => customTapped++),
+                          ),
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: SizedBox(
+                              width: 96,
+                              child: TallySelectField<int>(
+                                key: const Key('narrow-96-select'),
+                                label: '超窄标签防溢出测试',
+                                value: 1,
+                                leading: const CircleAvatar(
+                                  radius: 16,
+                                  child: Icon(Icons.wallet),
+                                ),
+                                options: const [
+                                  TallySelectOption<int>(
+                                    value: 1,
+                                    label: '超长选项文案在96px下单行省略不溢出',
+                                  ),
+                                ],
+                                onChanged: (_) {},
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        expect(
+          tester
+              .widget<TallySelectField<int?>>(
+                find.byKey(const Key('nullable-select')),
+              )
+              .value,
+          2,
+        );
+        expect(find.text('测试账户 2'), findsOneWidget);
+
+        // Tap tile inside TallyFormCard
+        await tester.tap(find.byKey(const Key('custom-form-tile')));
+        await tester.pump();
+        expect(customTapped, 1);
+
+        // Open mobile sheet: 31 options (<= 35) -> item 30 must already be in widget tree!
+        await tester.tap(find.byKey(const Key('nullable-select')));
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        expect(
+          find.byKey(const Key('tally-select-search-input')),
+          findsOneWidget,
+        );
+        expect(find.text('测试账户 30'), findsOneWidget);
+        expect(find.byType(CloseButton), findsNothing);
+
+        // Select `null` option ('不限账户') and verify record wrapper delivers null!
+        await tester.tap(find.text('不限账户'));
+        await tester.pumpAndSettle();
+        expect(selectedNullable, isNull);
+        expect(
+          tester
+              .widget<TallySelectField<int?>>(
+                find.byKey(const Key('nullable-select')),
+              )
+              .value,
+          isNull,
+        );
+        expect(find.text('不限账户'), findsOneWidget);
+
+        // 2. Desktop centered 18dp Dialog + > 35 options ListView.builder + search filtering
+        tester.view.physicalSize = const Size(1280, 800);
+        String selectedCurrency = 'CNY';
+        final manyOptions = [
+          const TallySelectOption<String>(
+            value: 'CNY',
+            label: '人民币 (CNY)',
+            searchKeywords: 'rmb yuan',
+          ),
+          for (var i = 1; i <= 50; i++)
+            TallySelectOption<String>(
+              value: 'CUR$i',
+              label: '外币选项 $i',
+              searchKeywords: 'fx_$i',
+            ),
+        ];
+
+        await tester.pumpWidget(
+          DesktopAdaptiveScope(
+            isDesktop: true,
+            child: MaterialApp(
+              theme: _guardTheme(Brightness.dark, isDesktop: true),
+              home: StatefulBuilder(
+                builder: (context, setState) => Scaffold(
+                  body: Center(
+                    child: SizedBox(
+                      width: 320,
+                      child: TallySelectField<String>(
+                        key: const Key('desktop-currency-select'),
+                        label: '结算币种',
+                        value: selectedCurrency,
+                        searchable: true,
+                        options: manyOptions,
+                        onChanged: (v) => setState(() => selectedCurrency = v),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+
+        await tester.tap(find.byKey(const Key('desktop-currency-select')));
+        await tester.pumpAndSettle();
+        expect(find.byType(Dialog), findsOneWidget);
+        expect(find.byType(CloseButton), findsOneWidget);
+        expect(find.byType(ListView), findsOneWidget);
+
+        final dialog = tester.widget<Dialog>(find.byType(Dialog));
+        expect(
+          (dialog.shape! as RoundedRectangleBorder).borderRadius,
+          BorderRadius.circular(18),
+        );
+
+        // Search by keyword -> narrows filtered list to 1 (<= 35) and selects it
+        await tester.enterText(
+          find.byKey(const Key('tally-select-search-input')),
+          'fx_42',
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('外币选项 42'), findsOneWidget);
+        await tester.tap(find.text('外币选项 42'));
+        await tester.pumpAndSettle();
+        expect(selectedCurrency, 'CUR42');
+
+        // 3. AlertDialog (IntrinsicWidth) compatibility without SizedBox wrapper
+        final hostCtx = tester.element(find.byType(Scaffold));
+        // ignore: unawaited_futures
+        showDialog<void>(
+          context: hostCtx,
+          builder: (ctx) => AlertDialog(
+            title: const Text('IntrinsicWidth 弹窗测试'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TallySelectField<String>(
+                  key: const Key('alert-dialog-select'),
+                  label: '账本',
+                  value: 'default',
+                  leading: const Icon(Icons.book_outlined),
+                  options: const [
+                    TallySelectOption(value: 'default', label: '默认账本'),
+                  ],
+                  onChanged: (_) {},
+                ),
+              ],
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        expect(find.byKey(const Key('alert-dialog-select')), findsOneWidget);
+        Navigator.of(hostCtx).pop();
+        await tester.pumpAndSettle();
+      },
+    );
+
+    testWidgets(
+      'showCreditDayPickerSheetOrDialog renders 1..28 grid + endOfMonthDay on mobile and desktop',
+      (tester) async {
+        addTearDown(() {
+          tester.view.resetPhysicalSize();
+          tester.view.resetDevicePixelRatio();
+        });
+
+        for (final (isDesktop, size) in const [
+          (false, Size(390, 844)),
+          (true, Size(1280, 800)),
+        ]) {
+          tester.view.physicalSize = size;
+          tester.view.devicePixelRatio = 1.0;
+          var day = 15;
+
+          await tester.pumpWidget(
+            DesktopAdaptiveScope(
+              isDesktop: isDesktop,
+              child: MaterialApp(
+                theme: _guardTheme(Brightness.light, isDesktop: isDesktop),
+                home: StatefulBuilder(
+                  builder: (context, setState) => Scaffold(
+                    body: Center(
+                      child: TallySelectField<int>(
+                        key: const Key('credit-day-trigger'),
+                        label: '账单日',
+                        value: day,
+                        displayText: day == endOfMonthDay ? '月底' : '每月 $day 日',
+                        onCustomTap: () async {
+                          final picked = await showCreditDayPickerSheetOrDialog(
+                            context,
+                            title: '选择账单日',
+                            currentDay: day,
+                          );
+                          if (picked != null) {
+                            setState(() => day = picked);
+                          }
+                        },
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          );
+          await tester.pumpAndSettle();
+
+          // Pick day 28
+          await tester.tap(find.byKey(const Key('credit-day-trigger')));
+          await tester.pumpAndSettle();
+          expect(tester.takeException(), isNull);
+          if (isDesktop) {
+            expect(find.byType(Dialog), findsOneWidget);
+          }
+          expect(find.byKey(const Key('credit-day-option-1')), findsOneWidget);
+          expect(find.byKey(const Key('credit-day-option-28')), findsOneWidget);
+          expect(find.text('28日'), findsOneWidget);
+          expect(find.bySemanticsLabel('每月 28 日'), findsOneWidget);
+          expect(
+            find.byKey(const Key('credit-day-option-end')),
+            findsOneWidget,
+          );
+          expect(find.text('月底（每月最后一天）'), findsOneWidget);
+
+          await tester.tap(find.byKey(const Key('credit-day-option-28')));
+          await tester.pumpAndSettle();
+          expect(day, 28);
+          expect(find.text('每月 28 日'), findsOneWidget);
+
+          // Pick end of month
+          await tester.tap(find.byKey(const Key('credit-day-trigger')));
+          await tester.pumpAndSettle();
+          await tester.tap(find.byKey(const Key('credit-day-option-end')));
+          await tester.pumpAndSettle();
+          expect(day, endOfMonthDay);
+          expect(find.text('月底'), findsOneWidget);
+        }
+      },
+    );
   });
 
   group('Transfer / backup pages keep sibling buttons uniform', () {
     const sizes = <(String, Size, bool)>[
+      ('phone-360', Size(360, 800), false),
       ('phone', Size(390, 844), false),
       ('desktop', Size(1280, 800), true),
     ];
@@ -429,11 +936,28 @@ void main() {
             'export_start_date_button',
             'export_end_date_button',
             'share_csv_export_button',
+            'confirm_csv_export_button',
           ], label: 'csv export card');
-          // The final export stays the single solid primary action.
-          final confirm = find.byKey(const Key('confirm_csv_export_button'));
-          final confirmButton = tester.widget<FilledButton>(confirm);
-          expect(confirmButton, isNot(isA<TallySoftButton>()));
+          final bookField = tester.widget<TallySelectField<int>>(
+            find.byKey(const Key('export_book_dropdown')),
+          );
+          expect(bookField.value, noRef);
+        },
+      );
+    });
+
+    testWidgets('CsvImportPage', (tester) async {
+      await runPageMatrix(
+        tester,
+        label: 'CsvImportPage',
+        page: () => const CsvImportPage(),
+        extraChecks: (tester, _) async {
+          _expectSameFill(tester, const [
+            'open_csv_export_button',
+            'open_import_batches_button',
+            'pick_import_file_button',
+            'export_template_v3_button',
+          ], label: 'csv import appbar & card');
         },
       );
     });
@@ -516,10 +1040,62 @@ void main() {
         expect(guide, findsOneWidget);
         expect(normal, findsOneWidget);
         expect(credit, findsOneWidget);
+        final titleFinder = find.descendant(
+          of: guide,
+          matching: find.text('还没有资产账户'),
+        );
+        expect(titleFinder, findsOneWidget);
+
+        // No circular top wallet icon badge exists above '还没有资产账户':
+        // only the icons inside the two scene sub-cards remain.
         expect(
-          find.descendant(of: guide, matching: find.text('还没有资产账户')),
+          find.descendant(
+            of: guide,
+            matching: find.byIcon(Icons.account_balance_wallet_outlined),
+          ),
           findsOneWidget,
         );
+        expect(
+          find.descendant(
+            of: guide,
+            matching: find.byIcon(Icons.credit_card_outlined),
+          ),
+          findsOneWidget,
+        );
+        final guideIcons = find.descendant(
+          of: guide,
+          matching: find.byType(Icon),
+        );
+        final normalIcons = find.descendant(
+          of: normal,
+          matching: find.byType(Icon),
+        );
+        final creditIcons = find.descendant(
+          of: credit,
+          matching: find.byType(Icon),
+        );
+        expect(
+          guideIcons.evaluate().length,
+          normalIcons.evaluate().length + creditIcons.evaluate().length,
+        );
+        final titleTop = tester.getRect(titleFinder).top;
+        for (final iconEl in guideIcons.evaluate()) {
+          expect(
+            tester.getRect(find.byElementPredicate((e) => e == iconEl)).top,
+            greaterThan(titleTop),
+          );
+        }
+        final circularContainers = find.descendant(
+          of: guide,
+          matching: find.byWidgetPredicate(
+            (w) =>
+                w is Container &&
+                w.decoration is BoxDecoration &&
+                (w.decoration! as BoxDecoration).shape == BoxShape.circle,
+          ),
+        );
+        expect(circularContainers, findsNothing);
+
         expect(
           find.descendant(of: normal, matching: find.text('新建资金账户')),
           findsOneWidget,

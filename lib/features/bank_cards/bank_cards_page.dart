@@ -639,10 +639,21 @@ class _BankCardTile extends StatelessWidget {
                     runSpacing: 4,
                     crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
-                      Chip(
-                        visualDensity: VisualDensity.compact,
-                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        label: Text(BankCardType.labelOf(card.cardType)),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 3,
+                        ),
+                        decoration: BoxDecoration(
+                          color: tallyNestedSurfaceColor(theme.colorScheme),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          BankCardType.labelOf(card.cardType),
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
                       ),
                       Container(
                         key: _scopedKey('card_luhn_badge_${card.id}'),
@@ -739,13 +750,9 @@ class _BankCardTile extends StatelessWidget {
                   child: Row(
                     children: [
                       Flexible(
-                        child: TextButton.icon(
+                        child: TallySoftButton.icon(
                           key: _scopedKey('copy_card_no_${card.id}'),
-                          style: TextButton.styleFrom(
-                            visualDensity: VisualDensity.compact,
-                            padding: const EdgeInsets.symmetric(horizontal: 8),
-                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          ),
+                          compact: true,
                           onPressed: onCopyNumber,
                           icon: const Icon(Icons.copy, size: 15),
                           label: const FittedBox(
@@ -754,15 +761,11 @@ class _BankCardTile extends StatelessWidget {
                           ),
                         ),
                       ),
-                      const SizedBox(width: 4),
+                      const SizedBox(width: 6),
                       Flexible(
-                        child: TextButton.icon(
+                        child: TallySoftButton.icon(
                           key: _scopedKey('copy_card_full_${card.id}'),
-                          style: TextButton.styleFrom(
-                            visualDensity: VisualDensity.compact,
-                            padding: const EdgeInsets.symmetric(horizontal: 8),
-                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          ),
+                          compact: true,
                           onPressed: onCopyFull,
                           icon: const Icon(Icons.assignment_outlined, size: 15),
                           label: const FittedBox(

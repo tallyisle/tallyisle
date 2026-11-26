@@ -182,40 +182,23 @@ class _CsvExportPageState extends ConsumerState<CsvExportPage> {
                       style: Theme.of(context).textTheme.titleMedium,
                     ),
                     const SizedBox(height: 16),
-                    InputDecorator(
-                      decoration: InputDecoration(
-                        labelText: '选择账本',
-                        border: const OutlineInputBorder(),
-                        contentPadding: EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: isDesktop ? 16 : 4,
+                    TallySelectField<int>(
+                      key: const Key('export_book_dropdown'),
+                      label: '选择账本',
+                      sheetTitle: '选择导出账本',
+                      value: effectiveBookId,
+                      enabled: !_busy,
+                      options: [
+                        const TallySelectOption<int>(
+                          value: noRef,
+                          label: '全部账本',
                         ),
-                      ),
-                      child: DropdownButtonHideUnderline(
-                        child: DropdownButton<int>(
-                          key: const Key('export_book_dropdown'),
-                          isExpanded: true,
-                          isDense: isDesktop,
-                          value: effectiveBookId,
-                          items: [
-                            const DropdownMenuItem<int>(
-                              value: noRef,
-                              child: Text('全部账本'),
-                            ),
-                            for (final b in books)
-                              DropdownMenuItem<int>(
-                                value: b.id,
-                                child: Text(b.name),
-                              ),
-                          ],
-                          onChanged: _busy
-                              ? null
-                              : (value) {
-                                  if (value == null) return;
-                                  setState(() => _selectedBookId = value);
-                                },
-                        ),
-                      ),
+                        for (final b in books)
+                          TallySelectOption<int>(value: b.id, label: b.name),
+                      ],
+                      onChanged: _busy
+                          ? null
+                          : (value) => setState(() => _selectedBookId = value),
                     ),
                     const SizedBox(height: 8),
                     SwitchListTile(
@@ -293,21 +276,6 @@ class _CsvExportPageState extends ConsumerState<CsvExportPage> {
                       child: SegmentedButton<bool>(
                         key: const Key('export_encoding_selector'),
                         showSelectedIcon: false,
-                        style: isDesktop
-                            ? const ButtonStyle(
-                                padding: WidgetStatePropertyAll(
-                                  EdgeInsets.symmetric(
-                                    horizontal: 12,
-                                    vertical: 6,
-                                  ),
-                                ),
-                              )
-                            : const ButtonStyle(
-                                visualDensity: VisualDensity.compact,
-                                padding: WidgetStatePropertyAll(
-                                  EdgeInsets.symmetric(horizontal: 10),
-                                ),
-                              ),
                         segments: const [
                           ButtonSegment<bool>(
                             value: true,
@@ -348,7 +316,7 @@ class _CsvExportPageState extends ConsumerState<CsvExportPage> {
                     const SizedBox(height: 16),
                     LayoutBuilder(
                       builder: (ctx, constraints) {
-                        final confirmBtn = FilledButton.icon(
+                        final confirmBtn = TallySoftButton.icon(
                           key: const Key('confirm_csv_export_button'),
                           onPressed: _busy
                               ? null

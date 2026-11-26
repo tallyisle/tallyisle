@@ -260,288 +260,312 @@ class _BankCardEditorPageState extends ConsumerState<BankCardEditorPage> {
                           ? const EdgeInsets.fromLTRB(20, 12, 20, 16)
                           : const EdgeInsets.all(16),
                       children: [
-                        Wrap(
-                          spacing: 8,
+                        TallyFormCard(
+                          title: '卡片信息',
+                          spacing: 12,
                           children: [
-                            ChoiceChip(
-                              key: const Key('bank_card_type_0'),
-                              label: const Text('储蓄卡'),
-                              selected: _cardType == BankCardType.debit,
-                              onSelected: _busy
-                                  ? null
-                                  : (_) => setState(
-                                      () => _cardType = BankCardType.debit,
-                                    ),
-                            ),
-                            ChoiceChip(
-                              key: const Key('bank_card_type_1'),
-                              label: const Text('信用卡'),
-                              selected: _cardType == BankCardType.credit,
-                              onSelected: _busy
-                                  ? null
-                                  : (_) => setState(
-                                      () => _cardType = BankCardType.credit,
-                                    ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 16),
-                        TextField(
-                          key: const Key('bank_card_name_input'),
-                          controller: _nameController,
-                          enabled: !_busy,
-                          maxLength: maxBankCardNameLength,
-                          onChanged: (_) => setState(() {}),
-                          decoration: const InputDecoration(
-                            labelText: '银行与卡片名称（如：招商银行储蓄卡）',
-                            border: OutlineInputBorder(),
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Builder(
-                          builder: (context) {
-                            final theme = Theme.of(context);
-                            final cardVisual = resolveBankCardVisual(
-                              cardColorMeta: _encodedCardColorMeta(),
-                              cardName: _nameController.text.trim(),
-                              cardType: _cardType,
-                            );
-                            return InkWell(
-                              key: const Key('bank_card_icon_picker_trigger'),
-                              borderRadius: BorderRadius.circular(12),
-                              onTap: _busy ? null : _pickCardIcon,
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 10,
+                            Wrap(
+                              spacing: 8,
+                              children: [
+                                ChoiceChip(
+                                  key: const Key('bank_card_type_0'),
+                                  label: const Text('储蓄卡'),
+                                  selected: _cardType == BankCardType.debit,
+                                  onSelected: _busy
+                                      ? null
+                                      : (_) => setState(
+                                          () => _cardType = BankCardType.debit,
+                                        ),
                                 ),
-                                decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(
-                                    color: theme.colorScheme.outlineVariant,
+                                ChoiceChip(
+                                  key: const Key('bank_card_type_1'),
+                                  label: const Text('信用卡'),
+                                  selected: _cardType == BankCardType.credit,
+                                  onSelected: _busy
+                                      ? null
+                                      : (_) => setState(
+                                          () => _cardType = BankCardType.credit,
+                                        ),
+                                ),
+                              ],
+                            ),
+                            TextField(
+                              key: const Key('bank_card_name_input'),
+                              controller: _nameController,
+                              enabled: !_busy,
+                              maxLength: maxBankCardNameLength,
+                              onChanged: (_) => setState(() {}),
+                              decoration: const InputDecoration(
+                                labelText: '银行与卡片名称（如：招商银行储蓄卡）',
+                              ),
+                            ),
+                            Builder(
+                              builder: (context) {
+                                final theme = Theme.of(context);
+                                final cardVisual = resolveBankCardVisual(
+                                  cardColorMeta: _encodedCardColorMeta(),
+                                  cardName: _nameController.text.trim(),
+                                  cardType: _cardType,
+                                );
+                                return Material(
+                                  color: tallyNestedSurfaceColor(
+                                    theme.colorScheme,
                                   ),
-                                ),
-                                child: Row(
-                                  children: [
-                                    BankCardIconAvatar(
-                                      cardColorMeta: _encodedCardColorMeta(),
-                                      cardName: _nameController.text.trim(),
-                                      cardType: _cardType,
-                                      size: 38,
+                                  elevation: 0,
+                                  surfaceTintColor: Colors.transparent,
+                                  borderRadius: BorderRadius.circular(
+                                    kTallyNestedRadius,
+                                  ),
+                                  clipBehavior: Clip.antiAlias,
+                                  child: InkWell(
+                                    key: const Key(
+                                      'bank_card_icon_picker_trigger',
                                     ),
-                                    const SizedBox(width: 12),
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
+                                    borderRadius: BorderRadius.circular(
+                                      kTallyNestedRadius,
+                                    ),
+                                    onTap: _busy ? null : _pickCardIcon,
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 12,
+                                        vertical: 10,
+                                      ),
+                                      child: Row(
                                         children: [
-                                          Text(
-                                            '银行行标',
-                                            style: theme.textTheme.bodyMedium,
+                                          BankCardIconAvatar(
+                                            cardColorMeta:
+                                                _encodedCardColorMeta(),
+                                            cardName: _nameController.text
+                                                .trim(),
+                                            cardType: _cardType,
+                                            size: 38,
                                           ),
-                                          Text(
-                                            cardVisual.isAutoMatched
-                                                ? '${cardVisual.visual.label}（按名称智能关联）· 点击更换'
-                                                : '${cardVisual.visual.label}（手动指定）· 点击更换或恢复自动',
-                                            style: theme.textTheme.bodySmall
-                                                ?.copyWith(
-                                                  color:
-                                                      theme.colorScheme.outline,
+                                          const SizedBox(width: 12),
+                                          Expanded(
+                                            child: Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              children: [
+                                                Text(
+                                                  '银行行标',
+                                                  style: theme
+                                                      .textTheme
+                                                      .bodyMedium,
                                                 ),
+                                                Text(
+                                                  cardVisual.isAutoMatched
+                                                      ? '${cardVisual.visual.label}（按名称智能关联）· 点击更换'
+                                                      : '${cardVisual.visual.label}（手动指定）· 点击更换或恢复自动',
+                                                  style: theme
+                                                      .textTheme
+                                                      .bodySmall
+                                                      ?.copyWith(
+                                                        color: theme
+                                                            .colorScheme
+                                                            .onSurfaceVariant,
+                                                      ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                          Icon(
+                                            Icons.chevron_right_rounded,
+                                            size: 20,
+                                            color: theme
+                                                .colorScheme
+                                                .onSurfaceVariant,
                                           ),
                                         ],
                                       ),
                                     ),
-                                    const Icon(Icons.chevron_right),
-                                  ],
-                                ),
-                              ),
-                            );
-                          },
-                        ),
-                        const SizedBox(height: 12),
-                        TextField(
-                          key: const Key('bank_card_no_input'),
-                          controller: _noController,
-                          enabled: !_busy,
-                          keyboardType: TextInputType.number,
-                          inputFormatters: <TextInputFormatter>[
-                            FilteringTextInputFormatter.allow(
-                              RegExp(r'[0-9\s\-]'),
+                                  ),
+                                );
+                              },
                             ),
-                          ],
-                          onChanged: (_) => setState(() {}),
-                          decoration: const InputDecoration(
-                            labelText: '银行卡号',
-                            hintText: '支持输入或粘贴带空格/连字符的卡号',
-                            border: OutlineInputBorder(),
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Builder(
-                          builder: (context) {
-                            final theme = Theme.of(context);
-                            final isDark = theme.brightness == Brightness.dark;
-                            final luhnBgColor = luhn.passesLuhn
-                                ? (isDark
-                                      ? Colors.green.shade900.withValues(
-                                          alpha: 0.45,
-                                        )
-                                      : Colors.green.withValues(alpha: 0.14))
-                                : theme.colorScheme.surfaceContainerHighest;
-                            final luhnFgColor = luhn.passesLuhn
-                                ? (isDark
-                                      ? Colors.green.shade300
-                                      : Colors.green.shade700)
-                                : theme.colorScheme.onSurfaceVariant;
-                            return Row(
-                              children: [
-                                Flexible(
-                                  child: Container(
-                                    key: const Key('editor_luhn_badge'),
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 10,
-                                      vertical: 4,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: luhnBgColor,
-                                      borderRadius: BorderRadius.circular(999),
-                                    ),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Icon(
-                                          luhn.passesLuhn
-                                              ? Icons.verified_outlined
-                                              : Icons.info_outline,
-                                          size: 16,
-                                          color: luhnFgColor,
+                            TextField(
+                              key: const Key('bank_card_no_input'),
+                              controller: _noController,
+                              enabled: !_busy,
+                              keyboardType: TextInputType.number,
+                              inputFormatters: <TextInputFormatter>[
+                                FilteringTextInputFormatter.allow(
+                                  RegExp(r'[0-9\s\-]'),
+                                ),
+                              ],
+                              onChanged: (_) => setState(() {}),
+                              decoration: const InputDecoration(
+                                labelText: '银行卡号',
+                                hintText: '支持输入或粘贴带空格/连字符的卡号',
+                              ),
+                            ),
+                            Builder(
+                              builder: (context) {
+                                final theme = Theme.of(context);
+                                final isDark =
+                                    theme.brightness == Brightness.dark;
+                                final luhnBgColor = luhn.passesLuhn
+                                    ? (isDark
+                                          ? Colors.green.shade900.withValues(
+                                              alpha: 0.45,
+                                            )
+                                          : Colors.green.withValues(
+                                              alpha: 0.14,
+                                            ))
+                                    : tallyNestedSurfaceColor(
+                                        theme.colorScheme,
+                                      );
+                                final luhnFgColor = luhn.passesLuhn
+                                    ? (isDark
+                                          ? Colors.green.shade300
+                                          : Colors.green.shade700)
+                                    : theme.colorScheme.onSurfaceVariant;
+                                return Row(
+                                  children: [
+                                    Flexible(
+                                      child: Container(
+                                        key: const Key('editor_luhn_badge'),
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 10,
+                                          vertical: 4,
                                         ),
-                                        const SizedBox(width: 4),
-                                        Flexible(
-                                          child: Text(
-                                            luhn.badgeLabel,
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: theme.textTheme.labelSmall
-                                                ?.copyWith(color: luhnFgColor),
+                                        decoration: BoxDecoration(
+                                          color: luhnBgColor,
+                                          borderRadius: BorderRadius.circular(
+                                            999,
                                           ),
                                         ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                                if (groupedPreview.isNotEmpty) ...[
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: Text(
-                                      groupedPreview,
-                                      key: const Key('editor_grouped_preview'),
-                                      overflow: TextOverflow.ellipsis,
-                                      style: theme.textTheme.bodySmall,
-                                    ),
-                                  ),
-                                ],
-                              ],
-                            );
-                          },
-                        ),
-                        const SizedBox(height: 16),
-                        TextField(
-                          key: const Key('bank_card_owner_input'),
-                          controller: _ownerController,
-                          enabled: !_busy,
-                          maxLength: maxBankCardOwnerLength,
-                          decoration: const InputDecoration(
-                            labelText: '持卡人（可选）',
-                            border: OutlineInputBorder(),
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        InputDecorator(
-                          decoration: const InputDecoration(
-                            labelText: '关联资产账户（可选）',
-                            border: OutlineInputBorder(),
-                            contentPadding: EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 14,
-                            ),
-                          ),
-                          child: DropdownButtonHideUnderline(
-                            child: DropdownButton<int>(
-                              key: const Key('bank_card_asset_dropdown'),
-                              isExpanded: true,
-                              isDense: true,
-                              style: Theme.of(context).textTheme.bodyLarge,
-                              value: validAssetId,
-                              items: [
-                                const DropdownMenuItem<int>(
-                                  value: noRef,
-                                  child: Text('不关联账户'),
-                                ),
-                                for (final a in assets)
-                                  DropdownMenuItem<int>(
-                                    value: a.id,
-                                    child: Text(a.name),
-                                  ),
-                              ],
-                              onChanged: _busy
-                                  ? null
-                                  : (v) => setState(
-                                      () => _cardAssetId = v ?? noRef,
-                                    ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          '卡片配色',
-                          style: Theme.of(context).textTheme.labelLarge,
-                        ),
-                        const SizedBox(height: 8),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            ChoiceChip(
-                              key: const Key('card_color_default'),
-                              label: const Text('默认'),
-                              selected: _explicitColorHex == null,
-                              onSelected: _busy
-                                  ? null
-                                  : (_) => setState(
-                                      () => _explicitColorHex = null,
-                                    ),
-                            ),
-                            for (final (hex, label) in presetBankCardColors)
-                              ChoiceChip(
-                                key: Key('card_color_$hex'),
-                                avatar: CircleAvatar(
-                                  backgroundColor: parseCardColorOrNull(hex),
-                                  radius: 8,
-                                ),
-                                label: Text(label),
-                                selected:
-                                    _explicitColorHex?.toUpperCase() == hex,
-                                onSelected: _busy
-                                    ? null
-                                    : (_) => setState(
-                                        () => _explicitColorHex = hex,
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Icon(
+                                              luhn.passesLuhn
+                                                  ? Icons.verified_outlined
+                                                  : Icons.info_outline,
+                                              size: 16,
+                                              color: luhnFgColor,
+                                            ),
+                                            const SizedBox(width: 4),
+                                            Flexible(
+                                              child: Text(
+                                                luhn.badgeLabel,
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: theme
+                                                    .textTheme
+                                                    .labelSmall
+                                                    ?.copyWith(
+                                                      color: luhnFgColor,
+                                                    ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
                                       ),
-                              ),
+                                    ),
+                                    if (groupedPreview.isNotEmpty) ...[
+                                      const SizedBox(width: 12),
+                                      Expanded(
+                                        child: Text(
+                                          groupedPreview,
+                                          key: const Key(
+                                            'editor_grouped_preview',
+                                          ),
+                                          overflow: TextOverflow.ellipsis,
+                                          style: theme.textTheme.bodySmall,
+                                        ),
+                                      ),
+                                    ],
+                                  ],
+                                );
+                              },
+                            ),
                           ],
                         ),
-                        const SizedBox(height: 16),
-                        TextField(
-                          key: const Key('bank_card_remark_input'),
-                          controller: _remarkController,
-                          enabled: !_busy,
-                          maxLength: maxBankCardRemarkLength,
-                          maxLines: 2,
-                          decoration: const InputDecoration(
-                            labelText: '开户支行 / 备注（可选）',
-                            border: OutlineInputBorder(),
-                          ),
+                        const SizedBox(height: 12),
+                        TallyFormCard(
+                          title: '归属与关联',
+                          spacing: 12,
+                          children: [
+                            TextField(
+                              key: const Key('bank_card_owner_input'),
+                              controller: _ownerController,
+                              enabled: !_busy,
+                              maxLength: maxBankCardOwnerLength,
+                              decoration: const InputDecoration(
+                                labelText: '持卡人（可选）',
+                              ),
+                            ),
+                            TallySelectField<int>(
+                              key: const Key('bank_card_asset_dropdown'),
+                              label: '关联资产账户（可选）',
+                              enabled: !_busy,
+                              value: validAssetId,
+                              options: [
+                                const TallySelectOption<int>(
+                                  value: noRef,
+                                  label: '不关联账户',
+                                ),
+                                for (final a in assets)
+                                  TallySelectOption<int>(
+                                    value: a.id,
+                                    label: a.name,
+                                  ),
+                              ],
+                              onChanged: (v) =>
+                                  setState(() => _cardAssetId = v),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        TallyFormCard(
+                          title: '卡片配色与备注',
+                          spacing: 12,
+                          children: [
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                ChoiceChip(
+                                  key: const Key('card_color_default'),
+                                  label: const Text('默认'),
+                                  selected: _explicitColorHex == null,
+                                  onSelected: _busy
+                                      ? null
+                                      : (_) => setState(
+                                          () => _explicitColorHex = null,
+                                        ),
+                                ),
+                                for (final (hex, label) in presetBankCardColors)
+                                  ChoiceChip(
+                                    key: Key('card_color_$hex'),
+                                    avatar: CircleAvatar(
+                                      backgroundColor: parseCardColorOrNull(
+                                        hex,
+                                      ),
+                                      radius: 8,
+                                    ),
+                                    label: Text(label),
+                                    selected:
+                                        _explicitColorHex?.toUpperCase() == hex,
+                                    onSelected: _busy
+                                        ? null
+                                        : (_) => setState(
+                                            () => _explicitColorHex = hex,
+                                          ),
+                                  ),
+                              ],
+                            ),
+                            TextField(
+                              key: const Key('bank_card_remark_input'),
+                              controller: _remarkController,
+                              enabled: !_busy,
+                              maxLength: maxBankCardRemarkLength,
+                              maxLines: 2,
+                              decoration: const InputDecoration(
+                                labelText: '开户支行 / 备注（可选）',
+                              ),
+                            ),
+                          ],
                         ),
                         if (_error != null)
                           Padding(

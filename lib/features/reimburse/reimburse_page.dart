@@ -1309,10 +1309,6 @@ class _SingleReimburseSheetState extends ConsumerState<_SingleReimburseSheet> {
               decoration: InputDecoration(
                 labelText: '报销金额',
                 prefixText: '$sym ',
-                border: const OutlineInputBorder(),
-                contentPadding: isDialog
-                    ? const EdgeInsets.symmetric(horizontal: 12, vertical: 16)
-                    : null,
                 helperText: preview?.hintText,
                 helperStyle: TextStyle(
                   color: previewColor,
@@ -1349,13 +1345,7 @@ class _SingleReimburseSheetState extends ConsumerState<_SingleReimburseSheet> {
             TextField(
               key: const Key('reimburse-dialog-remark'),
               controller: _remarkCtrl,
-              decoration: InputDecoration(
-                labelText: '备注（选填）',
-                border: const OutlineInputBorder(),
-                contentPadding: isDialog
-                    ? const EdgeInsets.symmetric(horizontal: 12, vertical: 16)
-                    : null,
-              ),
+              decoration: const InputDecoration(labelText: '备注（选填）'),
             ),
             const SizedBox(height: 16),
             Row(
@@ -1564,13 +1554,7 @@ class _BatchReimburseSheetState extends ConsumerState<_BatchReimburseSheet> {
             TextField(
               key: const Key('reimburse-batch-remark'),
               controller: _remarkCtrl,
-              decoration: InputDecoration(
-                labelText: '统一备注（选填）',
-                border: const OutlineInputBorder(),
-                contentPadding: isDialog
-                    ? const EdgeInsets.symmetric(horizontal: 12, vertical: 16)
-                    : null,
-              ),
+              decoration: const InputDecoration(labelText: '统一备注（选填）'),
             ),
             if (_errorText != null) ...[
               const SizedBox(height: 10),
@@ -1621,46 +1605,28 @@ class _AccountDropdownField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isDesktop = DesktopAdaptive.isDesktop(context);
-    return DropdownButtonFormField<int>(
+    return TallySelectField<int>(
       key: fieldKey,
-      initialValue: selectedAssetId,
-      isExpanded: true,
-      decoration: InputDecoration(
-        labelText: labelText,
-        border: const OutlineInputBorder(),
-        contentPadding: isDesktop
-            ? const EdgeInsets.symmetric(horizontal: 12, vertical: 16)
-            : null,
-      ),
-      items: [
+      label: labelText,
+      value: selectedAssetId,
+      enabled: onChanged != null,
+      options: [
         for (final a in assets)
-          DropdownMenuItem<int>(
+          TallySelectOption<int>(
             value: a.id,
-            child: Row(
-              children: [
-                AssetIconAvatar(
-                  iconKey: a.icon,
-                  colorHex: a.color,
-                  name: a.name,
-                  assetType: a.type,
-                  subType: a.subType,
-                  size: 24,
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    a.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ],
+            label: a.name,
+            leading: AssetIconAvatar(
+              iconKey: a.icon,
+              colorHex: a.color,
+              name: a.name,
+              assetType: a.type,
+              subType: a.subType,
+              size: 24,
             ),
           ),
-        const DropdownMenuItem<int>(value: noRef, child: Text('不选账户')),
+        const TallySelectOption<int>(value: noRef, label: '不选账户'),
       ],
-      onChanged: onChanged,
+      onChanged: onChanged == null ? null : (v) => onChanged!(v),
     );
   }
 }

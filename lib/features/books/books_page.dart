@@ -31,16 +31,7 @@ class _BooksPageState extends ConsumerState<BooksPage> {
               key: const Key('book-name'),
               controller: nameController,
               autofocus: true,
-              decoration: isDesktop
-                  ? const InputDecoration(
-                      labelText: '账本名称',
-                      border: OutlineInputBorder(),
-                      contentPadding: EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 15,
-                      ),
-                    )
-                  : const InputDecoration(labelText: '账本名称'),
+              decoration: const InputDecoration(labelText: '账本名称'),
             ),
             const SizedBox(height: 12),
             TextField(
@@ -48,20 +39,10 @@ class _BooksPageState extends ConsumerState<BooksPage> {
               controller: dayController,
               keyboardType: TextInputType.number,
               inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-              decoration: isDesktop
-                  ? const InputDecoration(
-                      labelText: '月起始日 (1-28)',
-                      helperText: '账期统计从每月该日开始',
-                      border: OutlineInputBorder(),
-                      contentPadding: EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 15,
-                      ),
-                    )
-                  : const InputDecoration(
-                      labelText: '月起始日 (1-28)',
-                      helperText: '账期统计从每月该日开始',
-                    ),
+              decoration: const InputDecoration(
+                labelText: '月起始日 (1-28)',
+                helperText: '账期统计从每月该日开始',
+              ),
             ),
           ],
         );
@@ -123,16 +104,7 @@ class _BooksPageState extends ConsumerState<BooksPage> {
               key: const Key('edit-book-name'),
               controller: nameController,
               autofocus: true,
-              decoration: isDesktop
-                  ? const InputDecoration(
-                      labelText: '账本名称',
-                      border: OutlineInputBorder(),
-                      contentPadding: EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 15,
-                      ),
-                    )
-                  : const InputDecoration(labelText: '账本名称'),
+              decoration: const InputDecoration(labelText: '账本名称'),
             ),
             const SizedBox(height: 12),
             TextField(
@@ -140,20 +112,10 @@ class _BooksPageState extends ConsumerState<BooksPage> {
               controller: dayController,
               keyboardType: TextInputType.number,
               inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-              decoration: isDesktop
-                  ? const InputDecoration(
-                      labelText: '月起始日 (1-28)',
-                      helperText: '账期统计从每月该日开始',
-                      border: OutlineInputBorder(),
-                      contentPadding: EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 15,
-                      ),
-                    )
-                  : const InputDecoration(
-                      labelText: '月起始日 (1-28)',
-                      helperText: '账期统计从每月该日开始',
-                    ),
+              decoration: const InputDecoration(
+                labelText: '月起始日 (1-28)',
+                helperText: '账期统计从每月该日开始',
+              ),
             ),
           ],
         );

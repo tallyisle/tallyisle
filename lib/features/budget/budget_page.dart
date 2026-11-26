@@ -113,20 +113,10 @@ class _BudgetPageState extends ConsumerState<BudgetPage> {
                   keyboardType: const TextInputType.numberWithOptions(
                     decimal: true,
                   ),
-                  decoration: isDesktop
-                      ? const InputDecoration(
-                          labelText: '预算金额 (元)',
-                          prefixText: '¥ ',
-                          border: OutlineInputBorder(),
-                          contentPadding: EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 15,
-                          ),
-                        )
-                      : const InputDecoration(
-                          labelText: '预算金额 (元)',
-                          prefixText: '¥ ',
-                        ),
+                  decoration: const InputDecoration(
+                    labelText: '预算金额 (元)',
+                    prefixText: '¥ ',
+                  ),
                   autofocus: true,
                 ),
                 const SizedBox(height: 16),
@@ -281,41 +271,19 @@ class _BudgetPageState extends ConsumerState<BudgetPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 if (existing == null) ...[
-                  if (!isDesktop) ...[
-                    const Text('选择分类', style: TextStyle(fontSize: 13)),
-                    const SizedBox(height: 6),
-                  ],
-                  DropdownButtonFormField<int>(
+                  TallySelectField<int>(
                     key: const Key('category_budget_picker'),
-                    isExpanded: true,
-                    initialValue: selectedCatId,
-                    decoration: isDesktop
-                        ? const InputDecoration(
-                            labelText: '选择分类',
-                            border: OutlineInputBorder(),
-                            contentPadding: EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 15,
-                            ),
-                          )
-                        : const InputDecoration(),
-                    items: availableCategories
-                        .map(
-                          (c) => DropdownMenuItem<int>(
-                            value: c.id,
-                            child: Text(
-                              c.parentCatId != -1 ? '  └ ${c.name}' : c.name,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: (val) {
-                      if (val != null) {
-                        setDialogState(() => selectedCatId = val);
-                      }
-                    },
+                    label: '选择分类',
+                    value: selectedCatId,
+                    options: [
+                      for (final c in availableCategories)
+                        TallySelectOption<int>(
+                          value: c.id,
+                          label: c.parentCatId != -1 ? '  └ ${c.name}' : c.name,
+                        ),
+                    ],
+                    onChanged: (val) =>
+                        setDialogState(() => selectedCatId = val),
                   ),
                   const SizedBox(height: 16),
                 ],
@@ -328,13 +296,6 @@ class _BudgetPageState extends ConsumerState<BudgetPage> {
                   decoration: InputDecoration(
                     labelText: isExpense ? '预算金额 (元)' : '储蓄目标金额 (元)',
                     prefixText: '¥ ',
-                    border: isDesktop ? const OutlineInputBorder() : null,
-                    contentPadding: isDesktop
-                        ? const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 15,
-                          )
-                        : null,
                   ),
                   autofocus: true,
                 ),
@@ -358,15 +319,10 @@ class _BudgetPageState extends ConsumerState<BudgetPage> {
           );
           return AlertDialog(
             title: Text(title),
-            content: isDesktop
-                ? ConstrainedBox(
-                    constraints: const BoxConstraints(
-                      minWidth: 360,
-                      maxWidth: 420,
-                    ),
-                    child: dialogContent,
-                  )
-                : dialogContent,
+            content: SizedBox(
+              width: isDesktop ? 380 : double.maxFinite,
+              child: dialogContent,
+            ),
             actions: [
               if (existing != null)
                 TextButton(

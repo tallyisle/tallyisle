@@ -455,14 +455,7 @@ class _ReminderEditorDialogState extends ConsumerState<_ReminderEditorDialog> {
                     LengthLimitingTextInputFormatter(2),
                   ],
                   decoration: isDesktop
-                      ? const InputDecoration(
-                          labelText: '时',
-                          border: OutlineInputBorder(),
-                          contentPadding: EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 16,
-                          ),
-                        )
+                      ? const InputDecoration(labelText: '时')
                       : const InputDecoration(labelText: '时', isDense: true),
                   onChanged: (_) {
                     if (_errorMessage != null) {
@@ -508,14 +501,7 @@ class _ReminderEditorDialogState extends ConsumerState<_ReminderEditorDialog> {
                     LengthLimitingTextInputFormatter(2),
                   ],
                   decoration: isDesktop
-                      ? const InputDecoration(
-                          labelText: '分',
-                          border: OutlineInputBorder(),
-                          contentPadding: EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 16,
-                          ),
-                        )
+                      ? const InputDecoration(labelText: '分')
                       : const InputDecoration(labelText: '分', isDense: true),
                   onChanged: (_) {
                     if (_errorMessage != null) {
@@ -541,22 +527,11 @@ class _ReminderEditorDialogState extends ConsumerState<_ReminderEditorDialog> {
             controller: _tipController,
             enabled: !_submitting,
             maxLength: 60,
-            decoration: isDesktop
-                ? const InputDecoration(
-                    labelText: '提醒文案（可选）',
-                    hintText: defaultReminderTip,
-                    counterText: '',
-                    border: OutlineInputBorder(),
-                    contentPadding: EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 16,
-                    ),
-                  )
-                : const InputDecoration(
-                    labelText: '提醒文案（可选）',
-                    hintText: defaultReminderTip,
-                    counterText: '',
-                  ),
+            decoration: const InputDecoration(
+              labelText: '提醒文案（可选）',
+              hintText: defaultReminderTip,
+              counterText: '',
+            ),
             onChanged: (_) {
               if (_errorMessage != null) {
                 setState(() => _errorMessage = null);

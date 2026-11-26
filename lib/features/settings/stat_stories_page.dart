@@ -534,11 +534,6 @@ class _StatStoryEditorDialogState
                 enabled: !_busy,
                 decoration: const InputDecoration(
                   labelText: '账期标题（可选，如 2026年11月）',
-                  border: OutlineInputBorder(),
-                  contentPadding: EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 14,
-                  ),
                 ),
               ),
               const SizedBox(height: 10),
@@ -562,7 +557,6 @@ class _StatStoryEditorDialogState
                 decoration: const InputDecoration(
                   labelText: '故事内容',
                   hintText: '写下本期的收支感悟，或点击上方按钮从真实账单自动汇总……',
-                  border: OutlineInputBorder(),
                 ),
               ),
               if (_errorText != null) ...[

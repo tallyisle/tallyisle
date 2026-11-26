@@ -1640,7 +1640,6 @@ class _PastePaymentTextDialogState
               decoration: const InputDecoration(
                 hintText:
                     '例如：【招商银行】您账户8888于11月11日12:30消费人民币36.50元，商户：瑞幸咖啡\n或：早饭买煎饼微信花了9块5',
-                border: OutlineInputBorder(),
               ),
             ),
             if (_error != null) ...[
@@ -1839,108 +1838,49 @@ class _ConfirmDraftDialogState extends ConsumerState<_ConfirmDraftDialog> {
                 keyboardType: const TextInputType.numberWithOptions(
                   decimal: true,
                 ),
-                decoration: const InputDecoration(
-                  labelText: '金额（元）',
-                  border: OutlineInputBorder(),
-                ),
+                decoration: const InputDecoration(labelText: '金额（元）'),
               ),
               if (_recordType != RecordType.transfer) ...[
                 const SizedBox(height: 12),
-                InputDecorator(
-                  decoration: const InputDecoration(
-                    labelText: '分类',
-                    border: OutlineInputBorder(),
-                    contentPadding: EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 14,
-                    ),
-                  ),
-                  child: DropdownButtonHideUnderline(
-                    child: DropdownButton<int>(
-                      isExpanded: true,
-                      isDense: true,
-                      style: Theme.of(context).textTheme.bodyLarge,
-                      value: validCatId,
-                      items: [
-                        for (final c in dirCategories)
-                          DropdownMenuItem(value: c.id, child: Text(c.name)),
-                      ],
-                      onChanged: (v) => setState(() => _categoryId = v),
-                    ),
-                  ),
+                TallySelectField<int>(
+                  label: '分类',
+                  value: validCatId,
+                  options: [
+                    for (final c in dirCategories)
+                      TallySelectOption<int>(value: c.id, label: c.name),
+                  ],
+                  onChanged: (v) => setState(() => _categoryId = v),
                 ),
               ],
               const SizedBox(height: 12),
-              InputDecorator(
-                decoration: InputDecoration(
-                  labelText: _recordType == RecordType.transfer
-                      ? '转出账户'
-                      : '资金账户',
-                  border: const OutlineInputBorder(),
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 14,
-                  ),
-                ),
-                child: DropdownButtonHideUnderline(
-                  child: DropdownButton<int?>(
-                    isExpanded: true,
-                    isDense: true,
-                    style: Theme.of(context).textTheme.bodyLarge,
-                    value: validAssetId,
-                    items: [
-                      if (_recordType != RecordType.transfer)
-                        const DropdownMenuItem<int?>(
-                          value: null,
-                          child: Text('不选择账户'),
-                        ),
-                      for (final a in widget.assets)
-                        DropdownMenuItem<int?>(
-                          value: a.id,
-                          child: Text(a.name),
-                        ),
-                    ],
-                    onChanged: (v) => setState(() => _assetId = v),
-                  ),
-                ),
+              TallySelectField<int?>(
+                label: _recordType == RecordType.transfer ? '转出账户' : '资金账户',
+                value: validAssetId,
+                options: [
+                  if (_recordType != RecordType.transfer)
+                    const TallySelectOption<int?>(value: null, label: '不选择账户'),
+                  for (final a in widget.assets)
+                    TallySelectOption<int?>(value: a.id, label: a.name),
+                ],
+                onChanged: (v) => setState(() => _assetId = v),
               ),
               if (_recordType == RecordType.transfer) ...[
                 const SizedBox(height: 12),
-                InputDecorator(
-                  decoration: const InputDecoration(
-                    labelText: '转入账户',
-                    border: OutlineInputBorder(),
-                    contentPadding: EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 14,
-                    ),
-                  ),
-                  child: DropdownButtonHideUnderline(
-                    child: DropdownButton<int?>(
-                      isExpanded: true,
-                      isDense: true,
-                      style: Theme.of(context).textTheme.bodyLarge,
-                      value: validToAssetId,
-                      items: [
-                        for (final a in widget.assets)
-                          DropdownMenuItem<int?>(
-                            value: a.id,
-                            child: Text(a.name),
-                          ),
-                      ],
-                      onChanged: (v) => setState(() => _toAssetId = v),
-                    ),
-                  ),
+                TallySelectField<int?>(
+                  label: '转入账户',
+                  value: validToAssetId,
+                  options: [
+                    for (final a in widget.assets)
+                      TallySelectOption<int?>(value: a.id, label: a.name),
+                  ],
+                  onChanged: (v) => setState(() => _toAssetId = v),
                 ),
               ],
               const SizedBox(height: 12),
               TextField(
                 key: const Key('confirm_draft_remark_input'),
                 controller: _remarkController,
-                decoration: const InputDecoration(
-                  labelText: '备注',
-                  border: OutlineInputBorder(),
-                ),
+                decoration: const InputDecoration(labelText: '备注'),
               ),
               const SizedBox(height: 8),
               CheckboxListTile(
@@ -1964,7 +1904,6 @@ class _ConfirmDraftDialogState extends ConsumerState<_ConfirmDraftDialog> {
                   decoration: const InputDecoration(
                     labelText: '匹配关键词',
                     hintText: '例如：瑞幸咖啡',
-                    border: OutlineInputBorder(),
                   ),
                 ),
               ],
@@ -2114,7 +2053,6 @@ class _RuleEditorDialogState extends ConsumerState<_RuleEditorDialog> {
                 decoration: const InputDecoration(
                   labelText: '匹配关键词（商户名 / 卡号后四位 / 渠道）',
                   hintText: '例如：瑞幸咖啡 或 8888',
-                  border: OutlineInputBorder(),
                 ),
               ),
               const SizedBox(height: 12),
@@ -2149,77 +2087,34 @@ class _RuleEditorDialogState extends ConsumerState<_RuleEditorDialog> {
                 ),
               ),
               const SizedBox(height: 12),
-              InputDecorator(
-                decoration: const InputDecoration(
-                  labelText: '映射分类',
-                  border: OutlineInputBorder(),
-                  contentPadding: EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 14,
-                  ),
-                ),
-                child: DropdownButtonHideUnderline(
-                  child: DropdownButton<int?>(
-                    key: const Key('auto_bill_rule_category_dropdown'),
-                    isExpanded: true,
-                    isDense: true,
-                    style: Theme.of(context).textTheme.bodyLarge,
-                    value: validCatId,
-                    items: [
-                      const DropdownMenuItem<int?>(
-                        value: null,
-                        child: Text('不指定分类'),
-                      ),
-                      for (final c in visibleCats)
-                        DropdownMenuItem<int?>(
-                          value: c.id,
-                          child: Text(c.name),
-                        ),
-                    ],
-                    onChanged: (v) => setState(() => _categoryId = v),
-                  ),
-                ),
+              TallySelectField<int?>(
+                key: const Key('auto_bill_rule_category_dropdown'),
+                label: '映射分类',
+                value: validCatId,
+                options: [
+                  const TallySelectOption<int?>(value: null, label: '不指定分类'),
+                  for (final c in visibleCats)
+                    TallySelectOption<int?>(value: c.id, label: c.name),
+                ],
+                onChanged: (v) => setState(() => _categoryId = v),
               ),
               const SizedBox(height: 12),
-              InputDecorator(
-                decoration: const InputDecoration(
-                  labelText: '映射资金账户',
-                  border: OutlineInputBorder(),
-                  contentPadding: EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 14,
-                  ),
-                ),
-                child: DropdownButtonHideUnderline(
-                  child: DropdownButton<int?>(
-                    key: const Key('auto_bill_rule_asset_dropdown'),
-                    isExpanded: true,
-                    isDense: true,
-                    style: Theme.of(context).textTheme.bodyLarge,
-                    value: validAssetId,
-                    items: [
-                      const DropdownMenuItem<int?>(
-                        value: null,
-                        child: Text('不指定账户'),
-                      ),
-                      for (final a in widget.assets)
-                        DropdownMenuItem<int?>(
-                          value: a.id,
-                          child: Text(a.name),
-                        ),
-                    ],
-                    onChanged: (v) => setState(() => _assetId = v),
-                  ),
-                ),
+              TallySelectField<int?>(
+                key: const Key('auto_bill_rule_asset_dropdown'),
+                label: '映射资金账户',
+                value: validAssetId,
+                options: [
+                  const TallySelectOption<int?>(value: null, label: '不指定账户'),
+                  for (final a in widget.assets)
+                    TallySelectOption<int?>(value: a.id, label: a.name),
+                ],
+                onChanged: (v) => setState(() => _assetId = v),
               ),
               const SizedBox(height: 12),
               TextField(
                 key: const Key('auto_bill_rule_remark_input'),
                 controller: _remarkController,
-                decoration: const InputDecoration(
-                  labelText: '默认备注（可选）',
-                  border: OutlineInputBorder(),
-                ),
+                decoration: const InputDecoration(labelText: '默认备注（可选）'),
               ),
               const SizedBox(height: 6),
               SwitchListTile(

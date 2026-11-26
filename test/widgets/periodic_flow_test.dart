@@ -11,6 +11,7 @@ import 'package:tallyisle/data/periodic/periodic_service.dart';
 import 'package:tallyisle/data/repo/periodic_queries.dart';
 import 'package:tallyisle/domain/model/codes.dart';
 import 'package:tallyisle/domain/rules/periodic_records.dart';
+import 'package:tallyisle/features/common/tally_form_fields.dart';
 import 'package:tallyisle/features/periodic/periodic_editor_page.dart';
 import 'package:tallyisle/features/periodic/periodic_page.dart';
 
@@ -72,6 +73,7 @@ void main() {
       await settle(tester);
 
       await tester.ensureVisible(find.byKey(const Key('period_type_0')));
+      await tester.pump();
       await tester.tap(find.byKey(const Key('period_type_0')));
       await settle(tester);
 
@@ -313,7 +315,7 @@ void main() {
       await settle(tester);
 
       expect(find.byKey(const Key('periodic_editor_page')), findsOneWidget);
-      final assetDropdown = tester.widget<DropdownButton<int>>(
+      final assetDropdown = tester.widget<TallySelectField<int>>(
         find.byKey(const Key('periodic_asset_picker')),
       );
       expect(assetDropdown.value, assetId);
@@ -325,6 +327,10 @@ void main() {
         200,
         scrollable: find.byType(Scrollable).first,
       );
+      await tester.ensureVisible(
+        find.byKey(const Key('add_yearly_date_button')),
+      );
+      await tester.pump();
       await tester.tap(find.byKey(const Key('add_yearly_date_button')));
       await settle(tester);
 
@@ -343,7 +349,7 @@ void main() {
       await tester.tap(find.text('2 月').last);
       await settle(tester);
 
-      final yearlyDayDropdown = tester.widget<DropdownButton<int>>(
+      final yearlyDayDropdown = tester.widget<TallySelectField<int>>(
         find.byKey(const Key('yearly_day_picker')),
       );
       expect(yearlyDayDropdown.value, 29);

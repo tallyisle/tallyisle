@@ -224,21 +224,29 @@ class _WishSummaryBanner extends StatelessWidget {
           realizedTotalMinor: BigInt.zero,
         );
 
+    final nestedBg = tallyNestedSurfaceColor(theme.colorScheme);
     return Card(
       elevation: 0,
       surfaceTintColor: Colors.transparent,
       clipBehavior: Clip.antiAlias,
       shape: _tonalCardShape,
-      color: _tonalCardColor(Theme.of(context)),
+      color: _tonalCardColor(theme),
       key: const Key('wish_summary_banner'),
       margin: const EdgeInsets.fromLTRB(16, 12, 16, 4),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        padding: const EdgeInsets.all(12),
         child: Row(
           children: [
             Expanded(
-              child: Padding(
-                padding: const EdgeInsets.only(right: 8),
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+                decoration: BoxDecoration(
+                  color: nestedBg,
+                  borderRadius: BorderRadius.circular(kTallyNestedRadius),
+                ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -270,40 +278,45 @@ class _WishSummaryBanner extends StatelessWidget {
                 ),
               ),
             ),
-            Container(
-              width: 1,
-              height: 36,
-              color: theme.colorScheme.outlineVariant,
-            ),
-            const SizedBox(width: 16),
+            const SizedBox(width: 10),
             Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '已实现（${summary.realizedCount} 项）',
-                    key: const Key('wish_summary_realized_count'),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.labelMedium?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  FittedBox(
-                    fit: BoxFit.scaleDown,
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      '¥${formatMinor(summary.realizedTotalMinor)}',
-                      key: const Key('wish_summary_realized_total'),
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+                decoration: BoxDecoration(
+                  color: nestedBg,
+                  borderRadius: BorderRadius.circular(kTallyNestedRadius),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '已实现（${summary.realizedCount} 项）',
+                      key: const Key('wish_summary_realized_count'),
                       maxLines: 1,
-                      softWrap: false,
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
                       ),
                     ),
-                  ),
-                ],
+                    const SizedBox(height: 4),
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        '¥${formatMinor(summary.realizedTotalMinor)}',
+                        key: const Key('wish_summary_realized_total'),
+                        maxLines: 1,
+                        softWrap: false,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ],
@@ -521,22 +534,19 @@ class _WishCard extends StatelessWidget {
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
                   Flexible(
-                    child: TextButton.icon(
+                    child: TallySoftButton.icon(
                       key: Key(
                         wish.isRealized
                             ? 'reopen_wish_${wish.id}'
                             : 'realize_wish_${wish.id}',
                       ),
-                      style: TextButton.styleFrom(
-                        visualDensity: VisualDensity.compact,
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                      ),
+                      compact: true,
                       onPressed: onToggleRealized,
                       icon: Icon(
                         wish.isRealized
                             ? Icons.replay_outlined
                             : Icons.check_circle_outline,
-                        size: 18,
+                        size: 16,
                       ),
                       label: Text(
                         wish.isRealized ? '重新开启' : '实现',

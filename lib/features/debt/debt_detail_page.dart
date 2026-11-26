@@ -794,23 +794,10 @@ class _RepayDialogState extends ConsumerState<_RepayDialog> {
                 decimal: true,
               ),
               inputFormatters: debtAmountInputFormatters,
-              decoration: isDesktop
-                  ? InputDecoration(
-                      labelText: isBorrow
-                          ? '归还本金 ($debtCurr)'
-                          : '收回本金 ($debtCurr)',
-                      helperText: '填 0 表示仅记录纯利息',
-                      border: const OutlineInputBorder(),
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 16,
-                      ),
-                    )
-                  : InputDecoration(
-                      labelText: isBorrow
-                          ? '归还本金 ($debtCurr，填 0 为纯利息)'
-                          : '收回本金 ($debtCurr，填 0 为纯利息)',
-                    ),
+              decoration: InputDecoration(
+                labelText: isBorrow ? '归还本金 ($debtCurr)' : '收回本金 ($debtCurr)',
+                helperText: '填 0 表示仅记录纯利息',
+              ),
             ),
             const SizedBox(height: 12),
           ],
@@ -824,87 +811,37 @@ class _RepayDialogState extends ConsumerState<_RepayDialog> {
             enabled: !_submitting,
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
             inputFormatters: debtAmountInputFormatters,
-            decoration: isDesktop
-                ? InputDecoration(
-                    labelText: isBorrow
-                        ? '利息支出 ($debtCurr${widget.pureInterestOnly ? '' : '，可选'})'
-                        : '利息收入 ($debtCurr${widget.pureInterestOnly ? '' : '，可选'})',
-                    border: const OutlineInputBorder(),
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 16,
-                    ),
-                  )
-                : InputDecoration(
-                    labelText: isBorrow
-                        ? '利息支出 ($debtCurr${widget.pureInterestOnly ? '' : '，可选'})'
-                        : '利息收入 ($debtCurr${widget.pureInterestOnly ? '' : '，可选'})',
-                  ),
+            decoration: InputDecoration(
+              labelText: isBorrow
+                  ? '利息支出 ($debtCurr${widget.pureInterestOnly ? '' : '，可选'})'
+                  : '利息收入 ($debtCurr${widget.pureInterestOnly ? '' : '，可选'})',
+            ),
           ),
           const SizedBox(height: 12),
-          InputDecorator(
-            decoration: isDesktop
-                ? const InputDecoration(
-                    labelText: '资金账户',
-                    border: OutlineInputBorder(),
-                    contentPadding: EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 16,
-                    ),
-                  )
-                : const InputDecoration(labelText: '资金账户'),
-            child: DropdownButtonHideUnderline(
-              child: DropdownButton<int>(
-                key: const Key('repay_funding_selector'),
-                value: _selectedFundingId,
-                isExpanded: true,
-                isDense: true,
-                items: [
-                  const DropdownMenuItem<int>(
-                    value: noRef,
-                    child: Text('不关联资金账户'),
-                  ),
-                  for (final a in widget.fundingAccounts)
-                    DropdownMenuItem<int>(value: a.id, child: Text(a.name)),
-                ],
-                onChanged: _submitting
-                    ? null
-                    : (v) => setState(() => _selectedFundingId = v ?? noRef),
-              ),
-            ),
+          TallySelectField<int>(
+            key: const Key('repay_funding_selector'),
+            label: '资金账户',
+            value: _selectedFundingId,
+            enabled: !_submitting,
+            options: [
+              const TallySelectOption<int>(value: noRef, label: '不关联资金账户'),
+              for (final a in widget.fundingAccounts)
+                TallySelectOption<int>(value: a.id, label: a.name),
+            ],
+            onChanged: (v) => setState(() => _selectedFundingId = v),
           ),
           if (widget.books.length > 1) ...[
             const SizedBox(height: 12),
-            InputDecorator(
-              decoration: isDesktop
-                  ? const InputDecoration(
-                      labelText: '记入账本',
-                      border: OutlineInputBorder(),
-                      contentPadding: EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 16,
-                      ),
-                    )
-                  : const InputDecoration(labelText: '记入账本'),
-              child: DropdownButtonHideUnderline(
-                child: DropdownButton<int>(
-                  key: const Key('repay_book_selector'),
-                  value: _selectedBookId,
-                  isExpanded: true,
-                  isDense: true,
-                  items: [
-                    for (final b in widget.books)
-                      DropdownMenuItem<int>(value: b.id, child: Text(b.name)),
-                  ],
-                  onChanged: _submitting
-                      ? null
-                      : (v) {
-                          if (v != null) {
-                            setState(() => _selectedBookId = v);
-                          }
-                        },
-                ),
-              ),
+            TallySelectField<int>(
+              key: const Key('repay_book_selector'),
+              label: '记入账本',
+              value: _selectedBookId,
+              enabled: !_submitting,
+              options: [
+                for (final b in widget.books)
+                  TallySelectOption<int>(value: b.id, label: b.name),
+              ],
+              onChanged: (v) => setState(() => _selectedBookId = v),
             ),
           ],
           if (isBorrow) ...[
@@ -919,44 +856,36 @@ class _RepayDialogState extends ConsumerState<_RepayDialog> {
                   : (v) => setState(() => _excludeBudget = v),
             ),
           ],
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('操作日期'),
+          const SizedBox(height: 12),
+          TallyFormTile(
+            leading: const Icon(Icons.event),
+            title: '操作日期',
             trailing: Text(formatDate(_operateDate)),
-            onTap: _submitting
-                ? null
-                : () async {
-                    final picked = await showDatePicker(
-                      context: context,
-                      initialDate: _operateDate,
-                      firstDate: DateTime(2000),
-                      lastDate: DateTime(2100),
-                    );
-                    if (picked != null && mounted) {
-                      setState(() {
-                        _operateDate = DateTime(
-                          picked.year,
-                          picked.month,
-                          picked.day,
-                        );
-                      });
-                    }
-                  },
+            enabled: !_submitting,
+            onTap: () async {
+              final picked = await showDatePicker(
+                context: context,
+                initialDate: _operateDate,
+                firstDate: DateTime(2000),
+                lastDate: DateTime(2100),
+              );
+              if (picked != null && mounted) {
+                setState(() {
+                  _operateDate = DateTime(
+                    picked.year,
+                    picked.month,
+                    picked.day,
+                  );
+                });
+              }
+            },
           ),
+          const SizedBox(height: 12),
           TextField(
             key: const Key('repay_remark_input'),
             controller: _remarkCtrl,
             enabled: !_submitting,
-            decoration: isDesktop
-                ? const InputDecoration(
-                    labelText: '备注（可选）',
-                    border: OutlineInputBorder(),
-                    contentPadding: EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 16,
-                    ),
-                  )
-                : const InputDecoration(labelText: '备注（可选）'),
+            decoration: const InputDecoration(labelText: '备注（可选）'),
           ),
           if (_dialogError != null) ...[
             const SizedBox(height: 8),
@@ -973,12 +902,7 @@ class _RepayDialogState extends ConsumerState<_RepayDialog> {
       title: Text(
         widget.pureInterestOnly ? '记录纯利息' : (isBorrow ? '记录还款' : '记录收款'),
       ),
-      content: isDesktop
-          ? ConstrainedBox(
-              constraints: const BoxConstraints(minWidth: 380, maxWidth: 420),
-              child: scrollBody,
-            )
-          : scrollBody,
+      content: SizedBox(width: isDesktop ? 400 : 320, child: scrollBody),
       actions: [
         TextButton(
           onPressed: _submitting ? null : () => Navigator.pop(context),
@@ -1113,127 +1037,67 @@ class _AddPrincipalDialogState extends ConsumerState<_AddPrincipalDialog> {
             enabled: !_submitting,
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
             inputFormatters: debtAmountInputFormatters,
-            decoration: isDesktop
-                ? InputDecoration(
-                    labelText: isBorrow
-                        ? '追加借入本金 ($debtCurr)'
-                        : '追加借出本金 ($debtCurr)',
-                    border: const OutlineInputBorder(),
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 16,
-                    ),
-                  )
-                : InputDecoration(
-                    labelText: isBorrow
-                        ? '追加借入本金 ($debtCurr)'
-                        : '追加借出本金 ($debtCurr)',
-                  ),
+            decoration: InputDecoration(
+              labelText: isBorrow ? '追加借入本金 ($debtCurr)' : '追加借出本金 ($debtCurr)',
+            ),
           ),
           const SizedBox(height: 12),
-          InputDecorator(
-            decoration: isDesktop
-                ? const InputDecoration(
-                    labelText: '资金账户',
-                    border: OutlineInputBorder(),
-                    contentPadding: EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 16,
-                    ),
-                  )
-                : const InputDecoration(labelText: '资金账户'),
-            child: DropdownButtonHideUnderline(
-              child: DropdownButton<int>(
-                key: const Key('add_principal_funding_selector'),
-                value: _selectedFundingId,
-                isExpanded: true,
-                isDense: true,
-                items: [
-                  const DropdownMenuItem<int>(
-                    value: noRef,
-                    child: Text('不关联资金账户'),
-                  ),
-                  for (final a in widget.fundingAccounts)
-                    DropdownMenuItem<int>(value: a.id, child: Text(a.name)),
-                ],
-                onChanged: _submitting
-                    ? null
-                    : (v) => setState(() => _selectedFundingId = v ?? noRef),
-              ),
-            ),
+          TallySelectField<int>(
+            key: const Key('add_principal_funding_selector'),
+            label: '资金账户',
+            value: _selectedFundingId,
+            enabled: !_submitting,
+            options: [
+              const TallySelectOption<int>(value: noRef, label: '不关联资金账户'),
+              for (final a in widget.fundingAccounts)
+                TallySelectOption<int>(value: a.id, label: a.name),
+            ],
+            onChanged: (v) => setState(() => _selectedFundingId = v),
           ),
           if (widget.books.length > 1) ...[
             const SizedBox(height: 12),
-            InputDecorator(
-              decoration: isDesktop
-                  ? const InputDecoration(
-                      labelText: '记入账本',
-                      border: OutlineInputBorder(),
-                      contentPadding: EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 16,
-                      ),
-                    )
-                  : const InputDecoration(labelText: '记入账本'),
-              child: DropdownButtonHideUnderline(
-                child: DropdownButton<int>(
-                  key: const Key('add_principal_book_selector'),
-                  value: _selectedBookId,
-                  isExpanded: true,
-                  isDense: true,
-                  items: [
-                    for (final b in widget.books)
-                      DropdownMenuItem<int>(value: b.id, child: Text(b.name)),
-                  ],
-                  onChanged: _submitting
-                      ? null
-                      : (v) {
-                          if (v != null) {
-                            setState(() => _selectedBookId = v);
-                          }
-                        },
-                ),
-              ),
+            TallySelectField<int>(
+              key: const Key('add_principal_book_selector'),
+              label: '记入账本',
+              value: _selectedBookId,
+              enabled: !_submitting,
+              options: [
+                for (final b in widget.books)
+                  TallySelectOption<int>(value: b.id, label: b.name),
+              ],
+              onChanged: (v) => setState(() => _selectedBookId = v),
             ),
           ],
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('操作日期'),
+          const SizedBox(height: 12),
+          TallyFormTile(
+            leading: const Icon(Icons.event),
+            title: '操作日期',
             trailing: Text(formatDate(_operateDate)),
-            onTap: _submitting
-                ? null
-                : () async {
-                    final picked = await showDatePicker(
-                      context: context,
-                      initialDate: _operateDate,
-                      firstDate: DateTime(2000),
-                      lastDate: DateTime(2100),
-                    );
-                    if (picked != null && mounted) {
-                      setState(() {
-                        _operateDate = DateTime(
-                          picked.year,
-                          picked.month,
-                          picked.day,
-                        );
-                      });
-                    }
-                  },
+            enabled: !_submitting,
+            onTap: () async {
+              final picked = await showDatePicker(
+                context: context,
+                initialDate: _operateDate,
+                firstDate: DateTime(2000),
+                lastDate: DateTime(2100),
+              );
+              if (picked != null && mounted) {
+                setState(() {
+                  _operateDate = DateTime(
+                    picked.year,
+                    picked.month,
+                    picked.day,
+                  );
+                });
+              }
+            },
           ),
+          const SizedBox(height: 12),
           TextField(
             key: const Key('add_principal_remark_input'),
             controller: _remarkCtrl,
             enabled: !_submitting,
-            decoration: isDesktop
-                ? const InputDecoration(
-                    labelText: '备注（可选）',
-                    border: OutlineInputBorder(),
-                    contentPadding: EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 16,
-                    ),
-                  )
-                : const InputDecoration(labelText: '备注（可选）'),
+            decoration: const InputDecoration(labelText: '备注（可选）'),
           ),
           if (_dialogError != null) ...[
             const SizedBox(height: 8),
@@ -1248,12 +1112,7 @@ class _AddPrincipalDialogState extends ConsumerState<_AddPrincipalDialog> {
 
     return AlertDialog(
       title: Text(isBorrow ? '追加借入' : '追加借出'),
-      content: isDesktop
-          ? ConstrainedBox(
-              constraints: const BoxConstraints(minWidth: 380, maxWidth: 420),
-              child: scrollBody,
-            )
-          : scrollBody,
+      content: SizedBox(width: isDesktop ? 400 : 320, child: scrollBody),
       actions: [
         TextButton(
           onPressed: _submitting ? null : () => Navigator.pop(context),
@@ -1380,72 +1239,34 @@ class _EditRecordDialogState extends ConsumerState<_EditRecordDialog> {
             enabled: !_submitting,
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
             inputFormatters: debtAmountInputFormatters,
-            decoration: isDesktop
-                ? InputDecoration(
-                    labelText: '金额 ($debtCurr)',
-                    border: const OutlineInputBorder(),
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 16,
-                    ),
-                  )
-                : InputDecoration(labelText: '金额 ($debtCurr)'),
+            decoration: InputDecoration(labelText: '金额 ($debtCurr)'),
           ),
           const SizedBox(height: 12),
-          InputDecorator(
-            decoration: isDesktop
-                ? const InputDecoration(
-                    labelText: '资金账户',
-                    border: OutlineInputBorder(),
-                    contentPadding: EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 16,
-                    ),
-                  )
-                : const InputDecoration(labelText: '资金账户'),
-            child: DropdownButtonHideUnderline(
-              child: DropdownButton<int>(
-                key: const Key('edit_debt_record_funding_selector'),
-                value: _selectedFundingId,
-                isExpanded: true,
-                isDense: true,
-                items: [
-                  const DropdownMenuItem<int>(
-                    value: noRef,
-                    child: Text('不关联资金账户'),
-                  ),
-                  if (!hasInitialInActive)
-                    DropdownMenuItem<int>(
-                      value: widget.initialFundingId,
-                      child: Text(
-                        widget.view.accountNames[widget.initialFundingId] ??
-                            '账户#${widget.initialFundingId}',
-                      ),
-                    ),
-                  for (final a in widget.fundingAccounts)
-                    DropdownMenuItem<int>(value: a.id, child: Text(a.name)),
-                ],
-                onChanged: _submitting
-                    ? null
-                    : (v) => setState(() => _selectedFundingId = v ?? noRef),
-              ),
-            ),
+          TallySelectField<int>(
+            key: const Key('edit_debt_record_funding_selector'),
+            label: '资金账户',
+            value: _selectedFundingId,
+            enabled: !_submitting,
+            options: [
+              const TallySelectOption<int>(value: noRef, label: '不关联资金账户'),
+              if (!hasInitialInActive)
+                TallySelectOption<int>(
+                  value: widget.initialFundingId,
+                  label:
+                      widget.view.accountNames[widget.initialFundingId] ??
+                      '账户#${widget.initialFundingId}',
+                ),
+              for (final a in widget.fundingAccounts)
+                TallySelectOption<int>(value: a.id, label: a.name),
+            ],
+            onChanged: (v) => setState(() => _selectedFundingId = v),
           ),
           const SizedBox(height: 12),
           TextField(
             key: const Key('edit_debt_record_remark_input'),
             controller: _remarkCtrl,
             enabled: !_submitting,
-            decoration: isDesktop
-                ? const InputDecoration(
-                    labelText: '备注',
-                    border: OutlineInputBorder(),
-                    contentPadding: EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 16,
-                    ),
-                  )
-                : const InputDecoration(labelText: '备注'),
+            decoration: const InputDecoration(labelText: '备注'),
           ),
           if (_dialogError != null) ...[
             const SizedBox(height: 8),
@@ -1460,12 +1281,7 @@ class _EditRecordDialogState extends ConsumerState<_EditRecordDialog> {
 
     return AlertDialog(
       title: Text('编辑${widget.recordLabel}'),
-      content: isDesktop
-          ? ConstrainedBox(
-              constraints: const BoxConstraints(minWidth: 380, maxWidth: 420),
-              child: scrollBody,
-            )
-          : scrollBody,
+      content: SizedBox(width: isDesktop ? 400 : 320, child: scrollBody),
       actions: [
         TextButton(
           onPressed: _submitting ? null : () => Navigator.pop(context),

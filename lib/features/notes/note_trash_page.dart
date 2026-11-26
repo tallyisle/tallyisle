@@ -135,14 +135,16 @@ class NoteTrashPage extends ConsumerWidget {
           scrolledUnderElevation: isDesktop ? 0 : null,
           title: const Text('便签回收站'),
           actions: [
-            TextButton.icon(
+            TallySoftButton.icon(
               key: const Key('empty_note_trash_button'),
+              compact: true,
               onPressed: trashedList.isEmpty
                   ? null
                   : () => _emptyTrash(context, ref, trashedList.length),
-              icon: const Icon(Icons.delete_forever_outlined),
+              icon: const Icon(Icons.delete_forever_outlined, size: 18),
               label: const Text('清空回收站'),
             ),
+            const SizedBox(width: 12),
           ],
         ),
         body: isDesktop
@@ -219,16 +221,9 @@ class _TrashedNoteCard extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 6),
-                TextButton.icon(
+                TallySoftButton.icon(
                   key: Key('restore_note_${note.id}'),
-                  style: TextButton.styleFrom(
-                    visualDensity: VisualDensity.compact,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 4,
-                    ),
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
+                  compact: true,
                   onPressed: onRestore,
                   icon: const Icon(Icons.restore_from_trash_outlined, size: 16),
                   label: const FittedBox(
@@ -236,18 +231,31 @@ class _TrashedNoteCard extends StatelessWidget {
                     child: Text('恢复', maxLines: 1, softWrap: false),
                   ),
                 ),
-                const SizedBox(width: 2),
-                TextButton.icon(
+                const SizedBox(width: 6),
+                TallySoftButton.icon(
                   key: Key('delete_note_permanently_${note.id}'),
+                  compact: true,
                   onPressed: onDeletePermanently,
-                  style: TextButton.styleFrom(
+                  style: FilledButton.styleFrom(
+                    elevation: 0,
+                    shadowColor: Colors.transparent,
+                    surfaceTintColor: Colors.transparent,
+                    side: BorderSide.none,
+                    backgroundColor: cs.errorContainer.withValues(
+                      alpha: theme.brightness == Brightness.dark ? 0.45 : 0.72,
+                    ),
                     foregroundColor: cs.error,
-                    visualDensity: VisualDensity.compact,
+                    iconColor: cs.error,
+                    minimumSize: const Size(0, 34),
                     padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 4,
+                      horizontal: 10,
+                      vertical: 6,
                     ),
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    visualDensity: VisualDensity.compact,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(kTallyNestedRadius),
+                    ),
                   ),
                   icon: const Icon(Icons.delete_forever_outlined, size: 16),
                   label: const FittedBox(

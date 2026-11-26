@@ -625,7 +625,6 @@ class _BillLocationEditorDialogState extends State<BillLocationEditorDialog> {
   @override
   Widget build(BuildContext context) {
     final isDesktop = DesktopAdaptive.isDesktop(context);
-    final fieldBorder = isDesktop ? const OutlineInputBorder() : null;
     final fieldGap = isDesktop ? 12.0 : 8.0;
     Widget content = Column(
       mainAxisSize: MainAxisSize.min,
@@ -633,19 +632,13 @@ class _BillLocationEditorDialogState extends State<BillLocationEditorDialog> {
         TextField(
           key: const Key('loc-simple-name'),
           controller: _simpleController,
-          decoration: InputDecoration(
-            labelText: '地点简称（如：人民广场）',
-            border: fieldBorder,
-          ),
+          decoration: const InputDecoration(labelText: '地点简称（如：人民广场）'),
         ),
         SizedBox(height: fieldGap),
         TextField(
           key: const Key('loc-detail-name'),
           controller: _detailController,
-          decoration: InputDecoration(
-            labelText: '详细地址（选填）',
-            border: fieldBorder,
-          ),
+          decoration: const InputDecoration(labelText: '详细地址（选填）'),
         ),
         SizedBox(height: fieldGap),
         Row(
@@ -658,10 +651,7 @@ class _BillLocationEditorDialogState extends State<BillLocationEditorDialog> {
                   signed: true,
                   decimal: true,
                 ),
-                decoration: InputDecoration(
-                  labelText: '纬度（选填）',
-                  border: fieldBorder,
-                ),
+                decoration: const InputDecoration(labelText: '纬度（选填）'),
               ),
             ),
             const SizedBox(width: 8),
@@ -673,10 +663,7 @@ class _BillLocationEditorDialogState extends State<BillLocationEditorDialog> {
                   signed: true,
                   decimal: true,
                 ),
-                decoration: InputDecoration(
-                  labelText: '经度（选填）',
-                  border: fieldBorder,
-                ),
+                decoration: const InputDecoration(labelText: '经度（选填）'),
               ),
             ),
           ],

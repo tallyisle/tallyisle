@@ -395,7 +395,7 @@ class _SavingsEditorPageState extends ConsumerState<SavingsEditorPage> {
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
               color: Theme.of(context).colorScheme.errorContainer,
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(kTallyNestedRadius),
             ),
             child: Text(
               _error!,
@@ -408,372 +408,326 @@ class _SavingsEditorPageState extends ConsumerState<SavingsEditorPage> {
           const SizedBox(height: 12),
         ],
         if (!_editing) ...[
-          Text('经典模板', style: Theme.of(context).textTheme.labelLarge),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
+          TallyFormCard(
+            title: '经典模板',
             children: [
-              ActionChip(
-                key: const Key('template_365_days'),
-                avatar: const Icon(Icons.bolt, size: 16),
-                label: const Text('365天存钱（66795.00）'),
-                onPressed: _busy
-                    ? null
-                    : () => _applyTemplate(SavingsPlanTemplate.days365(today)),
-              ),
-              ActionChip(
-                key: const Key('template_52_weeks'),
-                avatar: const Icon(Icons.calendar_view_week, size: 16),
-                label: const Text('52周存钱（13780.00）'),
-                onPressed: _busy
-                    ? null
-                    : () => _applyTemplate(SavingsPlanTemplate.weeks52(today)),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-        ],
-        Wrap(
-          spacing: 8,
-          children: [
-            for (final mode in const [
-              SavingsPlanType.incremental,
-              SavingsPlanType.fixed,
-              SavingsPlanType.free,
-            ])
-              ChoiceChip(
-                key: Key('plan_type_$mode'),
-                label: Text(SavingsPlanType.labelOf(mode)),
-                selected: _planType == mode,
-                onSelected: _busy
-                    ? null
-                    : (_) => setState(() {
-                        _planType = mode;
-                        if (mode == SavingsPlanType.free) {
-                          _autoPlan = false;
-                        }
-                      }),
-              ),
-          ],
-        ),
-        const SizedBox(height: 16),
-        TextField(
-          key: const Key('savings_name_input'),
-          controller: _nameCtrl,
-          enabled: !_busy,
-          decoration: InputDecoration(
-            labelText: '计划名称',
-            hintText: '例如：旅行基金、365天存钱',
-            border: const OutlineInputBorder(),
-            contentPadding: isDesktop
-                ? const EdgeInsets.symmetric(horizontal: 12, vertical: 16)
-                : null,
-          ),
-        ),
-        const SizedBox(height: 12),
-        if (_planType != SavingsPlanType.free) ...[
-          Text('存钱周期', style: Theme.of(context).textTheme.labelLarge),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            children: [
-              for (final cycle in SavingsCycleType.scheduledValues)
-                ChoiceChip(
-                  key: Key('cycle_type_$cycle'),
-                  label: Text(SavingsCycleType.labelOf(cycle)),
-                  selected: _cycleType == cycle,
-                  onSelected: _busy
-                      ? null
-                      : (_) => setState(() => _cycleType = cycle),
-                ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: TallySoftButton.icon(
-                  key: const Key('pick_start_date_button'),
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  onPressed: _busy ? null : () => _pickDate(isStart: true),
-                  icon: const Icon(Icons.event, size: 16),
-                  label: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: Text(
-                      '开始 ${_startDate.dateKey}',
-                      maxLines: 1,
-                      softWrap: false,
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: TallySoftButton.icon(
-                  key: const Key('pick_end_date_button'),
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  onPressed: _busy ? null : () => _pickDate(isStart: false),
-                  icon: const Icon(Icons.event_available, size: 16),
-                  label: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: Text(
-                      '结束 ${_endDate.dateKey}',
-                      maxLines: 1,
-                      softWrap: false,
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            key: const Key('savings_start_money_input'),
-            controller: _startMoneyCtrl,
-            enabled: !_busy,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            onChanged: (_) => setState(() {}),
-            decoration: InputDecoration(
-              labelText: _planType == SavingsPlanType.incremental
-                  ? '首期存入金额'
-                  : '每期定额金额',
-              prefixText: '$currSymbol ',
-              border: const OutlineInputBorder(),
-              contentPadding: isDesktop
-                  ? const EdgeInsets.symmetric(horizontal: 12, vertical: 16)
-                  : null,
-            ),
-          ),
-          if (_planType == SavingsPlanType.incremental) ...[
-            const SizedBox(height: 12),
-            TextField(
-              key: const Key('savings_incremental_input'),
-              controller: _incMoneyCtrl,
-              enabled: !_busy,
-              keyboardType: const TextInputType.numberWithOptions(
-                decimal: true,
-              ),
-              onChanged: (_) => setState(() {}),
-              decoration: InputDecoration(
-                labelText: '每期递增金额',
-                prefixText: '$currSymbol ',
-                border: const OutlineInputBorder(),
-                contentPadding: isDesktop
-                    ? const EdgeInsets.symmetric(horizontal: 12, vertical: 16)
-                    : null,
-              ),
-            ),
-          ],
-          const SizedBox(height: 12),
-          Card(
-            key: const Key('savings_target_preview'),
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Row(
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
                 children: [
-                  Text('预计共 $periods 期'),
-                  const SizedBox(width: 8),
+                  ActionChip(
+                    key: const Key('template_365_days'),
+                    avatar: const Icon(Icons.bolt, size: 16),
+                    label: const Text('365天存钱（66795.00）'),
+                    onPressed: _busy
+                        ? null
+                        : () => _applyTemplate(
+                            SavingsPlanTemplate.days365(today),
+                          ),
+                  ),
+                  ActionChip(
+                    key: const Key('template_52_weeks'),
+                    avatar: const Icon(Icons.calendar_view_week, size: 16),
+                    label: const Text('52周存钱（13780.00）'),
+                    onPressed: _busy
+                        ? null
+                        : () => _applyTemplate(
+                            SavingsPlanTemplate.weeks52(today),
+                          ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+        ],
+        TallyFormCard(
+          title: '计划方案',
+          spacing: 12,
+          children: [
+            Wrap(
+              spacing: 8,
+              children: [
+                for (final mode in const [
+                  SavingsPlanType.incremental,
+                  SavingsPlanType.fixed,
+                  SavingsPlanType.free,
+                ])
+                  ChoiceChip(
+                    key: Key('plan_type_$mode'),
+                    label: Text(SavingsPlanType.labelOf(mode)),
+                    selected: _planType == mode,
+                    onSelected: _busy
+                        ? null
+                        : (_) => setState(() {
+                            _planType = mode;
+                            if (mode == SavingsPlanType.free) {
+                              _autoPlan = false;
+                            }
+                          }),
+                  ),
+              ],
+            ),
+            TextField(
+              key: const Key('savings_name_input'),
+              controller: _nameCtrl,
+              enabled: !_busy,
+              decoration: const InputDecoration(
+                labelText: '计划名称',
+                hintText: '例如：旅行基金、365天存钱',
+              ),
+            ),
+            if (_planType != SavingsPlanType.free) ...[
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('存钱周期', style: Theme.of(context).textTheme.labelLarge),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    children: [
+                      for (final cycle in SavingsCycleType.scheduledValues)
+                        ChoiceChip(
+                          key: Key('cycle_type_$cycle'),
+                          label: Text(SavingsCycleType.labelOf(cycle)),
+                          selected: _cycleType == cycle,
+                          onSelected: _busy
+                              ? null
+                              : (_) => setState(() => _cycleType = cycle),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
+              Row(
+                children: [
                   Expanded(
-                    child: Align(
-                      alignment: Alignment.centerRight,
-                      child: FittedBox(
+                    child: TallySoftButton.icon(
+                      key: const Key('pick_start_date_button'),
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      onPressed: _busy ? null : () => _pickDate(isStart: true),
+                      icon: const Icon(Icons.event, size: 16),
+                      label: FittedBox(
                         fit: BoxFit.scaleDown,
                         child: Text(
-                          previewTarget == null
-                              ? '--'
-                              : '目标总额 $currSymbol${formatMinor(previewTarget)}',
-                          key: const Key('savings_preview_target_text'),
+                          '开始 ${_startDate.dateKey}',
                           maxLines: 1,
                           softWrap: false,
-                          style: Theme.of(context).textTheme.titleMedium
-                              ?.copyWith(fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: TallySoftButton.icon(
+                      key: const Key('pick_end_date_button'),
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      onPressed: _busy ? null : () => _pickDate(isStart: false),
+                      icon: const Icon(Icons.event_available, size: 16),
+                      label: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          '结束 ${_endDate.dateKey}',
+                          maxLines: 1,
+                          softWrap: false,
                         ),
                       ),
                     ),
                   ),
                 ],
               ),
-            ),
-          ),
-        ] else ...[
-          TextField(
-            key: const Key('savings_custom_target_input'),
-            controller: _customTargetCtrl,
-            enabled: !_busy,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            onChanged: (_) => setState(() {}),
-            decoration: InputDecoration(
-              labelText: '目标总金额',
-              prefixText: '$currSymbol ',
-              border: const OutlineInputBorder(),
-              contentPadding: isDesktop
-                  ? const EdgeInsets.symmetric(horizontal: 12, vertical: 16)
-                  : null,
-            ),
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: TallySoftButton.icon(
-                  key: const Key('pick_start_date_button'),
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  onPressed: _busy ? null : () => _pickDate(isStart: true),
-                  icon: const Icon(Icons.event, size: 16),
-                  label: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: Text(
-                      '开始 ${_startDate.dateKey}',
-                      maxLines: 1,
-                      softWrap: false,
-                    ),
+              TextField(
+                key: const Key('savings_start_money_input'),
+                controller: _startMoneyCtrl,
+                enabled: !_busy,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                onChanged: (_) => setState(() {}),
+                decoration: InputDecoration(
+                  labelText: _planType == SavingsPlanType.incremental
+                      ? '首期存入金额'
+                      : '每期定额金额',
+                  prefixText: '$currSymbol ',
+                ),
+              ),
+              if (_planType == SavingsPlanType.incremental)
+                TextField(
+                  key: const Key('savings_incremental_input'),
+                  controller: _incMoneyCtrl,
+                  enabled: !_busy,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  onChanged: (_) => setState(() {}),
+                  decoration: InputDecoration(
+                    labelText: '每期递增金额',
+                    prefixText: '$currSymbol ',
+                  ),
+                ),
+              Material(
+                key: const Key('savings_target_preview'),
+                color: tallyNestedSurfaceColor(Theme.of(context).colorScheme),
+                borderRadius: BorderRadius.circular(kTallyNestedRadius),
+                clipBehavior: Clip.antiAlias,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 12,
+                  ),
+                  child: Row(
+                    children: [
+                      Text('预计共 $periods 期'),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Align(
+                          alignment: Alignment.centerRight,
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text(
+                              previewTarget == null
+                                  ? '--'
+                                  : '目标总额 $currSymbol${formatMinor(previewTarget)}',
+                              key: const Key('savings_preview_target_text'),
+                              maxLines: 1,
+                              softWrap: false,
+                              style: Theme.of(context).textTheme.titleMedium
+                                  ?.copyWith(fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: TallySoftButton.icon(
-                  key: const Key('pick_end_date_button'),
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  onPressed: _busy ? null : () => _pickDate(isStart: false),
-                  icon: const Icon(Icons.event_available, size: 16),
-                  label: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: Text(
-                      _freeHasEndDate ? '截止 ${_endDate.dateKey}' : '截止日期（可选）',
-                      maxLines: 1,
-                      softWrap: false,
-                    ),
-                  ),
+            ] else ...[
+              TextField(
+                key: const Key('savings_custom_target_input'),
+                controller: _customTargetCtrl,
+                enabled: !_busy,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                onChanged: (_) => setState(() {}),
+                decoration: InputDecoration(
+                  labelText: '目标总金额',
+                  prefixText: '$currSymbol ',
                 ),
               ),
-              if (_freeHasEndDate)
-                IconButton(
-                  visualDensity: VisualDensity.compact,
-                  tooltip: '清除截止日期',
-                  onPressed: _busy
-                      ? null
-                      : () => setState(() => _freeHasEndDate = false),
-                  icon: const Icon(Icons.clear, size: 18),
-                ),
+              Row(
+                children: [
+                  Expanded(
+                    child: TallySoftButton.icon(
+                      key: const Key('pick_start_date_button'),
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      onPressed: _busy ? null : () => _pickDate(isStart: true),
+                      icon: const Icon(Icons.event, size: 16),
+                      label: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          '开始 ${_startDate.dateKey}',
+                          maxLines: 1,
+                          softWrap: false,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: TallySoftButton.icon(
+                      key: const Key('pick_end_date_button'),
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      onPressed: _busy ? null : () => _pickDate(isStart: false),
+                      icon: const Icon(Icons.event_available, size: 16),
+                      label: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          _freeHasEndDate
+                              ? '截止 ${_endDate.dateKey}'
+                              : '截止日期（可选）',
+                          maxLines: 1,
+                          softWrap: false,
+                        ),
+                      ),
+                    ),
+                  ),
+                  if (_freeHasEndDate)
+                    IconButton(
+                      visualDensity: VisualDensity.compact,
+                      tooltip: '清除截止日期',
+                      onPressed: _busy
+                          ? null
+                          : () => setState(() => _freeHasEndDate = false),
+                      icon: const Icon(Icons.clear, size: 18),
+                    ),
+                ],
+              ),
             ],
-          ),
-        ],
-        const SizedBox(height: 16),
-        InputDecorator(
-          decoration: InputDecoration(
-            labelText: '转出扣款账户（可选）',
-            border: const OutlineInputBorder(),
-            contentPadding: EdgeInsets.symmetric(
-              horizontal: 12,
-              vertical: isDesktop ? 16 : 4,
-            ),
-          ),
-          child: DropdownButtonHideUnderline(
-            child: DropdownButton<int>(
-              key: const Key('savings_from_asset_dropdown'),
-              value: effectiveFromValue,
-              isExpanded: true,
-              isDense: isDesktop,
-              items: [
-                const DropdownMenuItem(value: noRef, child: Text('不绑定转出账户')),
-                for (final a in activeFromAssets)
-                  DropdownMenuItem(
-                    value: a.id,
-                    child: Text(_assetOptionLabel(a)),
-                  ),
-              ],
-              onChanged: _busy
-                  ? null
-                  : (v) => setState(() => _fromAssetId = v ?? noRef),
-            ),
-          ),
+          ],
         ),
         const SizedBox(height: 12),
-        InputDecorator(
-          decoration: InputDecoration(
-            labelText: '转入存钱账户（可选）',
-            helperText: _editing ? '编辑计划时币种已锁定为 $currCode' : null,
-            border: const OutlineInputBorder(),
-            contentPadding: EdgeInsets.symmetric(
-              horizontal: 12,
-              vertical: isDesktop ? 16 : 4,
-            ),
-          ),
-          child: DropdownButtonHideUnderline(
-            child: DropdownButton<int>(
-              key: const Key('savings_to_asset_dropdown'),
-              value: effectiveToValue,
-              isExpanded: true,
-              isDense: isDesktop,
-              items: [
-                const DropdownMenuItem(value: noRef, child: Text('不绑定转入账户')),
-                for (final a in activeToAssets)
-                  DropdownMenuItem(
-                    value: a.id,
-                    child: Text(_assetOptionLabel(a)),
-                  ),
+        TallyFormCard(
+          title: '账户与备注',
+          spacing: 12,
+          children: [
+            TallySelectField<int>(
+              key: const Key('savings_from_asset_dropdown'),
+              label: '转出扣款账户（可选）',
+              value: effectiveFromValue,
+              enabled: !_busy,
+              options: [
+                const TallySelectOption(value: noRef, label: '不绑定转出账户'),
+                for (final a in activeFromAssets)
+                  TallySelectOption(value: a.id, label: _assetOptionLabel(a)),
               ],
-              onChanged: _busy
-                  ? null
-                  : (v) => setState(() => _toAssetId = v ?? noRef),
+              onChanged: (v) => setState(() => _fromAssetId = v),
             ),
-          ),
-        ),
-        if (books.isNotEmpty) ...[
-          const SizedBox(height: 12),
-          InputDecorator(
-            decoration: InputDecoration(
-              labelText: '转账入账账本',
-              border: const OutlineInputBorder(),
-              contentPadding: EdgeInsets.symmetric(
-                horizontal: 12,
-                vertical: isDesktop ? 16 : 4,
-              ),
+            TallySelectField<int>(
+              key: const Key('savings_to_asset_dropdown'),
+              label: '转入存钱账户（可选）',
+              helperText: _editing ? '编辑计划时币种已锁定为 $currCode' : null,
+              value: effectiveToValue,
+              enabled: !_busy,
+              options: [
+                const TallySelectOption(value: noRef, label: '不绑定转入账户'),
+                for (final a in activeToAssets)
+                  TallySelectOption(value: a.id, label: _assetOptionLabel(a)),
+              ],
+              onChanged: (v) => setState(() => _toAssetId = v),
             ),
-            child: DropdownButtonHideUnderline(
-              child: DropdownButton<int>(
+            if (books.isNotEmpty)
+              TallySelectField<int>(
                 key: const Key('savings_book_dropdown'),
+                label: '转账入账账本',
                 value: effectiveBookValue,
-                isExpanded: true,
-                isDense: isDesktop,
-                items: [
-                  const DropdownMenuItem(value: noRef, child: Text('跟随当前账本')),
+                enabled: !_busy,
+                options: [
+                  const TallySelectOption(value: noRef, label: '跟随当前账本'),
                   for (final b in books)
-                    DropdownMenuItem(value: b.id, child: Text(b.name)),
+                    TallySelectOption(value: b.id, label: b.name),
                 ],
+                onChanged: (v) => setState(() => _bookId = v),
+              ),
+            if (_planType != SavingsPlanType.free)
+              SwitchListTile(
+                key: const Key('savings_auto_plan_switch'),
+                contentPadding: EdgeInsets.zero,
+                title: const Text('自动存钱'),
+                subtitle: const Text('到达应存日期时自动打卡并生成转账流水'),
+                value: _autoPlan,
                 onChanged: _busy
                     ? null
-                    : (v) => setState(() => _bookId = v ?? noRef),
+                    : (val) => setState(() => _autoPlan = val),
               ),
+            TextField(
+              key: const Key('savings_remark_input'),
+              controller: _remarkCtrl,
+              enabled: !_busy,
+              maxLines: 2,
+              decoration: const InputDecoration(labelText: '备注（可选）'),
             ),
-          ),
-        ],
-        if (_planType != SavingsPlanType.free) ...[
-          const SizedBox(height: 8),
-          SwitchListTile(
-            key: const Key('savings_auto_plan_switch'),
-            contentPadding: EdgeInsets.zero,
-            title: const Text('自动存钱'),
-            subtitle: const Text('到达应存日期时自动打卡并生成转账流水'),
-            value: _autoPlan,
-            onChanged: _busy ? null : (val) => setState(() => _autoPlan = val),
-          ),
-        ],
-        const SizedBox(height: 12),
-        TextField(
-          key: const Key('savings_remark_input'),
-          controller: _remarkCtrl,
-          enabled: !_busy,
-          maxLines: 2,
-          decoration: InputDecoration(
-            labelText: '备注（可选）',
-            border: const OutlineInputBorder(),
-            contentPadding: isDesktop
-                ? const EdgeInsets.symmetric(horizontal: 12, vertical: 16)
-                : null,
-          ),
+          ],
         ),
       ],
     );
@@ -795,36 +749,25 @@ class _SavingsEditorPageState extends ConsumerState<SavingsEditorPage> {
             leading: isDesktop ? const CloseButton() : null,
             scrolledUnderElevation: isDesktop ? 0 : null,
             title: Text(_editing ? '编辑存钱计划' : '新建存钱计划'),
-            actions: isDesktop
-                ? null
-                : [
-                    TextButton(
-                      key: const Key('save_savings_plan_button'),
-                      onPressed: _busy ? null : onSave,
-                      child: const Text('保存'),
-                    ),
-                  ],
           ),
-          bottomNavigationBar: isDesktop
-              ? SafeArea(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 8, 20, 14),
-                    child: FilledButton(
-                      key: const Key('save_savings_plan_button'),
-                      onPressed: _busy ? null : onSave,
-                      child: Text(_busy ? '保存中…' : '保存'),
-                    ),
-                  ),
-                )
-              : null,
-          body: isDesktop
-              ? Center(
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 640),
-                    child: formList,
-                  ),
-                )
-              : formList,
+          bottomNavigationBar: SafeArea(
+            child: Padding(
+              padding: isDesktop
+                  ? const EdgeInsets.fromLTRB(20, 8, 20, 14)
+                  : const EdgeInsets.fromLTRB(16, 8, 16, 12),
+              child: FilledButton(
+                key: const Key('save_savings_plan_button'),
+                onPressed: _busy ? null : onSave,
+                child: Text(_busy ? '保存中…' : '保存'),
+              ),
+            ),
+          ),
+          body: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 640),
+              child: formList,
+            ),
+          ),
         ),
       ),
     );

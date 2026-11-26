@@ -100,11 +100,10 @@ class _NotesPageState extends ConsumerState<NotesPage> {
                       },
                       icon: const Icon(Icons.clear),
                     ),
-              border: const OutlineInputBorder(),
               isDense: !isDesktop,
               contentPadding: isDesktop
-                  ? const EdgeInsets.symmetric(horizontal: 12, vertical: 12)
-                  : null,
+                  ? const EdgeInsets.symmetric(horizontal: 14, vertical: 12)
+                  : const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             ),
           ),
         ),
@@ -156,10 +155,11 @@ class _NotesPageState extends ConsumerState<NotesPage> {
         scrolledUnderElevation: isDesktop ? 0 : null,
         title: const Text('便签'),
         actions: [
-          TextButton.icon(
+          TallySoftButton.icon(
             key: const Key('open_note_trash_button'),
+            compact: true,
             onPressed: _openTrash,
-            icon: const Icon(Icons.delete_sweep_outlined),
+            icon: const Icon(Icons.delete_sweep_outlined, size: 18),
             label: Text(trashCount > 0 ? '回收站 ($trashCount)' : '回收站'),
           ),
           if (isDesktop) ...[
@@ -172,7 +172,8 @@ class _NotesPageState extends ConsumerState<NotesPage> {
               label: const Text('新建便签'),
             ),
             const SizedBox(width: 12),
-          ],
+          ] else
+            const SizedBox(width: 12),
         ],
       ),
       body: isDesktop

@@ -173,26 +173,27 @@ class _BillAttachmentStripState extends ConsumerState<BillAttachmentStrip> {
                       ),
               ),
             if (canAdd)
-              InkWell(
-                key: const Key('att-strip-add-btn'),
-                borderRadius: BorderRadius.circular(8),
-                onTap: _busy ? null : () => _pickAndAdd(names),
-                child: Container(
-                  width: 72,
-                  height: 72,
-                  decoration: BoxDecoration(
-                    border: Border.all(
-                      color: Theme.of(context).colorScheme.outlineVariant,
+              Material(
+                color: tallyNestedSurfaceColor(Theme.of(context).colorScheme),
+                elevation: 0,
+                surfaceTintColor: Colors.transparent,
+                borderRadius: BorderRadius.circular(kTallyNestedRadius),
+                clipBehavior: Clip.antiAlias,
+                child: InkWell(
+                  key: const Key('att-strip-add-btn'),
+                  borderRadius: BorderRadius.circular(kTallyNestedRadius),
+                  onTap: _busy ? null : () => _pickAndAdd(names),
+                  child: const SizedBox(
+                    width: 72,
+                    height: 72,
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.add_photo_alternate_outlined, size: 24),
+                        SizedBox(height: 2),
+                        Text('添加', style: TextStyle(fontSize: 11)),
+                      ],
                     ),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: const Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.add_photo_alternate_outlined, size: 24),
-                      SizedBox(height: 2),
-                      Text('添加', style: TextStyle(fontSize: 11)),
-                    ],
                   ),
                 ),
               ),

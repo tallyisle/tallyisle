@@ -312,11 +312,27 @@ class _AssetEditorPageState extends ConsumerState<AssetEditorPage> {
     }
   }
 
-  List<DropdownMenuItem<int>> _dayItems() => [
-    for (var d = 1; d <= 28; d++)
-      DropdownMenuItem(value: d, child: Text('每月 $d 日')),
-    const DropdownMenuItem(value: endOfMonthDay, child: Text('月底')),
-  ];
+  Future<void> _pickBillDay() async {
+    final picked = await showCreditDayPickerSheetOrDialog(
+      context,
+      title: '选择账单日',
+      currentDay: billDay,
+    );
+    if (picked != null && mounted) {
+      setState(() => billDay = picked);
+    }
+  }
+
+  Future<void> _pickRepayDay() async {
+    final picked = await showCreditDayPickerSheetOrDialog(
+      context,
+      title: '选择还款日',
+      currentDay: repaymentDay,
+    );
+    if (picked != null && mounted) {
+      setState(() => repaymentDay = picked);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -393,353 +409,306 @@ class _AssetEditorPageState extends ConsumerState<AssetEditorPage> {
                         ? const EdgeInsets.fromLTRB(20, 12, 20, 16)
                         : const EdgeInsets.all(16),
                     children: [
-                      if (!editing)
-                        SizedBox(
-                          width: double.infinity,
-                          child: SegmentedButton<int>(
-                            showSelectedIcon: false,
-                            style: const ButtonStyle(
-                              visualDensity: VisualDensity.compact,
-                              padding: WidgetStatePropertyAll(
-                                EdgeInsets.symmetric(horizontal: 10),
+                      TallyFormCard(
+                        title: '基本信息',
+                        spacing: 12,
+                        children: [
+                          if (!editing)
+                            SizedBox(
+                              width: double.infinity,
+                              child: SegmentedButton<int>(
+                                showSelectedIcon: false,
+                                segments: const [
+                                  ButtonSegment(
+                                    value: AssetType.normal,
+                                    label: FittedBox(
+                                      fit: BoxFit.scaleDown,
+                                      child: Text(
+                                        '普通账户',
+                                        maxLines: 1,
+                                        softWrap: false,
+                                      ),
+                                    ),
+                                    icon: Icon(
+                                      Icons.account_balance_wallet_outlined,
+                                      size: 18,
+                                    ),
+                                  ),
+                                  ButtonSegment(
+                                    value: AssetType.credit,
+                                    label: FittedBox(
+                                      fit: BoxFit.scaleDown,
+                                      child: Text(
+                                        '信用账户',
+                                        maxLines: 1,
+                                        softWrap: false,
+                                      ),
+                                    ),
+                                    icon: Icon(Icons.credit_card, size: 18),
+                                  ),
+                                ],
+                                selected: {type},
+                                onSelectionChanged: busy
+                                    ? null
+                                    : (s) => setState(() {
+                                        type = s.first;
+                                        if (!_userPickedVisual) {
+                                          selectedIcon = null;
+                                          selectedColor = null;
+                                        }
+                                      }),
                               ),
                             ),
-                            segments: const [
-                              ButtonSegment(
-                                value: AssetType.normal,
-                                label: FittedBox(
-                                  fit: BoxFit.scaleDown,
-                                  child: Text(
-                                    '普通账户',
-                                    maxLines: 1,
-                                    softWrap: false,
-                                  ),
-                                ),
-                                icon: Icon(
-                                  Icons.account_balance_wallet_outlined,
-                                  size: 18,
-                                ),
-                              ),
-                              ButtonSegment(
-                                value: AssetType.credit,
-                                label: FittedBox(
-                                  fit: BoxFit.scaleDown,
-                                  child: Text(
-                                    '信用账户',
-                                    maxLines: 1,
-                                    softWrap: false,
-                                  ),
-                                ),
-                                icon: Icon(Icons.credit_card, size: 18),
-                              ),
-                            ],
-                            selected: {type},
-                            onSelectionChanged: busy
-                                ? null
-                                : (s) => setState(() {
-                                    type = s.first;
-                                    if (!_userPickedVisual) {
-                                      selectedIcon = null;
-                                      selectedColor = null;
-                                    }
-                                  }),
-                          ),
-                        ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        key: const Key('asset-name'),
-                        controller: name,
-                        enabled: !busy,
-                        onChanged: (_) => setState(() {}),
-                        decoration: InputDecoration(
-                          labelText: '账户名称',
-                          hintText: isCredit
-                              ? '如：招行信用卡、花呗、白条'
-                              : '如：现金、招行储蓄卡、微信钱包、支付宝',
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      InkWell(
-                        key: const Key('asset-visual-picker-trigger'),
-                        borderRadius: BorderRadius.circular(12),
-                        onTap: busy ? null : _pickVisual,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 10,
-                          ),
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(
-                              color: theme.colorScheme.outlineVariant,
+                          TextField(
+                            key: const Key('asset-name'),
+                            controller: name,
+                            enabled: !busy,
+                            onChanged: (_) => setState(() {}),
+                            decoration: InputDecoration(
+                              labelText: '账户名称',
+                              hintText: isCredit
+                                  ? '如：招行信用卡、花呗、白条'
+                                  : '如：现金、招行储蓄卡、微信钱包、支付宝',
                             ),
                           ),
-                          child: Row(
-                            children: [
-                              AssetIconAvatar(
-                                iconKey: visual.iconKey,
-                                colorHex: visual.colorHex,
-                                name: visual.label,
-                                assetType: type,
-                                subType: original?.subType,
-                                size: 40,
+                          TallyFormTile(
+                            tileKey: const Key('asset-visual-picker-trigger'),
+                            enabled: !busy,
+                            onTap: _pickVisual,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 10,
+                            ),
+                            leading: AssetIconAvatar(
+                              iconKey: visual.iconKey,
+                              colorHex: visual.colorHex,
+                              name: visual.label,
+                              assetType: type,
+                              subType: original?.subType,
+                              size: 40,
+                            ),
+                            title: '账户图标与颜色',
+                            subtitle:
+                                !_userPickedVisual &&
+                                    matchReviewedInstitution(
+                                          name.text.trim(),
+                                          assetType: type,
+                                        ) !=
+                                        null
+                                ? '${visual.label}（已按名称智能关联）· 点击更换'
+                                : '${visual.label} · 点击更换图标或配色',
+                          ),
+                          if (!editing)
+                            TextField(
+                              key: const Key('asset-balance'),
+                              controller: balance,
+                              enabled: !busy,
+                              keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                    decimal: true,
+                                  ),
+                              inputFormatters: _amountInputFormatters,
+                              decoration: InputDecoration(
+                                labelText: isCredit ? '当前欠款' : '当前余额',
+                                helperText: isCredit ? '没有欠款就留空或填 0' : null,
                               ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      '账户图标与颜色',
-                                      style: theme.textTheme.bodyMedium,
-                                    ),
-                                    Text(
-                                      !_userPickedVisual &&
-                                              matchReviewedInstitution(
-                                                    name.text.trim(),
-                                                    assetType: type,
-                                                  ) !=
-                                                  null
-                                          ? '${visual.label}（已按名称智能关联）· 点击更换'
-                                          : '${visual.label} · 点击更换图标或配色',
-                                      style: theme.textTheme.bodySmall
-                                          ?.copyWith(
-                                            color: theme.colorScheme.outline,
-                                          ),
-                                    ),
-                                  ],
+                            )
+                          else
+                            TallyFormTile(
+                              title: isCredit ? '当前欠款/溢存' : '当前余额',
+                              subtitle: '修改余额请在账户详情里使用“调整余额”',
+                              trailing: Text(
+                                formatMinor(
+                                  original?.balanceMinor ?? BigInt.zero,
+                                ),
+                                style: theme.textTheme.titleSmall?.copyWith(
+                                  fontWeight: FontWeight.w600,
                                 ),
                               ),
-                              const Icon(Icons.chevron_right),
+                            ),
+                          TallySelectField<String>(
+                            label: '币种',
+                            value: currency ?? '',
+                            enabled: !busy,
+                            options: [
+                              const TallySelectOption(
+                                value: '',
+                                label: '本位币（人民币）',
+                              ),
+                              for (final c in currencies)
+                                if (c.code != 'CNY')
+                                  TallySelectOption(
+                                    value: c.code,
+                                    label: '${c.name}（${c.code}）',
+                                  ),
                             ],
+                            onChanged: (v) =>
+                                setState(() => currency = v.isEmpty ? null : v),
                           ),
-                        ),
+                        ],
                       ),
-                      const SizedBox(height: 12),
-                      if (!editing)
-                        TextField(
-                          key: const Key('asset-balance'),
-                          controller: balance,
-                          enabled: !busy,
-                          keyboardType: const TextInputType.numberWithOptions(
-                            decimal: true,
-                          ),
-                          inputFormatters: _amountInputFormatters,
-                          decoration: InputDecoration(
-                            labelText: isCredit ? '当前欠款' : '当前余额',
-                            helperText: isCredit ? '没有欠款就留空或填 0' : null,
-                          ),
-                        )
-                      else
-                        ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          title: Text(isCredit ? '当前欠款/溢存' : '当前余额'),
-                          subtitle: const Text('修改余额请在账户详情里使用“调整余额”'),
-                          trailing: Text(
-                            formatMinor(original?.balanceMinor ?? BigInt.zero),
-                          ),
-                        ),
                       if (isCredit) ...[
                         const SizedBox(height: 12),
-                        TextField(
-                          key: const Key('credit-limit'),
-                          controller: limit,
-                          enabled: !busy,
-                          keyboardType: const TextInputType.numberWithOptions(
-                            decimal: true,
-                          ),
-                          inputFormatters: _amountInputFormatters,
-                          decoration: const InputDecoration(labelText: '信用额度'),
-                        ),
-                        const SizedBox(height: 12),
-                        DropdownButtonFormField<int>(
-                          key: const Key('bill-day'),
-                          isExpanded: true,
-                          initialValue: billDay,
-                          decoration: const InputDecoration(labelText: '账单日'),
-                          items: _dayItems(),
-                          onChanged: busy
-                              ? null
-                              : (v) => setState(() => billDay = v ?? 1),
-                        ),
-                        SwitchListTile(
-                          contentPadding: EdgeInsets.zero,
-                          title: const Text('账单日当天的消费计入本期账单'),
-                          value: billDayCounted,
-                          onChanged: busy
-                              ? null
-                              : (v) => setState(() => billDayCounted = v),
-                        ),
-                        SizedBox(
-                          width: double.infinity,
-                          child: SegmentedButton<bool>(
-                            showSelectedIcon: false,
-                            style: const ButtonStyle(
-                              visualDensity: VisualDensity.compact,
-                              padding: WidgetStatePropertyAll(
-                                EdgeInsets.symmetric(horizontal: 10),
-                              ),
-                            ),
-                            segments: const [
-                              ButtonSegment(
-                                value: false,
-                                label: FittedBox(
-                                  fit: BoxFit.scaleDown,
-                                  child: Text(
-                                    '固定还款日',
-                                    maxLines: 1,
-                                    softWrap: false,
+                        TallyFormCard(
+                          title: '账单与还款设置',
+                          spacing: 12,
+                          children: [
+                            TextField(
+                              key: const Key('credit-limit'),
+                              controller: limit,
+                              enabled: !busy,
+                              keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                    decimal: true,
                                   ),
-                                ),
+                              inputFormatters: _amountInputFormatters,
+                              decoration: const InputDecoration(
+                                labelText: '信用额度',
                               ),
-                              ButtonSegment(
-                                value: true,
-                                label: FittedBox(
-                                  fit: BoxFit.scaleDown,
-                                  child: Text(
-                                    '账单日后 N 天',
-                                    maxLines: 1,
-                                    softWrap: false,
+                            ),
+                            TallySelectField<int>(
+                              key: const Key('bill-day'),
+                              label: '账单日',
+                              value: billDay,
+                              displayText: creditDayLabel(billDay),
+                              enabled: !busy,
+                              onCustomTap: _pickBillDay,
+                            ),
+                            SwitchListTile(
+                              contentPadding: EdgeInsets.zero,
+                              title: const Text('账单日当天的消费计入本期账单'),
+                              value: billDayCounted,
+                              onChanged: busy
+                                  ? null
+                                  : (v) => setState(() => billDayCounted = v),
+                            ),
+                            SizedBox(
+                              width: double.infinity,
+                              child: SegmentedButton<bool>(
+                                showSelectedIcon: false,
+                                segments: const [
+                                  ButtonSegment(
+                                    value: false,
+                                    label: FittedBox(
+                                      fit: BoxFit.scaleDown,
+                                      child: Text(
+                                        '固定还款日',
+                                        maxLines: 1,
+                                        softWrap: false,
+                                      ),
+                                    ),
                                   ),
-                                ),
-                              ),
-                            ],
-                            selected: {repaymentAfter},
-                            onSelectionChanged: busy
-                                ? null
-                                : (s) =>
-                                      setState(() => repaymentAfter = s.first),
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        if (repaymentAfter)
-                          TextField(
-                            key: const Key('repay-after-days'),
-                            controller: afterDays,
-                            enabled: !busy,
-                            keyboardType: TextInputType.number,
-                            decoration: const InputDecoration(
-                              labelText: '账单日后天数',
-                              suffixText: '天',
-                            ),
-                          )
-                        else
-                          DropdownButtonFormField<int>(
-                            key: const Key('repay-day'),
-                            isExpanded: true,
-                            initialValue: repaymentDay,
-                            decoration: const InputDecoration(labelText: '还款日'),
-                            items: _dayItems(),
-                            onChanged: busy
-                                ? null
-                                : (v) => setState(() => repaymentDay = v ?? 1),
-                          ),
-                        const SizedBox(height: 12),
-                        DropdownButtonFormField<int>(
-                          isExpanded: true,
-                          initialValue: assets.any((a) => a.id == repayAssetId)
-                              ? repayAssetId
-                              : noRef,
-                          decoration: const InputDecoration(
-                            labelText: '默认还款账户（可选）',
-                          ),
-                          items: [
-                            const DropdownMenuItem(
-                              value: noRef,
-                              child: Text(
-                                '不设置',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
+                                  ButtonSegment(
+                                    value: true,
+                                    label: FittedBox(
+                                      fit: BoxFit.scaleDown,
+                                      child: Text(
+                                        '账单日后 N 天',
+                                        maxLines: 1,
+                                        softWrap: false,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                                selected: {repaymentAfter},
+                                onSelectionChanged: busy
+                                    ? null
+                                    : (s) => setState(
+                                        () => repaymentAfter = s.first,
+                                      ),
                               ),
                             ),
-                            for (final a in assets)
-                              DropdownMenuItem(
-                                value: a.id,
-                                child: Text(
-                                  a.name,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
+                            if (repaymentAfter)
+                              TextField(
+                                key: const Key('repay-after-days'),
+                                controller: afterDays,
+                                enabled: !busy,
+                                keyboardType: TextInputType.number,
+                                decoration: const InputDecoration(
+                                  labelText: '账单日后天数',
+                                  suffixText: '天',
                                 ),
+                              )
+                            else
+                              TallySelectField<int>(
+                                key: const Key('repay-day'),
+                                label: '还款日',
+                                value: repaymentDay,
+                                displayText: creditDayLabel(repaymentDay),
+                                enabled: !busy,
+                                onCustomTap: _pickRepayDay,
                               ),
+                            TallySelectField<int>(
+                              label: '默认还款账户（可选）',
+                              value: assets.any((a) => a.id == repayAssetId)
+                                  ? repayAssetId!
+                                  : noRef,
+                              enabled: !busy,
+                              options: [
+                                const TallySelectOption(
+                                  value: noRef,
+                                  label: '不设置',
+                                ),
+                                for (final a in assets)
+                                  TallySelectOption(value: a.id, label: a.name),
+                              ],
+                              onChanged: (v) => setState(
+                                () => repayAssetId = v == noRef ? null : v,
+                              ),
+                            ),
                           ],
-                          onChanged: busy
-                              ? null
-                              : (v) => setState(
-                                  () => repayAssetId = v == noRef ? null : v,
-                                ),
                         ),
                       ],
                       const SizedBox(height: 12),
-                      DropdownButtonFormField<String>(
-                        isExpanded: true,
-                        initialValue: currency ?? '',
-                        decoration: const InputDecoration(labelText: '币种'),
-                        items: [
-                          const DropdownMenuItem(
-                            value: '',
-                            child: Text(
-                              '本位币（人民币）',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
+                      TallyFormCard(
+                        title: '偏好与备注',
+                        spacing: 8,
+                        children: [
+                          TextField(
+                            controller: remark,
+                            enabled: !busy,
+                            decoration: const InputDecoration(
+                              labelText: '备注（可选）',
                             ),
                           ),
-                          for (final c in currencies)
-                            if (c.code != 'CNY')
-                              DropdownMenuItem(
-                                value: c.code,
-                                child: Text(
-                                  '${c.name}（${c.code}）',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                        ],
-                        onChanged: busy
-                            ? null
-                            : (v) => setState(
-                                () => currency = (v == null || v.isEmpty)
-                                    ? null
-                                    : v,
-                              ),
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: remark,
-                        enabled: !busy,
-                        decoration: const InputDecoration(labelText: '备注（可选）'),
-                      ),
-                      SwitchListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: const Text('计入总资产'),
-                        value: counted,
-                        onChanged: busy
-                            ? null
-                            : (v) => setState(() => counted = v),
-                      ),
-                      if (type != AssetType.debt)
-                        SwitchListTile(
-                          key: const Key('asset-default-account-switch'),
-                          contentPadding: EdgeInsets.zero,
-                          title: const Text('设为默认账户'),
-                          subtitle: Text(
-                            isInactiveExisting
-                                ? '该账户当前$inactiveStatusLabel，恢复为正常状态后才可设为默认账户'
-                                : '开启后新建账单时默认自动填入此账户',
+                          SwitchListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: const Text('计入总资产'),
+                            value: counted,
+                            onChanged: busy
+                                ? null
+                                : (v) => setState(() => counted = v),
                           ),
-                          value: isInactiveExisting ? false : isDefaultAccount,
-                          onChanged: busy || isInactiveExisting
-                              ? null
-                              : (v) => setState(() {
-                                  _userTouchedDefaultSwitch = true;
-                                  isDefaultAccount = v;
-                                }),
-                        ),
-                      if (error != null)
+                          if (type != AssetType.debt)
+                            SwitchListTile(
+                              key: const Key('asset-default-account-switch'),
+                              contentPadding: EdgeInsets.zero,
+                              title: const Text('设为默认账户'),
+                              subtitle: Text(
+                                isInactiveExisting
+                                    ? '该账户当前$inactiveStatusLabel，恢复为正常状态后才可设为默认账户'
+                                    : '开启后新建账单时默认自动填入此账户',
+                              ),
+                              value: isInactiveExisting
+                                  ? false
+                                  : isDefaultAccount,
+                              onChanged: busy || isInactiveExisting
+                                  ? null
+                                  : (v) => setState(() {
+                                      _userTouchedDefaultSwitch = true;
+                                      isDefaultAccount = v;
+                                    }),
+                            ),
+                        ],
+                      ),
+                      if (error != null) ...[
+                        const SizedBox(height: 12),
                         Text(
                           error!,
                           key: const Key('asset-error'),
                           style: TextStyle(color: theme.colorScheme.error),
                         ),
+                      ],
                     ],
                   ),
                 ),

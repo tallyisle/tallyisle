@@ -469,10 +469,6 @@ class _CustomRateSourceDialogState extends State<_CustomRateSourceDialog> {
               labelText: 'JSON 接口地址（留空使用默认公共源）',
               hintText: 'https://open.er-api.com/v6/latest/CNY',
               errorText: _error,
-              border: isDesktop ? const OutlineInputBorder() : null,
-              contentPadding: isDesktop
-                  ? const EdgeInsets.symmetric(horizontal: 12, vertical: 15)
-                  : null,
             ),
           ),
         ],
@@ -1073,15 +1069,22 @@ class _CurrencyDialogState extends ConsumerState<_CurrencyDialog> {
         : _statusHelper;
 
     final isDesktop = DesktopAdaptive.isDesktop(context);
-    const desktopFieldPadding = EdgeInsets.symmetric(
+    final orderedUnused = <WorldCurrencySpec>[
+      for (final p in allUnused)
+        if (p.popular) p,
+      for (final p in allUnused)
+        if (!p.popular) p,
+    ];
+    final fieldGap = isDesktop ? 8.0 : 6.0;
+    const compactFieldPadding = EdgeInsets.symmetric(
       horizontal: 12,
-      vertical: 15,
+      vertical: 9,
     );
 
     return AlertDialog(
       insetPadding: isDesktop
           ? const EdgeInsets.symmetric(horizontal: 24, vertical: 16)
-          : const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
+          : const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
       title: Text(editing ? '修改汇率' : '添加币种'),
       content: SizedBox(
         width: isDesktop ? 400 : 360,
@@ -1097,14 +1100,8 @@ class _CurrencyDialogState extends ConsumerState<_CurrencyDialog> {
                   enabled: !_saving,
                   onChanged: (v) => setState(() => _searchQuery = v),
                   decoration: InputDecoration(
-                    isDense: !isDesktop,
-                    border: isDesktop ? const OutlineInputBorder() : null,
-                    contentPadding: isDesktop
-                        ? const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 12,
-                          )
-                        : null,
+                    isDense: true,
+                    contentPadding: compactFieldPadding,
                     prefixIcon: const Icon(Icons.search, size: 18),
                     prefixIconConstraints: const BoxConstraints(
                       minWidth: 34,
@@ -1127,7 +1124,7 @@ class _CurrencyDialogState extends ConsumerState<_CurrencyDialog> {
                     hintText: '搜索全球 150+ 币种（如：土耳其 / 里拉 / TRY）',
                   ),
                 ),
-                SizedBox(height: isDesktop ? 10 : 8),
+                SizedBox(height: fieldGap),
                 if (chipItems.isEmpty && isSearching)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 6),
@@ -1142,9 +1139,7 @@ class _CurrencyDialogState extends ConsumerState<_CurrencyDialog> {
                 else if (chipItems.isNotEmpty) ...[
                   ConstrainedBox(
                     constraints: BoxConstraints(
-                      maxHeight: isSearching
-                          ? (isDesktop ? 124 : 112)
-                          : (isDesktop ? 84 : 72),
+                      maxHeight: isSearching ? 110 : 64,
                     ),
                     child: SingleChildScrollView(
                       child: Wrap(
@@ -1173,56 +1168,94 @@ class _CurrencyDialogState extends ConsumerState<_CurrencyDialog> {
                       ),
                     ),
                   ),
-                  SizedBox(height: isDesktop ? 10 : 4),
+                  SizedBox(height: fieldGap),
                 ],
-                if (allUnused.isNotEmpty) ...[
-                  DropdownButtonFormField<String>(
+                if (orderedUnused.isNotEmpty) ...[
+                  TallySelectField<String>(
                     key: const Key('currency-preset'),
-                    isExpanded: true,
-                    menuMaxHeight: 320,
-                    decoration: isDesktop
-                        ? const InputDecoration(
-                            labelText: '更多常用币种',
-                            border: OutlineInputBorder(),
-                            contentPadding: desktopFieldPadding,
-                          )
-                        : const InputDecoration(
-                            labelText: '更多常用币种',
-                            isDense: true,
-                          ),
-                    items: [
-                      for (final p in allUnused)
-                        DropdownMenuItem(
+                    label: '选择全球预设币种',
+                    hintText: '点击浏览或搜索全球预设币种',
+                    value: orderedUnused.any((p) => p.code == selectedCode)
+                        ? selectedCode
+                        : null,
+                    enabled: !_saving,
+                    searchable: true,
+                    sheetTitle: '选择全球预设币种',
+                    isDense: true,
+                    options: [
+                      for (final p in orderedUnused)
+                        TallySelectOption<String>(
                           value: p.code,
-                          child: Text(
-                            '${p.name}（${p.code}）',
-                            overflow: TextOverflow.ellipsis,
+                          label: '${p.name}（${p.code}）',
+                          subtitle: p.popular ? '常用币种' : null,
+                          searchKeywords:
+                              '${p.code} ${p.name} ${p.symbol} ${p.keywords}',
+                          leading: CircleAvatar(
+                            radius: 14,
+                            backgroundColor: tallySoftButtonFillColor(
+                              theme.colorScheme,
+                            ),
+                            foregroundColor:
+                                theme.colorScheme.onPrimaryContainer,
+                            child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Padding(
+                                padding: const EdgeInsets.all(2),
+                                child: Text(
+                                  p.symbol.isNotEmpty
+                                      ? p.symbol.characters.first
+                                      : p.code.characters.first,
+                                  style: theme.textTheme.labelSmall?.copyWith(
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                            ),
                           ),
                         ),
                     ],
-                    onChanged: _saving ? null : _pickPreset,
+                    onChanged: _pickPreset,
                   ),
-                  if (isDesktop) const SizedBox(height: 10),
+                  SizedBox(height: fieldGap),
                 ],
               ],
-              TextField(
-                key: const Key('currency-code'),
-                controller: code,
-                enabled: !editing && !_saving,
-                textCapitalization: TextCapitalization.characters,
-                onChanged: _onCodeChanged,
-                decoration: isDesktop
-                    ? const InputDecoration(
-                        labelText: '代码（如 USD / TRY）',
-                        border: OutlineInputBorder(),
-                        contentPadding: desktopFieldPadding,
-                      )
-                    : const InputDecoration(
+              Row(
+                children: [
+                  Expanded(
+                    flex: 3,
+                    child: TextField(
+                      key: const Key('currency-code'),
+                      controller: code,
+                      enabled: !editing && !_saving,
+                      textCapitalization: TextCapitalization.characters,
+                      onChanged: _onCodeChanged,
+                      decoration: const InputDecoration(
                         labelText: '代码（如 USD / TRY）',
                         isDense: true,
+                        contentPadding: compactFieldPadding,
                       ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    flex: 2,
+                    child: TextField(
+                      key: const Key('currency-symbol'),
+                      controller: symbol,
+                      enabled: !_saving,
+                      onChanged: (v) {
+                        _symbolManuallyEdited = v.trim().isNotEmpty;
+                      },
+                      decoration: const InputDecoration(
+                        labelText: '符号（可选）',
+                        isDense: true,
+                        contentPadding: compactFieldPadding,
+                      ),
+                    ),
+                  ),
+                ],
               ),
-              if (isDesktop) const SizedBox(height: 10),
+              SizedBox(height: fieldGap),
               TextField(
                 key: const Key('currency-name'),
                 controller: name,
@@ -1231,31 +1264,13 @@ class _CurrencyDialogState extends ConsumerState<_CurrencyDialog> {
                   _nameManuallyEdited = v.trim().isNotEmpty;
                   if (error != null) setState(() => error = null);
                 },
-                decoration: isDesktop
-                    ? const InputDecoration(
-                        labelText: '名称',
-                        border: OutlineInputBorder(),
-                        contentPadding: desktopFieldPadding,
-                      )
-                    : const InputDecoration(labelText: '名称', isDense: true),
+                decoration: const InputDecoration(
+                  labelText: '名称',
+                  isDense: true,
+                  contentPadding: compactFieldPadding,
+                ),
               ),
-              if (isDesktop) const SizedBox(height: 10),
-              TextField(
-                key: const Key('currency-symbol'),
-                controller: symbol,
-                enabled: !_saving,
-                onChanged: (v) {
-                  _symbolManuallyEdited = v.trim().isNotEmpty;
-                },
-                decoration: isDesktop
-                    ? const InputDecoration(
-                        labelText: '符号（可选）',
-                        border: OutlineInputBorder(),
-                        contentPadding: desktopFieldPadding,
-                      )
-                    : const InputDecoration(labelText: '符号（可选）', isDense: true),
-              ),
-              if (isDesktop) const SizedBox(height: 10),
+              SizedBox(height: fieldGap),
               TextField(
                 key: const Key('currency-price'),
                 controller: price,
@@ -1265,9 +1280,8 @@ class _CurrencyDialogState extends ConsumerState<_CurrencyDialog> {
                 ),
                 onChanged: _onPriceChanged,
                 decoration: InputDecoration(
-                  isDense: !isDesktop,
-                  border: isDesktop ? const OutlineInputBorder() : null,
-                  contentPadding: isDesktop ? desktopFieldPadding : null,
+                  isDense: true,
+                  contentPadding: compactFieldPadding,
                   labelText: editing ? '汇率' : '汇率（留空或点下方可自动联网获取）',
                   prefixText: '1 $displayCode = ',
                   suffixText: 'CNY',

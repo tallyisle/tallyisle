@@ -1330,7 +1330,6 @@ class _SmartQuickContentState extends ConsumerState<_SmartQuickContent> {
             decoration: InputDecoration(
               labelText: '输入一句记账口语，或粘贴短信/通知文本',
               hintText: '例：早饭买煎饼微信花了9块5 / 昨天打车32元招行卡',
-              border: const OutlineInputBorder(),
               suffixIcon: _textController.text.isNotEmpty
                   ? IconButton(
                       tooltip: '清空输入',
@@ -1501,10 +1500,7 @@ class _SmartQuickContentState extends ConsumerState<_SmartQuickContent> {
                       keyboardType: const TextInputType.numberWithOptions(
                         decimal: true,
                       ),
-                      decoration: const InputDecoration(
-                        labelText: '金额（元）',
-                        border: OutlineInputBorder(),
-                      ),
+                      decoration: const InputDecoration(labelText: '金额（元）'),
                     ),
                     if (_discountController.text.trim().isNotEmpty &&
                         _singleType != RecordType.transfer) ...[
@@ -1517,7 +1513,6 @@ class _SmartQuickContentState extends ConsumerState<_SmartQuickContent> {
                         ),
                         decoration: const InputDecoration(
                           labelText: '优惠减免（元，可选）',
-                          border: OutlineInputBorder(),
                         ),
                       ),
                     ],
@@ -1526,132 +1521,66 @@ class _SmartQuickContentState extends ConsumerState<_SmartQuickContent> {
                       Row(
                         children: [
                           Expanded(
-                            child: InputDecorator(
-                              decoration: const InputDecoration(
-                                labelText: '分类',
-                                border: OutlineInputBorder(),
-                                contentPadding: EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 14,
-                                ),
-                              ),
-                              child: DropdownButtonHideUnderline(
-                                child: DropdownButton<int>(
-                                  key: const Key(
-                                    'smart_quick_category_dropdown',
+                            child: TallySelectField<int>(
+                              key: const Key('smart_quick_category_dropdown'),
+                              label: '分类',
+                              value: validSingleCatId,
+                              options: [
+                                for (final c in dirCats)
+                                  TallySelectOption<int>(
+                                    value: c.id,
+                                    label: c.name,
                                   ),
-                                  isExpanded: true,
-                                  isDense: true,
-                                  style: theme.textTheme.bodyLarge,
-                                  value: validSingleCatId,
-                                  items: [
-                                    for (final c in dirCats)
-                                      DropdownMenuItem(
-                                        value: c.id,
-                                        child: Text(c.name),
-                                      ),
-                                  ],
-                                  onChanged: (v) =>
-                                      setState(() => _singleCategoryId = v),
-                                ),
-                              ),
+                              ],
+                              onChanged: (v) =>
+                                  setState(() => _singleCategoryId = v),
                             ),
                           ),
                           const SizedBox(width: 10),
                           Expanded(
-                            child: InputDecorator(
-                              decoration: const InputDecoration(
-                                labelText: '扣款 / 入账账户',
-                                border: OutlineInputBorder(),
-                                contentPadding: EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 14,
+                            child: TallySelectField<int?>(
+                              key: const Key('smart_quick_asset_dropdown'),
+                              label: '扣款 / 入账账户',
+                              value: validSingleAssetId,
+                              options: [
+                                const TallySelectOption<int?>(
+                                  value: null,
+                                  label: '不指定账户',
                                 ),
-                              ),
-                              child: DropdownButtonHideUnderline(
-                                child: DropdownButton<int?>(
-                                  key: const Key('smart_quick_asset_dropdown'),
-                                  isExpanded: true,
-                                  isDense: true,
-                                  style: theme.textTheme.bodyLarge,
-                                  value: validSingleAssetId,
-                                  items: [
-                                    const DropdownMenuItem<int?>(
-                                      value: null,
-                                      child: Text('不指定账户'),
-                                    ),
-                                    for (final a in assets)
-                                      DropdownMenuItem<int?>(
-                                        value: a.id,
-                                        child: Text(a.name),
-                                      ),
-                                  ],
-                                  onChanged: (v) =>
-                                      setState(() => _singleAssetId = v),
-                                ),
-                              ),
+                                for (final a in assets)
+                                  TallySelectOption<int?>(
+                                    value: a.id,
+                                    label: a.name,
+                                  ),
+                              ],
+                              onChanged: (v) =>
+                                  setState(() => _singleAssetId = v),
                             ),
                           ),
                         ],
                       ),
                     ] else ...[
                       const SizedBox(height: 12),
-                      InputDecorator(
-                        decoration: const InputDecoration(
-                          labelText: '转出账户',
-                          border: OutlineInputBorder(),
-                          contentPadding: EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 14,
-                          ),
-                        ),
-                        child: DropdownButtonHideUnderline(
-                          child: DropdownButton<int?>(
-                            key: const Key('smart_quick_asset_dropdown'),
-                            isExpanded: true,
-                            isDense: true,
-                            style: theme.textTheme.bodyLarge,
-                            value: validSingleAssetId,
-                            items: [
-                              for (final a in assets)
-                                DropdownMenuItem<int?>(
-                                  value: a.id,
-                                  child: Text(a.name),
-                                ),
-                            ],
-                            onChanged: (v) =>
-                                setState(() => _singleAssetId = v),
-                          ),
-                        ),
+                      TallySelectField<int?>(
+                        key: const Key('smart_quick_asset_dropdown'),
+                        label: '转出账户',
+                        value: validSingleAssetId,
+                        options: [
+                          for (final a in assets)
+                            TallySelectOption<int?>(value: a.id, label: a.name),
+                        ],
+                        onChanged: (v) => setState(() => _singleAssetId = v),
                       ),
                       const SizedBox(height: 12),
-                      InputDecorator(
-                        decoration: const InputDecoration(
-                          labelText: '转入账户',
-                          border: OutlineInputBorder(),
-                          contentPadding: EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 14,
-                          ),
-                        ),
-                        child: DropdownButtonHideUnderline(
-                          child: DropdownButton<int?>(
-                            key: const Key('smart_quick_to_asset_dropdown'),
-                            isExpanded: true,
-                            isDense: true,
-                            style: theme.textTheme.bodyLarge,
-                            value: validSingleToAssetId,
-                            items: [
-                              for (final a in assets)
-                                DropdownMenuItem<int?>(
-                                  value: a.id,
-                                  child: Text(a.name),
-                                ),
-                            ],
-                            onChanged: (v) =>
-                                setState(() => _singleToAssetId = v),
-                          ),
-                        ),
+                      TallySelectField<int?>(
+                        key: const Key('smart_quick_to_asset_dropdown'),
+                        label: '转入账户',
+                        value: validSingleToAssetId,
+                        options: [
+                          for (final a in assets)
+                            TallySelectOption<int?>(value: a.id, label: a.name),
+                        ],
+                        onChanged: (v) => setState(() => _singleToAssetId = v),
                       ),
                     ],
                     const SizedBox(height: 12),
@@ -1659,10 +1588,7 @@ class _SmartQuickContentState extends ConsumerState<_SmartQuickContent> {
                       key: const Key('smart_quick_remark_input'),
                       controller: _remarkController,
                       onChanged: (_) => setState(() {}),
-                      decoration: const InputDecoration(
-                        labelText: '备注',
-                        border: OutlineInputBorder(),
-                      ),
+                      decoration: const InputDecoration(labelText: '备注'),
                     ),
                     const SizedBox(height: 10),
                     Align(
@@ -1761,36 +1687,18 @@ class _SmartQuickContentState extends ConsumerState<_SmartQuickContent> {
                   ],
                 ),
                 const SizedBox(height: 10),
-                InputDecorator(
-                  decoration: const InputDecoration(
-                    labelText: '默认资金账户（单笔未指定时生效）',
-                    border: OutlineInputBorder(),
-                    contentPadding: EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 14,
+                TallySelectField<int?>(
+                  label: '默认资金账户（单笔未指定时生效）',
+                  value: validDefaultBatchAssetId,
+                  options: [
+                    const TallySelectOption<int?>(
+                      value: null,
+                      label: '不指定默认账户',
                     ),
-                  ),
-                  child: DropdownButtonHideUnderline(
-                    child: DropdownButton<int?>(
-                      isExpanded: true,
-                      isDense: true,
-                      style: theme.textTheme.bodyLarge,
-                      value: validDefaultBatchAssetId,
-                      items: [
-                        const DropdownMenuItem<int?>(
-                          value: null,
-                          child: Text('不指定默认账户'),
-                        ),
-                        for (final a in assets)
-                          DropdownMenuItem<int?>(
-                            value: a.id,
-                            child: Text(a.name),
-                          ),
-                      ],
-                      onChanged: (v) =>
-                          setState(() => _defaultBatchAssetId = v),
-                    ),
-                  ),
+                    for (final a in assets)
+                      TallySelectOption<int?>(value: a.id, label: a.name),
+                  ],
+                  onChanged: (v) => setState(() => _defaultBatchAssetId = v),
                 ),
                 const SizedBox(height: 10),
                 for (final candidate in _multiCandidates) ...[
@@ -1928,75 +1836,41 @@ class _MultiCandidateCard extends StatelessWidget {
             Row(
               children: [
                 Expanded(
-                  child: InputDecorator(
-                    decoration: const InputDecoration(
-                      labelText: '分类',
-                      border: OutlineInputBorder(),
-                      contentPadding: EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 14,
-                      ),
-                    ),
-                    child: DropdownButtonHideUnderline(
-                      child: DropdownButton<int>(
-                        isExpanded: true,
-                        isDense: true,
-                        style: theme.textTheme.bodyLarge,
-                        value: validCatId,
-                        items: [
-                          for (final c in dirCats)
-                            DropdownMenuItem(value: c.id, child: Text(c.name)),
-                        ],
-                        onChanged: (v) =>
-                            onChanged(candidate.copyWith(categoryId: v)),
-                      ),
-                    ),
+                  child: TallySelectField<int>(
+                    label: '分类',
+                    value: validCatId,
+                    options: [
+                      for (final c in dirCats)
+                        TallySelectOption<int>(value: c.id, label: c.name),
+                    ],
+                    onChanged: (v) =>
+                        onChanged(candidate.copyWith(categoryId: v)),
                   ),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
-                  child: InputDecorator(
-                    decoration: const InputDecoration(
-                      labelText: '账户（可选）',
-                      border: OutlineInputBorder(),
-                      contentPadding: EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 14,
-                      ),
-                    ),
-                    child: DropdownButtonHideUnderline(
-                      child: DropdownButton<int?>(
-                        isExpanded: true,
-                        isDense: true,
-                        style: theme.textTheme.bodyLarge,
-                        value: validAssetId,
-                        items: [
-                          const DropdownMenuItem<int?>(
-                            value: null,
-                            child: Text('跟随默认'),
-                          ),
-                          for (final a in assets)
-                            DropdownMenuItem<int?>(
-                              value: a.id,
-                              child: Text(a.name),
-                            ),
-                        ],
-                        onChanged: (v) => onChanged(
-                          OcrBillCandidate(
-                            index: candidate.index,
-                            type: candidate.type,
-                            money: candidate.money,
-                            discount: candidate.discount,
-                            recordTimeMs: candidate.recordTimeMs,
-                            merchant: candidate.merchant,
-                            remark: candidate.remark,
-                            categoryHint: candidate.categoryHint,
-                            accountHint: candidate.accountHint,
-                            categoryId: validCatId,
-                            assetId: v,
-                            selected: candidate.selected,
-                          ),
-                        ),
+                  child: TallySelectField<int?>(
+                    label: '账户（可选）',
+                    value: validAssetId,
+                    options: [
+                      const TallySelectOption<int?>(value: null, label: '跟随默认'),
+                      for (final a in assets)
+                        TallySelectOption<int?>(value: a.id, label: a.name),
+                    ],
+                    onChanged: (v) => onChanged(
+                      OcrBillCandidate(
+                        index: candidate.index,
+                        type: candidate.type,
+                        money: candidate.money,
+                        discount: candidate.discount,
+                        recordTimeMs: candidate.recordTimeMs,
+                        merchant: candidate.merchant,
+                        remark: candidate.remark,
+                        categoryHint: candidate.categoryHint,
+                        accountHint: candidate.accountHint,
+                        categoryId: validCatId,
+                        assetId: v,
+                        selected: candidate.selected,
                       ),
                     ),
                   ),

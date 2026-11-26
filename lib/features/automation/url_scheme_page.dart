@@ -217,7 +217,6 @@ class _UrlSchemePageState extends ConsumerState<UrlSchemePage> {
                   decoration: const InputDecoration(
                     labelText: '输入或选择待执行的 URL 链接',
                     hintText: 'tallyisle://addbill?type=0&money=18.50',
-                    border: OutlineInputBorder(),
                   ),
                 ),
                 const SizedBox(height: 12),

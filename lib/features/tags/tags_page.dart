@@ -46,16 +46,7 @@ class _TagsPageState extends ConsumerState<TagsPage> {
                   key: const Key('tag-name'),
                   controller: nameController,
                   autofocus: true,
-                  decoration: isDesktop
-                      ? const InputDecoration(
-                          labelText: '标签名称',
-                          border: OutlineInputBorder(),
-                          contentPadding: EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 15,
-                          ),
-                        )
-                      : const InputDecoration(labelText: '标签名称'),
+                  decoration: const InputDecoration(labelText: '标签名称'),
                 ),
                 if (parentTagId == null) ...[
                   const SizedBox(height: 8),
@@ -156,16 +147,7 @@ class _TagsPageState extends ConsumerState<TagsPage> {
                   key: const Key('edit-tag-name'),
                   controller: nameController,
                   autofocus: true,
-                  decoration: isDesktop
-                      ? const InputDecoration(
-                          labelText: '标签名称',
-                          border: OutlineInputBorder(),
-                          contentPadding: EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 15,
-                          ),
-                        )
-                      : const InputDecoration(labelText: '标签名称'),
+                  decoration: const InputDecoration(labelText: '标签名称'),
                 ),
                 const SizedBox(height: 12),
                 _TagColorPicker(

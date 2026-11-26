@@ -377,7 +377,7 @@ class _InstallmentEditorPageState extends ConsumerState<InstallmentEditorPage> {
                             elevation: 0,
                             surfaceTintColor: Colors.transparent,
                             clipBehavior: Clip.antiAlias,
-                            color: _tonalCardColor(Theme.of(context)),
+                            color: Theme.of(context).colorScheme.errorContainer,
                             shape: _tonalCardShape,
                             margin: EdgeInsets.zero,
                             child: Padding(
@@ -394,22 +394,84 @@ class _InstallmentEditorPageState extends ConsumerState<InstallmentEditorPage> {
                           ),
                           const SizedBox(height: 12),
                         ],
-                        TextField(
-                          key: const Key('installment_name_input'),
-                          controller: _nameCtrl,
-                          enabled: !_busy,
-                          maxLength: 50,
-                          decoration: InputDecoration(
-                            labelText: '分期名称',
-                            hintText: '例如：笔记本电脑、账单分期',
-                            border: const OutlineInputBorder(),
-                            contentPadding: isDesktop
-                                ? const EdgeInsets.symmetric(
-                                    horizontal: 12,
-                                    vertical: 16,
-                                  )
-                                : null,
-                          ),
+                        TallyFormCard(
+                          title: '基本信息',
+                          spacing: 12,
+                          children: [
+                            TextField(
+                              key: const Key('installment_name_input'),
+                              controller: _nameCtrl,
+                              enabled: !_busy,
+                              maxLength: 50,
+                              decoration: const InputDecoration(
+                                labelText: '分期名称',
+                                hintText: '例如：笔记本电脑、账单分期',
+                              ),
+                            ),
+                            if (!_isEditing) ...[
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Expanded(
+                                    flex: 3,
+                                    child: TextField(
+                                      key: const Key(
+                                        'installment_principal_input',
+                                      ),
+                                      controller: _principalCtrl,
+                                      enabled: !_busy,
+                                      keyboardType:
+                                          const TextInputType.numberWithOptions(
+                                            decimal: true,
+                                          ),
+                                      inputFormatters: amountInputFormatters,
+                                      onChanged: (_) => setState(() {}),
+                                      decoration: const InputDecoration(
+                                        labelText: '分期总本金',
+                                        prefixText: '¥ ',
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    flex: 2,
+                                    child: TextField(
+                                      key: const Key(
+                                        'installment_periods_input',
+                                      ),
+                                      controller: _periodsCtrl,
+                                      enabled: !_busy,
+                                      keyboardType: TextInputType.number,
+                                      inputFormatters: [
+                                        FilteringTextInputFormatter.digitsOnly,
+                                      ],
+                                      onChanged: (_) => setState(() {}),
+                                      decoration: const InputDecoration(
+                                        labelText: '分期期数',
+                                        suffixText: '期',
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              TextField(
+                                key: const Key('installment_charge_input'),
+                                controller: _chargeCtrl,
+                                enabled: !_busy,
+                                keyboardType:
+                                    const TextInputType.numberWithOptions(
+                                      decimal: true,
+                                    ),
+                                inputFormatters: amountInputFormatters,
+                                onChanged: (_) => setState(() {}),
+                                decoration: const InputDecoration(
+                                  labelText: '总手续费（选填）',
+                                  hintText: '0.00',
+                                  prefixText: '¥ ',
+                                ),
+                              ),
+                            ],
+                          ],
                         ),
                         const SizedBox(height: 12),
                         if (_isEditing && _editingRow != null) ...[
@@ -417,394 +479,265 @@ class _InstallmentEditorPageState extends ConsumerState<InstallmentEditorPage> {
                             installment: _editingRow!,
                             assets: allAssets,
                           ),
-                          const SizedBox(height: 16),
+                          const SizedBox(height: 12),
                         ] else if (!_isEditing) ...[
-                          Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                          TallyFormCard(
+                            title: '分期规则与扣款',
+                            spacing: 12,
                             children: [
-                              Expanded(
-                                flex: 3,
-                                child: TextField(
-                                  key: const Key('installment_principal_input'),
-                                  controller: _principalCtrl,
-                                  enabled: !_busy,
-                                  keyboardType:
-                                      const TextInputType.numberWithOptions(
-                                        decimal: true,
+                              TallySelectField<int>(
+                                key: const Key(
+                                  'installment_charge_way_dropdown',
+                                ),
+                                label: '手续费收取方式',
+                                value: _chargeWay,
+                                enabled: !_busy,
+                                options: [
+                                  for (final way in [
+                                    InstallmentChargeWay.firstPeriod,
+                                    InstallmentChargeWay.perPeriod,
+                                    InstallmentChargeWay.lastPeriod,
+                                  ])
+                                    TallySelectOption(
+                                      value: way,
+                                      label: InstallmentChargeWay.labelOf(way),
+                                    ),
+                                ],
+                                onChanged: (v) =>
+                                    setState(() => _chargeWay = v),
+                              ),
+                              TallySelectField<int>(
+                                key: const Key('installment_cal_way_dropdown'),
+                                label: '每期金额取舍方式',
+                                value: _calWay,
+                                enabled: !_busy,
+                                options: [
+                                  for (final way in [
+                                    InstallmentCalWay.halfUp2,
+                                    InstallmentCalWay.floor2,
+                                    InstallmentCalWay.halfUp0,
+                                    InstallmentCalWay.floor0,
+                                  ])
+                                    TallySelectOption(
+                                      value: way,
+                                      label: InstallmentCalWay.labelOf(way),
+                                    ),
+                                ],
+                                onChanged: (v) => setState(() => _calWay = v),
+                              ),
+                              TallySelectField<int>(
+                                key: const Key(
+                                  'installment_remainder_dropdown',
+                                ),
+                                label: '除不尽余数归属',
+                                value: _remainderIn,
+                                enabled: !_busy,
+                                options: [
+                                  for (final rem in [
+                                    InstallmentRemainderIn.firstPeriod,
+                                    InstallmentRemainderIn.lastPeriod,
+                                  ])
+                                    TallySelectOption(
+                                      value: rem,
+                                      label: InstallmentRemainderIn.labelOf(
+                                        rem,
                                       ),
-                                  inputFormatters: amountInputFormatters,
-                                  onChanged: (_) => setState(() {}),
-                                  decoration: InputDecoration(
-                                    labelText: '分期总本金',
-                                    prefixText: '¥ ',
-                                    border: const OutlineInputBorder(),
-                                    contentPadding: isDesktop
-                                        ? const EdgeInsets.symmetric(
-                                            horizontal: 12,
-                                            vertical: 16,
-                                          )
-                                        : null,
-                                  ),
-                                ),
+                                    ),
+                                ],
+                                onChanged: (v) =>
+                                    setState(() => _remainderIn = v),
                               ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                flex: 2,
-                                child: TextField(
-                                  key: const Key('installment_periods_input'),
-                                  controller: _periodsCtrl,
-                                  enabled: !_busy,
-                                  keyboardType: TextInputType.number,
-                                  inputFormatters: [
-                                    FilteringTextInputFormatter.digitsOnly,
-                                  ],
-                                  onChanged: (_) => setState(() {}),
-                                  decoration: InputDecoration(
-                                    labelText: '分期期数',
-                                    suffixText: '期',
-                                    border: const OutlineInputBorder(),
-                                    contentPadding: isDesktop
-                                        ? const EdgeInsets.symmetric(
-                                            horizontal: 12,
-                                            vertical: 16,
-                                          )
-                                        : null,
-                                  ),
-                                ),
+                              TallySelectField<int>(
+                                key: const Key('installment_asset_dropdown'),
+                                label: '扣款账户',
+                                value: usableAssets.any((a) => a.id == _assetId)
+                                    ? _assetId
+                                    : null,
+                                hintText: usableAssets.isEmpty
+                                    ? '暂无可用扣款账户'
+                                    : '请选择扣款账户',
+                                enabled: !_busy && usableAssets.isNotEmpty,
+                                options: [
+                                  for (final a in usableAssets)
+                                    TallySelectOption(
+                                      value: a.id,
+                                      label: a.name,
+                                    ),
+                                ],
+                                onChanged: (v) => setState(() => _assetId = v),
                               ),
-                            ],
-                          ),
-                          const SizedBox(height: 12),
-                          TextField(
-                            key: const Key('installment_charge_input'),
-                            controller: _chargeCtrl,
-                            enabled: !_busy,
-                            keyboardType: const TextInputType.numberWithOptions(
-                              decimal: true,
-                            ),
-                            inputFormatters: amountInputFormatters,
-                            onChanged: (_) => setState(() {}),
-                            decoration: InputDecoration(
-                              labelText: '总手续费（选填）',
-                              hintText: '0.00',
-                              prefixText: '¥ ',
-                              border: const OutlineInputBorder(),
-                              contentPadding: isDesktop
-                                  ? const EdgeInsets.symmetric(
-                                      horizontal: 12,
-                                      vertical: 16,
-                                    )
-                                  : null,
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          _LabeledDropdown<int>(
-                            fieldKey: const Key(
-                              'installment_charge_way_dropdown',
-                            ),
-                            label: '手续费收取方式',
-                            value: _chargeWay,
-                            enabled: !_busy,
-                            items: [
-                              for (final way in [
-                                InstallmentChargeWay.firstPeriod,
-                                InstallmentChargeWay.perPeriod,
-                                InstallmentChargeWay.lastPeriod,
-                              ])
-                                DropdownMenuItem(
-                                  value: way,
-                                  child: Text(
-                                    InstallmentChargeWay.labelOf(way),
+                              TallyFormTile(
+                                tileKey: const Key(
+                                  'installment_start_date_tile',
+                                ),
+                                leading: const Icon(Icons.event),
+                                title: '首期入账日期',
+                                subtitle: formatDate(_startDate),
+                                enabled: !_busy,
+                                onTap: _pickStartDate,
+                              ),
+                              if (!_startDate.isAfter(_todayLocal()))
+                                SwitchListTile(
+                                  key: const Key(
+                                    'installment_catchup_now_switch',
                                   ),
+                                  contentPadding: EdgeInsets.zero,
+                                  title: const Text('已到期期次立即自动入账'),
+                                  subtitle: const Text('开启后保存时自动补记首期及之前已到期账单'),
+                                  value: _catchUpDueNow,
+                                  onChanged: _busy
+                                      ? null
+                                      : (v) =>
+                                            setState(() => _catchUpDueNow = v),
                                 ),
                             ],
-                            onChanged: (v) {
-                              if (v != null) setState(() => _chargeWay = v);
-                            },
-                          ),
-                          const SizedBox(height: 12),
-                          _LabeledDropdown<int>(
-                            fieldKey: const Key('installment_cal_way_dropdown'),
-                            label: '每期金额取舍方式',
-                            value: _calWay,
-                            enabled: !_busy,
-                            items: [
-                              for (final way in [
-                                InstallmentCalWay.halfUp2,
-                                InstallmentCalWay.floor2,
-                                InstallmentCalWay.halfUp0,
-                                InstallmentCalWay.floor0,
-                              ])
-                                DropdownMenuItem(
-                                  value: way,
-                                  child: Text(InstallmentCalWay.labelOf(way)),
-                                ),
-                            ],
-                            onChanged: (v) {
-                              if (v != null) setState(() => _calWay = v);
-                            },
-                          ),
-                          const SizedBox(height: 12),
-                          _LabeledDropdown<int>(
-                            fieldKey: const Key(
-                              'installment_remainder_dropdown',
-                            ),
-                            label: '除不尽余数归属',
-                            value: _remainderIn,
-                            enabled: !_busy,
-                            items: [
-                              for (final rem in [
-                                InstallmentRemainderIn.firstPeriod,
-                                InstallmentRemainderIn.lastPeriod,
-                              ])
-                                DropdownMenuItem(
-                                  value: rem,
-                                  child: Text(
-                                    InstallmentRemainderIn.labelOf(rem),
-                                  ),
-                                ),
-                            ],
-                            onChanged: (v) {
-                              if (v != null) setState(() => _remainderIn = v);
-                            },
-                          ),
-                          const SizedBox(height: 12),
-                          _LabeledDropdown<int>(
-                            fieldKey: const Key('installment_asset_dropdown'),
-                            label: '扣款账户',
-                            value: usableAssets.any((a) => a.id == _assetId)
-                                ? _assetId
-                                : null,
-                            hint: usableAssets.isEmpty ? '暂无可用扣款账户' : '请选择扣款账户',
-                            enabled: !_busy && usableAssets.isNotEmpty,
-                            items: [
-                              for (final a in usableAssets)
-                                DropdownMenuItem(
-                                  value: a.id,
-                                  child: Text(a.name),
-                                ),
-                            ],
-                            onChanged: (v) {
-                              if (v != null) setState(() => _assetId = v);
-                            },
-                          ),
-                          const SizedBox(height: 8),
-                          ListTile(
-                            key: const Key('installment_start_date_tile'),
-                            contentPadding: EdgeInsets.zero,
-                            leading: const Icon(Icons.event),
-                            title: const Text('首期入账日期'),
-                            subtitle: Text(formatDate(_startDate)),
-                            trailing: const Icon(Icons.chevron_right),
-                            onTap: _busy ? null : _pickStartDate,
-                          ),
-                          if (!_startDate.isAfter(_todayLocal()))
-                            SwitchListTile(
-                              key: const Key('installment_catchup_now_switch'),
-                              contentPadding: EdgeInsets.zero,
-                              title: const Text('已到期期次立即自动入账'),
-                              subtitle: const Text('开启后保存时自动补记首期及之前已到期账单'),
-                              value: _catchUpDueNow,
-                              onChanged: _busy
-                                  ? null
-                                  : (v) => setState(() => _catchUpDueNow = v),
-                            ),
-                          const SizedBox(height: 8),
-                        ],
-                        if (books.length > 1) ...[
-                          _LabeledDropdown<int>(
-                            fieldKey: const Key('installment_book_dropdown'),
-                            label: '所属账本',
-                            value: books.any((b) => b.id == _bookId)
-                                ? _bookId
-                                : books.first.id,
-                            enabled: !_busy,
-                            items: [
-                              for (final b in books)
-                                DropdownMenuItem(
-                                  value: b.id,
-                                  child: Text(b.name),
-                                ),
-                            ],
-                            onChanged: (v) {
-                              if (v != null && v != _bookId) {
-                                setState(() {
-                                  _bookId = v;
-                                  _catId = noRef;
-                                });
-                              }
-                            },
                           ),
                           const SizedBox(height: 12),
                         ],
-                        _LabeledDropdown<int>(
-                          fieldKey: const Key('installment_category_dropdown'),
-                          label: '支出分类',
-                          value: effectiveCatId,
-                          enabled: !_busy,
-                          items: [
-                            const DropdownMenuItem(
-                              value: noRef,
-                              child: Text('不选分类（账单分期）'),
-                            ),
-                            for (final c in expenseCategories)
-                              DropdownMenuItem(
-                                value: c.id,
-                                child: Text(categoryName(allCategories, c.id)),
+                        TallyFormCard(
+                          title: '账本与分类',
+                          spacing: 12,
+                          children: [
+                            if (books.length > 1)
+                              TallySelectField<int>(
+                                key: const Key('installment_book_dropdown'),
+                                label: '所属账本',
+                                value: books.any((b) => b.id == _bookId)
+                                    ? _bookId
+                                    : books.first.id,
+                                enabled: !_busy,
+                                options: [
+                                  for (final b in books)
+                                    TallySelectOption(
+                                      value: b.id,
+                                      label: b.name,
+                                    ),
+                                ],
+                                onChanged: (v) {
+                                  if (v != _bookId) {
+                                    setState(() {
+                                      _bookId = v;
+                                      _catId = noRef;
+                                    });
+                                  }
+                                },
                               ),
+                            TallySelectField<int>(
+                              key: const Key('installment_category_dropdown'),
+                              label: '支出分类',
+                              value: effectiveCatId,
+                              enabled: !_busy,
+                              options: [
+                                const TallySelectOption(
+                                  value: noRef,
+                                  label: '不选分类（账单分期）',
+                                ),
+                                for (final c in expenseCategories)
+                                  TallySelectOption(
+                                    value: c.id,
+                                    label: categoryName(allCategories, c.id),
+                                  ),
+                              ],
+                              onChanged: (v) => setState(() => _catId = v),
+                            ),
                           ],
-                          onChanged: (v) {
-                            if (v != null) setState(() => _catId = v);
-                          },
                         ),
                         if (isCreditAsset) ...[
                           const SizedBox(height: 12),
-                          Card(
+                          TallyFormCard(
                             key: const Key('installment_credit_options_card'),
-                            elevation: 0,
-                            surfaceTintColor: Colors.transparent,
-                            clipBehavior: Clip.antiAlias,
-                            color: _tonalCardColor(Theme.of(context)),
-                            shape: _tonalCardShape,
-                            margin: EdgeInsets.zero,
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 4,
-                              ),
-                              child: Column(
-                                children: [
-                                  SwitchListTile(
-                                    key: const Key('installment_cb_switch'),
-                                    contentPadding: EdgeInsets.zero,
-                                    title: const Text('未入账本金占用信用额度'),
-                                    subtitle: const Text('计入信用卡待还总负债与已用额度'),
-                                    value: _principalCounted,
-                                    onChanged: _busy
-                                        ? null
-                                        : (v) => setState(
-                                            () => _principalCounted = v,
-                                          ),
-                                  ),
-                                  SwitchListTile(
-                                    key: const Key('installment_ci_switch'),
-                                    contentPadding: EdgeInsets.zero,
-                                    title: const Text('未入账手续费占用信用额度'),
-                                    subtitle: const Text('开启后未入账手续费一并计入待还负债'),
-                                    value: _interestCounted,
-                                    onChanged: _busy
-                                        ? null
-                                        : (v) => setState(
-                                            () => _interestCounted = v,
-                                          ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ],
-                        const SizedBox(height: 8),
-                        SwitchListTile(
-                          key: const Key('installment_exclude_budget_switch'),
-                          contentPadding: EdgeInsets.zero,
-                          title: const Text('不计入预算'),
-                          value: _excludeBudget,
-                          onChanged: _busy
-                              ? null
-                              : (v) => setState(() => _excludeBudget = v),
-                        ),
-                        SwitchListTile(
-                          key: const Key('installment_exclude_exin_switch'),
-                          contentPadding: EdgeInsets.zero,
-                          title: const Text('不计入收支统计'),
-                          value: _excludeExIn,
-                          onChanged: _busy
-                              ? null
-                              : (v) => setState(() => _excludeExIn = v),
-                        ),
-                        if (tags.isNotEmpty) ...[
-                          const SizedBox(height: 8),
-                          Text(
-                            '标签',
-                            style: Theme.of(context).textTheme.labelLarge,
-                          ),
-                          const SizedBox(height: 8),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
+                            title: '信用额度占用',
+                            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
                             children: [
-                              for (final t in tags)
-                                FilterChip(
-                                  key: Key('installment_tag_${t.tagId}'),
-                                  label: Text(t.name),
-                                  selected: _selectedTagIds.contains(t.tagId),
-                                  onSelected: _busy
-                                      ? null
-                                      : (sel) => setState(() {
-                                          if (sel) {
-                                            _selectedTagIds.add(t.tagId);
-                                          } else {
-                                            _selectedTagIds.remove(t.tagId);
-                                          }
-                                        }),
-                                ),
+                              SwitchListTile(
+                                key: const Key('installment_cb_switch'),
+                                contentPadding: EdgeInsets.zero,
+                                title: const Text('未入账本金占用信用额度'),
+                                subtitle: const Text('计入信用卡待还总负债与已用额度'),
+                                value: _principalCounted,
+                                onChanged: _busy
+                                    ? null
+                                    : (v) =>
+                                          setState(() => _principalCounted = v),
+                              ),
+                              SwitchListTile(
+                                key: const Key('installment_ci_switch'),
+                                contentPadding: EdgeInsets.zero,
+                                title: const Text('未入账手续费占用信用额度'),
+                                subtitle: const Text('开启后未入账手续费一并计入待还负债'),
+                                value: _interestCounted,
+                                onChanged: _busy
+                                    ? null
+                                    : (v) =>
+                                          setState(() => _interestCounted = v),
+                              ),
                             ],
                           ),
                         ],
+                        const SizedBox(height: 12),
+                        TallyFormCard(
+                          title: '统计与标签',
+                          spacing: 8,
+                          children: [
+                            SwitchListTile(
+                              key: const Key(
+                                'installment_exclude_budget_switch',
+                              ),
+                              contentPadding: EdgeInsets.zero,
+                              title: const Text('不计入预算'),
+                              value: _excludeBudget,
+                              onChanged: _busy
+                                  ? null
+                                  : (v) => setState(() => _excludeBudget = v),
+                            ),
+                            SwitchListTile(
+                              key: const Key('installment_exclude_exin_switch'),
+                              contentPadding: EdgeInsets.zero,
+                              title: const Text('不计入收支统计'),
+                              value: _excludeExIn,
+                              onChanged: _busy
+                                  ? null
+                                  : (v) => setState(() => _excludeExIn = v),
+                            ),
+                            if (tags.isNotEmpty) ...[
+                              Text(
+                                '标签',
+                                style: Theme.of(context).textTheme.labelLarge,
+                              ),
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: [
+                                  for (final t in tags)
+                                    FilterChip(
+                                      key: Key('installment_tag_${t.tagId}'),
+                                      label: Text(t.name),
+                                      selected: _selectedTagIds.contains(
+                                        t.tagId,
+                                      ),
+                                      onSelected: _busy
+                                          ? null
+                                          : (sel) => setState(() {
+                                              if (sel) {
+                                                _selectedTagIds.add(t.tagId);
+                                              } else {
+                                                _selectedTagIds.remove(t.tagId);
+                                              }
+                                            }),
+                                    ),
+                                ],
+                              ),
+                            ],
+                          ],
+                        ),
                         if (preview != null && preview.isNotEmpty) ...[
-                          const SizedBox(height: 16),
+                          const SizedBox(height: 12),
                           _SchedulePreviewCard(schedule: preview),
                         ],
                       ],
                     ),
                   ),
                 ),
-        ),
-      ),
-    );
-  }
-}
-
-class _LabeledDropdown<T> extends StatelessWidget {
-  const _LabeledDropdown({
-    required this.fieldKey,
-    required this.label,
-    required this.value,
-    required this.items,
-    required this.onChanged,
-    this.enabled = true,
-    this.hint,
-  });
-
-  final Key fieldKey;
-  final String label;
-  final T? value;
-  final List<DropdownMenuItem<T>> items;
-  final ValueChanged<T?> onChanged;
-  final bool enabled;
-  final String? hint;
-
-  @override
-  Widget build(BuildContext context) {
-    final isDesktop = DesktopAdaptive.isDesktop(context);
-    return InputDecorator(
-      decoration: InputDecoration(
-        labelText: label,
-        border: const OutlineInputBorder(),
-        contentPadding: EdgeInsets.symmetric(
-          horizontal: 12,
-          vertical: isDesktop ? 16 : 4,
-        ),
-      ),
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<T>(
-          key: fieldKey,
-          isExpanded: true,
-          isDense: isDesktop,
-          value: value,
-          hint: hint == null ? null : Text(hint!),
-          items: items,
-          onChanged: enabled ? onChanged : null,
         ),
       ),
     );

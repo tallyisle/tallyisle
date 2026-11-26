@@ -531,10 +531,6 @@ class _SlotCheckInDialogState extends ConsumerState<_SlotCheckInDialog> {
           decoration: InputDecoration(
             labelText: '存入金额',
             prefixText: '${widget.detail.currencySymbol} ',
-            border: const OutlineInputBorder(),
-            contentPadding: isDesktop
-                ? const EdgeInsets.symmetric(horizontal: 12, vertical: 16)
-                : null,
           ),
         ),
         const SizedBox(height: 12),
@@ -542,13 +538,7 @@ class _SlotCheckInDialogState extends ConsumerState<_SlotCheckInDialog> {
           key: const Key('slot_checkin_remark_input'),
           controller: _remarkCtrl,
           enabled: !_submitting,
-          decoration: InputDecoration(
-            labelText: '备注（可选）',
-            border: const OutlineInputBorder(),
-            contentPadding: isDesktop
-                ? const EdgeInsets.symmetric(horizontal: 12, vertical: 16)
-                : null,
-          ),
+          decoration: const InputDecoration(labelText: '备注（可选）'),
         ),
       ],
     );
@@ -726,10 +716,6 @@ class _FreePlanCheckInDialogState
               decoration: InputDecoration(
                 labelText: '本次存入金额',
                 prefixText: '$symbol ',
-                border: const OutlineInputBorder(),
-                contentPadding: isDesktop
-                    ? const EdgeInsets.symmetric(horizontal: 12, vertical: 16)
-                    : null,
               ),
             )
           else ...[
@@ -749,10 +735,6 @@ class _FreePlanCheckInDialogState
               decoration: InputDecoration(
                 labelText: '目标累计已存金额',
                 prefixText: '$symbol ',
-                border: const OutlineInputBorder(),
-                contentPadding: isDesktop
-                    ? const EdgeInsets.symmetric(horizontal: 12, vertical: 16)
-                    : null,
               ),
             ),
             const SizedBox(height: 8),
@@ -771,13 +753,7 @@ class _FreePlanCheckInDialogState
             key: const Key('free_remark_input'),
             controller: _remarkCtrl,
             enabled: !_submitting,
-            decoration: InputDecoration(
-              labelText: '备注（可选）',
-              border: const OutlineInputBorder(),
-              contentPadding: isDesktop
-                  ? const EdgeInsets.symmetric(horizontal: 12, vertical: 16)
-                  : null,
-            ),
+            decoration: const InputDecoration(labelText: '备注（可选）'),
           ),
         ],
       ),

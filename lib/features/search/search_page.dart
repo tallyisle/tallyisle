@@ -146,10 +146,14 @@ class _SearchPageState extends ConsumerState<SearchPage> {
           textAlignVertical: isDesktop ? TextAlignVertical.center : null,
           decoration: InputDecoration(
             hintText: '搜索备注关键词…',
+            filled: false,
             border: InputBorder.none,
+            enabledBorder: InputBorder.none,
+            focusedBorder: InputBorder.none,
+            disabledBorder: InputBorder.none,
             contentPadding: isDesktop
                 ? const EdgeInsets.symmetric(horizontal: 8, vertical: 12)
-                : null,
+                : const EdgeInsets.symmetric(vertical: 12),
             suffixIcon: _keywordController.text.isNotEmpty
                 ? IconButton(
                     icon: const Icon(Icons.clear),
@@ -393,48 +397,21 @@ class _SearchPageState extends ConsumerState<SearchPage> {
               ),
               const SizedBox(height: 8),
 
-              // Account & Category dropdowns
+              // Account & Category selectors
               Row(
                 children: [
                   Expanded(
-                    child: DropdownButtonFormField<int?>(
-                      isExpanded: true,
-                      initialValue: _selectedAssetId,
-                      decoration: isDesktop
-                          ? const InputDecoration(
-                              labelText: '账户',
-                              border: OutlineInputBorder(),
-                              contentPadding: EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 12,
-                              ),
-                            )
-                          : const InputDecoration(
-                              labelText: '账户',
-                              isDense: true,
-                              contentPadding: EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 8,
-                              ),
-                            ),
-                      items: [
-                        const DropdownMenuItem(
+                    child: TallySelectField<int?>(
+                      label: '账户',
+                      value: _selectedAssetId,
+                      isDense: !isDesktop,
+                      options: [
+                        const TallySelectOption<int?>(
                           value: null,
-                          child: Text(
-                            '所有账户',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
+                          label: '所有账户',
                         ),
                         for (final a in assets)
-                          DropdownMenuItem(
-                            value: a.id,
-                            child: Text(
-                              a.name,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
+                          TallySelectOption<int?>(value: a.id, label: a.name),
                       ],
                       onChanged: (val) =>
                           setState(() => _selectedAssetId = val),
@@ -442,46 +419,19 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                   ),
                   const SizedBox(width: 8),
                   Expanded(
-                    child: DropdownButtonFormField<int?>(
-                      isExpanded: true,
-                      initialValue: _selectedCategoryIds.length == 1
+                    child: TallySelectField<int?>(
+                      label: '分类',
+                      value: _selectedCategoryIds.length == 1
                           ? _selectedCategoryIds.first
                           : null,
-                      decoration: isDesktop
-                          ? const InputDecoration(
-                              labelText: '分类',
-                              border: OutlineInputBorder(),
-                              contentPadding: EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 12,
-                              ),
-                            )
-                          : const InputDecoration(
-                              labelText: '分类',
-                              isDense: true,
-                              contentPadding: EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 8,
-                              ),
-                            ),
-                      items: [
-                        const DropdownMenuItem(
+                      isDense: !isDesktop,
+                      options: [
+                        const TallySelectOption<int?>(
                           value: null,
-                          child: Text(
-                            '所有分类',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
+                          label: '所有分类',
                         ),
                         for (final c in categories)
-                          DropdownMenuItem(
-                            value: c.id,
-                            child: Text(
-                              c.name,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
+                          TallySelectOption<int?>(value: c.id, label: c.name),
                       ],
                       onChanged: (val) {
                         setState(() {
@@ -565,7 +515,6 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                                 horizontal: 12,
                                 vertical: 12,
                               ),
-                              border: OutlineInputBorder(),
                             )
                           : const InputDecoration(
                               hintText: '最低金额',
@@ -575,7 +524,6 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                                 horizontal: 8,
                                 vertical: 8,
                               ),
-                              border: OutlineInputBorder(),
                             ),
                       onChanged: (_) => setState(() {}),
                     ),
@@ -598,7 +546,6 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                                 horizontal: 12,
                                 vertical: 12,
                               ),
-                              border: OutlineInputBorder(),
                             )
                           : const InputDecoration(
                               hintText: '最高金额',
@@ -608,7 +555,6 @@ class _SearchPageState extends ConsumerState<SearchPage> {
                                 horizontal: 8,
                                 vertical: 8,
                               ),
-                              border: OutlineInputBorder(),
                             ),
                       onChanged: (_) => setState(() {}),
                     ),

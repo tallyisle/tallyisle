@@ -12,6 +12,7 @@ import 'tally_button.dart';
 export 'tally_button.dart';
 export 'tally_card.dart';
 export 'tally_empty_state.dart';
+export 'tally_form_fields.dart';
 
 const _uuid = Uuid();
 

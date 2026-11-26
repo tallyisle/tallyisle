@@ -244,42 +244,22 @@ class _AssetFilterBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isDesktop = DesktopAdaptive.isDesktop(context);
     final validSelected =
         selectedAssetId != null &&
             eligibleAssets.any((a) => a.id == selectedAssetId)
         ? selectedAssetId!
         : noRef;
-    return InputDecorator(
-      decoration: isDesktop
-          ? const InputDecoration(
-              labelText: '筛选账户',
-              border: OutlineInputBorder(),
-              contentPadding: EdgeInsets.symmetric(
-                horizontal: 12,
-                vertical: 16,
-              ),
-            )
-          : const InputDecoration(
-              labelText: '筛选账户',
-              isDense: true,
-              border: OutlineInputBorder(),
-              contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-            ),
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<int>(
-          key: const Key('deposit_asset_filter'),
-          value: validSelected,
-          isExpanded: true,
-          isDense: true,
-          items: [
-            const DropdownMenuItem(value: noRef, child: Text('全部合格账户')),
-            for (final a in eligibleAssets)
-              DropdownMenuItem(value: a.id, child: Text(a.name)),
-          ],
-          onChanged: (v) => onChanged(v == null || v == noRef ? null : v),
-        ),
-      ),
+    return TallySelectField<int>(
+      key: const Key('deposit_asset_filter'),
+      label: '筛选账户',
+      value: validSelected,
+      isDense: true,
+      options: [
+        const TallySelectOption(value: noRef, label: '全部合格账户'),
+        for (final a in eligibleAssets)
+          TallySelectOption(value: a.id, label: a.name),
+      ],
+      onChanged: (v) => onChanged(v == noRef ? null : v),
     );
   }
 }

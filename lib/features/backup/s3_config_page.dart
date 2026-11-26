@@ -298,192 +298,150 @@ class _S3ConfigPageState extends ConsumerState<S3ConfigPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            '兼容 AWS S3、Cloudflare R2、阿里云 OSS、腾讯云 COS、MinIO 与 Backblaze B2（标准 AWS SigV4 签名）。',
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            key: const Key('s3_endpoint_input'),
-            controller: _endpointController,
-            enabled: !_busy,
-            keyboardType: TextInputType.url,
-            onChanged: (_) => _userTouched = true,
-            decoration: isDesktop
-                ? const InputDecoration(
-                    labelText: 'Endpoint 地址',
-                    hintText: 'https://<account>.r2.cloudflarestorage.com',
-                    helperText: '支持 R2 / AWS S3 / 阿里云 OSS / MinIO 端点地址',
-                    border: OutlineInputBorder(),
-                    contentPadding: EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 16,
-                    ),
-                  )
-                : const InputDecoration(
-                    labelText: 'Endpoint 地址',
-                    hintText:
-                        'https://<account>.r2.cloudflarestorage.com 或 https://s3.us-east-1.amazonaws.com',
-                    border: OutlineInputBorder(),
-                  ),
-          ),
-          const SizedBox(height: 12),
-          Row(
+          TallyFormCard(
+            title: '对象存储连接',
+            subtitle:
+                '兼容 AWS S3、Cloudflare R2、阿里云 OSS、腾讯云 COS、MinIO 与 Backblaze B2（标准 AWS SigV4 签名）。',
+            spacing: 12,
             children: [
-              Expanded(
-                child: TextField(
-                  key: const Key('s3_region_input'),
-                  controller: _regionController,
-                  enabled: !_busy,
-                  onChanged: (_) => _userTouched = true,
-                  decoration: InputDecoration(
-                    labelText: 'Region 区域',
-                    hintText: 'auto / us-east-1',
-                    border: const OutlineInputBorder(),
-                    contentPadding: isDesktop
-                        ? const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 16,
-                          )
-                        : null,
+              TextField(
+                key: const Key('s3_endpoint_input'),
+                controller: _endpointController,
+                enabled: !_busy,
+                keyboardType: TextInputType.url,
+                onChanged: (_) => _userTouched = true,
+                decoration: isDesktop
+                    ? const InputDecoration(
+                        labelText: 'Endpoint 地址',
+                        hintText: 'https://<account>.r2.cloudflarestorage.com',
+                        helperText: '支持 R2 / AWS S3 / 阿里云 OSS / MinIO 端点地址',
+                      )
+                    : const InputDecoration(
+                        labelText: 'Endpoint 地址',
+                        hintText:
+                            'https://<account>.r2.cloudflarestorage.com 或 https://s3.us-east-1.amazonaws.com',
+                      ),
+              ),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      key: const Key('s3_region_input'),
+                      controller: _regionController,
+                      enabled: !_busy,
+                      onChanged: (_) => _userTouched = true,
+                      decoration: const InputDecoration(
+                        labelText: 'Region 区域',
+                        hintText: 'auto / us-east-1',
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: TextField(
+                      key: const Key('s3_bucket_input'),
+                      controller: _bucketController,
+                      enabled: !_busy,
+                      onChanged: (_) => _userTouched = true,
+                      decoration: const InputDecoration(
+                        labelText: 'Bucket 桶名称',
+                        hintText: 'tallyisle-data',
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              TextField(
+                key: const Key('s3_access_key_input'),
+                controller: _accessKeyController,
+                enabled: !_busy,
+                onChanged: (_) => _userTouched = true,
+                decoration: const InputDecoration(labelText: 'Access Key ID'),
+              ),
+              TextField(
+                key: const Key('s3_secret_key_input'),
+                controller: _secretKeyController,
+                enabled: !_busy,
+                obscureText: _obscureSecretKey,
+                onChanged: (_) => _userTouched = true,
+                decoration: InputDecoration(
+                  labelText: 'Secret Access Key',
+                  suffixIcon: IconButton(
+                    visualDensity: isDesktop ? VisualDensity.compact : null,
+                    icon: Icon(
+                      _obscureSecretKey
+                          ? Icons.visibility
+                          : Icons.visibility_off,
+                    ),
+                    onPressed: () =>
+                        setState(() => _obscureSecretKey = !_obscureSecretKey),
                   ),
                 ),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: TextField(
-                  key: const Key('s3_bucket_input'),
-                  controller: _bucketController,
-                  enabled: !_busy,
-                  onChanged: (_) => _userTouched = true,
-                  decoration: InputDecoration(
-                    labelText: 'Bucket 桶名称',
-                    hintText: 'tallyisle-data',
-                    border: const OutlineInputBorder(),
-                    contentPadding: isDesktop
-                        ? const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 16,
-                          )
-                        : null,
-                  ),
+              TextField(
+                key: const Key('s3_prefix_input'),
+                controller: _prefixController,
+                enabled: !_busy,
+                onChanged: (_) => _userTouched = true,
+                decoration: const InputDecoration(
+                  labelText: '远端对象前缀（Prefix）',
+                  hintText: 'TallyIsle',
                 ),
+              ),
+              SwitchListTile(
+                key: const Key('s3_path_style_switch'),
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Path-Style 路径寻址模式'),
+                subtitle: Text(
+                  _forcePathStyle
+                      ? '默认开启（endpoint/bucket/key），广泛兼容 MinIO、R2 与自建服务'
+                      : 'Virtual-Hosted 虚拟主机模式（bucket.endpoint/key），适用于强制子域名的对象存储',
+                ),
+                value: _forcePathStyle,
+                onChanged: _busy
+                    ? null
+                    : (val) {
+                        _userTouched = true;
+                        setState(() => _forcePathStyle = val);
+                      },
               ),
             ],
           ),
           const SizedBox(height: 12),
-          TextField(
-            key: const Key('s3_access_key_input'),
-            controller: _accessKeyController,
-            enabled: !_busy,
-            onChanged: (_) => _userTouched = true,
-            decoration: InputDecoration(
-              labelText: 'Access Key ID',
-              border: const OutlineInputBorder(),
-              contentPadding: isDesktop
-                  ? const EdgeInsets.symmetric(horizontal: 12, vertical: 16)
-                  : null,
-            ),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            key: const Key('s3_secret_key_input'),
-            controller: _secretKeyController,
-            enabled: !_busy,
-            obscureText: _obscureSecretKey,
-            onChanged: (_) => _userTouched = true,
-            decoration: InputDecoration(
-              labelText: 'Secret Access Key',
-              border: const OutlineInputBorder(),
-              contentPadding: isDesktop
-                  ? const EdgeInsets.symmetric(horizontal: 12, vertical: 16)
-                  : null,
-              suffixIcon: IconButton(
-                visualDensity: isDesktop ? VisualDensity.compact : null,
-                icon: Icon(
-                  _obscureSecretKey ? Icons.visibility : Icons.visibility_off,
-                ),
-                onPressed: () =>
-                    setState(() => _obscureSecretKey = !_obscureSecretKey),
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            key: const Key('s3_prefix_input'),
-            controller: _prefixController,
-            enabled: !_busy,
-            onChanged: (_) => _userTouched = true,
-            decoration: InputDecoration(
-              labelText: '远端对象前缀（Prefix）',
-              hintText: 'TallyIsle',
-              border: const OutlineInputBorder(),
-              contentPadding: isDesktop
-                  ? const EdgeInsets.symmetric(horizontal: 12, vertical: 16)
-                  : null,
-            ),
-          ),
-          const SizedBox(height: 8),
-          SwitchListTile(
-            key: const Key('s3_path_style_switch'),
-            contentPadding: EdgeInsets.zero,
-            title: const Text('Path-Style 路径寻址模式'),
-            subtitle: Text(
-              _forcePathStyle
-                  ? '默认开启（endpoint/bucket/key），广泛兼容 MinIO、R2 与自建服务'
-                  : 'Virtual-Hosted 虚拟主机模式（bucket.endpoint/key），适用于强制子域名的对象存储',
-            ),
-            value: _forcePathStyle,
-            onChanged: _busy
-                ? null
-                : (val) {
-                    _userTouched = true;
-                    setState(() => _forcePathStyle = val);
-                  },
-          ),
-          const SizedBox(height: 8),
-          InputDecorator(
-            decoration: InputDecoration(
-              labelText: '远端自动保留备份份数',
-              border: const OutlineInputBorder(),
-              contentPadding: isDesktop
-                  ? const EdgeInsets.symmetric(horizontal: 12, vertical: 16)
-                  : null,
-            ),
-            child: DropdownButtonHideUnderline(
-              child: DropdownButton<int>(
+          TallyFormCard(
+            title: '备份策略',
+            spacing: 8,
+            children: [
+              TallySelectField<int>(
                 key: const Key('s3_keep_count_dropdown'),
-                isExpanded: true,
-                isDense: true,
+                label: '远端自动保留备份份数',
                 value: _keepCount,
-                items: [
+                enabled: !_busy,
+                options: [
                   for (final n in keepOptions)
-                    DropdownMenuItem<int>(value: n, child: Text('保留最近 $n 份备份')),
+                    TallySelectOption<int>(value: n, label: '保留最近 $n 份备份'),
                 ],
                 onChanged: _busy
                     ? null
                     : (val) {
-                        if (val != null) {
-                          _userTouched = true;
-                          setState(() => _keepCount = val);
-                        }
+                        _userTouched = true;
+                        setState(() => _keepCount = val);
                       },
               ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          SwitchListTile(
-            key: const Key('s3_auto_backup_switch'),
-            contentPadding: EdgeInsets.zero,
-            title: const Text('开启自动静默云备份'),
-            subtitle: const Text('距上次备份超过 24 小时且本地产生新账单变动时自动归档上传'),
-            value: _autoBackupEnabled,
-            onChanged: _busy
-                ? null
-                : (val) {
-                    _userTouched = true;
-                    setState(() => _autoBackupEnabled = val);
-                  },
+              SwitchListTile(
+                key: const Key('s3_auto_backup_switch'),
+                contentPadding: EdgeInsets.zero,
+                title: const Text('开启自动静默云备份'),
+                subtitle: const Text('距上次备份超过 24 小时且本地产生新账单变动时自动归档上传'),
+                value: _autoBackupEnabled,
+                onChanged: _busy
+                    ? null
+                    : (val) {
+                        _userTouched = true;
+                        setState(() => _autoBackupEnabled = val);
+                      },
+              ),
+            ],
           ),
           if (_testStatusMessage != null) ...[
             const SizedBox(height: 12),
@@ -494,7 +452,7 @@ class _S3ConfigPageState extends ConsumerState<S3ConfigPage> {
                 color: _testSucceeded
                     ? Colors.green.withValues(alpha: isDark ? 0.18 : 0.12)
                     : Theme.of(context).colorScheme.errorContainer,
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.circular(12),
               ),
               child: Text(
                 _testStatusMessage!,

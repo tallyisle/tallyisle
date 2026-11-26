@@ -594,34 +594,11 @@ class _AssetsPageState extends ConsumerState<AssetsPage> {
                       clipBehavior: Clip.antiAlias,
                       shape: cardShape,
                       child: Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 24, 16, 16),
+                        padding: const EdgeInsets.fromLTRB(16, 20, 16, 16),
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            Center(
-                              child: Container(
-                                width: 56,
-                                height: 56,
-                                decoration: BoxDecoration(
-                                  color: theme.colorScheme.primaryContainer
-                                      .withValues(
-                                        alpha:
-                                            theme.brightness == Brightness.dark
-                                            ? 0.32
-                                            : 0.48,
-                                      ),
-                                  shape: BoxShape.circle,
-                                ),
-                                alignment: Alignment.center,
-                                child: Icon(
-                                  Icons.account_balance_wallet_outlined,
-                                  size: 26,
-                                  color: theme.colorScheme.primary,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(height: 14),
                             Text(
                               '还没有资产账户',
                               textAlign: TextAlign.center,

@@ -821,11 +821,6 @@ class _CustomThemeHexDialogState extends State<_CustomThemeHexDialog> {
         labelText: '6 位十六进制颜色码',
         hintText: '例如 138EAA 或 #2E7D32',
         errorText: _errorText,
-        border: const OutlineInputBorder(),
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 12,
-          vertical: 14,
-        ),
       ),
       onChanged: (value) => setState(() {
         _previewColor = _tryParseHex(value);

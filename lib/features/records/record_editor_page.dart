@@ -4425,9 +4425,6 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                         horizontal: 12,
                         vertical: isDesktop ? 10 : 10,
                       ),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10),
-                      ),
                     ),
                   ),
                 ),
@@ -4957,6 +4954,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                                   decoration: InputDecoration(
                                     isCollapsed: isDesktopLayout,
                                     isDense: !isDesktopLayout,
+                                    filled: false,
                                     constraints: isDesktopLayout
                                         ? const BoxConstraints(minHeight: 32)
                                         : null,
@@ -4972,6 +4970,9 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                                       vertical: 4,
                                     ),
                                     border: InputBorder.none,
+                                    enabledBorder: InputBorder.none,
+                                    focusedBorder: InputBorder.none,
+                                    disabledBorder: InputBorder.none,
                                   ),
                                 ),
                               ),
@@ -5065,6 +5066,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                       style: const TextStyle(fontSize: 13.5, height: 1.25),
                       decoration: InputDecoration(
                         isCollapsed: true,
+                        filled: false,
                         hintText: '输入备注...',
                         hintStyle: TextStyle(
                           fontSize: 13.5,
@@ -5073,6 +5075,9 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                         ),
                         contentPadding: const EdgeInsets.symmetric(vertical: 8),
                         border: InputBorder.none,
+                        enabledBorder: InputBorder.none,
+                        focusedBorder: InputBorder.none,
+                        disabledBorder: InputBorder.none,
                       ),
                     ),
                   ),
@@ -5239,6 +5244,7 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                       style: const TextStyle(fontSize: 13.5),
                       decoration: InputDecoration(
                         isDense: true,
+                        filled: false,
                         hintText: '输入备注...',
                         hintStyle: TextStyle(
                           fontSize: 13,
@@ -5249,6 +5255,9 @@ class _RecordEditorPageState extends ConsumerState<RecordEditorPage>
                           vertical: 8,
                         ),
                         border: InputBorder.none,
+                        enabledBorder: InputBorder.none,
+                        focusedBorder: InputBorder.none,
+                        disabledBorder: InputBorder.none,
                         prefixIcon: Icon(
                           Icons.edit_note_rounded,
                           size: 18,
@@ -6132,7 +6141,6 @@ class _DiscountEditDialogState extends State<_DiscountEditDialog> {
               hintText: '0.00',
               prefixText: '${widget.currencySymbol} ',
               errorText: _errorText,
-              border: const OutlineInputBorder(),
             ),
           ),
         ],
@@ -6282,7 +6290,6 @@ class _ConversionEditDialogState extends State<_ConversionEditDialog> {
               labelText: fieldLabel,
               prefixText: '${widget.targetCurrency} ',
               errorText: _errorText,
-              border: const OutlineInputBorder(),
             ),
           ),
           const SizedBox(height: 6),
