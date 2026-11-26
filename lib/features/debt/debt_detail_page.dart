@@ -20,7 +20,7 @@ const _uuid = Uuid();
 
 enum _DetailMenuAction { edit, recalibrate, settle, reopen, delete }
 
-/// Detail page for one lending/borrowing project (`F-011` / `/bkp/DDAct`).
+/// Detail page for one lending/borrowing project (`F-011`).
 class DebtDetailPage extends ConsumerStatefulWidget {
   const DebtDetailPage({super.key, required this.debtId});
 

@@ -689,7 +689,7 @@ void main() {
         expect(picked.bytes, sampleBytes);
         expect(fakeFileSelector.lastOpenTypeGroups, isEmpty);
 
-        // saveBytes, shareBytes, openExternalUrl succeed over dev.tallyisle/files
+        // saveBytes, shareBytes, openExternalUrl succeed over com.tallyisle/files
         await access.saveBytes('ohos_backup.yi2a', sampleBytes);
         await access.shareBytes(
           'ohos_backup.zip',

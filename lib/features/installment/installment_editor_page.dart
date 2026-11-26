@@ -15,7 +15,7 @@ import '../records/record_editor_page.dart'
 import '../records/record_labels.dart' show assetName, categoryName;
 import 'installment_providers.dart';
 
-/// Create / edit page for an installment plan (F-010, original `/bkp/CreateInstAct`).
+/// Create / edit page for an installment plan (F-010).
 class InstallmentEditorPage extends ConsumerStatefulWidget {
   const InstallmentEditorPage({super.key, this.installmentId});
 

@@ -877,7 +877,7 @@ final class SavingsService {
   /// Deletes a savings plan and its `money_save_plan_record` rows.
   ///
   /// By default (`deleteLinkedTransfers == false`), preserves historical transfer
-  /// bills per original DR-SP-05. When `deleteLinkedTransfers == true`, checks each
+  /// bills by default. When `deleteLinkedTransfers == true`, checks each
   /// linked `recordId` and deletes live transfer bills while reversing `netEffects`.
   Future<void> deletePlan({
     required String commandId,

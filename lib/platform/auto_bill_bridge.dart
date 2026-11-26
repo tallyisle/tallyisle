@@ -584,7 +584,7 @@ AutoBillBridge createAutoBillBridge({bool? isOhosOverride}) {
   );
 }
 
-/// Native implementation bridged via `MethodChannel('dev.tallyisle/automation')`
+/// Native implementation bridged via `MethodChannel('com.tallyisle/automation')`
 /// on Android, iOS and HarmonyOS.
 final class MethodChannelAutoBillBridge implements AutoBillBridge {
   MethodChannelAutoBillBridge({MethodChannel? channel, bool? isOhosOverride})

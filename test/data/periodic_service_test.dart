@@ -429,7 +429,7 @@ void main() {
         initial: Money.parse('1000.00'),
       );
 
-      // Insert an existing bill at 2026-03-03 18:30:00.500 (would have triggered SQL-PB-09 maxTime+1ms in original APK)
+      // Insert an existing bill at 2026-03-03 18:30:00.500 (verifies deterministic timestamp independence)
       await ledger.saveRecord(
         commandId: 'existing-bill',
         draft: RecordDraft(

@@ -40,19 +40,12 @@ __pycache__/
 *.sqlite-shm
 *.sqlite-wal
 
-# Evidence is archived on disk only (17 GB); not tracked since 2026-11-06
-evidence/
-archive/*/evidence/
-
-# Local binary reference APK and packaged APK releases
-reference/*.apk
+# Packaged release artifacts
 release/
 
-# Local governance docs, AI instructions, read-only archives, reference & private seeds
+# Local governance docs, AI instructions & private seeds
 # (Backed up via cloud env-kit archive; excluded from public source repository)
 /AGENTS.md
 /docs/
-/archive/
-/reference/
 /tool/seeds/
 /.env-kit/

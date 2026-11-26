@@ -1788,7 +1788,7 @@ final class StagedPennyBackup {
   final bool synthesizedDefaultBook;
 }
 
-/// Extracts original app version string (e.g. `'8.6.0'`) from a `.penny` / `.yy`
+/// Extracts backup source version string (e.g. `'8.6.0'`) from a `.penny` / `.yy`
 /// filename when present.
 String? extractPennyVersionFromFileName(String fileName) {
   final base = fileName.split(RegExp(r'[/\\]')).last;
@@ -1796,7 +1796,7 @@ String? extractPennyVersionFromFileName(String fileName) {
   return match?.group(1);
 }
 
-/// Selects the active book ID after restore (`import-original-backup.md` §6.2):
+/// Selects the active book ID after restore (`yiyu-backup-import.md` §6.2):
 /// prefers `id == 1`; otherwise selects the first book ordered by `(sort, id)`.
 int resolvePennyTargetBookId(Iterable<StagedAccountBook> books) {
   final list = books.toList();
@@ -2808,7 +2808,7 @@ StagedPennyBackup stagePennyJsonText(
     'app_version',
   ]);
   final appVersion =
-      rootVersion ?? extractPennyVersionFromFileName(fileName) ?? '原版备份';
+      rootVersion ?? extractPennyVersionFromFileName(fileName) ?? '一羽记账备份';
 
   final preview = PennyBackupPreview(
     fileName: fileName,

@@ -40,8 +40,9 @@ class AppDatabase extends _$AppDatabase {
 
   final int Function() nowMs;
 
-  /// Pre-1.0 policy (ADR-013): the schema may change freely and development
-  /// databases are recreated instead of migrated. Real migrations start at 1.0.
+  /// Schema lock policy (ADR-013): the 24 SQLite tables and column definitions
+  /// are strictly frozen; never alter schema without explicit user approval and
+  /// a complete compatibility migration plan.
   @override
   int get schemaVersion => 1;
 

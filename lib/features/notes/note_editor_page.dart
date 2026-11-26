@@ -11,7 +11,7 @@ import 'note_providers.dart';
 
 const _uuid = Uuid();
 
-/// Create / edit page for a Note (`F-015`, original route `/bkp/NEAct`).
+/// Create / edit page for a Note (`F-015`).
 class NoteEditorPage extends ConsumerStatefulWidget {
   const NoteEditorPage({this.noteId, super.key});
 

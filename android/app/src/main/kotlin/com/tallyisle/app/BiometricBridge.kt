@@ -1,4 +1,4 @@
-package dev.tallyisle.rebuild
+package com.tallyisle.app
 
 import android.app.Activity
 import android.app.KeyguardManager
@@ -301,7 +301,7 @@ class BiometricBridge(private val activity: Activity) {
     }
 
     companion object {
-        const val CHANNEL_NAME = "dev.tallyisle/biometrics"
+        const val CHANNEL_NAME = "com.tallyisle/biometrics"
 
         private const val STATUS_AVAILABLE = "available"
         private const val STATUS_NOT_ENROLLED = "notEnrolled"

@@ -1,6 +1,6 @@
 {
   "app": {
-    "bundleName": "dev.tallyisle.app",
+    "bundleName": "com.tallyisle.app",
     "vendor": "tallyisle",
     "versionCode": 12,
     "versionName": "0.9.0",

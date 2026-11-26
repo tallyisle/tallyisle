@@ -266,7 +266,7 @@ void main() {
         expect(macWindow, contains('"TallyIsle"'));
 
         final bioKt = _readRepoFile(
-          'android/app/src/main/kotlin/dev/tallyisle/rebuild/BiometricBridge.kt',
+          'android/app/src/main/kotlin/com/tallyisle/app/BiometricBridge.kt',
         );
         expect(bioKt, contains('验证身份以解锁帐屿'));
         expect(bioKt, contains('Verify identity to unlock TallyIsle'));

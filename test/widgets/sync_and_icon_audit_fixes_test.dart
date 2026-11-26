@@ -600,7 +600,7 @@ void main() {
       );
 
       test(
-        'B-26: Windows openExternalUrl invokes MethodChannel(dev.tallyisle/files) and handles bool return values',
+        'B-26: Windows openExternalUrl invokes MethodChannel(com.tallyisle/files) and handles bool return values',
         () async {
           const channel = MethodChannel(fileBridgeChannelName);
           final calls = <MethodCall>[];

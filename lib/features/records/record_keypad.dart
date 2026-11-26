@@ -246,7 +246,7 @@ TextEditingValue applyCustomKeypadValue(
   );
 }
 
-/// Clean 一羽 / 钱迹 style 4×4 custom arithmetic keypad (`254dp` before `SafeArea`
+/// Borderless tonal 4×4 custom arithmetic keypad (`254dp` before `SafeArea`
 /// bottom inset) for `RecordEditorPage`:
 /// - Row 1: `7`, `8`, `9`, `⌫` (tap backspace, long-press clear all)
 /// - Row 2: `4`, `5`, `6`, `+` (tap `+`; optional long-press `×` when [enableMultiplyDivide] is true)

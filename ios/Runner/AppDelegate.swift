@@ -58,7 +58,7 @@ private final class DocumentPickerDelegateBox: NSObject,
 
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
-  private static let fileChannelName = "dev.tallyisle/files"
+  private static let fileChannelName = "com.tallyisle/files"
   private var fileChannel: FlutterMethodChannel?
   private var activeDocumentPickers = Set<DocumentPickerDelegateBox>()
 

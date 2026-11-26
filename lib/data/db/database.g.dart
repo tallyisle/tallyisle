@@ -1110,8 +1110,8 @@ class Asset extends DataClass implements Insertable<Asset> {
   final BigInt initMoneyMinor;
   final bool isDefault;
 
-  /// Original semantics: 1 = counted in net worth, except for type=4 (debt)
-  /// where the polarity is inverted (0 = counted). Always written explicitly.
+  /// Net-worth inclusion flag: `1` = counted in net worth, except for `type = 4`
+  /// (debt) where polarity is inverted (`0` = counted). Always written explicitly.
   final int isEffectiveAsset;
   final int usedTimes;
   final String? color;

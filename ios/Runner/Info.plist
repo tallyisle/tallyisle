@@ -50,7 +50,7 @@
 			<key>CFBundleTypeRole</key>
 			<string>Editor</string>
 			<key>CFBundleURLName</key>
-			<string>dev.tallyisle.urlscheme</string>
+			<string>com.tallyisle.urlscheme</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>tallyisle</string>
@@ -96,7 +96,7 @@
 			<key>UIApplicationShortcutItemTitle</key>
 			<string>SHORTCUT_NEW_RECORD_TITLE</string>
 			<key>UIApplicationShortcutItemType</key>
-			<string>dev.tallyisle.shortcut.new_record</string>
+			<string>com.tallyisle.shortcut.new_record</string>
 		</dict>
 		<dict>
 			<key>UIApplicationShortcutItemIconSymbolName</key>
@@ -104,7 +104,7 @@
 			<key>UIApplicationShortcutItemTitle</key>
 			<string>SHORTCUT_SMART_BILL_TITLE</string>
 			<key>UIApplicationShortcutItemType</key>
-			<string>dev.tallyisle.shortcut.smart_bill</string>
+			<string>com.tallyisle.shortcut.smart_bill</string>
 		</dict>
 		<dict>
 			<key>UIApplicationShortcutItemIconSymbolName</key>
@@ -112,7 +112,7 @@
 			<key>UIApplicationShortcutItemTitle</key>
 			<string>SHORTCUT_OCR_BILL_TITLE</string>
 			<key>UIApplicationShortcutItemType</key>
-			<string>dev.tallyisle.shortcut.ocr_bill</string>
+			<string>com.tallyisle.shortcut.ocr_bill</string>
 		</dict>
 		<dict>
 			<key>UIApplicationShortcutItemIconSymbolName</key>
@@ -120,7 +120,7 @@
 			<key>UIApplicationShortcutItemTitle</key>
 			<string>SHORTCUT_DRAFTS_TITLE</string>
 			<key>UIApplicationShortcutItemType</key>
-			<string>dev.tallyisle.shortcut.drafts</string>
+			<string>com.tallyisle.shortcut.drafts</string>
 		</dict>
 	</array>
 	<key>UIApplicationSupportsIndirectInputEvents</key>

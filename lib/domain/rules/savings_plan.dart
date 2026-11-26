@@ -29,7 +29,7 @@ abstract final class SavingsPlanType {
 }
 
 /// Cycle codes stored in `money_save_plan.cycle_type` (savings-plan.md §2, DR-SP-02).
-/// Note: code `4` is unused in the original Room v42 schema.
+/// Note: code `4` is unused in the schema.
 abstract final class SavingsCycleType {
   static const free = -1;
   static const daily = 1;
@@ -746,7 +746,7 @@ final class SavingsActiveSummary {
 
 /// Summarizes active savings plans in [base] currency using exact `BigInt` math.
 ///
-/// Unlike the original app's silent 1:1 fallback (`CE-SP-08`), any active foreign
+/// Any active foreign
 /// plan lacking a valid positive exchange rate is reported in [missingRates] and
 /// NOT falsely added 1:1 as base currency.
 SavingsActiveSummary summarizeActiveSavingsPlans({

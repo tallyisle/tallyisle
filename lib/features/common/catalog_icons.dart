@@ -14,7 +14,7 @@ import '../../domain/rules/bank_icon_catalog.dart';
 import '../../domain/rules/template_card_rules.dart';
 import 'svg_vector_icon.dart';
 
-/// Harmonious Material 3-aligned color presets matching 一羽记账's soft rounded
+/// Harmonious Material 3-aligned color presets for TallyIsle's soft rounded
 /// circular category and account icon badges.
 const List<String> catalogColorHexPresets = <String>[
   '#FF7043', // Warm Coral (餐饮)
@@ -561,7 +561,7 @@ const Map<String, String> _categoryIconAliases = <String, String>{
   'swaphoriz': 'swap_horiz',
   'swap_horiz': 'swap_horiz',
   'setmeal': 'set_meal',
-  // Original v8.6.0 preset category numeric codes (ledger-catalog.md §6):
+  // Legacy numeric category icon codes (`docs/reference/ledger-catalog.md` §6):
   '1': 'restaurant',
   '2': 'shopping_bag',
   '3': 'subway',

@@ -1070,7 +1070,7 @@ void main() {
 
   group('Android FileAccess native MethodChannel bridge', () {
     test(
-      'routes saveBytes and shareBytes over dev.tallyisle/files on Android and maps CANCELLED',
+      'routes saveBytes and shareBytes over com.tallyisle/files on Android and maps CANCELLED',
       () async {
         debugDefaultTargetPlatformOverride = TargetPlatform.android;
         addTearDown(() => debugDefaultTargetPlatformOverride = null);

@@ -24,7 +24,7 @@ import {
 } from '../common/WidgetStore';
 
 const TAG: string = 'TallyIsleAutomationBridge';
-const CHANNEL_NAME: string = 'dev.tallyisle/automation';
+const CHANNEL_NAME: string = 'com.tallyisle/automation';
 const STATUS_UNSUPPORTED_LABEL: string = '当前平台不支持';
 const ACTION_SEND_DATA: string = 'ohos.want.action.sendData';
 const PARAM_SHORTCUT_ACTION: string = 'shortcut_action';

@@ -12,10 +12,10 @@ const String defaultYa2iExportFileName = 'TallyIsle-Android2iOS.ya2i';
 /// Historical hardcoded Zip4j password used by LAN `ServerBackup.zip` (`DR-IMP-09`).
 const String historicalLanZipPassword = 'YYjz@23!';
 
-/// Tombstone status code from original cloud-sync entities (`DR-BK-08`).
+/// Tombstone status code from legacy cloud-sync entities (`DR-BK-08`).
 const int _tombstoneStatus = 4;
 
-/// Canonical 19 cross-OS root list keys in `.ya2i` / `.yi2a` (`docs/modules/ios-migration.md` §2.1).
+/// Canonical 19 cross-OS root list keys in `.ya2i` / `.yi2a` (`docs/modules/third-party-migration.md` §2.1).
 const List<String> iosMigrationListKeys = <String>[
   'books',
   'categories',
@@ -38,7 +38,7 @@ const List<String> iosMigrationListKeys = <String>[
   'statStory',
 ];
 
-/// Validates `.yi2a` import file extension (`docs/modules/ios-migration.md` §2.1, `EX-20`):
+/// Validates `.yi2a` import file extension (`docs/modules/third-party-migration.md` §2.1, `EX-20`):
 /// - Empty / blank extension is allowed (short-circuit pass).
 /// - Non-blank extension must strictly equal lowercase `'yi2a'`.
 void validateYi2aFileName(String fileName) {
@@ -486,7 +486,7 @@ BigInt? _parseMinorStoredOrMajor(Object? raw, {required bool sourceIsMinor}) {
 
 // ============================================================================
 // Embedded JSON Column Converters (Import -> TallyIsle minor strings,
-// Export -> Original 2-decimal JSON numbers)
+// Export -> 2-decimal JSON numbers)
 // ============================================================================
 
 /// Converts `record.extra_info` (`curr` and `adbi` / flat advance keys) from

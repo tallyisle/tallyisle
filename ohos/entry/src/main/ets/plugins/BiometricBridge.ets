@@ -12,7 +12,7 @@ import { i18n } from '@kit.LocalizationKit';
 import userAuth from '@ohos.userIAM.userAuth';
 
 const TAG: string = 'TallyIsleBiometricBridge';
-const CHANNEL_NAME: string = 'dev.tallyisle/biometrics';
+const CHANNEL_NAME: string = 'com.tallyisle/biometrics';
 
 const STATUS_AVAILABLE: string = 'available';
 const STATUS_NOT_ENROLLED: string = 'notEnrolled';

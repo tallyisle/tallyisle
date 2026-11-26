@@ -661,7 +661,7 @@ void main() {
 
       expect(find.byKey(const Key('penny_preview_dialog')), findsNothing);
       expect(
-        find.textContaining('原版 Android 备份导入完成：已切换至「一羽主账本」'),
+        find.textContaining('一羽记账 Android 备份导入完成：已切换至「一羽主账本」'),
         findsOneWidget,
       );
       expect(find.text('账本 1 · 账户 1 · 账单 2 · 便签 1'), findsOneWidget);
@@ -1022,7 +1022,7 @@ void main() {
 
       expect(find.byKey(const Key('lan_password_dialog')), findsNothing);
       expect(find.byKey(const Key('lan_confirm_dialog')), findsOneWidget);
-      expect(find.textContaining('已自动匹配原版历史加密口令'), findsOneWidget);
+      expect(find.textContaining('已自动匹配一羽记账历史默认口令'), findsOneWidget);
 
       await tester.tap(find.byKey(const Key('migration_confirm_submit')));
       await settle(tester);

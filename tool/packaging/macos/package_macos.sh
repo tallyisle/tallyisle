@@ -141,7 +141,7 @@ rm -f "$PKG_OUT"
 pkgbuild \
   --component "$APP_PATH" \
   --install-location /Applications \
-  --identifier dev.tallyisle.rebuild \
+  --identifier com.tallyisle.app \
   --version "$APP_VERSION" \
   "$PKG_OUT"
 assert_nonempty "$PKG_OUT"

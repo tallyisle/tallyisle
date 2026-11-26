@@ -17,7 +17,7 @@ import '../common/desktop_modal_page.dart';
 import 'bank_card_editor_page.dart';
 import 'bank_card_providers.dart';
 
-/// Bank Card Memo Folder page (`F-023`, original `/bkp/BCBAct`).
+/// Bank Card Memo Folder page (`F-023`).
 class BankCardsPage extends ConsumerStatefulWidget {
   const BankCardsPage({super.key});
 

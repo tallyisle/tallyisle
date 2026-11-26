@@ -13,7 +13,7 @@ import 'savings_detail_page.dart';
 import 'savings_editor_page.dart';
 import 'savings_providers.dart';
 
-/// Savings Plan management page (F-012, original route R-029 `/bkp/MSPAct`).
+/// Savings Plan management page (F-012).
 class SavingsPage extends ConsumerStatefulWidget {
   const SavingsPage({super.key});
 

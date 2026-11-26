@@ -4,10 +4,10 @@ import '../../core/failure.dart';
 import '../../core/money.dart';
 import '../model/codes.dart';
 
-/// Original `auto_map.key` sentinel for draft inbox rows (`F-020`).
+/// Reserved `auto_map.key` sentinel for draft inbox rows (`F-020`).
 const String autoMapDraftKey = 'KEY_DRAFT';
 
-/// Original `auto_map.key` sentinel for cloud accessibility node config (`F-020`).
+/// Reserved `auto_map.key` sentinel for cloud accessibility node config (`F-020`).
 const String autoMapConfigKey = 'KEY_CONFIG';
 
 /// Returns true when [key] represents a user mapping rule row in `auto_map`.

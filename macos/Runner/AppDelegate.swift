@@ -8,7 +8,7 @@ class AppDelegate: FlutterAppDelegate {
   override func applicationDidFinishLaunching(_ notification: Notification) {
     if let controller = mainFlutterWindow?.contentViewController as? FlutterViewController {
       let channel = FlutterMethodChannel(
-        name: "dev.tallyisle/files",
+        name: "com.tallyisle/files",
         binaryMessenger: controller.engine.binaryMessenger
       )
       channel.setMethodCallHandler { [weak self] call, result in

@@ -21,7 +21,7 @@ import 'installment_editor_page.dart';
 import 'installment_page.dart' show InstallmentIntProgressBar;
 import 'installment_providers.dart';
 
-/// Installment detail & repayment schedule page (F-010, original `/bkp/InstDtlAct`).
+/// Installment detail & repayment schedule page (F-010).
 class InstallmentDetailPage extends ConsumerStatefulWidget {
   const InstallmentDetailPage({
     super.key,

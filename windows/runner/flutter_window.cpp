@@ -17,7 +17,7 @@
 
 namespace {
 
-constexpr const char kFilesChannelName[] = "dev.tallyisle/files";
+constexpr const char kFilesChannelName[] = "com.tallyisle/files";
 
 bool HasAllowedHttpScheme(const std::string& url) {
   if (url.find('\0') != std::string::npos) {

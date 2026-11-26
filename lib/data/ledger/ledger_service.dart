@@ -896,7 +896,7 @@ final class LedgerService {
     return trimmed;
   }
 
-  // Original flag: 1 = counted, inverted for type 4 (ledger-catalog §3).
+  // Inclusion flag: 1 = counted, inverted for type 4 (ledger-catalog §3).
   int _effectiveFlag(int type, bool counted) =>
       type == AssetType.debt ? (counted ? 0 : 1) : (counted ? 1 : 0);
 
@@ -1539,7 +1539,7 @@ final class LedgerService {
             cat.accountBookId != d.bookId) {
           throw const Failure(FailureCode.validation, '请选择当前账本的分类');
         }
-        // Original allows bills without an account (asset_id = -1).
+        // Schema allows bills without an account (asset_id = -1).
         if (d.assetId != noRef) await _fundingAsset(d.assetId);
         if (d.discount != null) {
           if (d.discount!.isNegative) {

@@ -5,7 +5,7 @@ import UIKit
 import UniformTypeIdentifiers
 import Vision
 
-/// Unified iOS native MethodChannel bridge (`dev.tallyisle/automation`) for:
+/// Unified iOS native MethodChannel bridge (`com.tallyisle/automation`) for:
 ///  - `tallyisle://` cold & warm external deep links
 ///  - Open-In image/text files, Home Screen quick actions, and foreground AppIntents payloads
 ///  - Background AppIntents captured-event inbox persisted in `UserDefaults.standard`
@@ -16,7 +16,7 @@ import Vision
 final class AutomationBridge: NSObject {
   static let shared = AutomationBridge()
 
-  static let channelName = "dev.tallyisle/automation"
+  static let channelName = "com.tallyisle/automation"
   static let capturedEventsDefaultsKey = "tallyisle_ios_captured_events"
   private static let statusUnsupportedLabel = "当前平台不支持"
   private static let maxStoredCapturedEvents = 100
@@ -30,10 +30,10 @@ final class AutomationBridge: NSObject {
     "txt", "text",
   ]
   private static let shortcutTypeToAction: [String: String] = [
-    "dev.tallyisle.shortcut.new_record": "new_record",
-    "dev.tallyisle.shortcut.smart_bill": "smart_bill",
-    "dev.tallyisle.shortcut.ocr_bill": "ocr_bill",
-    "dev.tallyisle.shortcut.drafts": "drafts",
+    "com.tallyisle.shortcut.new_record": "new_record",
+    "com.tallyisle.shortcut.smart_bill": "smart_bill",
+    "com.tallyisle.shortcut.ocr_bill": "ocr_bill",
+    "com.tallyisle.shortcut.drafts": "drafts",
   ]
 
   private struct QueuedSharedPayload {
@@ -140,7 +140,7 @@ final class AutomationBridge: NSObject {
   }
 
   /// Captures a `tallyisle://` URL (case-insensitive scheme), ignoring internal reminder routes
-  /// (`reminder`, `reminder-open`) and rejecting legacy `yyjz://` links.
+  /// (`reminder`, `reminder-open`) and rejecting any non-`tallyisle` scheme.
   @discardableResult
   func handleIncomingDeepLink(_ url: URL, notifyFlutter: Bool = true) -> Bool {
     guard let scheme = url.scheme?.lowercased(), scheme == "tallyisle" else {

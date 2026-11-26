@@ -1,7 +1,7 @@
 import '../../core/failure.dart';
 import '../../core/money.dart';
 
-/// Original keyboard upper bound: `88888888888.00` (`8888888888800` minor units,
+/// Keypad upper bound: `88888888888.00` (`8888888888800` minor units,
 /// `docs/reference/ledger-catalog.md` §5, DR-003).
 final BigInt maxKeypadAmountMinor = BigInt.parse('8888888888800');
 final Money maxKeypadAmount = Money.minor(maxKeypadAmountMinor);

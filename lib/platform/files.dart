@@ -153,7 +153,7 @@ final class ExternalBackupFileEntry {
   }
 }
 
-const String fileBridgeChannelName = 'dev.tallyisle/files';
+const String fileBridgeChannelName = 'com.tallyisle/files';
 
 typedef PickBytesHandler =
     Future<SelectedBytes> Function(List<String>? allowedExtensions);

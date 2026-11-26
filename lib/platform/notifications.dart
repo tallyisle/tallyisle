@@ -101,7 +101,7 @@ abstract interface class ReminderScheduler {
   Future<void> dispose();
 }
 
-const String reminderChannelName = 'dev.tallyisle/reminders';
+const String reminderChannelName = 'com.tallyisle/reminders';
 
 /// Creates the platform-appropriate [ReminderScheduler].
 ReminderScheduler createReminderScheduler({bool? isOhosOverride}) {
@@ -119,7 +119,7 @@ ReminderScheduler createReminderScheduler({bool? isOhosOverride}) {
   );
 }
 
-/// Native implementation bridged via `MethodChannel('dev.tallyisle/reminders')`
+/// Native implementation bridged via `MethodChannel('com.tallyisle/reminders')`
 /// on Android and HarmonyOS.
 ///
 /// If invoked inside headless Flutter widget tests where no native host is

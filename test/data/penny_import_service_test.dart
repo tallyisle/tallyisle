@@ -23,7 +23,7 @@ Map<String, Object?> _buildFull20TablePayload() => <String, Object?>{
       '_id': 1,
       'id': 1,
       'type': 1,
-      'name': '原版日常账本',
+      'name': '历史日常账本',
       'cover': 'cover_1',
       'sort': 1,
       'status': 0,

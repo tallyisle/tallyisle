@@ -96,7 +96,7 @@ final class BiometricAuthResult {
   int get hashCode => Object.hash(outcome, message);
 }
 
-const String biometricChannelName = 'dev.tallyisle/biometrics';
+const String biometricChannelName = 'com.tallyisle/biometrics';
 
 /// Platform boundary for OS biometric authentication (`ADR-008`, `F-024`).
 ///
@@ -165,7 +165,7 @@ final class UnsupportedBiometricAuthenticator
   Future<void> cancelAuthentication() async {}
 }
 
-/// Native implementation backed by `MethodChannel('dev.tallyisle/biometrics')`
+/// Native implementation backed by `MethodChannel('com.tallyisle/biometrics')`
 /// on Android (`BiometricPrompt`) and HarmonyOS (`@ohos.userIAM.userAuth`).
 final class MethodChannelBiometricAuthenticator
     implements BiometricAuthenticator {

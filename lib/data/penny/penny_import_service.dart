@@ -25,7 +25,7 @@ final class PennyImportResult {
 }
 
 /// Atomic restore service for original `.penny` / `.yy` encrypted backups
-/// (`docs/modules/import-original-backup.md` F-035, R1..R7, HR-01..HR-05).
+/// (`docs/modules/yiyu-backup-import.md` F-035, R1..R7, HR-01..HR-05).
 final class PennyImportService {
   PennyImportService(this.db, {ReminderService? reminderService})
     : _reminderService = reminderService ?? ReminderService(db);

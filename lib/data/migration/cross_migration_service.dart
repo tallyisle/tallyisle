@@ -598,7 +598,7 @@ final class CrossMigrationService {
   /// - If `"YYjz@23!"` fails, returns [LanInspectPasswordRequired] cleanly so the
   ///   UI prompts the user for their custom password (`CE-IOS-03`).
   /// - If a user-supplied [password] fails, returns [LanInspectWrongPassword].
-  /// - Extracts the SQLite `.db` to a temporary directory, inspects Room v42 /
+  /// - Extracts the SQLite `.db` to a temporary directory, inspects legacy Android SQLite /
   ///   TallyIsle tables read-only via `package:sqlite3`, converts REAL amounts to
   ///   exact `int64` minor units, drops `sstatus == 4` tombstones, and always
   ///   deletes temporary files in `finally`.

@@ -25,7 +25,7 @@ final _intInputFormatters = <TextInputFormatter>[
   FilteringTextInputFormatter.digitsOnly,
 ];
 
-/// Create / edit screen for a fixed deposit (`FixedDepositAddEditActivity` / `/bkp/FDAEAct`, F-027).
+/// Create / edit screen for a fixed deposit (`FixedDepositAddEditActivity`, F-027).
 class FixedDepositEditorPage extends ConsumerStatefulWidget {
   const FixedDepositEditorPage({
     super.key,

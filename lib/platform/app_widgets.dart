@@ -5,7 +5,7 @@ import '../core/failure.dart';
 import '../core/money.dart';
 import 'files.dart';
 
-const String automationChannelName = 'dev.tallyisle/automation';
+const String automationChannelName = 'com.tallyisle/automation';
 
 /// Supported Android home-screen widgets / HarmonyOS service cards (`F-034`).
 enum DesktopWidgetKind {
@@ -206,7 +206,7 @@ Map<DesktopWidgetKind, int> _decodeCountsMap(Map<Object?, Object?>? raw) {
 }
 
 /// Android / HarmonyOS native implementation bridged via
-/// `MethodChannel('dev.tallyisle/automation')`.
+/// `MethodChannel('com.tallyisle/automation')`.
 ///
 /// Never registers a method-call handler so it coexists cleanly with
 /// `MethodChannelAutoBillBridge` on the shared channel.

@@ -1,4 +1,4 @@
-package dev.tallyisle.rebuild
+package com.tallyisle.app
 
 import android.accessibilityservice.AccessibilityService
 import android.content.ComponentName

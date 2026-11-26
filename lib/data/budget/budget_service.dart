@@ -325,7 +325,7 @@ final class BudgetService {
   /// [currentPeriod] when the current period has no budgets and the previous period
   /// has at least one budget with `acopy == true`.
   ///
-  /// Fixes the original app's `singleOrNull` defect, allowing arbitrary numbers of
+  /// Allows arbitrary numbers of
   /// category budgets and total budget to be copied/carried over simultaneously.
   Future<int> ensureAutoCarryoverIfNeeded({
     required String commandId,

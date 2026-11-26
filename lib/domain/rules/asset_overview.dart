@@ -67,7 +67,7 @@ final class OverviewAccount {
   final String? currency;
   final String? creditInfo;
 
-  /// Original gate: `type == 4 ? !eff : eff` (ledger-catalog §3).
+  /// Inclusion gate: `type == 4 ? !eff : eff` (ledger-catalog §3).
   bool get counted =>
       type == AssetType.debt ? isEffectiveAsset == 0 : isEffectiveAsset == 1;
 }

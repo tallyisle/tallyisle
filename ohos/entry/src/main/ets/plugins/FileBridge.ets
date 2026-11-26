@@ -16,7 +16,7 @@ import uniformTypeDescriptor from '@ohos.data.uniformTypeDescriptor';
 import { systemShare } from '@kit.ShareKit';
 
 const TAG: string = 'TallyIsleFileBridge';
-const CHANNEL_NAME: string = 'dev.tallyisle/files';
+const CHANNEL_NAME: string = 'com.tallyisle/files';
 const SHARED_EXPORTS_DIR: string = 'shared_exports';
 const EXPORT_CACHE_TTL_MS: number = 24 * 60 * 60 * 1000;
 

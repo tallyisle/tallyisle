@@ -51,8 +51,7 @@ final class AssetDelta {
 /// principal history and are not covered by these deltas; only the funding
 /// accounts of debt records are affected here.
 ///
-/// Rules: docs/reference/ledger-catalog.md §1. Deliberate decisions where the
-/// original is unconfirmed are marked "decision".
+/// Rules: `docs/reference/ledger-catalog.md` §1.
 List<AssetDelta> balanceEffects(EntryFacts r) {
   final deltas = <AssetDelta>[];
   void add(int assetId, BigInt minor) {

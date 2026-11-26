@@ -15,7 +15,7 @@ import 'installment_detail_page.dart';
 import 'installment_editor_page.dart';
 import 'installment_providers.dart';
 
-/// Installment management list page (F-010, original `/bkp/IRAct`).
+/// Installment management list page (F-010).
 class InstallmentPage extends ConsumerStatefulWidget {
   const InstallmentPage({
     super.key,

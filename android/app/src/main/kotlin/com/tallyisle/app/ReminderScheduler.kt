@@ -1,4 +1,4 @@
-package dev.tallyisle.rebuild
+package com.tallyisle.app
 
 import android.Manifest
 import android.app.AlarmManager
@@ -26,16 +26,16 @@ data class PersistedReminder(
 )
 
 object ReminderNativeScheduler {
-    const val CHANNEL_NAME = "dev.tallyisle/reminders"
+    const val CHANNEL_NAME = "com.tallyisle/reminders"
     const val NOTIFICATION_CHANNEL_ID = "bookkeeping_reminder"
     const val NOTIFICATION_CHANNEL_NAME = "记账提醒"
     const val DEFAULT_REMINDER_TIP = "是时候来记账啦！"
     const val DEFAULT_LAUNCH_ROUTE = "/record/new"
 
-    const val ACTION_FIRE_REMINDER = "dev.tallyisle.rebuild.ACTION_FIRE_REMINDER"
-    const val EXTRA_REMINDER_ID = "dev.tallyisle.rebuild.extra.REMINDER_ID"
-    const val EXTRA_SCHEDULED_AT = "dev.tallyisle.rebuild.extra.SCHEDULED_AT"
-    const val EXTRA_LAUNCH_ROUTE = "dev.tallyisle.rebuild.extra.LAUNCH_ROUTE"
+    const val ACTION_FIRE_REMINDER = "com.tallyisle.app.ACTION_FIRE_REMINDER"
+    const val EXTRA_REMINDER_ID = "com.tallyisle.app.extra.REMINDER_ID"
+    const val EXTRA_SCHEDULED_AT = "com.tallyisle.app.extra.SCHEDULED_AT"
+    const val EXTRA_LAUNCH_ROUTE = "com.tallyisle.app.extra.LAUNCH_ROUTE"
 
     private const val PREFS_NAME = "tallyisle_reminders"
     private const val KEY_REMINDERS_JSON = "reminders_json"

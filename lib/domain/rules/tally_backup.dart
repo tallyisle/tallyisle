@@ -24,7 +24,7 @@ const int defaultAutoBackupCooldownMs =
 /// double / JavaScript `Number.MAX_SAFE_INTEGER` (`2^53 - 1`).
 final BigInt maxSafeJsInteger = BigInt.parse('9007199254740991');
 
-/// All 22 Room v42 business tables covered by TallyIsle `.tally` backups (R1, ADR-013).
+/// All 22 core business tables covered by TallyIsle `.tally` backups (R1, ADR-013).
 const List<String> tallyBusinessTables = <String>[
   'account_book',
   'record',

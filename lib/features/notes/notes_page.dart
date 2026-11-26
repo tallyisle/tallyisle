@@ -13,7 +13,7 @@ import 'note_trash_page.dart';
 
 const _uuid = Uuid();
 
-/// Notes management page (`F-015`, original route `/bkp/NAct`).
+/// Notes management page (`F-015`).
 class NotesPage extends ConsumerStatefulWidget {
   const NotesPage({super.key});
 

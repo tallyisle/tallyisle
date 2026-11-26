@@ -1,4 +1,4 @@
-package dev.tallyisle.rebuild
+package com.tallyisle.app
 
 import android.app.Activity
 import android.content.ComponentName
@@ -20,7 +20,7 @@ import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
 /**
- * Unified Android native MethodChannel bridge (`dev.tallyisle/automation`) for:
+ * Unified Android native MethodChannel bridge (`com.tallyisle/automation`) for:
  *  - `F-033` `tallyisle://` external deep-link capture & live dispatch
  *  - `F-034` Desktop AppWidget snapshot sync & pin requests (4 widget kinds)
  *  - `F-020` notification listener / accessibility / overlay permission status & settings jumps
@@ -407,13 +407,13 @@ class AutomationBridge(
     }
 
     companion object {
-        const val CHANNEL_NAME = "dev.tallyisle/automation"
+        const val CHANNEL_NAME = "com.tallyisle/automation"
         const val STATUS_ENABLED = "已开启"
         const val STATUS_DISABLED = "未开启"
         const val OVERLAY_GRANTED = "已授权"
         const val OVERLAY_DENIED = "未授权"
 
-        const val ACTION_SHORTCUT = "dev.tallyisle.rebuild.action.SHORTCUT"
+        const val ACTION_SHORTCUT = "com.tallyisle.app.action.SHORTCUT"
         const val EXTRA_SHORTCUT_ACTION = "shortcut_action"
         const val EXTRA_SHORTCUT_SOURCE = "shortcut_source"
         const val SHORTCUT_NEW_RECORD = "new_record"
@@ -432,7 +432,7 @@ class AutomationBridge(
         )
 
         private const val MAX_OCR_SIDE_PX = 4096
-        private const val MAIN_ACTIVITY_CLASS = "dev.tallyisle.rebuild.MainActivity"
+        private const val MAIN_ACTIVITY_CLASS = "com.tallyisle.app.MainActivity"
 
         private val ioExecutor: ExecutorService = Executors.newSingleThreadExecutor { runnable ->
             Thread(runnable, "tallyisle-automation-io").apply { isDaemon = true }

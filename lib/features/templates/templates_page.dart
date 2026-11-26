@@ -191,7 +191,7 @@ class _TemplateQuickBarState extends ConsumerState<TemplateQuickBar> {
   }
 }
 
-/// Management page for Bill Templates (`F-016`, original `/bkp/RTAct`).
+/// Management page for Bill Templates (`F-016`).
 class TemplatesPage extends ConsumerStatefulWidget {
   const TemplatesPage({super.key});
 

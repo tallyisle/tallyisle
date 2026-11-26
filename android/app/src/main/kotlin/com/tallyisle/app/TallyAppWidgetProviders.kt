@@ -1,4 +1,4 @@
-package dev.tallyisle.rebuild
+package com.tallyisle.app
 
 import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
@@ -43,8 +43,8 @@ object TallyWidgetStore {
     const val KIND_MONTH_BAR = "month_bar"
     const val KIND_SMART_QUICK = "smart_quick"
 
-    private const val EXTRA_LAUNCH_ROUTE = "dev.tallyisle.rebuild.extra.LAUNCH_ROUTE"
-    private const val MAIN_ACTIVITY_CLASS = "dev.tallyisle.rebuild.MainActivity"
+    private const val EXTRA_LAUNCH_ROUTE = "com.tallyisle.app.extra.LAUNCH_ROUTE"
+    private const val MAIN_ACTIVITY_CLASS = "com.tallyisle.app.MainActivity"
 
     private const val KEY_BOOK_NAME = "book_name"
     private const val KEY_PERIOD_LABEL = "period_label"

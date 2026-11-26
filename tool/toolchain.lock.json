@@ -9,7 +9,7 @@
   "dart": "3.13.5",
   "jdk": "17.0.13+11",
   "android": {
-    "applicationId": "dev.tallyisle.rebuild",
+    "applicationId": "com.tallyisle.app",
     "minSdk": 26,
     "compileSdk": 36,
     "targetSdk": 36,

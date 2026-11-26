@@ -133,14 +133,14 @@ class _PennyImportPageState extends ConsumerState<PennyImportPage> {
         final theme = Theme.of(dialogContext);
         return AlertDialog(
           key: const Key('penny_preview_dialog'),
-          title: const Text('原版备份导入预览'),
+          title: const Text('一羽记账备份导入预览'),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _PreviewRow(label: '备份文件', value: preview.fileName),
-                _PreviewRow(label: '原版版本', value: preview.appVersion),
+                _PreviewRow(label: '来源版本', value: preview.appVersion),
                 _PreviewRow(
                   label: '账本数量',
                   value:
@@ -201,7 +201,7 @@ class _PennyImportPageState extends ConsumerState<PennyImportPage> {
     final theme = Theme.of(context);
     return Scaffold(
       key: const Key('penny_import_page'),
-      appBar: AppBar(title: const Text('导入原版备份')),
+      appBar: AppBar(title: const Text('导入一羽记账备份')),
       body: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 760),
@@ -224,7 +224,7 @@ class _PennyImportPageState extends ConsumerState<PennyImportPage> {
                       Text('从一羽记账备份文件恢复', style: theme.textTheme.titleMedium),
                       const SizedBox(height: 8),
                       Text(
-                        '支持导入原版导出的 .penny 加密备份文件（兼容历史 .yy 备份）。'
+                        '支持导入一羽记账导出的 .penny 加密备份文件（兼容历史 .yy 备份）。'
                         '恢复过程在独立暂存校验通过后以单一数据库事务执行，若文件损坏或为空不会改动本地已有数据。',
                         style: theme.textTheme.bodyMedium,
                       ),

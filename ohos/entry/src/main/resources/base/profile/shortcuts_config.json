@@ -6,7 +6,7 @@
       "icon": "$media:icon",
       "wants": [
         {
-          "bundleName": "dev.tallyisle.app",
+          "bundleName": "com.tallyisle.app",
           "moduleName": "entry",
           "abilityName": "EntryAbility",
           "parameters": {
@@ -21,7 +21,7 @@
       "icon": "$media:icon",
       "wants": [
         {
-          "bundleName": "dev.tallyisle.app",
+          "bundleName": "com.tallyisle.app",
           "moduleName": "entry",
           "abilityName": "EntryAbility",
           "parameters": {
@@ -36,7 +36,7 @@
       "icon": "$media:icon",
       "wants": [
         {
-          "bundleName": "dev.tallyisle.app",
+          "bundleName": "com.tallyisle.app",
           "moduleName": "entry",
           "abilityName": "EntryAbility",
           "parameters": {
@@ -51,7 +51,7 @@
       "icon": "$media:icon",
       "wants": [
         {
-          "bundleName": "dev.tallyisle.app",
+          "bundleName": "com.tallyisle.app",
           "moduleName": "entry",
           "abilityName": "EntryAbility",
           "parameters": {

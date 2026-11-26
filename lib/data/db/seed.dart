@@ -2,18 +2,17 @@ import 'package:drift/drift.dart';
 
 import 'database.dart';
 
-/// Default book id used by the original app (日常账本).
+/// Default initial account book id (日常账本).
 const defaultBookId = 1;
 
-/// The 16 preset categories of the original app (12 expense + 4 income),
-/// in source order (docs/reference/ledger-catalog.md §6).
+/// Built-in 16 preset categories (12 expense + 4 income) seeded on first run.
 const presetExpenseCategories = [
   '餐饮', '购物', '交通', '娱乐', '零食', '日用品', //
   '生活居家', '话费', '运动', '医疗', '发红包', '捐款',
 ];
 const presetIncomeCategories = ['工资', '零花钱', '奖金', '收红包'];
 
-/// Original first-run state: book 1 + 16 categories, no accounts.
+/// First-run initial database state: book 1 + 16 preset categories, no accounts.
 Future<void> seedDefaults(AppDatabase db, int nowMs) async {
   await db
       .into(db.accountBooks)

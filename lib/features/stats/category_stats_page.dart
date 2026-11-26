@@ -18,7 +18,7 @@ import '../records/record_detail_page.dart';
 import '../budget/budget_widgets.dart' show tonalCardColor;
 import 'category_stats_providers.dart';
 
-/// Main category statistics page (F-008 / SCR-005, original `/anz/ADAct`).
+/// Main category statistics page (F-008 / SCR-005).
 class CategoryStatsPage extends ConsumerStatefulWidget {
   const CategoryStatsPage({super.key});
 
@@ -2224,7 +2224,7 @@ class _CategoryStatsFilterDrawerState
   }
 }
 
-/// Category Drilldown Page (F-030 / SCR-017, original `/anz/CAAct`).
+/// Category Drilldown Page (F-030 / SCR-017).
 class CategoryDrilldownPage extends StatefulWidget {
   const CategoryDrilldownPage({
     super.key,

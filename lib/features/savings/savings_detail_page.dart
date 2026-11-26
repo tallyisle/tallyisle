@@ -18,7 +18,7 @@ import 'savings_providers.dart';
 
 const _uuid = Uuid();
 
-/// Detail page for a Savings Plan (F-012, original route R-028 `/bkp/MSPDAct`).
+/// Detail page for a Savings Plan (F-012).
 class SavingsDetailPage extends ConsumerStatefulWidget {
   const SavingsDetailPage({required this.planId, super.key});
 

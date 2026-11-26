@@ -1,12 +1,11 @@
 part of 'database.dart';
 
-// Mirrors the original Room v42 schema (docs/reference/original-schema-room-v42.sql)
-// with the deliberate changes recorded in ADR-013:
-//  * money REAL -> INTEGER minor units (2 decimals), column suffix `_minor`;
-//  * exchange rates REAL -> decimal TEXT;
-//  * cloud-sync metadata (uid / sync_time / sstatus) dropped, deletes are physical;
-//  * account_book keeps only the business key `id` (Room's `_id` row id dropped).
-// The original `-1` "no reference" sentinels are kept so original rules port 1:1.
+// TallyIsle core SQLite schema (ADR-011, ADR-013):
+//  * money amounts stored as INTEGER minor units (2 decimals), column suffix `_minor`;
+//  * exchange rates stored as exact decimal TEXT;
+//  * physical row deletes (no soft-delete tombstones in core tables);
+//  * `account_book` keyed directly by business `id`;
+//  * `-1` sentinel represents "no reference" on nullable integer foreign keys.
 
 @DataClassName('AccountBook')
 class AccountBooks extends Table {
@@ -42,8 +41,8 @@ class Assets extends Table {
   Int64Column get initMoneyMinor => int64()();
   BoolColumn get isDefault => boolean().withDefault(const Constant(false))();
 
-  /// Original semantics: 1 = counted in net worth, except for type=4 (debt)
-  /// where the polarity is inverted (0 = counted). Always written explicitly.
+  /// Net-worth inclusion flag: `1` = counted in net worth, except for `type = 4`
+  /// (debt) where polarity is inverted (`0` = counted). Always written explicitly.
   IntColumn get isEffectiveAsset => integer().withDefault(const Constant(1))();
   IntColumn get usedTimes => integer().withDefault(const Constant(0))();
   TextColumn get color => text().nullable()();
@@ -54,7 +53,7 @@ class Assets extends Table {
   TextColumn get fixedDepositInfo => text().nullable()();
   TextColumn get groupName => text().nullable()();
 
-  /// Null means the app base currency (original behaviour).
+  /// Null means the app base currency (`CNY` by default).
   TextColumn get currency => text().nullable()();
 }
 

@@ -117,7 +117,7 @@ void main() {
     test(
       'Android SAF tree, iOS Bookmark, HarmonyOS Download, and macOS Bookmark channel operations & cancel handling',
       () async {
-        const channel = MethodChannel('dev.tallyisle/test_ext_dir');
+        const channel = MethodChannel('com.tallyisle/test_ext_dir');
         final recordedCalls = <MethodCall>[];
         final virtualFiles = <String, Uint8List>{};
         var simulateCancel = false;
@@ -365,7 +365,7 @@ void main() {
       'Native bridge sources wire SAF tree, iOS UIDocumentPicker Save-to-Files, HarmonyOS DOWNLOAD, and macOS app-scope bookmarks',
       () {
         final androidKt = File(
-          'android/app/src/main/kotlin/dev/tallyisle/rebuild/FileBridge.kt',
+          'android/app/src/main/kotlin/com/tallyisle/app/FileBridge.kt',
         ).readAsStringSync();
         expect(androidKt, contains('ACTION_OPEN_DOCUMENT_TREE'));
         expect(androidKt, contains('takePersistableUriPermission'));

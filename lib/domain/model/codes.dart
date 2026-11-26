@@ -1,5 +1,4 @@
-/// Original `record.type` codes (docs/reference/ledger-catalog.md §1).
-/// Codes are kept identical to the original app so backups map 1:1.
+/// Canonical `record.type` codes (`docs/reference/ledger-catalog.md` §1).
 abstract final class RecordType {
   static const expense = 0;
   static const income = 1;
@@ -14,7 +13,7 @@ abstract final class RecordType {
   static const debtInterest = 10; // 借贷利息 sub 0 支出 / 1 收入
   static const reimburseDiff = 11; // 报销差额 sub 0 支出 / 1 收入
   static const fee = 12; // 手续费（转账子单或独立）
-  static const billInstallment = 13; // 账单分期（含义未完全确认）
+  static const billInstallment = 13; // 账单分期
   static const installmentPrincipal = 14; // 分期每期本金（无分类）
   static const reimburseReceipt = 15; // 报销收款
   static const advanceExpense = 16; // 预支
@@ -49,7 +48,7 @@ abstract final class RecordDirection {
   static const income = 1;
 }
 
-/// Original `asset.type` codes that are confirmed (ledger-catalog §3).
+/// Canonical `asset.type` codes (`docs/reference/ledger-catalog.md` §3).
 abstract final class AssetType {
   static const normal = 0;
   static const debt = 4; // sub 99 借出(债权) / 100 借入(债务)
@@ -66,5 +65,5 @@ abstract final class AssetStatus {
   static const settled = 2;
 }
 
-/// "No reference" sentinel used by original integer reference columns.
+/// "No reference" sentinel used by integer foreign-key columns.
 const noRef = -1;

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
-  <id>dev.tallyisle.rebuild</id>
+  <id>com.tallyisle.app</id>
   <name>TallyIsle</name>
   <name xml:lang="zh-CN">帐屿</name>
   <summary>Local-first, cent-accurate personal accounting and asset manager</summary>
@@ -11,7 +11,7 @@
     <p>TallyIsle is a local-first, cent-accurate personal accounting and asset management application built with Flutter, supporting multi-ledger accounting, credit card statement cycles, budgets, analytics, and portable offline backups.</p>
     <p xml:lang="zh-CN">帐屿是一款本地优先、精确到分的个人记账与资产管理工具，支持多账本记账、信用卡账单周期、预算统计与便携离线备份。</p>
   </description>
-  <launchable type="desktop-id">dev.tallyisle.rebuild.desktop</launchable>
+  <launchable type="desktop-id">com.tallyisle.app.desktop</launchable>
   <url type="homepage">https://github.com/tallyisle/tallyisle</url>
   <provides>
     <binary>tallyisle</binary>

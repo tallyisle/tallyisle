@@ -46,7 +46,7 @@ import 'desktop_record_editor_dialog.dart';
 import 'record_datetime_dialog.dart';
 import 'record_keypad.dart';
 
-/// Original keyboard upper bound (`docs/reference/ledger-catalog.md` §5).
+/// Keypad upper bound (`docs/reference/ledger-catalog.md` §5).
 final maxAmount = Money.parse('88888888888.00');
 
 final amountInputFormatters = <TextInputFormatter>[

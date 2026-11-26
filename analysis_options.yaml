@@ -2,8 +2,6 @@ analyzer:
   exclude:
     - .toolchain/**
     - '**/*.g.dart'
-    - evidence/**
-    - archive/**
     - docs/**
     - build/**
     - android/**

@@ -120,8 +120,7 @@ Page<Object?> _adaptiveRecordDetailPage(
   );
 }
 
-/// Semantic routes (ADR-015). Mapping to the original app's 73 routes is kept
-/// in docs/reference/ as modules are implemented.
+/// Semantic application routes (ADR-015).
 GoRouter buildRouter({
   List<NavigatorObserver>? observers,
   DesktopPopupRouteObserver? popupObserver,

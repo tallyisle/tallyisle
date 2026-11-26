@@ -4,6 +4,6 @@
     <comment>TallyIsle Backup Archive</comment>
     <comment xml:lang="zh-CN">帐屿备份文件</comment>
     <glob pattern="*.tally"/>
-    <icon name="dev.tallyisle.rebuild"/>
+    <icon name="com.tallyisle.app"/>
   </mime-type>
 </mime-info>

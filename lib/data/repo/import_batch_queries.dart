@@ -20,7 +20,7 @@ final class ImportBatchSummary {
   final int liveTotalRowCount;
 }
 
-/// Enriched view of a single imported bill for batch drill-down (`/bkp/RLAct`).
+/// Enriched view of a single imported bill for batch drill-down .
 final class BatchRecordItem {
   const BatchRecordItem({
     required this.record,
@@ -82,7 +82,7 @@ final class ImportBatchQueries {
     db.importPlatforms,
   )..where((t) => t.id.equals(batchId))).watchSingleOrNull();
 
-  /// Watches all live records belonging to [batchId] across books (`/bkp/RLAct`).
+  /// Watches all live records belonging to [batchId] across books .
   Stream<List<BatchRecordItem>> watchBatchRecords(int batchId) => db
       .customSelect(
         'SELECT r.*, '

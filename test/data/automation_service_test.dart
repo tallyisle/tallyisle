@@ -336,7 +336,7 @@ void main() {
             );
 
         Map<Object?, Object?>? capturedWirePayload;
-        const testChannel = MethodChannel('dev.tallyisle/test_widgets');
+        const testChannel = MethodChannel('com.tallyisle/test_widgets');
         TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
             .setMockMethodCallHandler(testChannel, (call) async {
               if (call.method == 'updateWidgetSnapshot') {
@@ -1078,7 +1078,7 @@ void main() {
               ),
             );
         Map<Object?, Object?>? wire;
-        const testChannel = MethodChannel('dev.tallyisle/test_widgets_v2');
+        const testChannel = MethodChannel('com.tallyisle/test_widgets_v2');
         TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
             .setMockMethodCallHandler(testChannel, (call) async {
               if (call.method == 'updateWidgetSnapshot') {
@@ -1279,7 +1279,7 @@ void main() {
 
   group('MethodChannelAutoBillBridge canonical wire contract', () {
     test('Dart→native methods and native→Dart callbacks', () async {
-      const name = 'dev.tallyisle/test_automation_contract';
+      const name = 'com.tallyisle/test_automation_contract';
       const channel = MethodChannel(name);
       final calls = <MethodCall>[];
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger

@@ -14,7 +14,7 @@ import '../records/record_detail_page.dart';
 import 'fixed_deposit_editor_page.dart';
 import 'fixed_deposit_providers.dart';
 
-/// Fixed Deposit Management screen (`FixedDepositManageActivity` / `/bkp/FDMAct`, F-027).
+/// Fixed Deposit Management screen (`FixedDepositManageActivity`, F-027).
 class FixedDepositPage extends ConsumerStatefulWidget {
   const FixedDepositPage({super.key, this.initialAssetId, this.onRecordTap});
 

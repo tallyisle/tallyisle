@@ -1,4 +1,4 @@
-package dev.tallyisle.rebuild
+package com.tallyisle.app
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -66,11 +66,11 @@ object AutoBillPromptNotifier {
 
     const val ROUTE_AUTO_BILL = "/automation/auto-bill"
 
-    internal const val BROADCAST_ACTION = "dev.tallyisle.rebuild.action.AUTO_BILL_PROMPT_ACTION"
-    internal const val EXTRA_PROMPT_ACTION = "dev.tallyisle.rebuild.extra.PROMPT_ACTION"
-    internal const val EXTRA_DRAFT_ID = "dev.tallyisle.rebuild.extra.DRAFT_ID"
-    internal const val EXTRA_RECORD_ID = "dev.tallyisle.rebuild.extra.RECORD_ID"
-    internal const val EXTRA_NOTIFICATION_ID = "dev.tallyisle.rebuild.extra.NOTIFICATION_ID"
+    internal const val BROADCAST_ACTION = "com.tallyisle.app.action.AUTO_BILL_PROMPT_ACTION"
+    internal const val EXTRA_PROMPT_ACTION = "com.tallyisle.app.extra.PROMPT_ACTION"
+    internal const val EXTRA_DRAFT_ID = "com.tallyisle.app.extra.DRAFT_ID"
+    internal const val EXTRA_RECORD_ID = "com.tallyisle.app.extra.RECORD_ID"
+    internal const val EXTRA_NOTIFICATION_ID = "com.tallyisle.app.extra.NOTIFICATION_ID"
 
     private const val FALLBACK_NOTIFICATION_ID = 7301
     private const val FINISH_NOTIFICATION_ID = 7302

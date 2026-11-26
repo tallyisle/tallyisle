@@ -320,7 +320,7 @@ void main() {
       expect(find.text('本地优先、精确到分的开源个人记账与资产管理工具'), findsOneWidget);
       expect(
         find.text(
-          '基于 Flutter 构建 · 支持 Android / iOS / HarmonyOS / Windows / Linux / macOS 六端',
+          '基于 Flutter 构建 · 支持 Android / iOS / HarmonyOS / Windows / Linux / macOS 全平台',
         ),
         findsOneWidget,
       );

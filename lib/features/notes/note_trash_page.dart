@@ -11,7 +11,7 @@ import 'note_providers.dart';
 
 const _uuid = Uuid();
 
-/// Recycle bin page for trashed notes (`F-015`, original route `/bkp/NTAct`).
+/// Recycle bin page for trashed notes (`F-015`).
 class NoteTrashPage extends ConsumerWidget {
   const NoteTrashPage({super.key});
 

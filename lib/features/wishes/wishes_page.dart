@@ -13,7 +13,7 @@ import 'wish_providers.dart';
 
 const _uuid = Uuid();
 
-/// Wish List page (`F-014`, original route `/bkp/WLAct`).
+/// Wish List page (`F-014`).
 class WishesPage extends ConsumerStatefulWidget {
   const WishesPage({super.key});
 

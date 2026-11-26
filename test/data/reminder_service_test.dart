@@ -217,8 +217,8 @@ void main() {
   });
 
   group('MethodChannelReminderScheduler wire protocol', () {
-    test('invokes dev.tallyisle/reminders native methods accurately', () async {
-      const channel = MethodChannel('dev.tallyisle/reminders_test');
+    test('invokes com.tallyisle/reminders native methods accurately', () async {
+      const channel = MethodChannel('com.tallyisle/reminders_test');
       final calls = <MethodCall>[];
       var pendingRoute = '/record/new';
 

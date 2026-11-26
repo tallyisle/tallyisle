@@ -7,9 +7,9 @@
         android:shortcutShortLabel="@string/shortcut_new_record_short"
         android:shortcutLongLabel="@string/shortcut_new_record_long">
         <intent
-            android:action="dev.tallyisle.rebuild.action.SHORTCUT"
-            android:targetPackage="dev.tallyisle.rebuild"
-            android:targetClass="dev.tallyisle.rebuild.MainActivity">
+            android:action="com.tallyisle.app.action.SHORTCUT"
+            android:targetPackage="com.tallyisle.app"
+            android:targetClass="com.tallyisle.app.MainActivity">
             <extra
                 android:name="shortcut_action"
                 android:value="new_record" />
@@ -25,9 +25,9 @@
         android:shortcutShortLabel="@string/shortcut_smart_bill_short"
         android:shortcutLongLabel="@string/shortcut_smart_bill_long">
         <intent
-            android:action="dev.tallyisle.rebuild.action.SHORTCUT"
-            android:targetPackage="dev.tallyisle.rebuild"
-            android:targetClass="dev.tallyisle.rebuild.MainActivity">
+            android:action="com.tallyisle.app.action.SHORTCUT"
+            android:targetPackage="com.tallyisle.app"
+            android:targetClass="com.tallyisle.app.MainActivity">
             <extra
                 android:name="shortcut_action"
                 android:value="smart_bill" />
@@ -43,9 +43,9 @@
         android:shortcutShortLabel="@string/shortcut_ocr_bill_short"
         android:shortcutLongLabel="@string/shortcut_ocr_bill_long">
         <intent
-            android:action="dev.tallyisle.rebuild.action.SHORTCUT"
-            android:targetPackage="dev.tallyisle.rebuild"
-            android:targetClass="dev.tallyisle.rebuild.MainActivity">
+            android:action="com.tallyisle.app.action.SHORTCUT"
+            android:targetPackage="com.tallyisle.app"
+            android:targetClass="com.tallyisle.app.MainActivity">
             <extra
                 android:name="shortcut_action"
                 android:value="ocr_bill" />
@@ -61,9 +61,9 @@
         android:shortcutShortLabel="@string/shortcut_drafts_short"
         android:shortcutLongLabel="@string/shortcut_drafts_long">
         <intent
-            android:action="dev.tallyisle.rebuild.action.SHORTCUT"
-            android:targetPackage="dev.tallyisle.rebuild"
-            android:targetClass="dev.tallyisle.rebuild.MainActivity">
+            android:action="com.tallyisle.app.action.SHORTCUT"
+            android:targetPackage="com.tallyisle.app"
+            android:targetClass="com.tallyisle.app.MainActivity">
             <extra
                 android:name="shortcut_action"
                 android:value="drafts" />

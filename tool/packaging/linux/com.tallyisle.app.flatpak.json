@@ -1,5 +1,5 @@
 {
-  "app-id": "dev.tallyisle.rebuild",
+  "app-id": "com.tallyisle.app",
   "runtime": "org.gnome.Platform",
   "runtime-version": "47",
   "sdk": "org.gnome.Sdk",
@@ -26,10 +26,10 @@
         "cp -a bundle/. /app/tallyisle/",
         "chmod +x /app/tallyisle/tallyisle",
         "ln -sf /app/tallyisle/tallyisle /app/bin/tallyisle",
-        "install -Dm644 dev.tallyisle.rebuild.desktop /app/share/applications/dev.tallyisle.rebuild.desktop",
-        "install -Dm644 dev.tallyisle.rebuild.metainfo.xml /app/share/metainfo/dev.tallyisle.rebuild.metainfo.xml",
-        "install -Dm644 dev.tallyisle.rebuild.mime.xml /app/share/mime/packages/dev.tallyisle.rebuild.mime.xml",
-        "for s in 16 32 64 128 256 512; do install -Dm644 icons/app_icon_${s}.png /app/share/icons/hicolor/${s}x${s}/apps/dev.tallyisle.rebuild.png; done"
+        "install -Dm644 com.tallyisle.app.desktop /app/share/applications/com.tallyisle.app.desktop",
+        "install -Dm644 com.tallyisle.app.metainfo.xml /app/share/metainfo/com.tallyisle.app.metainfo.xml",
+        "install -Dm644 com.tallyisle.app.mime.xml /app/share/mime/packages/com.tallyisle.app.mime.xml",
+        "for s in 16 32 64 128 256 512; do install -Dm644 icons/app_icon_${s}.png /app/share/icons/hicolor/${s}x${s}/apps/com.tallyisle.app.png; done"
       ],
       "sources": [
         {
@@ -44,15 +44,15 @@
         },
         {
           "type": "file",
-          "path": "dev.tallyisle.rebuild.desktop"
+          "path": "com.tallyisle.app.desktop"
         },
         {
           "type": "file",
-          "path": "dev.tallyisle.rebuild.metainfo.xml"
+          "path": "com.tallyisle.app.metainfo.xml"
         },
         {
           "type": "file",
-          "path": "dev.tallyisle.rebuild.mime.xml"
+          "path": "com.tallyisle.app.mime.xml"
         }
       ]
     }

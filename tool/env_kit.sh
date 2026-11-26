@@ -59,8 +59,7 @@ GITCFG
       tool/seeds/gradle-init/tallyisle-offline.gradle \
       tool/seeds/sqlite-hooks/download-1ff25026/libsqlite3.so \
       tool/seeds/sqlite-hooks/download-b372f69d/libsqlite3.so \
-      tool/seeds/sqlite-hooks/download-c2858e70/libsqlite3.so \
-      reference/*.apk
+      tool/seeds/sqlite-hooks/download-c2858e70/libsqlite3.so
     do
       if [[ -f "$target" ]]; then
         sha256sum "$target" >> .env-kit/MANIFEST.sha256
@@ -68,7 +67,7 @@ GITCFG
     done
 
     items=()
-    for entry in AGENTS.md docs archive reference tool/seeds .env-kit; do
+    for entry in AGENTS.md docs tool/seeds .env-kit; do
       if [[ -e "$entry" ]]; then
         items+=("$entry")
       fi

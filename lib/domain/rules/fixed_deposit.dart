@@ -184,7 +184,7 @@ int calculateDueDate({
   ).millisecondsSinceEpoch;
 }
 
-/// Original `mul6(a, b)` operator (R2 / FD-F01):
+/// Fixed-precision `mul6(a, b)` operator (R2 / FD-F01):
 /// rounds both operands to 6 decimal places `HALF_UP` before multiplying,
 /// and rounds the product to 6 decimal places `HALF_UP`.
 DecimalValue mul6(DecimalValue a, DecimalValue b) {
@@ -713,7 +713,7 @@ FixedDepositHeaderSummary computeDepositHeaderSummary(
     if (normalizeCurrency(item.baseCurrency) == base &&
         item.baseMoneyMinor > BigInt.zero &&
         item.moneyMinor > BigInt.zero) {
-      // Original 12-decimal historical ratio: round2(expectedIncome * round12(bm / money))
+      // 12-decimal historical ratio: round2(expectedIncome * round12(bm / money))
       final ratio12 = divideRounded(
         item.baseMoneyMinor * powerOfTen(12),
         item.moneyMinor,

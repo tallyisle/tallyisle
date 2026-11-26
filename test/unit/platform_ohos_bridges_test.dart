@@ -46,7 +46,7 @@ void main() {
     );
   });
 
-  group('HarmonyOS BiometricAuthenticator (dev.tallyisle/biometrics)', () {
+  group('HarmonyOS BiometricAuthenticator (com.tallyisle/biometrics)', () {
     test(
       'selects MethodChannelBiometricAuthenticator on TargetPlatform.ohos and maps UserAuth statuses & outcomes',
       () async {
@@ -187,7 +187,7 @@ void main() {
     );
   });
 
-  group('HarmonyOS AutoBillBridge & AppWidgetBridge (dev.tallyisle/automation)', () {
+  group('HarmonyOS AutoBillBridge & AppWidgetBridge (com.tallyisle/automation)', () {
     test(
       'handles tallyisle:// deep links while honestly reporting AccessibilityService as unsupported and enabling HarmonyOS service cards (ADR-008)',
       () async {
@@ -314,7 +314,7 @@ void main() {
     );
   });
 
-  group('HarmonyOS ReminderScheduler (dev.tallyisle/reminders)', () {
+  group('HarmonyOS ReminderScheduler (com.tallyisle/reminders)', () {
     test(
       'synchronizes daily reminders, checks/requests notification permission, and dispatches launch routes',
       () async {

@@ -9,13 +9,13 @@ class MainFlutterWindow: NSWindow {
   private static let minTitleBarVisibleWidth: CGFloat = 120
   private static let minTitleBarVisibleHeight: CGFloat = 32
 
-  private static let keyHasSavedFrame = "dev.tallyisle.windowState.hasSavedFrame"
-  private static let keyFrameX = "dev.tallyisle.windowState.x"
-  private static let keyFrameY = "dev.tallyisle.windowState.y"
-  private static let keyFrameWidth = "dev.tallyisle.windowState.width"
-  private static let keyFrameHeight = "dev.tallyisle.windowState.height"
-  private static let keyIsZoomed = "dev.tallyisle.windowState.isZoomed"
-  private static let keyIsFullScreen = "dev.tallyisle.windowState.isFullScreen"
+  private static let keyHasSavedFrame = "com.tallyisle.windowState.hasSavedFrame"
+  private static let keyFrameX = "com.tallyisle.windowState.x"
+  private static let keyFrameY = "com.tallyisle.windowState.y"
+  private static let keyFrameWidth = "com.tallyisle.windowState.width"
+  private static let keyFrameHeight = "com.tallyisle.windowState.height"
+  private static let keyIsZoomed = "com.tallyisle.windowState.isZoomed"
+  private static let keyIsFullScreen = "com.tallyisle.windowState.isFullScreen"
 
   private var lastNormalFrame: NSRect = .zero
   private var isZoomedState: Bool = false

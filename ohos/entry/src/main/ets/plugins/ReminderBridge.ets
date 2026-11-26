@@ -14,12 +14,12 @@ import notificationManager from '@ohos.notificationManager';
 import reminderAgentManager from '@ohos.reminderAgentManager';
 
 const TAG: string = 'TallyIsleReminderBridge';
-const CHANNEL_NAME: string = 'dev.tallyisle/reminders';
+const CHANNEL_NAME: string = 'com.tallyisle/reminders';
 const STORE_FILE_NAME: string = 'reminders_ohos.json';
 const EXTRA_LAUNCH_ROUTE: string = 'launch_route';
 const DEFAULT_REMINDER_TIP: string = '别忘了记录今天的收支哦';
 const DEFAULT_LAUNCH_ROUTE: string = '/record/new';
-const APP_BUNDLE_NAME: string = 'dev.tallyisle.app';
+const APP_BUNDLE_NAME: string = 'com.tallyisle.app';
 const APP_ABILITY_NAME: string = 'EntryAbility';
 
 class PersistedReminderRecord {

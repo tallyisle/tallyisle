@@ -5,10 +5,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:tallyisle/core/app_version.dart';
 
 const List<String> _packagingFiles = <String>[
-  'tool/packaging/linux/dev.tallyisle.rebuild.desktop',
-  'tool/packaging/linux/dev.tallyisle.rebuild.metainfo.xml',
-  'tool/packaging/linux/dev.tallyisle.rebuild.mime.xml',
-  'tool/packaging/linux/dev.tallyisle.rebuild.flatpak.json',
+  'tool/packaging/linux/com.tallyisle.app.desktop',
+  'tool/packaging/linux/com.tallyisle.app.metainfo.xml',
+  'tool/packaging/linux/com.tallyisle.app.mime.xml',
+  'tool/packaging/linux/com.tallyisle.app.flatpak.json',
   'tool/packaging/linux/package_linux.sh',
   'tool/packaging/windows/tallyisle.iss',
   'tool/packaging/windows/package_windows.ps1',
@@ -98,12 +98,12 @@ void main() {
 
     test('Linux desktop, MIME, AppStream, and Flatpak manifests follow specs', () {
       final desktop = File(
-        'tool/packaging/linux/dev.tallyisle.rebuild.desktop',
+        'tool/packaging/linux/com.tallyisle.app.desktop',
       ).readAsStringSync();
       expect(desktop, contains('Name=TallyIsle'));
       expect(desktop, contains('Name[zh_CN]=帐屿'));
       expect(desktop, contains('Exec=tallyisle %u'));
-      expect(desktop, contains('Icon=dev.tallyisle.rebuild'));
+      expect(desktop, contains('Icon=com.tallyisle.app'));
       expect(desktop, contains('Categories=Office;Finance;'));
       expect(
         desktop,
@@ -114,26 +114,26 @@ void main() {
       expect(desktop, contains('StartupWMClass=tallyisle'));
 
       final mime = File(
-        'tool/packaging/linux/dev.tallyisle.rebuild.mime.xml',
+        'tool/packaging/linux/com.tallyisle.app.mime.xml',
       ).readAsStringSync();
       expect(mime, contains('application/x-tallyisle-backup'));
       expect(mime, contains('*.tally'));
 
       final metainfo = File(
-        'tool/packaging/linux/dev.tallyisle.rebuild.metainfo.xml',
+        'tool/packaging/linux/com.tallyisle.app.metainfo.xml',
       ).readAsStringSync();
-      expect(metainfo, contains('<id>dev.tallyisle.rebuild</id>'));
-      expect(metainfo, contains('dev.tallyisle.rebuild.desktop'));
+      expect(metainfo, contains('<id>com.tallyisle.app</id>'));
+      expect(metainfo, contains('com.tallyisle.app.desktop'));
       expect(metainfo, contains('x-scheme-handler/tallyisle'));
 
       final flatpak =
           jsonDecode(
                 File(
-                  'tool/packaging/linux/dev.tallyisle.rebuild.flatpak.json',
+                  'tool/packaging/linux/com.tallyisle.app.flatpak.json',
                 ).readAsStringSync(),
               )
               as Map<String, Object?>;
-      expect(flatpak['app-id'], 'dev.tallyisle.rebuild');
+      expect(flatpak['app-id'], 'com.tallyisle.app');
       expect(flatpak['runtime'], 'org.gnome.Platform');
       expect(flatpak['runtime-version'], '47');
       expect(flatpak['sdk'], 'org.gnome.Sdk');
@@ -397,21 +397,21 @@ void main() {
         expect(contentsText, contains('./usr/bin/tallyisle'));
         expect(
           contentsText,
-          contains('./usr/share/applications/dev.tallyisle.rebuild.desktop'),
+          contains('./usr/share/applications/com.tallyisle.app.desktop'),
         );
         expect(
           contentsText,
-          contains('./usr/share/metainfo/dev.tallyisle.rebuild.metainfo.xml'),
+          contains('./usr/share/metainfo/com.tallyisle.app.metainfo.xml'),
         );
         expect(
           contentsText,
-          contains('./usr/share/mime/packages/dev.tallyisle.rebuild.mime.xml'),
+          contains('./usr/share/mime/packages/com.tallyisle.app.mime.xml'),
         );
         for (final size in const <int>[16, 32, 64, 128, 256, 512]) {
           expect(
             contentsText,
             contains(
-              './usr/share/icons/hicolor/${size}x$size/apps/dev.tallyisle.rebuild.png',
+              './usr/share/icons/hicolor/${size}x$size/apps/com.tallyisle.app.png',
             ),
           );
         }

@@ -97,12 +97,11 @@ _YiyuBackupKind _detectYiyuBackupKind(SelectedBytes selected) {
   }
   throw const Failure(
     FailureCode.validation,
-    '无法识别该备份文件格式，请选择原版 .penny / .yy、.yi2a 或 .zip / .db 备份文件',
+    '无法识别该备份文件格式，请选择一羽记账 .penny / .yy、.yi2a 或 .zip / .db 备份文件',
   );
 }
 
-/// Modular third-party bookkeeping software import hub (`第三方数据导入`, `F-035`,
-/// `docs/modules/ios-migration.md` & `docs/modules/import-original-backup.md`):
+/// Modular third-party bookkeeping software import hub (`第三方数据导入`):
 /// - `一羽记账导入`: 1-step 14/15-column CSV incremental import + unified backup
 ///   auto-dispatch for `.penny`/`.yy`, `.yi2a` (plus external share intent), and
 ///   LAN `ServerBackup.zip`/`.db`
@@ -197,7 +196,7 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
       await _refreshProviders();
     }
     _setStatus(
-      '原版 Android 备份导入完成：已切换至「${result.preview.targetBookName}」，共恢复 '
+      '一羽记账 Android 备份导入完成：已切换至「${result.preview.targetBookName}」，共恢复 '
       '${result.preview.bookCount} 个账本、${result.preview.assetCount} 个账户、'
       '${result.preview.recordCount} 条账单',
       isError: false,
@@ -403,9 +402,9 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
       await _refreshProviders();
     }
     final kindLabel = switch (preview.sourceKind) {
-      MigrationSourceKind.yi2a => '原版 iOS 迁移包导入完成',
+      MigrationSourceKind.yi2a => '一羽记账 iOS 迁移包导入完成',
       MigrationSourceKind.haohaoDb => '好好记账数据库整库迁入完成',
-      MigrationSourceKind.lanBackup => '原版局域网备份恢复完成',
+      MigrationSourceKind.lanBackup => '一羽记账局域网备份恢复完成',
     };
     _setStatus(
       '$kindLabel：共恢复 ${applied.bookCount} 个账本、${applied.assetCount} 个账户、${applied.recordCount} 条账单',
@@ -563,7 +562,7 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        '1. 帐屿六端（Android / iOS / HarmonyOS / Windows / Linux / macOS）数据格式 100% 统一，'
+                        '1. 帐屿全平台（Android / iOS / HarmonyOS / Windows / Linux / macOS）数据格式 100% 统一，'
                         '日常多设备流转请使用「云同步与备份（.tally / WebDAV / S3）」；\n'
                         '2. 本页专用于第三方记账软件与外部平台历史数据迁入'
                         '（全量迁入采用单事务安全替换，并自动保留本机已有便签与自定义汇率）。',
@@ -623,7 +622,7 @@ class _MigrationPageState extends ConsumerState<MigrationPage> {
                       const SizedBox(height: 6),
                       const Text(
                         '支持导出的 14/15 列 CSV 表格增量并入所选账本；'
-                        '也支持选择原版 Android (.penny / .yy)、iOS (.yi2a) 或局域网备份 (.zip / .db) 单事务整库迁入，'
+                        '也支持选择一羽记账 Android (.penny / .yy)、iOS (.yi2a) 或局域网备份 (.zip / .db) 单事务整库迁入，'
                         '完整保留本机便签与自定义汇率。',
                       ),
                       const SizedBox(height: 12),
@@ -913,14 +912,14 @@ class _PennyConfirmDialog extends StatelessWidget {
         : '0 条（自动过滤已删除记录）';
 
     return AlertDialog(
-      title: const Text('原版 Android 备份导入预览'),
+      title: const Text('一羽记账 Android 备份导入预览'),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _PreviewRow(label: '备份文件', value: preview.fileName),
-            _PreviewRow(label: '原版版本', value: preview.appVersion),
+            _PreviewRow(label: '来源版本', value: preview.appVersion),
             _PreviewRow(
               label: '账本数量',
               value: '${preview.bookCount} 个（恢复后选中：${preview.targetBookName}）',
@@ -1002,9 +1001,9 @@ class _MigrationConfirmDialog extends StatelessWidget {
     final isYi2a = preview.sourceKind == MigrationSourceKind.yi2a;
     final isHaohaoDb = preview.sourceKind == MigrationSourceKind.haohaoDb;
     final title = switch (preview.sourceKind) {
-      MigrationSourceKind.yi2a => '确认导入原版 iOS 迁移数据',
+      MigrationSourceKind.yi2a => '确认导入一羽记账 iOS 迁移数据',
       MigrationSourceKind.haohaoDb => '确认整库迁入好好记账备份',
-      MigrationSourceKind.lanBackup => '确认恢复原版局域网备份',
+      MigrationSourceKind.lanBackup => '确认恢复一羽记账局域网备份',
     };
 
     return AlertDialog(
@@ -1018,7 +1017,7 @@ class _MigrationConfirmDialog extends StatelessWidget {
             if (!isYi2a && preview.entryName != preview.fileName)
               Text('数据库条目：${preview.entryName}'),
             if (preview.usedHistoricalPassword)
-              const Text('解密状态：已自动匹配原版历史加密口令'),
+              const Text('解密状态：已自动匹配一羽记账历史默认口令'),
             const SizedBox(height: 10),
             if (isHaohaoDb) ...[
               Text(

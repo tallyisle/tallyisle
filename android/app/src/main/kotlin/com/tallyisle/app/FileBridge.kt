@@ -1,4 +1,4 @@
-package dev.tallyisle.rebuild
+package com.tallyisle.app
 
 import android.app.Activity
 import android.content.ClipData
@@ -544,7 +544,7 @@ class FileBridge(private val activity: Activity) {
     }
 
     companion object {
-        const val CHANNEL_NAME = "dev.tallyisle/files"
+        const val CHANNEL_NAME = "com.tallyisle/files"
         const val REQUEST_CODE_SAVE_DOCUMENT = 4035
         const val REQUEST_CODE_PICK_DIRECTORY = 4036
 

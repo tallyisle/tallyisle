@@ -120,7 +120,7 @@ class AboutHelpPage extends StatelessWidget {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  '基于 Flutter 构建 · 支持 Android / iOS / HarmonyOS / Windows / Linux / macOS 六端',
+                  '基于 Flutter 构建 · 支持 Android / iOS / HarmonyOS / Windows / Linux / macOS 全平台',
                   textAlign: TextAlign.center,
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: scheme.onSurfaceVariant,

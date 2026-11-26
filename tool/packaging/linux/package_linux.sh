@@ -17,7 +17,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 PUBSPEC="$REPO_ROOT/pubspec.yaml"
 ICON_DIR="$REPO_ROOT/macos/Runner/Assets.xcassets/AppIcon.appiconset"
-APP_ID="dev.tallyisle.rebuild"
+APP_ID="com.tallyisle.app"
 
 BUNDLE_DIR="$REPO_ROOT/build/linux/x64/release/bundle"
 OUT_DIR="$REPO_ROOT"
@@ -170,7 +170,7 @@ Section: utils
 Priority: optional
 Architecture: amd64
 Installed-Size: ${INSTALLED_SIZE_KB}
-Maintainer: TallyIsle <noreply@tallyisle.dev>
+Maintainer: TallyIsle <support@tallyisle.com>
 Homepage: https://github.com/tallyisle/tallyisle
 Depends: libgtk-3-0 | libgtk-3-0t64, libglib2.0-0 | libglib2.0-0t64, xdg-utils
 Description: TallyIsle - Local-first personal accounting and asset manager

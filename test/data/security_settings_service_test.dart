@@ -126,7 +126,7 @@ void main() {
     test(
       'MethodChannelBiometricAuthenticator wire protocol & UnsupportedBiometricAuthenticator fallback (ADR-008)',
       () async {
-        const channel = MethodChannel('dev.tallyisle/biometrics_test');
+        const channel = MethodChannel('com.tallyisle/biometrics_test');
         final messenger =
             TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
         addTearDown(() => messenger.setMockMethodCallHandler(channel, null));

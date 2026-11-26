@@ -61,7 +61,7 @@ final class UrlSchemeService {
   AutoBillService? _autoBillService;
 
   /// Never constructs a second native channel bridge (that would steal the
-  /// shared `dev.tallyisle/automation` handler).
+  /// shared `com.tallyisle/automation` handler).
   AutoBillService get _autoBill => _autoBillService ??= AutoBillService(
     db,
     ledgerService: _ledger,

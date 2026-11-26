@@ -106,7 +106,7 @@ void main() {
       expect(tester.takeException(), isNull);
       expect(
         find.text(
-          '基于 Flutter 构建 · 支持 Android / iOS / HarmonyOS / Windows / Linux / macOS 六端',
+          '基于 Flutter 构建 · 支持 Android / iOS / HarmonyOS / Windows / Linux / macOS 全平台',
         ),
         findsOneWidget,
       );

@@ -24,7 +24,7 @@ Uint8List _hexToBytes(String hex) {
 String _bytesToHex(Uint8List bytes) =>
     [for (final b in bytes) b.toRadixString(16).padLeft(2, '0')].join();
 
-/// Builds a genuine Room v42 SQLite `.db` binary using `docs/reference/original-schema-room-v42.sql`
+/// Builds a genuine legacy Android SQLite SQLite `.db` binary using `docs/ARCHITECTURE.md`
 /// conventions (`REAL` money columns, `_id` + `id` on `account_book`, `uid`/`sstatus`/`sync_time`).
 Uint8List _buildRoomV42DatabaseBytes(Directory workDir) {
   final file = File('${workDir.path}/build_room_v42.db');
@@ -781,7 +781,7 @@ void main() {
             if (await buildDir.exists()) await buildDir.delete(recursive: true);
           });
 
-          // Seed local note & custom EUR currency in target DB (absent in Room v42 source .db)
+          // Seed local note & custom EUR currency in target DB (absent in legacy Android SQLite source .db)
           await db
               .into(db.notes)
               .insert(
