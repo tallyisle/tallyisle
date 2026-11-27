@@ -1022,6 +1022,7 @@ class _CompactDesktopRail extends StatelessWidget {
             clipBehavior: Clip.antiAlias,
             child: InkWell(
               key: const Key('add-record'),
+              splashFactory: NoSplash.splashFactory,
               onTap: onAddRecord,
               child: SizedBox(
                 width: 46,
@@ -1149,11 +1150,26 @@ class _SidebarNavTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final isDark = scheme.brightness == Brightness.dark;
+    final activeForeground = isDark
+        ? scheme.onPrimaryContainer
+        : scheme.primary;
+    final selectedFill = isDark
+        ? Color.lerp(
+            scheme.surfaceContainerHigh,
+            scheme.primaryContainer,
+            0.56,
+          )!
+        : Color.lerp(
+            scheme.surfaceContainerLowest,
+            scheme.primaryContainer,
+            0.70,
+          )!;
 
     Widget leadingIcon = Icon(
       selected ? selectedIcon : icon,
       size: 20,
-      color: selected ? scheme.onSecondaryContainer : scheme.onSurfaceVariant,
+      color: selected ? activeForeground : scheme.onSurfaceVariant,
     );
     if (badgeCount > 0) {
       leadingIcon = Badge(label: Text('$badgeCount'), child: leadingIcon);
@@ -1163,11 +1179,12 @@ class _SidebarNavTile extends StatelessWidget {
       selected: selected,
       button: true,
       child: Material(
-        color: selected ? scheme.secondaryContainer : Colors.transparent,
+        color: selected ? selectedFill : Colors.transparent,
         borderRadius: BorderRadius.circular(12),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
           key: slotKey,
+          splashFactory: NoSplash.splashFactory,
           onTap: onTap,
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -1182,9 +1199,7 @@ class _SidebarNavTile extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.bodyMedium?.copyWith(
                       fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
-                      color: selected
-                          ? scheme.onSecondaryContainer
-                          : scheme.onSurface,
+                      color: selected ? activeForeground : scheme.onSurface,
                     ),
                   ),
                 ),
@@ -1195,7 +1210,7 @@ class _SidebarNavTile extends StatelessWidget {
                       fontSize: 10.5,
                       color:
                           (selected
-                                  ? scheme.onSecondaryContainer
+                                  ? activeForeground
                                   : scheme.onSurfaceVariant)
                               .withValues(alpha: 0.65),
                     ),
@@ -1237,6 +1252,7 @@ class _SidebarUtilityButton extends StatelessWidget {
         clipBehavior: Clip.antiAlias,
         child: InkWell(
           key: buttonKey,
+          splashFactory: NoSplash.splashFactory,
           onTap: onTap,
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
@@ -1265,7 +1281,7 @@ class _SidebarUtilityButton extends StatelessWidget {
   }
 }
 
-class _RailSlot extends StatelessWidget {
+class _RailSlot extends StatefulWidget {
   const _RailSlot({
     required this.slotKey,
     required this.icon,
@@ -1285,56 +1301,112 @@ class _RailSlot extends StatelessWidget {
   final int badgeCount;
 
   @override
+  State<_RailSlot> createState() => _RailSlotState();
+}
+
+class _RailSlotState extends State<_RailSlot> {
+  bool _pressed = false;
+  bool _hovered = false;
+
+  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final isDark = scheme.brightness == Brightness.dark;
+    final activeForeground = isDark
+        ? scheme.onPrimaryContainer
+        : scheme.primary;
+    final Color pillColor;
+    if (widget.selected) {
+      pillColor = isDark
+          ? Color.lerp(
+              scheme.surfaceContainerHigh,
+              scheme.primaryContainer,
+              _pressed ? 0.72 : 0.56,
+            )!
+          : Color.lerp(
+              scheme.surfaceContainerLowest,
+              scheme.primaryContainer,
+              _pressed ? 0.84 : 0.70,
+            )!;
+    } else if (_pressed) {
+      pillColor = scheme.primary.withValues(alpha: isDark ? 0.16 : 0.10);
+    } else if (_hovered) {
+      pillColor = scheme.onSurface.withValues(alpha: 0.06);
+    } else {
+      pillColor = Colors.transparent;
+    }
+    final foregroundColor = widget.selected
+        ? activeForeground
+        : (_pressed ? scheme.onSurface : scheme.onSurfaceVariant);
 
     Widget iconWidget = Icon(
-      selected ? selectedIcon : icon,
+      widget.selected ? widget.selectedIcon : widget.icon,
       size: 21,
-      color: selected ? scheme.onSecondaryContainer : scheme.onSurfaceVariant,
+      color: foregroundColor,
     );
-    if (badgeCount > 0) {
-      iconWidget = Badge(label: Text('$badgeCount'), child: iconWidget);
+    if (widget.badgeCount > 0) {
+      iconWidget = Badge(
+        label: Text('${widget.badgeCount}'),
+        child: iconWidget,
+      );
     }
 
     return Semantics(
-      selected: selected,
+      selected: widget.selected,
       button: true,
       child: InkWell(
-        key: slotKey,
+        key: widget.slotKey,
         borderRadius: BorderRadius.circular(12),
-        onTap: onTap,
+        splashFactory: NoSplash.splashFactory,
+        overlayColor: const WidgetStatePropertyAll<Color>(Colors.transparent),
+        splashColor: Colors.transparent,
+        highlightColor: Colors.transparent,
+        hoverColor: Colors.transparent,
+        focusColor: Colors.transparent,
+        onHighlightChanged: (value) {
+          if (_pressed != value) setState(() => _pressed = value);
+        },
+        onHover: (value) {
+          if (_hovered != value) setState(() => _hovered = value);
+        },
+        onTap: widget.onTap,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              AnimatedContainer(
-                duration: const Duration(milliseconds: 180),
-                width: 48,
-                height: 28,
-                decoration: BoxDecoration(
-                  color: selected
-                      ? scheme.secondaryContainer
-                      : Colors.transparent,
-                  borderRadius: BorderRadius.circular(14),
+          child: AnimatedScale(
+            scale: _pressed ? 0.92 : 1.0,
+            duration: const Duration(milliseconds: 110),
+            curve: Curves.easeOutCubic,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 150),
+                  curve: Curves.easeOutCubic,
+                  width: 48,
+                  height: 28,
+                  decoration: BoxDecoration(
+                    color: pillColor,
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  alignment: Alignment.center,
+                  child: iconWidget,
                 ),
-                alignment: Alignment.center,
-                child: iconWidget,
-              ),
-              const SizedBox(height: 3),
-              Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.labelSmall?.copyWith(
-                  fontSize: 11.5,
-                  fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
-                  color: selected ? scheme.onSurface : scheme.onSurfaceVariant,
+                const SizedBox(height: 3),
+                Text(
+                  widget.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    fontSize: 11.5,
+                    fontWeight: widget.selected
+                        ? FontWeight.w600
+                        : FontWeight.w500,
+                    color: foregroundColor,
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

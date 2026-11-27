@@ -669,9 +669,12 @@ class _Shell extends ConsumerWidget {
     return Scaffold(
       body: shell,
       bottomNavigationBar: Material(
-        color: scheme.surfaceContainer,
-        surfaceTintColor: scheme.surfaceTint,
-        elevation: 3,
+        color: scheme.brightness == Brightness.dark
+            ? scheme.surfaceContainer
+            : scheme.surfaceContainerLow,
+        surfaceTintColor: Colors.transparent,
+        shadowColor: Colors.transparent,
+        elevation: 0,
         child: SafeArea(
           top: false,
           child: SizedBox(
@@ -697,30 +700,8 @@ class _Shell extends ConsumerWidget {
                 ),
                 Expanded(
                   child: Center(
-                    child: Tooltip(
-                      message: '记一笔',
-                      child: Semantics(
-                        button: true,
-                        label: '记一笔',
-                        child: Material(
-                          color: scheme.primary,
-                          borderRadius: BorderRadius.circular(14),
-                          clipBehavior: Clip.antiAlias,
-                          child: InkWell(
-                            key: const Key('add-record'),
-                            onTap: () => openNewRecordEntry(context, ref),
-                            child: SizedBox(
-                              width: 46,
-                              height: 40,
-                              child: Icon(
-                                Icons.add_rounded,
-                                color: scheme.onPrimary,
-                                size: 28,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
+                    child: _ShellAddRecordButton(
+                      onTap: () => openNewRecordEntry(context, ref),
                     ),
                   ),
                 ),
@@ -749,7 +730,77 @@ class _Shell extends ConsumerWidget {
   }
 }
 
-class _ShellNavSlot extends StatelessWidget {
+class _ShellAddRecordButton extends StatefulWidget {
+  const _ShellAddRecordButton({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  State<_ShellAddRecordButton> createState() => _ShellAddRecordButtonState();
+}
+
+class _ShellAddRecordButtonState extends State<_ShellAddRecordButton> {
+  bool _pressed = false;
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final fillColor = Color.lerp(
+      scheme.primary,
+      scheme.onPrimary,
+      _pressed ? 0.14 : (_hovered ? 0.06 : 0.0),
+    )!;
+    return Tooltip(
+      message: '记一笔',
+      child: Semantics(
+        button: true,
+        label: '记一笔',
+        child: AnimatedScale(
+          scale: _pressed ? 0.92 : 1.0,
+          duration: const Duration(milliseconds: 110),
+          curve: Curves.easeOutCubic,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: fillColor,
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: InkWell(
+              key: const Key('add-record'),
+              borderRadius: BorderRadius.circular(14),
+              splashFactory: NoSplash.splashFactory,
+              overlayColor: const WidgetStatePropertyAll<Color>(
+                Colors.transparent,
+              ),
+              splashColor: Colors.transparent,
+              highlightColor: Colors.transparent,
+              hoverColor: Colors.transparent,
+              focusColor: Colors.transparent,
+              onHighlightChanged: (value) {
+                if (_pressed != value) setState(() => _pressed = value);
+              },
+              onHover: (value) {
+                if (_hovered != value) setState(() => _hovered = value);
+              },
+              onTap: widget.onTap,
+              child: SizedBox(
+                width: 46,
+                height: 40,
+                child: Icon(
+                  Icons.add_rounded,
+                  color: scheme.onPrimary,
+                  size: 28,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ShellNavSlot extends StatefulWidget {
   const _ShellNavSlot({
     required this.slotKey,
     required this.icon,
@@ -767,54 +818,104 @@ class _ShellNavSlot extends StatelessWidget {
   final VoidCallback onTap;
 
   @override
+  State<_ShellNavSlot> createState() => _ShellNavSlotState();
+}
+
+class _ShellNavSlotState extends State<_ShellNavSlot> {
+  bool _pressed = false;
+  bool _hovered = false;
+
+  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final isDark = scheme.brightness == Brightness.dark;
+    final activeForeground = isDark
+        ? scheme.onPrimaryContainer
+        : scheme.primary;
+    final Color pillColor;
+    if (widget.selected) {
+      pillColor = isDark
+          ? Color.lerp(
+              scheme.surfaceContainerHigh,
+              scheme.primaryContainer,
+              _pressed ? 0.72 : 0.56,
+            )!
+          : Color.lerp(
+              scheme.surfaceContainerLowest,
+              scheme.primaryContainer,
+              _pressed ? 0.84 : 0.70,
+            )!;
+    } else if (_pressed) {
+      pillColor = scheme.primary.withValues(alpha: isDark ? 0.16 : 0.10);
+    } else if (_hovered) {
+      pillColor = scheme.onSurface.withValues(alpha: 0.06);
+    } else {
+      pillColor = Colors.transparent;
+    }
+    final foregroundColor = widget.selected
+        ? activeForeground
+        : (_pressed ? scheme.onSurface : scheme.onSurfaceVariant);
+
     return Expanded(
       child: Semantics(
-        selected: selected,
+        selected: widget.selected,
         button: true,
         child: InkWell(
-          key: slotKey,
-          onTap: onTap,
+          key: widget.slotKey,
+          splashFactory: NoSplash.splashFactory,
+          overlayColor: const WidgetStatePropertyAll<Color>(Colors.transparent),
+          splashColor: Colors.transparent,
+          highlightColor: Colors.transparent,
+          hoverColor: Colors.transparent,
+          focusColor: Colors.transparent,
+          onHighlightChanged: (value) {
+            if (_pressed != value) setState(() => _pressed = value);
+          },
+          onHover: (value) {
+            if (_hovered != value) setState(() => _hovered = value);
+          },
+          onTap: widget.onTap,
           child: SizedBox.expand(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                AnimatedContainer(
-                  duration: const Duration(milliseconds: 180),
-                  width: 52,
-                  height: 28,
-                  decoration: BoxDecoration(
-                    color: selected
-                        ? scheme.secondaryContainer
-                        : Colors.transparent,
-                    borderRadius: BorderRadius.circular(14),
+            child: AnimatedScale(
+              scale: _pressed ? 0.92 : 1.0,
+              duration: const Duration(milliseconds: 110),
+              curve: Curves.easeOutCubic,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 150),
+                    curve: Curves.easeOutCubic,
+                    width: 52,
+                    height: 28,
+                    decoration: BoxDecoration(
+                      color: pillColor,
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    alignment: Alignment.center,
+                    child: Icon(
+                      widget.selected ? widget.selectedIcon : widget.icon,
+                      size: 22,
+                      color: foregroundColor,
+                    ),
                   ),
-                  alignment: Alignment.center,
-                  child: Icon(
-                    selected ? selectedIcon : icon,
-                    size: 22,
-                    color: selected
-                        ? scheme.onSecondaryContainer
-                        : scheme.onSurfaceVariant,
+                  const SizedBox(height: 3),
+                  Text(
+                    widget.label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      fontSize: 12,
+                      height: 1.1,
+                      fontWeight: widget.selected
+                          ? FontWeight.w600
+                          : FontWeight.w500,
+                      color: foregroundColor,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    fontSize: 12,
-                    height: 1.1,
-                    fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
-                    color: selected
-                        ? scheme.onSurface
-                        : scheme.onSurfaceVariant,
-                  ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),

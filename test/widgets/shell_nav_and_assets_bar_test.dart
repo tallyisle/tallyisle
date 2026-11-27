@@ -151,6 +151,118 @@ void main() {
   );
 
   testWidgets(
+    'Bottom bar and compact rail suppress full-cell rectangular InkWell splash/highlight shadows and provide pill-only spring press feedback',
+    (tester) async {
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      final db = AppDatabase(NativeDatabase.memory());
+
+      // 1. Mobile 5-slot bottom bar (390x844)
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1.0;
+
+      await tester.pumpWidget(
+        ProviderScope(
+          retry: (_, _) => null,
+          overrides: [databaseProvider.overrideWith((ref) async => db)],
+          child: const TallyIsleApp(),
+        ),
+      );
+      await settle(tester);
+
+      final bottomBarFinder = find.byKey(const Key('shell-bottom-bar'));
+      expect(bottomBarFinder, findsOneWidget);
+
+      final barMaterial = tester.widget<Material>(
+        find
+            .ancestor(of: bottomBarFinder, matching: find.byType(Material))
+            .first,
+      );
+      expect(barMaterial.elevation, 0);
+      expect(barMaterial.surfaceTintColor, Colors.transparent);
+      expect(barMaterial.shadowColor, Colors.transparent);
+
+      const bottomKeys = <Key>[
+        Key('nav-slot-home'),
+        Key('nav-slot-stats'),
+        Key('add-record'),
+        Key('nav-slot-assets'),
+        Key('nav-slot-more'),
+      ];
+      for (final key in bottomKeys) {
+        final inkWell = tester.widget<InkWell>(find.byKey(key));
+        expect(
+          inkWell.splashFactory,
+          same(NoSplash.splashFactory),
+          reason: '$key must disable rectangular Material splash',
+        );
+        expect(
+          inkWell.overlayColor?.resolve(const <WidgetState>{
+            WidgetState.pressed,
+            WidgetState.hovered,
+            WidgetState.focused,
+          }),
+          Colors.transparent,
+          reason: '$key must not paint full-slot rectangular overlay shade',
+        );
+      }
+
+      // Press-and-hold on '资产' triggers spring scale compression without exceptions, then releases cleanly.
+      final assetsSlot = find.byKey(const Key('nav-slot-assets'));
+      final gesture = await tester.startGesture(tester.getCenter(assetsSlot));
+      await tester.pump(const Duration(milliseconds: 60));
+      expect(tester.takeException(), isNull);
+      final pressedScale = tester.widget<AnimatedScale>(
+        find.descendant(of: assetsSlot, matching: find.byType(AnimatedScale)),
+      );
+      expect(pressedScale.scale, closeTo(0.92, 0.001));
+
+      await gesture.up();
+      await settle(tester);
+      expect(tester.takeException(), isNull);
+      final releasedScale = tester.widget<AnimatedScale>(
+        find.descendant(of: assetsSlot, matching: find.byType(AnimatedScale)),
+      );
+      expect(releasedScale.scale, 1.0);
+      expect(
+        find.descendant(
+          of: bottomBarFinder,
+          matching: find.byIcon(Icons.account_balance_wallet),
+        ),
+        findsOneWidget,
+      );
+
+      // 2. Tablet / compact 76px rail (900x700)
+      tester.view.physicalSize = const Size(900, 700);
+      await settle(tester);
+      expect(find.byKey(const Key('desktop-nav-rail')), findsOneWidget);
+      for (final key in const <Key>[
+        Key('nav-slot-home'),
+        Key('nav-slot-stats'),
+        Key('nav-slot-assets'),
+        Key('nav-slot-more'),
+      ]) {
+        final railInkWell = tester.widget<InkWell>(find.byKey(key));
+        expect(railInkWell.splashFactory, same(NoSplash.splashFactory));
+        expect(
+          railInkWell.overlayColor?.resolve(const <WidgetState>{
+            WidgetState.pressed,
+            WidgetState.hovered,
+          }),
+          Colors.transparent,
+        );
+      }
+
+      await tester.pumpWidget(const SizedBox());
+      await settle(tester);
+      await tester.pump(const Duration(seconds: 1));
+    },
+  );
+
+  testWidgets(
     'AssetsPage (Scheme A2) renders 3 quick-entry items on a single symmetric 3-column row without 报销管理 across 320dp, 360dp, and 412dp widths',
     (tester) async {
       addTearDown(() {
