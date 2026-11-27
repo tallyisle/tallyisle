@@ -191,8 +191,12 @@ final class S3Client {
   final Duration transferTimeout;
 
   static const int _uploadChunkSize = 32 * 1024;
-  static const int _maxListPages = 50;
+  static const int _maxListPages = 1000;
   static const String _probeRelativePath = '.tallyisle_s3_probe.tmp';
+
+  HttpClient? _sessionClient;
+  int _sessionDepth = 0;
+  String? _lastPutEtag;
 
   static HttpClient _defaultHttpClient() => Zone.root.run(
     () => HttpClient()
@@ -212,10 +216,29 @@ final class S3Client {
     normalizeS3Prefix(config.remotePrefix);
   }
 
+  /// Reuses a single [HttpClient] keep-alive pool across all S3 requests
+  /// issued inside [body] during a single sync session.
+  Future<T> runSession<T>(Future<T> Function() body) async {
+    _sessionDepth++;
+    _sessionClient ??= Zone.root.run(_httpClientFactory);
+    try {
+      return await body();
+    } finally {
+      _sessionDepth--;
+      if (_sessionDepth <= 0) {
+        _sessionDepth = 0;
+        final c = _sessionClient;
+        _sessionClient = null;
+        c?.close(force: true);
+      }
+    }
+  }
+
   Future<T> _withClient<T>(Future<T> Function(HttpClient client) action) {
     final completer = Completer<T>();
     Zone.root.run(() async {
-      final client = _httpClientFactory();
+      final shared = _sessionClient;
+      final client = shared ?? _httpClientFactory();
       try {
         final result = await action(client);
         completer.complete(result);
@@ -253,7 +276,9 @@ final class S3Client {
           st,
         );
       } finally {
-        client.close(force: true);
+        if (shared == null) {
+          client.close(force: true);
+        }
       }
     });
     return completer.future;
@@ -296,21 +321,46 @@ final class S3Client {
     }
   }
 
+  int _currentNowMs() => nowMs?.call() ?? DateTime.now().millisecondsSinceEpoch;
+
   Never _throwForErrorStatus(
     int statusCode,
     String responseBody, {
     required String action,
+    String? retryAfterHeader,
   }) {
+    final retryMs = parseHttpRetryAfterMs(
+      retryAfterHeader,
+      nowMs: _currentNowMs(),
+    );
     if (statusCode == 401 || statusCode == 403) {
       if (responseBody.contains('RequestTimeTooSkewed')) {
+        throw Failure(
+          FailureCode.authRequired,
+          'S3 签名时钟偏差过大（RequestTimeTooSkewed），请校准本机系统时间后重试',
+          retryAfterMs: retryMs,
+        );
+      }
+      if (statusCode == 401 ||
+          responseBody.contains('InvalidAccessKeyId') ||
+          responseBody.contains('SignatureDoesNotMatch')) {
         throw const Failure(
           FailureCode.authRequired,
-          'S3 签名时间偏差过大，请校准本机系统时间后重试',
+          'S3 认证失败（401 / InvalidAccessKeyId / SignatureDoesNotMatch），请检查密钥与 Region 配置',
         );
       }
       throw const Failure(
         FailureCode.authRequired,
-        'S3 认证失败或无存储桶权限，请检查密钥、Region 与 Bucket 配置',
+        'S3 认证失败或无存储桶权限（403），请检查密钥、Region 与 Bucket 配置',
+      );
+    }
+    if (statusCode == 429 ||
+        statusCode == 503 ||
+        responseBody.contains('SlowDown')) {
+      throw Failure(
+        FailureCode.remoteUnavailable,
+        '$action触发远端限流或繁忙（S3 状态码 $statusCode）',
+        retryAfterMs: retryMs,
       );
     }
     if (statusCode == 404 && responseBody.contains('NoSuchBucket')) {
@@ -325,8 +375,150 @@ final class S3Client {
     throw Failure(
       FailureCode.remoteUnavailable,
       '$action失败（S3 状态码 $statusCode）',
+      retryAfterMs: retryMs,
     );
   }
+
+  /// Checks whether an object exists via native SigV4 `HEAD` (costing 1 GET-class
+  /// request instead of a 12.5x more expensive `ListObjectsV2` request),
+  /// falling back to `ListObjectsV2` if a custom gateway returns `405` / `501`.
+  Future<CloudSyncObjectHead?> headObjectOrNull(String relativePath) =>
+      _withClient((client) async {
+        _requireConfigured();
+        final segments = validateCloudRelativeSegments(relativePath);
+        final key = joinS3ObjectKey(config.remotePrefix, relativePath);
+        final signed = _sign(method: 'HEAD', objectKey: key);
+        final req = await client
+            .openUrl('HEAD', signed.target.requestUri)
+            .timeout(controlTimeout);
+        _applySignedHeaders(req, signed);
+        req.headers.set(HttpHeaders.acceptEncodingHeader, 'identity');
+        final res = await req.close().timeout(controlTimeout);
+        final retryAfter = res.headers.value(HttpHeaders.retryAfterHeader);
+        final etag = res.headers.value(HttpHeaders.etagHeader);
+        final contentLengthHdr = res.headers.value(
+          HttpHeaders.contentLengthHeader,
+        );
+        await res.drain<void>().timeout(controlTimeout);
+
+        if (res.statusCode == 404) {
+          return null;
+        }
+        if (res.statusCode == 405 || res.statusCode == 501) {
+          final parentDir = segments.length > 1
+              ? segments.sublist(0, segments.length - 1).join('/')
+              : '';
+          final objs = await _listObjectsOn(
+            client,
+            relativePrefix: parentDir,
+            delimiter: '/',
+          );
+          final expectedRel = segments.join('/');
+          for (final o in objs) {
+            if (o.relativePath == expectedRel) {
+              return CloudSyncObjectHead(sizeBytes: o.sizeBytes, etag: o.etag);
+            }
+          }
+          return null;
+        }
+        if (res.statusCode < 200 || res.statusCode >= 300) {
+          _throwForErrorStatus(
+            res.statusCode,
+            '',
+            action: '检查远端对象',
+            retryAfterHeader: retryAfter,
+          );
+        }
+        final len = contentLengthHdr != null
+            ? int.tryParse(contentLengthHdr.trim())
+            : (res.contentLength >= 0 ? res.contentLength : null);
+        return CloudSyncObjectHead(sizeBytes: len, etag: etag);
+      });
+
+  /// Conditional `GET` mounting `If-None-Match` and `Cache-Control: no-cache`
+  /// as **unsigned** HTTP headers so CDN/reverse-proxy header normalization
+  /// never triggers `SignatureDoesNotMatch`, returning `304` with 0B payload.
+  Future<ConditionalGetResult> getObjectConditional(
+    String relativePath, {
+    String? ifNoneMatch,
+    bool noCache = true,
+  }) => _withClient((client) async {
+    _requireConfigured();
+    final key = joinS3ObjectKey(config.remotePrefix, relativePath);
+    final signed = _sign(method: 'GET', objectKey: key);
+    final req = await client
+        .openUrl('GET', signed.target.requestUri)
+        .timeout(controlTimeout);
+    _applySignedHeaders(req, signed);
+    req.headers.set(HttpHeaders.acceptEncodingHeader, 'identity');
+    if (noCache) {
+      req.headers.set(HttpHeaders.cacheControlHeader, 'no-cache');
+    }
+    if (ifNoneMatch != null && ifNoneMatch.trim().isNotEmpty) {
+      req.headers.set(HttpHeaders.ifNoneMatchHeader, ifNoneMatch.trim());
+    }
+
+    final res = await req.close().timeout(transferTimeout);
+    final resEtag = res.headers.value(HttpHeaders.etagHeader);
+    final retryAfter = res.headers.value(HttpHeaders.retryAfterHeader);
+
+    if (res.statusCode == HttpStatus.notModified) {
+      await res.drain<void>().timeout(controlTimeout);
+      return ConditionalGetResult(
+        notModified: true,
+        etag: resEtag ?? ifNoneMatch,
+      );
+    }
+    if (res.statusCode == 404) {
+      final errXml = await utf8.decoder
+          .bind(res.timeout(controlTimeout))
+          .join()
+          .catchError((_) => '');
+      if (errXml.contains('NoSuchBucket')) {
+        _throwForErrorStatus(
+          404,
+          errXml,
+          action: '读取远端对象',
+          retryAfterHeader: retryAfter,
+        );
+      }
+      return const ConditionalGetResult(notModified: false);
+    }
+    if (res.statusCode != 200) {
+      final errXml = await utf8.decoder
+          .bind(res.timeout(controlTimeout))
+          .join()
+          .catchError((_) => '');
+      _throwForErrorStatus(
+        res.statusCode,
+        errXml,
+        action: '读取远端对象',
+        retryAfterHeader: retryAfter,
+      );
+    }
+
+    final expectedLength = res.contentLength;
+    final builder = BytesBuilder(copy: false);
+    var received = 0;
+    await for (final chunk in res.timeout(transferTimeout)) {
+      builder.add(chunk);
+      received += chunk.length;
+    }
+    if (expectedLength >= 0 &&
+        res.compressionState !=
+            HttpClientResponseCompressionState.decompressed &&
+        received != expectedLength) {
+      throw const Failure(
+        FailureCode.remoteUnavailable,
+        '下载中断：S3 对象字节长度与响应头不一致',
+      );
+    }
+    return ConditionalGetResult(
+      notModified: false,
+      bytes: builder.takeBytes(),
+      etag: resEtag,
+    );
+  });
 
   /// Downloads an object relative to `config.remotePrefix`, returning `null` on `404`.
   Future<Uint8List?> getObjectOrNull(
@@ -350,6 +542,7 @@ final class S3Client {
     _applySignedHeaders(req, signed);
     req.headers.set(HttpHeaders.acceptEncodingHeader, 'identity');
     final res = await req.close().timeout(transferTimeout);
+    final retryAfter = res.headers.value(HttpHeaders.retryAfterHeader);
 
     if (res.statusCode == 404) {
       final errXml = await utf8.decoder
@@ -357,7 +550,12 @@ final class S3Client {
           .join()
           .catchError((_) => '');
       if (errXml.contains('NoSuchBucket')) {
-        _throwForErrorStatus(404, errXml, action: '读取远端对象');
+        _throwForErrorStatus(
+          404,
+          errXml,
+          action: '读取远端对象',
+          retryAfterHeader: retryAfter,
+        );
       }
       return null;
     }
@@ -367,7 +565,12 @@ final class S3Client {
           .bind(res.timeout(controlTimeout))
           .join()
           .catchError((_) => '');
-      _throwForErrorStatus(res.statusCode, errXml, action: '读取远端对象');
+      _throwForErrorStatus(
+        res.statusCode,
+        errXml,
+        action: '读取远端对象',
+        retryAfterHeader: retryAfter,
+      );
     }
 
     final expectedLength = res.contentLength;
@@ -458,12 +661,22 @@ final class S3Client {
     }
 
     final res = await req.close().timeout(transferTimeout);
+    final retryAfter = res.headers.value(HttpHeaders.retryAfterHeader);
+    final putEtag = res.headers.value(HttpHeaders.etagHeader);
+    if (putEtag != null && putEtag.isNotEmpty) {
+      _lastPutEtag = putEtag;
+    }
     if (res.statusCode < 200 || res.statusCode >= 300) {
       final errBody = await utf8.decoder
           .bind(res.timeout(controlTimeout))
           .join()
           .catchError((_) => '');
-      _throwForErrorStatus(res.statusCode, errBody, action: '上传 S3 对象');
+      _throwForErrorStatus(
+        res.statusCode,
+        errBody,
+        action: '上传 S3 对象',
+        retryAfterHeader: retryAfter,
+      );
     }
     await res.drain<void>().timeout(controlTimeout);
   }
@@ -491,6 +704,7 @@ final class S3Client {
     _applySignedHeaders(req, signed);
     req.contentLength = 0;
     final res = await req.close().timeout(controlTimeout);
+    final retryAfter = res.headers.value(HttpHeaders.retryAfterHeader);
     if (ignoreNotFound && res.statusCode == 404) {
       await res.drain<void>().timeout(controlTimeout);
       return;
@@ -502,17 +716,36 @@ final class S3Client {
           .bind(res.timeout(controlTimeout))
           .join()
           .catchError((_) => '');
-      _throwForErrorStatus(res.statusCode, errBody, action: '删除 S3 对象');
+      _throwForErrorStatus(
+        res.statusCode,
+        errBody,
+        action: '删除 S3 对象',
+        retryAfterHeader: retryAfter,
+      );
     }
     await res.drain<void>().timeout(controlTimeout);
   }
 
   /// Lists objects under `config.remotePrefix/[relativePrefix]` via S3
-  /// `ListObjectsV2` (`GET ?list-type=2&prefix=...`), following pagination.
+  /// `ListObjectsV2` (`GET ?list-type=2&max-keys=1000&prefix=...`), following
+  /// pagination up to `1000` pages (`1,000,000` objects) and failing closed if
+  /// truncated or cursor-looping.
   Future<List<S3ObjectMetadata>> listObjects({
     String relativePrefix = '',
     String? delimiter,
-  }) => _withClient((client) async {
+  }) => _withClient(
+    (client) => _listObjectsOn(
+      client,
+      relativePrefix: relativePrefix,
+      delimiter: delimiter,
+    ),
+  );
+
+  Future<List<S3ObjectMetadata>> _listObjectsOn(
+    HttpClient client, {
+    String relativePrefix = '',
+    String? delimiter,
+  }) async {
     _requireConfigured();
     final rootPrefix = '${normalizeS3Prefix(config.remotePrefix)}/';
     final queryPrefix = joinS3ObjectKey(
@@ -522,11 +755,14 @@ final class S3Client {
     );
 
     final results = <S3ObjectMetadata>[];
+    final seenTokens = <String>{};
     String? continuationToken;
+    var stillTruncated = false;
 
     for (var pageIdx = 0; pageIdx < _maxListPages; pageIdx++) {
       final query = <String, String>{
         'list-type': '2',
+        'max-keys': '1000',
         'prefix': queryPrefix,
         if (delimiter != null && delimiter.isNotEmpty) 'delimiter': delimiter,
         if (continuationToken != null) 'continuation-token': continuationToken,
@@ -538,12 +774,18 @@ final class S3Client {
       _applySignedHeaders(req, signed);
       req.headers.set(HttpHeaders.acceptEncodingHeader, 'identity');
       final res = await req.close().timeout(controlTimeout);
+      final retryAfter = res.headers.value(HttpHeaders.retryAfterHeader);
       final xmlBody = await utf8.decoder
           .bind(res.timeout(transferTimeout))
           .join();
 
       if (res.statusCode != 200) {
-        _throwForErrorStatus(res.statusCode, xmlBody, action: '获取 S3 对象列表');
+        _throwForErrorStatus(
+          res.statusCode,
+          xmlBody,
+          action: '获取 S3 对象列表',
+          retryAfterHeader: retryAfter,
+        );
       }
 
       final page = parseS3ListObjectsV2Xml(xmlBody);
@@ -562,14 +804,32 @@ final class S3Client {
         );
       }
 
-      if (!page.isTruncated || page.nextContinuationToken == null) {
+      if (!page.isTruncated) {
+        stillTruncated = false;
         break;
       }
-      continuationToken = page.nextContinuationToken;
+      stillTruncated = true;
+      final nextToken = page.nextContinuationToken;
+      if (nextToken == null ||
+          nextToken.isEmpty ||
+          !seenTokens.add(nextToken)) {
+        throw const Failure(
+          FailureCode.remoteUnavailable,
+          'S3 分页游标异常或重复，已拒绝使用不完整列表',
+        );
+      }
+      continuationToken = nextToken;
+    }
+
+    if (stillTruncated) {
+      throw const Failure(
+        FailureCode.remoteUnavailable,
+        'S3 目录对象数量超出分页上限，已拒绝基于残缺列表操作',
+      );
     }
 
     return results;
-  });
+  }
 
   /// Performs a real write -> read byte verification -> delete probe against
   /// the configured S3 bucket and prefix.
@@ -746,9 +1006,86 @@ final class S3BackupTarget implements BackupTarget, CloudSyncObjectStore {
     items.sort((a, b) {
       final byTime = b.modifiedAtMs.compareTo(a.modifiedAtMs);
       if (byTime != 0) return byTime;
-      return b.fileName.compareTo(a.fileName);
+      return compareBackupFileNamesNewestFirst(a.fileName, b.fileName);
     });
     return items;
+  }
+
+  /// Native SigV4 `HEAD` existence check on [relativePath].
+  Future<CloudSyncObjectHead?> headObject(String relativePath) {
+    _requireConfigured();
+    return _client.headObjectOrNull(relativePath);
+  }
+
+  Future<ConditionalGetResult> getObjectConditional(
+    String relativePath, {
+    String? ifNoneMatch,
+    bool noCache = true,
+  }) {
+    _requireConfigured();
+    return _client.getObjectConditional(
+      relativePath,
+      ifNoneMatch: ifNoneMatch,
+      noCache: noCache,
+    );
+  }
+
+  Future<String?> putObjectReturningEtag(
+    String relativePath,
+    Uint8List bytes, {
+    String contentType = 'application/octet-stream',
+    BackupProgressCallback? onProgress,
+  }) async {
+    _requireConfigured();
+    _client._lastPutEtag = null;
+    await _client.putObject(
+      relativePath,
+      bytes,
+      contentType: contentType,
+      onProgress: onProgress,
+    );
+    return _client._lastPutEtag;
+  }
+
+  Future<List<RemoteEntryMetadata>> listRelativeEntriesWithMetadata(
+    String relativeDir, {
+    bool includeTmp = false,
+  }) async {
+    _requireConfigured();
+    final dirSegs = validateCloudRelativeSegments(
+      relativeDir,
+      allowEmpty: true,
+    );
+    final relPrefix = dirSegs.join('/');
+    final objects = await _client.listObjects(
+      relativePrefix: relPrefix,
+      delimiter: '/',
+    );
+    final stripPrefix = relPrefix.isEmpty ? '' : '$relPrefix/';
+    final out = <RemoteEntryMetadata>[];
+    for (final obj in objects) {
+      if (stripPrefix.isNotEmpty && !obj.relativePath.startsWith(stripPrefix)) {
+        continue;
+      }
+      final tail = stripPrefix.isEmpty
+          ? obj.relativePath
+          : obj.relativePath.substring(stripPrefix.length);
+      if (tail.isEmpty || tail.contains('/')) continue;
+      if (!includeTmp && tail.toLowerCase().endsWith('.tmp')) continue;
+      out.add(
+        RemoteEntryMetadata(
+          fileName: tail,
+          sizeBytes: obj.sizeBytes,
+          modifiedAtMs: obj.modifiedAtMs > 0 ? obj.modifiedAtMs : null,
+        ),
+      );
+    }
+    return out;
+  }
+
+  Future<T> runSession<T>(Future<T> Function() body) {
+    _requireConfigured();
+    return _client.runSession(body);
   }
 
   @override

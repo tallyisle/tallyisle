@@ -529,6 +529,10 @@ void main() {
         find.byKey(const Key('cloud_sync_conflict_dialog')),
         findsOneWidget,
       );
+      expect(
+        find.byKey(const Key('conflict_comparison_summary_card')),
+        findsOneWidget,
+      );
       expect(find.text('检测到多端同步冲突'), findsOneWidget);
 
       // Tap 稍后处理 -> dialog closes, conflict banner stays visible, and conflict_*.tally exists locally & on S3!
@@ -901,6 +905,136 @@ void main() {
 
       tester.view.resetPhysicalSize();
       tester.view.resetDevicePixelRatio();
+      await tester.pumpWidget(const SizedBox());
+      await settle(tester);
+      await tester.pump(const Duration(seconds: 1));
+    },
+  );
+
+  testWidgets(
+    'BackupPage renames local sync device label and displays auth circuit-breaker backoff banner',
+    (tester) async {
+      HttpOverrides.global = null;
+      late final AppDatabase db;
+      late final TallyBackupService service;
+      final scheduler = InMemoryReminderScheduler();
+      final s3Server = (await tester.runAsync(_WidgetTestS3Server.start))!;
+      final tempRoot = (await tester.runAsync(
+        () => Directory.systemTemp.createTemp('cloud_sync_widget_rename_'),
+      ))!;
+      final localDir = Directory(p.join(tempRoot.path, 'local'));
+      final attDir = Directory(p.join(tempRoot.path, 'att'));
+
+      await tester.runAsync(() async {
+        db = AppDatabase(NativeDatabase.memory());
+        service = TallyBackupService(
+          db,
+          reminderService: ReminderService(db, scheduler: scheduler),
+          localBackupsDirectoryProvider: () async => localDir,
+          attachmentsDirectoryProvider: () async => attDir,
+        );
+        await service.saveS3Config(
+          S3Config(
+            endpoint: s3Server.endpoint,
+            region: 'auto',
+            bucket: _WidgetTestS3Server.bucket,
+            accessKeyId: _WidgetTestS3Server.accessKey,
+            secretAccessKey: _WidgetTestS3Server.secretKey,
+            remotePrefix: 'TallyIsle',
+          ),
+        );
+      });
+
+      addTearDown(() async {
+        await tester.pumpWidget(const SizedBox());
+        await scheduler.dispose();
+        await tester.runAsync(s3Server.close);
+        await tester.runAsync(db.close);
+        await tester.runAsync(() async {
+          if (await tempRoot.exists()) await tempRoot.delete(recursive: true);
+        });
+      });
+
+      late WidgetRef capturedRef;
+      await tester.pumpWidget(
+        ProviderScope(
+          retry: (_, _) => null,
+          overrides: [
+            databaseProvider.overrideWith((ref) async => db),
+            reminderSchedulerProvider.overrideWithValue(scheduler),
+            backupFileAccessProvider.overrideWithValue(const FileAccess()),
+            backupLocalDirectoryOverrideProvider.overrideWithValue(
+              () async => localDir,
+            ),
+            backupAttachmentsDirectoryOverrideProvider.overrideWithValue(
+              () async => attDir,
+            ),
+          ],
+          child: MaterialApp(
+            home: Consumer(
+              builder: (_, ref, _) {
+                capturedRef = ref;
+                return const BackupPage();
+              },
+            ),
+          ),
+        ),
+      );
+      await settle(tester);
+
+      expect(
+        find.byKey(const Key('cloud_sync_device_name_row')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const Key('cloud_sync_backoff_banner')), findsNothing);
+
+      // Rename local device via in-page dialog
+      final editBtn = find.byKey(const Key('edit_sync_device_name_button'));
+      await tester.ensureVisible(editBtn);
+      await settle(tester);
+      await tester.tap(editBtn);
+      await settle(tester);
+      expect(
+        find.byKey(const Key('rename_sync_device_dialog')),
+        findsOneWidget,
+      );
+
+      await tester.enterText(
+        find.byKey(const Key('sync_device_name_input')),
+        '书房主力台式机',
+      );
+      await tester.tap(find.byKey(const Key('save_sync_device_name_button')));
+      await settle(tester);
+
+      expect(find.text('本机标识：书房主力台式机'), findsOneWidget);
+      final updatedSettings = (await tester.runAsync(
+        service.getCloudSyncSettings,
+      ))!;
+      expect(updatedSettings.deviceName, '书房主力台式机');
+
+      // Trigger auth circuit-breaker state -> banner appears, then clears on reset
+      capturedRef
+          .read(syncBackoffStateProvider.notifier)
+          .updateState(
+            const SyncBackoffState(
+              consecutiveNonClock403Failures: 2,
+              isAuthCircuitOpen: true,
+              lastFailureMessage: 'Access Key 鉴权失败 (403)',
+            ),
+          );
+      await settle(tester);
+      expect(
+        find.byKey(const Key('cloud_sync_backoff_banner')),
+        findsOneWidget,
+      );
+      expect(find.textContaining('云端鉴权异常已暂停后台自动重试'), findsOneWidget);
+
+      capturedRef
+          .read(syncBackoffStateProvider.notifier)
+          .updateState(SyncBackoffState.healthy);
+      await settle(tester);
+      expect(find.byKey(const Key('cloud_sync_backoff_banner')), findsNothing);
+
       await tester.pumpWidget(const SizedBox());
       await settle(tester);
       await tester.pump(const Duration(seconds: 1));

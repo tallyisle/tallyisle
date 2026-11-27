@@ -16,9 +16,10 @@ enum FailureCode {
 
 /// Carries a safe message. Database errors, payloads and credentials stay out of UI.
 final class Failure implements Exception {
-  const Failure(this.code, this.message);
+  const Failure(this.code, this.message, {this.retryAfterMs});
   final FailureCode code;
   final String message;
+  final int? retryAfterMs;
   @override
   String toString() => 'TALLYISLE_FAILURE:${code.name}';
 }

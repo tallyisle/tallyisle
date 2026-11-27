@@ -8,6 +8,7 @@ import '../../domain/rules/cloud_sync_rules.dart';
 import '../../domain/rules/s3_sigv4_rules.dart';
 import '../../domain/rules/tally_backup.dart';
 import '../../platform/files.dart';
+import 's3_client.dart';
 
 typedef BackupProgressCallback =
     void Function(int transferredBytes, int totalBytes);
@@ -54,9 +55,37 @@ abstract interface class BackupTarget {
 
 /// Metadata returned by a lightweight remote object existence check (`HEAD` / list).
 final class CloudSyncObjectHead {
-  const CloudSyncObjectHead({this.sizeBytes});
+  const CloudSyncObjectHead({this.sizeBytes, this.etag});
 
   final int? sizeBytes;
+  final String? etag;
+}
+
+/// Result of a conditional `GET` (`If-None-Match`) against `sync/head.json`.
+final class ConditionalGetResult {
+  const ConditionalGetResult({
+    required this.notModified,
+    this.bytes,
+    this.etag,
+  });
+
+  final bool notModified;
+  final Uint8List? bytes;
+  final String? etag;
+}
+
+/// Immediate child file metadata (including optional `.tmp` entries) used by
+/// low-frequency GC and `.tmp` orphan cleanup.
+final class RemoteEntryMetadata {
+  const RemoteEntryMetadata({
+    required this.fileName,
+    required this.sizeBytes,
+    required this.modifiedAtMs,
+  });
+
+  final String fileName;
+  final int sizeBytes;
+  final int? modifiedAtMs;
 }
 
 /// Unified relative-path object operations used by multi-device snapshot sync
@@ -86,12 +115,15 @@ abstract interface class CloudSyncObjectStore {
   Future<Set<String>> listRelativeFileNames(String relativeDir);
 }
 
-/// Lightweight existence / metadata check for [CloudSyncObjectStore] without
-/// downloading full snapshot payloads.
+/// Lightweight existence, conditional `304`, session reuse, and metadata
+/// extensions for [CloudSyncObjectStore].
 extension CloudSyncObjectStoreHeadExtension on CloudSyncObjectStore {
   Future<CloudSyncObjectHead?> headObject(String relativePath) async {
     final self = this;
     if (self is WebDavBackupTarget) {
+      return self.headObject(relativePath);
+    }
+    if (self is S3BackupTarget) {
       return self.headObject(relativePath);
     }
     final segments = validateCloudRelativeSegments(relativePath);
@@ -103,6 +135,93 @@ extension CloudSyncObjectStoreHeadExtension on CloudSyncObjectStore {
       return null;
     }
     return const CloudSyncObjectHead();
+  }
+
+  Future<ConditionalGetResult> getObjectConditional(
+    String relativePath, {
+    String? ifNoneMatch,
+    bool noCache = true,
+  }) async {
+    final self = this;
+    if (self is WebDavBackupTarget) {
+      return self.getObjectConditional(
+        relativePath,
+        ifNoneMatch: ifNoneMatch,
+        noCache: noCache,
+      );
+    }
+    if (self is S3BackupTarget) {
+      return self.getObjectConditional(
+        relativePath,
+        ifNoneMatch: ifNoneMatch,
+        noCache: noCache,
+      );
+    }
+    final bytes = await getObjectOrNull(relativePath);
+    return ConditionalGetResult(notModified: false, bytes: bytes);
+  }
+
+  Future<String?> putObjectReturningEtag(
+    String relativePath,
+    Uint8List bytes, {
+    String contentType = 'application/octet-stream',
+    BackupProgressCallback? onProgress,
+  }) async {
+    final self = this;
+    if (self is WebDavBackupTarget) {
+      return self.putObjectReturningEtag(
+        relativePath,
+        bytes,
+        contentType: contentType,
+        onProgress: onProgress,
+      );
+    }
+    if (self is S3BackupTarget) {
+      return self.putObjectReturningEtag(
+        relativePath,
+        bytes,
+        contentType: contentType,
+        onProgress: onProgress,
+      );
+    }
+    await putObject(
+      relativePath,
+      bytes,
+      contentType: contentType,
+      onProgress: onProgress,
+    );
+    return null;
+  }
+
+  Future<List<RemoteEntryMetadata>?> listRelativeEntriesWithMetadataOrNull(
+    String relativeDir, {
+    bool includeTmp = false,
+  }) async {
+    final self = this;
+    if (self is WebDavBackupTarget) {
+      return self.listRelativeEntriesWithMetadata(
+        relativeDir,
+        includeTmp: includeTmp,
+      );
+    }
+    if (self is S3BackupTarget) {
+      return self.listRelativeEntriesWithMetadata(
+        relativeDir,
+        includeTmp: includeTmp,
+      );
+    }
+    return null;
+  }
+
+  Future<T> runSession<T>(Future<T> Function() action) {
+    final self = this;
+    if (self is WebDavBackupTarget) {
+      return self.runSession(action);
+    }
+    if (self is S3BackupTarget) {
+      return self.runSession(action);
+    }
+    return action();
   }
 }
 
@@ -241,6 +360,9 @@ final class WebDavClient {
   final Duration staleHeadRetryDelay;
 
   final Set<String> _verifiedCollectionPaths = <String>{};
+  HttpClient? _sessionClient;
+  int _sessionDepth = 0;
+  String? _lastPutEtag;
 
   static const int _uploadChunkSize = 32 * 1024;
   static const int _smallPayloadVerifyMaxBytes = 256 * 1024;
@@ -334,10 +456,29 @@ final class WebDavClient {
     return 'Basic $token';
   }
 
+  /// Reuses a single [HttpClient] keep-alive pool across all WebDAV requests
+  /// issued inside [body] during a single sync session.
+  Future<T> runSession<T>(Future<T> Function() body) async {
+    _sessionDepth++;
+    _sessionClient ??= Zone.root.run(_httpClientFactory);
+    try {
+      return await body();
+    } finally {
+      _sessionDepth--;
+      if (_sessionDepth <= 0) {
+        _sessionDepth = 0;
+        final c = _sessionClient;
+        _sessionClient = null;
+        c?.close(force: true);
+      }
+    }
+  }
+
   Future<T> _withClient<T>(Future<T> Function(HttpClient client) action) {
     final completer = Completer<T>();
     Zone.root.run(() async {
-      final client = _httpClientFactory();
+      final shared = _sessionClient;
+      final client = shared ?? _httpClientFactory();
       try {
         final result = await action(client);
         completer.complete(result);
@@ -375,17 +516,42 @@ final class WebDavClient {
           st,
         );
       } finally {
-        client.close(force: true);
+        if (shared == null) {
+          client.close(force: true);
+        }
       }
     });
     return completer.future;
   }
 
-  void _checkAuthAndStorageStatus(int statusCode, {required String action}) {
-    if (statusCode == 401 || statusCode == 403) {
+  int _currentNowMs() => nowMs?.call() ?? DateTime.now().millisecondsSinceEpoch;
+
+  void _checkAuthAndStorageStatus(
+    int statusCode, {
+    required String action,
+    String? retryAfterHeader,
+  }) {
+    if (statusCode == 401) {
       throw const Failure(
         FailureCode.authRequired,
-        'WebDAV 认证失败或无目录权限，请检查用户名与应用密码',
+        'WebDAV 认证失败（401），请检查用户名与应用密码',
+      );
+    }
+    if (statusCode == 403) {
+      throw const Failure(
+        FailureCode.authRequired,
+        'WebDAV 无目录权限（403），请检查用户名与应用密码',
+      );
+    }
+    if (statusCode == 429 || statusCode == 503) {
+      final retryMs = parseHttpRetryAfterMs(
+        retryAfterHeader,
+        nowMs: _currentNowMs(),
+      );
+      throw Failure(
+        FailureCode.remoteUnavailable,
+        '$action触发远端限流或繁忙（状态码 $statusCode），请稍后重试',
+        retryAfterMs: retryMs,
       );
     }
     if (statusCode == 507) {
@@ -399,10 +565,8 @@ final class WebDavClient {
     }
   }
 
-  Future<int> _propfindCollectionDepth0StatusOn(
-    HttpClient client,
-    Uri dirUri,
-  ) async {
+  Future<({int statusCode, String? retryAfter})>
+  _propfindCollectionDepth0StatusOn(HttpClient client, Uri dirUri) async {
     final checkReq = await client
         .openUrl('PROPFIND', dirUri)
         .timeout(controlTimeout);
@@ -416,8 +580,9 @@ final class WebDavClient {
     checkReq.contentLength = bodyBytes.length;
     checkReq.add(bodyBytes);
     final checkRes = await checkReq.close().timeout(controlTimeout);
+    final retryAfter = checkRes.headers.value(HttpHeaders.retryAfterHeader);
     await checkRes.drain<void>().timeout(controlTimeout);
-    return checkRes.statusCode;
+    return (statusCode: checkRes.statusCode, retryAfter: retryAfter);
   }
 
   /// Ensures the configured remote WebDAV folder hierarchy exists (`PROPFIND` + `MKCOL`).
@@ -436,8 +601,13 @@ final class WebDavClient {
     }
 
     final dirUri = _directoryUri(fullSegments);
-    final checkStatus = await _propfindCollectionDepth0StatusOn(client, dirUri);
-    _checkAuthAndStorageStatus(checkStatus, action: '检查远端目录');
+    final check = await _propfindCollectionDepth0StatusOn(client, dirUri);
+    final checkStatus = check.statusCode;
+    _checkAuthAndStorageStatus(
+      checkStatus,
+      action: '检查远端目录',
+      retryAfterHeader: check.retryAfter,
+    );
     if (checkStatus == 200 || checkStatus == 207) {
       final acc = <String>[];
       for (final seg in fullSegments) {
@@ -448,6 +618,15 @@ final class WebDavClient {
         _verifiedCollectionPaths.add('/');
       }
       return;
+    }
+    // Strictly proceed to MKCOL ONLY when PROPFIND indicates the directory is
+    // absent (404) or Depth:0 PROPFIND is unsupported (405). Never cascade 4
+    // MKCOL writes on 429 / 502 / gateway errors!
+    if (checkStatus != 404 && checkStatus != 405) {
+      throw Failure(
+        FailureCode.remoteUnavailable,
+        '检查 WebDAV 远端目录失败（状态码 $checkStatus）',
+      );
     }
 
     final current = <String>[];
@@ -464,8 +643,13 @@ final class WebDavClient {
       mkReq.headers.set(HttpHeaders.authorizationHeader, _basicAuthHeader);
       mkReq.contentLength = 0;
       final mkRes = await mkReq.close().timeout(controlTimeout);
+      final mkRetryAfter = mkRes.headers.value(HttpHeaders.retryAfterHeader);
       await mkRes.drain<void>().timeout(controlTimeout);
-      _checkAuthAndStorageStatus(mkRes.statusCode, action: '创建远端目录');
+      _checkAuthAndStorageStatus(
+        mkRes.statusCode,
+        action: '创建远端目录',
+        retryAfterHeader: mkRetryAfter,
+      );
       if (mkRes.statusCode == 201 ||
           mkRes.statusCode == 200 ||
           mkRes.statusCode == 204 ||
@@ -476,11 +660,8 @@ final class WebDavClient {
       if (mkRes.statusCode == 409) {
         // Some WebDAV gateways (e.g. Alist / cloud-drive bridges) return 409
         // instead of 405 when MKCOL targets an already-existing folder.
-        final verifyStatus = await _propfindCollectionDepth0StatusOn(
-          client,
-          colUri,
-        );
-        if (verifyStatus == 200 || verifyStatus == 207) {
+        final verify = await _propfindCollectionDepth0StatusOn(client, colUri);
+        if (verify.statusCode == 200 || verify.statusCode == 207) {
           _verifiedCollectionPaths.add(prefixKey);
           continue;
         }
@@ -520,13 +701,18 @@ final class WebDavClient {
     req.add(reqBytes);
 
     final res = await req.close().timeout(controlTimeout);
+    final retryAfter = res.headers.value(HttpHeaders.retryAfterHeader);
     final xmlBody = await utf8.decoder
         .bind(res.timeout(transferTimeout))
         .join();
     if (res.statusCode == 404) {
       return const <BackupFileMetadata>[];
     }
-    _checkAuthAndStorageStatus(res.statusCode, action: '获取远端备份列表');
+    _checkAuthAndStorageStatus(
+      res.statusCode,
+      action: '获取远端备份列表',
+      retryAfterHeader: retryAfter,
+    );
     if (res.statusCode != 207 && res.statusCode != 200) {
       throw Failure(
         FailureCode.remoteUnavailable,
@@ -606,6 +792,121 @@ final class WebDavClient {
     }
     return toDelete;
   }
+
+  /// Conditional `GET` on [relativePath] sending raw `If-None-Match` +
+  /// `Cache-Control: no-cache` and returning `304 Not Modified` with zero body.
+  Future<ConditionalGetResult> getRelativeFileConditional(
+    String relativePath, {
+    String? ifNoneMatch,
+    bool noCache = true,
+  }) => _withClient((client) async {
+    final segments = validateCloudRelativeSegments(relativePath);
+    final uri = _relativePathUri(segments);
+    final req = await client.getUrl(uri).timeout(controlTimeout);
+    req.headers.set(HttpHeaders.authorizationHeader, _basicAuthHeader);
+    req.headers.set(HttpHeaders.acceptEncodingHeader, 'identity');
+    if (noCache) {
+      req.headers.set(HttpHeaders.cacheControlHeader, 'no-cache');
+    }
+    if (ifNoneMatch != null && ifNoneMatch.trim().isNotEmpty) {
+      req.headers.set(HttpHeaders.ifNoneMatchHeader, ifNoneMatch.trim());
+    }
+    final res = await req.close().timeout(transferTimeout);
+    final resEtag = res.headers.value(HttpHeaders.etagHeader);
+    if (res.statusCode == HttpStatus.notModified) {
+      await res.drain<void>().timeout(controlTimeout);
+      return ConditionalGetResult(
+        notModified: true,
+        etag: resEtag ?? ifNoneMatch,
+      );
+    }
+    if (res.statusCode == 404 || res.statusCode == 410) {
+      await res.drain<void>().timeout(controlTimeout);
+      return const ConditionalGetResult(notModified: false);
+    }
+    _checkAuthAndStorageStatus(
+      res.statusCode,
+      action: '下载远端文件',
+      retryAfterHeader: res.headers.value(HttpHeaders.retryAfterHeader),
+    );
+    if (res.statusCode != 200) {
+      await res.drain<void>().timeout(controlTimeout);
+      throw Failure(
+        FailureCode.remoteUnavailable,
+        '下载 WebDAV 文件失败（状态码 ${res.statusCode}）',
+      );
+    }
+    final expectedLength = res.contentLength;
+    final builder = BytesBuilder(copy: false);
+    var received = 0;
+    await for (final chunk in res.timeout(transferTimeout)) {
+      builder.add(chunk);
+      received += chunk.length;
+    }
+    if (expectedLength >= 0 &&
+        res.compressionState !=
+            HttpClientResponseCompressionState.decompressed &&
+        received != expectedLength) {
+      throw const Failure(FailureCode.remoteUnavailable, '下载中断：远端字节长度与响应头不一致');
+    }
+    return ConditionalGetResult(
+      notModified: false,
+      bytes: builder.takeBytes(),
+      etag: resEtag,
+    );
+  });
+
+  /// Lists immediate child file entries (optionally including `.tmp` files)
+  /// with size and `getlastmodified` timestamps for low-frequency GC.
+  Future<List<RemoteEntryMetadata>> listRelativeEntriesWithMetadata(
+    String relativeDir, {
+    bool includeTmp = false,
+  }) => _withClient((client) async {
+    final subSegments = validateCloudRelativeSegments(
+      relativeDir,
+      allowEmpty: true,
+    );
+    final dirUri = _directoryUri(<String>[
+      ..._remoteDirSegments(),
+      ...subSegments,
+    ]);
+    final req = await client
+        .openUrl('PROPFIND', dirUri)
+        .timeout(controlTimeout);
+    req.headers.set(HttpHeaders.authorizationHeader, _basicAuthHeader);
+    req.headers.set('Depth', '1');
+    req.headers.set(
+      HttpHeaders.contentTypeHeader,
+      'application/xml; charset=utf-8',
+    );
+    final reqBytes = utf8.encode(_propfindBody);
+    req.contentLength = reqBytes.length;
+    req.add(reqBytes);
+
+    final res = await req.close().timeout(controlTimeout);
+    final xmlBody = await utf8.decoder
+        .bind(res.timeout(transferTimeout))
+        .join();
+    if (res.statusCode == 404) {
+      return const <RemoteEntryMetadata>[];
+    }
+    _checkAuthAndStorageStatus(
+      res.statusCode,
+      action: '列举远端同步目录',
+      retryAfterHeader: res.headers.value(HttpHeaders.retryAfterHeader),
+    );
+    if (res.statusCode != 207 && res.statusCode != 200) {
+      throw Failure(
+        FailureCode.remoteUnavailable,
+        '列举 WebDAV 目录失败（状态码 ${res.statusCode}）',
+      );
+    }
+    return parsePropfindEntriesWithMetadata(
+      xmlBody,
+      collectionPath: dirUri.path,
+      includeTmp: includeTmp,
+    );
+  });
 
   /// Reads an arbitrary relative object under `remoteDirectory` (e.g. `sync/head.json`),
   /// returning `null` on `404`.
@@ -696,13 +997,18 @@ final class WebDavClient {
         req.add(reqBytes);
 
         final res = await req.close().timeout(controlTimeout);
+        final retryAfter = res.headers.value(HttpHeaders.retryAfterHeader);
         final xmlBody = await utf8.decoder
             .bind(res.timeout(transferTimeout))
             .join();
         if (res.statusCode == 404) {
           return const <String>{};
         }
-        _checkAuthAndStorageStatus(res.statusCode, action: '列举远端同步目录');
+        _checkAuthAndStorageStatus(
+          res.statusCode,
+          action: '列举远端同步目录',
+          retryAfterHeader: retryAfter,
+        );
         if (res.statusCode != 207 && res.statusCode != 200) {
           throw Failure(
             FailureCode.remoteUnavailable,
@@ -712,7 +1018,7 @@ final class WebDavClient {
         return parsePropfindFileNames(xmlBody, collectionPath: dirUri.path);
       });
 
-  Future<int> _sendMoveOn(
+  Future<({int statusCode, String? retryAfter})> _sendMoveOn(
     HttpClient client, {
     required Uri tmpUri,
     required Uri finalUri,
@@ -725,8 +1031,13 @@ final class WebDavClient {
     moveReq.headers.set('Overwrite', 'T');
     moveReq.contentLength = 0;
     final moveRes = await moveReq.close().timeout(controlTimeout);
+    final moveEtag = moveRes.headers.value(HttpHeaders.etagHeader);
+    final moveRetryAfter = moveRes.headers.value(HttpHeaders.retryAfterHeader);
+    if (moveEtag != null && moveEtag.isNotEmpty) {
+      _lastPutEtag = moveEtag;
+    }
     await moveRes.drain<void>().timeout(controlTimeout);
-    return moveRes.statusCode;
+    return (statusCode: moveRes.statusCode, retryAfter: moveRetryAfter);
   }
 
   Future<void> _atomicPutWithMoveFallbackOn(
@@ -747,11 +1058,12 @@ final class WebDavClient {
       onProgress: onProgress,
     );
 
-    final moveStatus = await _sendMoveOn(
+    final moveResult = await _sendMoveOn(
       client,
       tmpUri: tmpUri,
       finalUri: finalUri,
     );
+    final moveStatus = moveResult.statusCode;
 
     if (moveStatus == 200 || moveStatus == 201 || moveStatus == 204) {
       return;
@@ -787,7 +1099,11 @@ final class WebDavClient {
     try {
       await _deleteUriOn(client, tmpUri, ignoreNotFound: true);
     } catch (_) {}
-    _checkAuthAndStorageStatus(moveStatus, action: '原子重命名远端文件');
+    _checkAuthAndStorageStatus(
+      moveStatus,
+      action: '原子重命名远端文件',
+      retryAfterHeader: moveResult.retryAfter,
+    );
     throw Failure(
       FailureCode.remoteUnavailable,
       'WebDAV 两阶段提交 MOVE 失败（状态码 $moveStatus）',
@@ -807,13 +1123,20 @@ final class WebDavClient {
       req.headers.set(HttpHeaders.cacheControlHeader, 'no-cache');
     }
     final res = await req.close().timeout(transferTimeout);
+    final retryAfter = res.headers.value(HttpHeaders.retryAfterHeader);
     if (res.statusCode == 404 || res.statusCode == 410) {
       await res.drain<void>().timeout(controlTimeout);
       return null;
     }
-    _checkAuthAndStorageStatus(res.statusCode, action: '下载远端文件');
     if (res.statusCode != 200) {
       await res.drain<void>().timeout(controlTimeout);
+    }
+    _checkAuthAndStorageStatus(
+      res.statusCode,
+      action: '下载远端文件',
+      retryAfterHeader: retryAfter,
+    );
+    if (res.statusCode != 200) {
       throw Failure(
         FailureCode.remoteUnavailable,
         '下载 WebDAV 文件失败（状态码 ${res.statusCode}）',
@@ -869,6 +1192,11 @@ final class WebDavClient {
     }
 
     final res = await req.close().timeout(transferTimeout);
+    final retryAfter = res.headers.value(HttpHeaders.retryAfterHeader);
+    final putEtag = res.headers.value(HttpHeaders.etagHeader);
+    if (putEtag != null && putEtag.isNotEmpty) {
+      _lastPutEtag = putEtag;
+    }
     await res.drain<void>().timeout(controlTimeout);
     if (res.statusCode == 409 && retryMissingParent) {
       // RFC 4918 §9.7.1: 409 on PUT indicates a missing ancestor collection
@@ -891,7 +1219,11 @@ final class WebDavClient {
       );
       return;
     }
-    _checkAuthAndStorageStatus(res.statusCode, action: '上传备份文件');
+    _checkAuthAndStorageStatus(
+      res.statusCode,
+      action: '上传备份文件',
+      retryAfterHeader: retryAfter,
+    );
     if (res.statusCode < 200 || res.statusCode >= 300) {
       throw Failure(
         FailureCode.remoteUnavailable,
@@ -960,12 +1292,17 @@ final class WebDavClient {
       req.headers.set(HttpHeaders.pragmaHeader, 'no-cache');
     }
     final res = await req.close().timeout(controlTimeout);
+    final retryAfter = res.headers.value(HttpHeaders.retryAfterHeader);
     await res.drain<void>().timeout(controlTimeout);
     if (res.statusCode == 405 || res.statusCode == 501) {
       // Lightweight WebDAV server does not implement HEAD; direct PUT succeeded.
       return (skipLengthVerification: true, remoteLength: null);
     }
-    _checkAuthAndStorageStatus(res.statusCode, action: '校验远端备份长度');
+    _checkAuthAndStorageStatus(
+      res.statusCode,
+      action: '校验远端备份长度',
+      retryAfterHeader: retryAfter,
+    );
     if (res.statusCode < 200 || res.statusCode >= 300) {
       throw Failure(
         FailureCode.remoteUnavailable,
@@ -1003,13 +1340,20 @@ final class WebDavClient {
     req.headers.set(HttpHeaders.cacheControlHeader, 'no-cache');
     req.headers.set(HttpHeaders.pragmaHeader, 'no-cache');
     final res = await req.close().timeout(transferTimeout);
+    final retryAfter = res.headers.value(HttpHeaders.retryAfterHeader);
     if (res.statusCode == 404 || res.statusCode == 410) {
       await res.drain<void>().timeout(controlTimeout);
       return false;
     }
-    _checkAuthAndStorageStatus(res.statusCode, action: '回读校验远端文件');
     if (res.statusCode != 200) {
       await res.drain<void>().timeout(controlTimeout);
+    }
+    _checkAuthAndStorageStatus(
+      res.statusCode,
+      action: '回读校验远端文件',
+      retryAfterHeader: retryAfter,
+    );
+    if (res.statusCode != 200) {
       throw Failure(
         FailureCode.remoteUnavailable,
         '下载 WebDAV 文件失败（状态码 ${res.statusCode}）',
@@ -1038,6 +1382,7 @@ final class WebDavClient {
         req.headers.set(HttpHeaders.acceptEncodingHeader, 'identity');
         req.headers.set(HttpHeaders.cacheControlHeader, 'no-cache');
         final res = await req.close().timeout(controlTimeout);
+        final retryAfter = res.headers.value(HttpHeaders.retryAfterHeader);
         await res.drain<void>().timeout(controlTimeout);
         if (res.statusCode == 404 || res.statusCode == 410) {
           return null;
@@ -1051,7 +1396,11 @@ final class WebDavClient {
               ? const CloudSyncObjectHead()
               : null;
         }
-        _checkAuthAndStorageStatus(res.statusCode, action: '检查远端同步对象');
+        _checkAuthAndStorageStatus(
+          res.statusCode,
+          action: '检查远端同步对象',
+          retryAfterHeader: retryAfter,
+        );
         if (res.statusCode < 200 || res.statusCode >= 300) {
           throw Failure(
             FailureCode.remoteUnavailable,
@@ -1064,7 +1413,10 @@ final class WebDavClient {
         final len = contentLengthHeader != null
             ? int.tryParse(contentLengthHeader.trim())
             : (res.contentLength >= 0 ? res.contentLength : null);
-        return CloudSyncObjectHead(sizeBytes: len);
+        return CloudSyncObjectHead(
+          sizeBytes: len,
+          etag: res.headers.value(HttpHeaders.etagHeader),
+        );
       });
 
   Future<void> _deleteUriOn(
@@ -1075,11 +1427,16 @@ final class WebDavClient {
     final req = await client.deleteUrl(uri).timeout(controlTimeout);
     req.headers.set(HttpHeaders.authorizationHeader, _basicAuthHeader);
     final res = await req.close().timeout(controlTimeout);
+    final retryAfter = res.headers.value(HttpHeaders.retryAfterHeader);
     await res.drain<void>().timeout(controlTimeout);
     if (ignoreNotFound && (res.statusCode == 404 || res.statusCode == 410)) {
       return;
     }
-    _checkAuthAndStorageStatus(res.statusCode, action: '删除远端文件');
+    _checkAuthAndStorageStatus(
+      res.statusCode,
+      action: '删除远端文件',
+      retryAfterHeader: retryAfter,
+    );
     if (res.statusCode != 200 &&
         res.statusCode != 202 &&
         res.statusCode != 204) {
@@ -1151,8 +1508,64 @@ final class WebDavClient {
     items.sort((a, b) {
       final byTime = b.modifiedAtMs.compareTo(a.modifiedAtMs);
       if (byTime != 0) return byTime;
-      return b.fileName.compareTo(a.fileName);
+      return compareBackupFileNamesNewestFirst(a.fileName, b.fileName);
     });
+    return items;
+  }
+
+  /// Parses immediate non-collection entries with `getcontentlength` and
+  /// `getlastmodified` from a `PROPFIND` XML response.
+  static List<RemoteEntryMetadata> parsePropfindEntriesWithMetadata(
+    String xml, {
+    required String collectionPath,
+    bool includeTmp = false,
+  }) {
+    final responseBlocks = RegExp(
+      r'<(?:[A-Za-z0-9_-]+:)?response\b[^>]*>([\s\S]*?)</(?:[A-Za-z0-9_-]+:)?response>',
+      caseSensitive: false,
+    ).allMatches(xml);
+
+    final normalizedCollection = _decodeWebDavPath(collectionPath);
+    final items = <RemoteEntryMetadata>[];
+    final seenNames = <String>{};
+
+    for (final match in responseBlocks) {
+      final block = match.group(1) ?? '';
+      final okPropsXml = _extract2xxPropsXml(block);
+      if (okPropsXml == null) continue;
+      if (RegExp(
+        r'<(?:[A-Za-z0-9_-]+:)?collection\b',
+        caseSensitive: false,
+      ).hasMatch(okPropsXml)) {
+        continue;
+      }
+      final rawHref = _extractTagText(block, 'href');
+      if (rawHref == null || rawHref.isEmpty) continue;
+      final decodedPath = _decodeHrefToPath(rawHref);
+      if (decodedPath.isEmpty || decodedPath == normalizedCollection) {
+        continue;
+      }
+      final slashIdx = decodedPath.lastIndexOf('/');
+      final fileName = slashIdx >= 0
+          ? decodedPath.substring(slashIdx + 1)
+          : decodedPath;
+      if (fileName.isEmpty) continue;
+      if (!includeTmp && fileName.toLowerCase().endsWith('.tmp')) continue;
+      if (!seenNames.add(fileName)) continue;
+
+      final sizeText = _extractTagText(okPropsXml, 'getcontentlength');
+      final sizeBytes = int.tryParse(sizeText?.trim() ?? '') ?? 0;
+      final lastModText = _extractTagText(okPropsXml, 'getlastmodified');
+      final modifiedAtMs = _parseHttpOrIsoTimestamp(lastModText);
+
+      items.add(
+        RemoteEntryMetadata(
+          fileName: fileName,
+          sizeBytes: sizeBytes < 0 ? 0 : sizeBytes,
+          modifiedAtMs: modifiedAtMs,
+        ),
+      );
+    }
     return items;
   }
 
@@ -1482,5 +1895,51 @@ final class WebDavBackupTarget implements BackupTarget, CloudSyncObjectStore {
   Future<CloudSyncObjectHead?> headObject(String relativePath) async {
     _requireConfigured();
     return _client.headRelativeFileOrNull(relativePath);
+  }
+
+  Future<ConditionalGetResult> getObjectConditional(
+    String relativePath, {
+    String? ifNoneMatch,
+    bool noCache = true,
+  }) async {
+    _requireConfigured();
+    return _client.getRelativeFileConditional(
+      relativePath,
+      ifNoneMatch: ifNoneMatch,
+      noCache: noCache,
+    );
+  }
+
+  Future<String?> putObjectReturningEtag(
+    String relativePath,
+    Uint8List bytes, {
+    String contentType = 'application/octet-stream',
+    BackupProgressCallback? onProgress,
+  }) async {
+    _requireConfigured();
+    _client._lastPutEtag = null;
+    await _client.putRelativeFile(
+      relativePath,
+      bytes,
+      contentType: contentType,
+      onProgress: onProgress,
+    );
+    return _client._lastPutEtag;
+  }
+
+  Future<List<RemoteEntryMetadata>> listRelativeEntriesWithMetadata(
+    String relativeDir, {
+    bool includeTmp = false,
+  }) async {
+    _requireConfigured();
+    return _client.listRelativeEntriesWithMetadata(
+      relativeDir,
+      includeTmp: includeTmp,
+    );
+  }
+
+  Future<T> runSession<T>(Future<T> Function() body) {
+    _requireConfigured();
+    return _client.runSession(body);
   }
 }

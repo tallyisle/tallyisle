@@ -63,7 +63,7 @@ ThemeData _guardTheme(Brightness brightness, {required bool isDesktop}) {
       scheme,
       isDesktop: isDesktop,
     ),
-    textButtonTheme: tallyTextButtonTheme(scheme),
+    textButtonTheme: tallyTextButtonTheme(scheme, isDesktop: isDesktop),
     floatingActionButtonTheme: tallyFabTheme(scheme),
   );
 }
@@ -1186,4 +1186,166 @@ void main() {
       });
     }
   });
+
+  group(
+    'Desktop 40dp Button Height Parity & CategoryTransferPage 3-Tab Alignment',
+    () {
+      testWidgets(
+        'Desktop TargetPlatform.windows/linux/macOS keeps FilledButton, OutlinedButton, TextButton & TallySoftButton at uniform 40dp height and aligns all 3 CategoryTransferPage tabs inside 16dp tonal cards',
+        (tester) async {
+          tester.view.physicalSize = const Size(1280, 900);
+          tester.view.devicePixelRatio = 1.0;
+          addTearDown(() {
+            tester.view.resetPhysicalSize();
+            tester.view.resetDevicePixelRatio();
+          });
+
+          // 1. Desktop VisualDensity.compact platform parity check (40.0px across all 4 button types)
+          final baseDesktop = ThemeData(
+            colorScheme: ColorScheme.fromSeed(
+              seedColor: const Color(0xFF2E7D6B),
+            ),
+            platform: TargetPlatform.windows,
+            visualDensity: VisualDensity.compact,
+            useMaterial3: true,
+          );
+          final s = baseDesktop.colorScheme;
+          final desktopTheme = baseDesktop.copyWith(
+            cardTheme: tallyCardTheme(s),
+            inputDecorationTheme: tallyInputDecorationTheme(s, isDesktop: true),
+            segmentedButtonTheme: tallySegmentedButtonTheme(s, isDesktop: true),
+            filledButtonTheme: tallyPrimaryButtonTheme(s, isDesktop: true),
+            outlinedButtonTheme: tallySoftOutlinedButtonTheme(
+              s,
+              isDesktop: true,
+            ),
+            textButtonTheme: tallyTextButtonTheme(s, isDesktop: true),
+          );
+
+          await tester.pumpWidget(
+            DesktopAdaptiveScope(
+              isDesktop: true,
+              child: MaterialApp(
+                theme: desktopTheme,
+                home: Scaffold(
+                  body: Center(
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        TallySoftButton(
+                          key: const Key('h-soft'),
+                          onPressed: () {},
+                          child: const Text('采用云端版本'),
+                        ),
+                        FilledButton(
+                          key: const Key('h-filled'),
+                          onPressed: () {},
+                          child: const Text('以本机覆盖云端'),
+                        ),
+                        OutlinedButton(
+                          key: const Key('h-outlined'),
+                          onPressed: () {},
+                          child: const Text('次要按钮'),
+                        ),
+                        TextButton(
+                          key: const Key('h-text'),
+                          onPressed: () {},
+                          child: const Text('稍后处理'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          );
+          await tester.pump();
+          final hSoft = tester.getSize(find.byKey(const Key('h-soft'))).height;
+          final hFilled = tester
+              .getSize(find.byKey(const Key('h-filled')))
+              .height;
+          final hOutlined = tester
+              .getSize(find.byKey(const Key('h-outlined')))
+              .height;
+          final hText = tester.getSize(find.byKey(const Key('h-text'))).height;
+          expect(hSoft, 40.0);
+          expect(hFilled, 40.0);
+          expect(hOutlined, 40.0);
+          expect(hText, 40.0);
+
+          // 2. CategoryTransferPage 3-tab horizontal alignment & TallySoftButton parity
+          late final AppDatabase db;
+          await tester.runAsync(() async {
+            db = AppDatabase(NativeDatabase.memory());
+            await db.select(db.accountBooks).get();
+            await db
+                .into(db.accountBooks)
+                .insert(
+                  AccountBooksCompanion.insert(name: '第二账本', createDate: 2000),
+                );
+          });
+          var closedDb = false;
+          addTearDown(() async {
+            if (!closedDb) {
+              closedDb = true;
+              await tester.runAsync(db.close);
+            }
+          });
+
+          await tester.pumpWidget(
+            ProviderScope(
+              retry: (_, _) => null,
+              overrides: <Override>[
+                databaseProvider.overrideWith((ref) async => db),
+              ],
+              child: DesktopAdaptiveScope(
+                isDesktop: true,
+                child: MaterialApp(
+                  theme: desktopTheme,
+                  home: const CategoryTransferPage(),
+                ),
+              ),
+            ),
+          );
+          await _settle(tester);
+
+          final tab1ExportRect = tester.getRect(
+            find.byKey(const Key('cat-export-save-btn')),
+          );
+          expect(tab1ExportRect.height, 40.0);
+
+          await tester.tap(find.byKey(const Key('cat-transfer-tab-copy')));
+          await _settle(tester);
+          final tab2CopyFinder = find.byKey(const Key('cat-copy-submit-btn'));
+          expect(
+            tester.widget<FilledButton>(tab2CopyFinder),
+            isA<TallySoftButton>(),
+          );
+          final tab2CopyRect = tester.getRect(tab2CopyFinder);
+          expect(tab2CopyRect.height, 40.0);
+          expect(tab2CopyRect.left, tab1ExportRect.left);
+          expect(tab2CopyRect.right, tab1ExportRect.right);
+
+          await tester.tap(find.byKey(const Key('cat-transfer-tab-migrate')));
+          await _settle(tester);
+          final tab3MigrateFinder = find.byKey(
+            const Key('cat-migrate-submit-btn'),
+          );
+          expect(
+            tester.widget<FilledButton>(tab3MigrateFinder),
+            isA<TallySoftButton>(),
+          );
+          final tab3MigrateRect = tester.getRect(tab3MigrateFinder);
+          expect(tab3MigrateRect.height, 40.0);
+          expect(tab3MigrateRect.left, tab1ExportRect.left);
+          expect(tab3MigrateRect.right, tab1ExportRect.right);
+
+          await tester.pumpWidget(const SizedBox.shrink());
+          await tester.pump(const Duration(seconds: 1));
+          closedDb = true;
+          await tester.runAsync(db.close);
+        },
+      );
+    },
+  );
 }

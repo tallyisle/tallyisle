@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:drift/drift.dart' show driftRuntimeOptions;
+import 'package:drift/drift.dart' show Value, driftRuntimeOptions;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
@@ -33,6 +33,9 @@ final class _SchedulerSigV4S3Server {
   final Map<String, int> getCountsByKey = <String, int>{};
   int requestCount = 0;
   int _tick = 0;
+  int? forcedErrorStatus;
+  String? forcedErrorBody;
+  String? forcedRetryAfterHeader;
 
   static const String bucket = 'auto-sync-bucket';
   static const String region = 'auto';
@@ -79,6 +82,18 @@ final class _SchedulerSigV4S3Server {
     }
     final body = bodyBuilder.takeBytes();
     requestCount++;
+
+    if (forcedErrorStatus != null) {
+      req.response.statusCode = forcedErrorStatus!;
+      if (forcedRetryAfterHeader != null) {
+        req.response.headers.set('retry-after', forcedRetryAfterHeader!);
+      }
+      if (forcedErrorBody != null) {
+        req.response.write(forcedErrorBody!);
+      }
+      await req.response.close();
+      return;
+    }
 
     if (!_verifySigV4(req, body)) {
       req.response.statusCode = HttpStatus.forbidden;
@@ -789,6 +804,114 @@ void main() {
         final reqCountSnapshot = s3.requestCount;
         await Future<void>.delayed(const Duration(milliseconds: 180));
         expect(s3.requestCount, reqCountSnapshot);
+      },
+    );
+
+    test(
+      'enforces 30s windowFocus cooldown, 429/503/RequestTimeTooSkewed backoff, 401/403 auth circuit breaker (gating silent cloud backup too), manual reset, and silent maintenance scope',
+      () async {
+        final s3 = await _SchedulerSigV4S3Server.start();
+        addTearDown(s3.close);
+        final tempRoot = await Directory.systemTemp.createTemp(
+          'tally_sched_backoff_',
+        );
+        addTearDown(() => tempRoot.delete(recursive: true));
+
+        var now = 1762900000000;
+        final db = AppDatabase(NativeDatabase.memory(), nowMs: () => now);
+        addTearDown(db.close);
+        await db.select(db.accountBooks).get();
+
+        final service = TallyBackupService(
+          db,
+          reminderService: ReminderService(
+            db,
+            scheduler: InMemoryReminderScheduler(),
+          ),
+          localBackupsDirectoryProvider: () async =>
+              Directory(p.join(tempRoot.path, 'bk')),
+          attachmentsDirectoryProvider: () async =>
+              Directory(p.join(tempRoot.path, 'att')),
+        );
+        await service.saveS3Config(
+          s3.buildConfig().copyWith(autoBackupEnabled: true),
+        );
+        await service.setAutoArchiveBackupEnabled(false);
+        await service.updateCloudSyncTriggers(
+          syncOnStartup: true,
+          syncOnIdle: true,
+          idleMinutes: 3,
+        );
+        expect((await service.syncNow()).revision, 1);
+
+        final scheduler = BackupSyncScheduler(
+          service: service,
+          nowMs: () => now,
+          idleTimerDurationBuilder: (_) => const Duration(milliseconds: 60),
+          jitterPermilleBuilder: () => 0,
+        );
+        addTearDown(scheduler.dispose);
+        await scheduler.start();
+
+        // 1. Silent maintenance scope (`currency` / `budget` updates) MUST NOT arm `syncOnIdle`!
+        await service.runInSilentMaintenanceScope(() async {
+          await (db.update(db.currencies)..where((t) => t.code.equals('CNY')))
+              .write(CurrenciesCompanion(rateRefreshTime: Value(now)));
+        });
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+        expect(scheduler.pendingCloudChangeAtMs, isNull);
+
+        // 2. 30-second windowFocus cooldown: focus at t=0 runs 1 probe, focus at t=+5s makes 0 requests!
+        now += 35000;
+        s3.requestCount = 0;
+        await scheduler.onAppResumedOrFocused(isInitialStartup: false);
+        final countAfterFirstFocus = s3.requestCount;
+        expect(countAfterFirstFocus, greaterThan(0));
+
+        now += 5000; // < 30s cooldown!
+        await scheduler.onAppResumedOrFocused(isInitialStartup: false);
+        expect(s3.requestCount, countAfterFirstFocus);
+
+        // 3. 429 rate-limit with Retry-After=90 -> backs off 90s and ALSO blocks 24h silent auto-backup!
+        now +=
+            25 *
+            60 *
+            60 *
+            1000; // > 24h so silent auto-backup would otherwise run!
+        s3.forcedErrorStatus = 429;
+        s3.forcedRetryAfterHeader = '90';
+        s3.requestCount = 0;
+        await scheduler.onAppResumedOrFocused(isInitialStartup: false);
+        expect(
+          s3.requestCount,
+          1,
+        ); // Only cloud sync attempted; silent cloud backup blocked by backoff!
+        expect(scheduler.currentBackoffState.isAuthCircuitOpen, isFalse);
+        expect(scheduler.currentBackoffState.nextRetryAtMs, now + 90000);
+
+        // Within 90s backoff window -> 0 network requests!
+        now += 45000;
+        await scheduler.onAppResumedOrFocused(isInitialStartup: false);
+        expect(s3.requestCount, 1);
+
+        // 4. 401 auth failure -> trips `isAuthCircuitOpen = true`; even +2 hours later makes 0 auto requests!
+        now += 60000; // past 90s backoff
+        s3.forcedErrorStatus = 401;
+        s3.forcedRetryAfterHeader = null;
+        await scheduler.onAppResumedOrFocused(isInitialStartup: false);
+        expect(scheduler.currentBackoffState.isAuthCircuitOpen, isTrue);
+
+        final frozenReqCount = s3.requestCount;
+        now += 2 * 60 * 60 * 1000;
+        await scheduler.onAppResumedOrFocused(isInitialStartup: false);
+        expect(s3.requestCount, frozenReqCount);
+
+        // 5. Server recovers & user clicks manual `syncNow()` -> resets circuit breaker immediately!
+        s3.forcedErrorStatus = null;
+        await service.syncNow();
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        expect(scheduler.currentBackoffState.isAuthCircuitOpen, isFalse);
+        expect(scheduler.currentBackoffState.nextRetryAtMs, isNull);
       },
     );
   });

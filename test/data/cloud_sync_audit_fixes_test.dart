@@ -423,7 +423,7 @@ void main() {
 
           final ledgerA = LedgerService(dbA);
           final pathsByRev = <int, String>{};
-          for (var rev = 1; rev <= 3; rev++) {
+          for (var rev = 1; rev <= 6; rev++) {
             now += 5000;
             await ledgerA.saveRecord(
               commandId: 's01-rec-$rev',
@@ -442,7 +442,7 @@ void main() {
             pathsByRev[rev] = out.remoteHead!.databasePath;
           }
 
-          // Never writes sync/latest_db.tally; r3 + r2 kept, r1 pruned!
+          // Never writes sync/latest_db.tally; Top-5 (r6..r2) kept, r1 pruned!
           expect(
             s3.objects.containsKey('TallyIsle/sync/latest_db.tally'),
             isFalse,
@@ -450,18 +450,21 @@ void main() {
           expect(s3.objects.containsKey('TallyIsle/${pathsByRev[1]}'), isFalse);
           expect(s3.objects.containsKey('TallyIsle/${pathsByRev[2]}'), isTrue);
           expect(s3.objects.containsKey('TallyIsle/${pathsByRev[3]}'), isTrue);
+          expect(s3.objects.containsKey('TallyIsle/${pathsByRev[4]}'), isTrue);
+          expect(s3.objects.containsKey('TallyIsle/${pathsByRev[5]}'), isTrue);
+          expect(s3.objects.containsKey('TallyIsle/${pathsByRev[6]}'), isTrue);
 
-          // Simulate mid-push failure on r4 right before head.json upload: r3 remains pullable!
+          // Simulate mid-push failure on r7 right before head.json upload: r6 remains pullable!
           now += 5000;
           await ledgerA.saveRecord(
-            commandId: 's01-rec-4-aborted',
+            commandId: 's01-rec-7-aborted',
             draft: RecordDraft(
               bookId: 1,
               type: RecordType.expense,
               money: Money.parse('99.00'),
               recordTime: now,
               categoryId: 1,
-              remark: '断网未提交 r4',
+              remark: '断网未提交 r7',
             ),
           );
           await expectLater(
@@ -474,8 +477,8 @@ void main() {
 
           final pullB = await svcB.syncNow();
           expect(pullB.status, CloudSyncStatus.pulled);
-          expect(pullB.revision, 3);
-          expect(await dbB.select(dbB.records).get(), hasLength(3));
+          expect(pullB.revision, 6);
+          expect(await dbB.select(dbB.records).get(), hasLength(6));
 
           // Legacy format: 1 head.json + sync/latest_db.tally routes into conflict protection!
           final s3Legacy = await _AuditS3Server.start();
@@ -1460,7 +1463,12 @@ void main() {
                 remark: '远端冲突 r3',
               ),
             );
-            expect((await peerSvc.syncNow()).revision, 3);
+            expect(
+              (await peerSvc.syncNow(
+                resolution: SyncConflictResolution.useLocal,
+              )).revision,
+              3,
+            );
 
             now += 5000;
             final appSvc = TallyBackupService(

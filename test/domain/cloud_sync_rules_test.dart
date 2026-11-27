@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tallyisle/core/failure.dart';
+import 'package:tallyisle/core/zip_archive.dart';
 import 'package:tallyisle/data/backup/s3_client.dart';
 import 'package:tallyisle/data/backup/webdav_client.dart';
 import 'package:tallyisle/domain/rules/cloud_sync_rules.dart';
@@ -197,24 +198,24 @@ void main() {
     );
 
     test(
-      'selectSupersededSyncRevisionFileNames keeps rN and r(N-1) and prunes older revisions',
+      'selectSupersededSyncRevisionFileNames retains Top-5 (current + 4 prior < currentRevision), never touches >= currentRevision, and prunes older ancestors',
       () {
         final remoteFiles = <String>[
           'db_r1_1111111111111111.tally',
           'db_r2_2222222222222222.tally',
           'db_r3_3333333333333333.tally',
           'db_r4_4444444444444444.tally',
+          'db_r5_5555555555555555.tally',
+          'db_r6_6666666666666666.tally',
+          'db_r7_7777777777777777.tally', // concurrent future upload -> NEVER touch!
           'notes.txt',
         ];
         final toDelete = selectSupersededSyncRevisionFileNames(
           remoteFiles,
-          currentRevision: 4,
-          currentDatabasePath: 'sync/revisions/db_r4_4444444444444444.tally',
+          currentRevision: 6,
+          currentDatabasePath: 'sync/revisions/db_r6_6666666666666666.tally',
         );
-        expect(toDelete, <String>[
-          'db_r1_1111111111111111.tally',
-          'db_r2_2222222222222222.tally',
-        ]);
+        expect(toDelete, <String>['db_r1_1111111111111111.tally']);
       },
     );
   });
@@ -460,6 +461,208 @@ void main() {
             'hide': 0,
           });
           expect(isFreshSeedSnapshot(extraCat, attachmentCount: 0), isFalse);
+        },
+      );
+    },
+  );
+
+  group(
+    'Extreme-Scale Hardening: Revision Bound, Natural Sort, Backoff, GC & O(1) Zip',
+    () {
+      test(
+        'enforces maxSafeCloudSyncRevision (2^53 - 1) and natural numeric ordering for _10.tally > _9.tally > base',
+        () {
+          final maxPath = buildCloudSyncRevisionPath(
+            revision: maxSafeCloudSyncRevision,
+            dataSha256: 'a' * 64,
+          );
+          final parsedMax = parseSyncRevisionFileName(maxPath.split('/').last);
+          expect(parsedMax?.revision, maxSafeCloudSyncRevision);
+
+          expect(
+            () => buildCloudSyncRevisionPath(
+              revision: maxSafeCloudSyncRevision + 1,
+              dataSha256: 'a' * 64,
+            ),
+            throwsA(isA<Failure>()),
+          );
+          expect(
+            parseSyncRevisionFileName(
+              'db_r9999999999999999999999999999_aaaaaaaaaaaaaaaa.tally',
+            ),
+            isNull,
+          );
+
+          final names = <String>[
+            'backup_20261127_120000.tally',
+            'backup_20261127_120000_2.tally',
+            'backup_20261127_120000_9.tally',
+            'backup_20261127_120000_10.tally',
+            'backup_20261127_120000_12.tally',
+          ];
+          final sorted = [...names]..sort(compareBackupFileNamesNewestFirst);
+          expect(sorted, <String>[
+            'backup_20261127_120000_12.tally',
+            'backup_20261127_120000_10.tally',
+            'backup_20261127_120000_9.tally',
+            'backup_20261127_120000_2.tally',
+            'backup_20261127_120000.tally',
+          ]);
+        },
+      );
+
+      test(
+        'auto-upgrades legacy 帐屿本机 device name to platform-labelled short4 and evaluates exponential backoff vs auth circuit breaker',
+        () {
+          final upgraded = resolveEffectiveCloudSyncSettings(
+            rawJson: jsonEncode(<String, Object>{
+              'backend': 's3',
+              'deviceId': '89ab1234-5678-4000-8000-000000000000',
+              'deviceName': '帐屿本机',
+            }),
+            isWebDavConfigured: false,
+            fallbackDeviceId: '89ab1234-5678-4000-8000-000000000000',
+            fallbackDeviceName: 'Windows (89ab)',
+          );
+          expect(upgraded.deviceName, 'Windows (89ab)');
+
+          // 1. RequestTimeTooSkewed -> transient backoff (NOT permanent circuit open!)
+          final skewState = evaluateSyncFailureBackoff(
+            previous: SyncBackoffState.healthy,
+            failure: const Failure(
+              FailureCode.authRequired,
+              'S3 请求时钟偏差过大（RequestTimeTooSkewed）',
+            ),
+            nowMs: 1000,
+            jitterPermille: 0,
+          );
+          expect(skewState.isAuthCircuitOpen, isFalse);
+          expect(skewState.nextRetryAtMs, 31000);
+
+          // 2. 429 with Retry-After -> honors Retry-After > base delay
+          final rateLimitState = evaluateSyncFailureBackoff(
+            previous: SyncBackoffState.healthy,
+            failure: const Failure(
+              FailureCode.remoteUnavailable,
+              'WebDAV 请求过于频繁（429）',
+              retryAfterMs: 120000,
+            ),
+            nowMs: 1000,
+            retryAfterMs: 120000,
+            jitterPermille: 0,
+          );
+          expect(rateLimitState.isAuthCircuitOpen, isFalse);
+          expect(rateLimitState.nextRetryAtMs, 121000);
+
+          // 3. First generic 403 -> 30s backoff; 2nd consecutive 403 -> opens circuit!
+          final first403 = evaluateSyncFailureBackoff(
+            previous: SyncBackoffState.healthy,
+            failure: const Failure(
+              FailureCode.authRequired,
+              'WebDAV 访问被拒绝（403）',
+            ),
+            nowMs: 5000,
+          );
+          expect(first403.isAuthCircuitOpen, isFalse);
+          final second403 = evaluateSyncFailureBackoff(
+            previous: first403,
+            failure: const Failure(
+              FailureCode.authRequired,
+              'WebDAV 访问被拒绝（403）',
+            ),
+            nowMs: 40000,
+          );
+          expect(second403.isAuthCircuitOpen, isTrue);
+
+          // 4. Explicit 401 -> immediate circuit open!
+          final auth401 = evaluateSyncFailureBackoff(
+            previous: SyncBackoffState.healthy,
+            failure: const Failure(
+              FailureCode.authRequired,
+              'WebDAV 鉴权失败（401）',
+            ),
+            nowMs: 5000,
+          );
+          expect(auth401.isAuthCircuitOpen, isTrue);
+        },
+      );
+
+      test(
+        'evaluateAttachmentGarbageCollection enforces 30-day grace + minRetainedRevision + ConflictAttachmentRefLock protection + O(1) Zip readSingleEntryFromBytes',
+        () {
+          final shaA = 'a' * 64;
+          final shaB = 'b' * 64;
+          final shaC = 'c' * 64;
+          final objA = '${shaA}__live.jpg';
+          final objB = '${shaB}__conflict_locked.jpg';
+          final objC = '${shaC}__unreferenced.jpg';
+          const t0 = 1700000000000;
+
+          // Pass 1: objC first observed unreferenced at rev 5 -> enters gc_pending, NOT deleted!
+          final pass1 = evaluateAttachmentGarbageCollection(
+            existingRemoteAttachments: <String, int?>{
+              objA: t0 - 90000000,
+              objB: t0 - 90000000,
+              objC: t0 - 90000000,
+            },
+            referencedObjectNames: <String>{objA, objB},
+            previousPending: const <String, GcPendingEntry>{},
+            currentRevision: 5,
+            minRetainedRevision: 2,
+            nowMs: t0,
+          );
+          expect(pass1.toDelete, isEmpty);
+          expect(pass1.nextPending.keys, <String>[objC]);
+
+          // Pass 2: 31 days later, BUT minRetainedRevision is still 5 (<= 5) -> still kept!
+          const t31d = t0 + 31 * 24 * 60 * 60 * 1000;
+          final pass2 = evaluateAttachmentGarbageCollection(
+            existingRemoteAttachments: <String, int?>{
+              objA: t0 - 90000000,
+              objB: t0 - 90000000,
+              objC: t0 - 90000000,
+            },
+            referencedObjectNames: <String>{objA, objB},
+            previousPending: pass1.nextPending,
+            currentRevision: 8,
+            minRetainedRevision: 5,
+            nowMs: t31d,
+          );
+          expect(pass2.toDelete, isEmpty);
+
+          // Pass 3: 31 days later AND minRetainedRevision advanced to 6 (> 5) -> objC deleted, objB protected!
+          final pass3 = evaluateAttachmentGarbageCollection(
+            existingRemoteAttachments: <String, int?>{
+              objA: t0 - 90000000,
+              objB: t0 - 90000000,
+              objC: t0 - 90000000,
+            },
+            referencedObjectNames: <String>{objA, objB},
+            previousPending: pass2.nextPending,
+            currentRevision: 10,
+            minRetainedRevision: 6,
+            nowMs: t31d,
+          );
+          expect(pass3.toDelete, <String>[objC]);
+
+          // O(1) ZipArchive.readSingleEntryFromBytes reads manifest.json without decoding database/attachments!
+          final packed = packTallyArchive(
+            tables: _buildDefaultSeedTables(),
+            attachments: <String, Uint8List>{
+              'attachments/big.bin': Uint8List(4096),
+            },
+            createdAtMs: t0,
+            appVersion: '0.11.0',
+            includeAttachments: true,
+          );
+          final rawManifestBytes = ZipArchive.readSingleEntryFromBytes(
+            packed.bytes,
+            tallyManifestFileName,
+          );
+          expect(rawManifestBytes, isNotNull);
+          final onlyManifest = extractTallyManifestOnly(packed.bytes);
+          expect(onlyManifest.createdAtMs, t0);
+          expect(onlyManifest.attachmentCount, 1);
         },
       );
     },

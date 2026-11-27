@@ -431,57 +431,71 @@ class _CategoryTransferPageState extends ConsumerState<CategoryTransferPage>
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        _BookDropdownField(
-          fieldKey: const Key('cat-json-book-dropdown'),
-          label: '选择操作账本',
-          books: books,
-          selectedBookId: selectedBookId,
-          enabled: !_busy,
-          onChanged: (id) => setState(() => _jsonBookId = id),
-        ),
-        const SizedBox(height: 12),
-        catsAsync.when(
-          data: (cats) {
-            final visible = _jsonIncludeHidden
-                ? cats
-                : cats.where((c) => !c.isHide).toList();
-            final expTop = visible
-                .where((c) => c.type == 0 && c.parentCatId == -1)
-                .length;
-            final expSub = visible
-                .where((c) => c.type == 0 && c.parentCatId != -1)
-                .length;
-            final incTop = visible
-                .where((c) => c.type == 1 && c.parentCatId == -1)
-                .length;
-            final incSub = visible
-                .where((c) => c.type == 1 && c.parentCatId != -1)
-                .length;
-            return _tonalCard(
-              context,
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      '「${selectedBook.name}」分类概览',
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
-                    const SizedBox(height: 8),
-                    Text('支出分类：一级 $expTop 个 · 二级 $expSub 个'),
-                    const SizedBox(height: 4),
-                    Text('收入分类：一级 $incTop 个 · 二级 $incSub 个'),
-                  ],
+        _tonalCard(
+          context,
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _BookDropdownField(
+                  fieldKey: const Key('cat-json-book-dropdown'),
+                  label: '选择操作账本',
+                  books: books,
+                  selectedBookId: selectedBookId,
+                  enabled: !_busy,
+                  onChanged: (id) => setState(() => _jsonBookId = id),
                 ),
-              ),
-            );
-          },
-          loading: () => const Padding(
-            padding: EdgeInsets.all(16),
-            child: LinearProgressIndicator(),
+                const SizedBox(height: 12),
+                catsAsync.when(
+                  data: (cats) {
+                    final visible = _jsonIncludeHidden
+                        ? cats
+                        : cats.where((c) => !c.isHide).toList();
+                    final expTop = visible
+                        .where((c) => c.type == 0 && c.parentCatId == -1)
+                        .length;
+                    final expSub = visible
+                        .where((c) => c.type == 0 && c.parentCatId != -1)
+                        .length;
+                    final incTop = visible
+                        .where((c) => c.type == 1 && c.parentCatId == -1)
+                        .length;
+                    final incSub = visible
+                        .where((c) => c.type == 1 && c.parentCatId != -1)
+                        .length;
+                    return Container(
+                      decoration: BoxDecoration(
+                        color: tallyNestedSurfaceColor(
+                          Theme.of(context).colorScheme,
+                        ),
+                        borderRadius: BorderRadius.circular(kTallyNestedRadius),
+                      ),
+                      padding: const EdgeInsets.all(12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '「${selectedBook.name}」分类概览',
+                            style: Theme.of(context).textTheme.titleSmall,
+                          ),
+                          const SizedBox(height: 6),
+                          Text('支出分类：一级 $expTop 个 · 二级 $expSub 个'),
+                          const SizedBox(height: 4),
+                          Text('收入分类：一级 $incTop 个 · 二级 $incSub 个'),
+                        ],
+                      ),
+                    );
+                  },
+                  loading: () => const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 8),
+                    child: LinearProgressIndicator(),
+                  ),
+                  error: (e, _) => Text(safeMessage(e)),
+                ),
+              ],
+            ),
           ),
-          error: (e, _) => Text(safeMessage(e)),
         ),
         const SizedBox(height: 12),
         _tonalCard(
@@ -634,105 +648,124 @@ class _CategoryTransferPageState extends ConsumerState<CategoryTransferPage>
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        _BookDropdownField(
-          fieldKey: const Key('cat-copy-source-book'),
-          label: '源账本（复制来源）',
-          books: books,
-          selectedBookId: sourceBookId,
-          enabled: !_busy,
-          onChanged: (id) => setState(() {
-            _copySourceBookId = id;
-            _selectedSourceCategoryIds.clear();
-            if (_copyTargetBookId == id) {
-              _copyTargetBookId = books
-                  .where((b) => b.id != id)
-                  .firstOrNull
-                  ?.id;
-            }
-          }),
-        ),
-        const SizedBox(height: 12),
-        _BookDropdownField(
-          fieldKey: const Key('cat-copy-target-book'),
-          label: '目标账本（合并去向）',
-          books: targetOptions,
-          selectedBookId: targetBookId ?? targetOptions.first.id,
-          enabled: !_busy,
-          onChanged: (id) => setState(() => _copyTargetBookId = id),
-        ),
-        const SizedBox(height: 12),
         _tonalCard(
           context,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              SwitchListTile(
-                key: const Key('cat-copy-include-hidden'),
-                title: const Text('包含已隐藏分类'),
-                value: _copyIncludeHidden,
-                onChanged: _busy
-                    ? null
-                    : (v) => setState(() => _copyIncludeHidden = v),
-              ),
-              SwitchListTile(
-                key: const Key('cat-copy-subset-toggle'),
-                title: const Text('仅复制勾选的指定分类'),
-                subtitle: const Text('关闭时复制源账本全部可用分类'),
-                value: _copySelectSubset,
-                onChanged: _busy
-                    ? null
-                    : (v) => setState(() => _copySelectSubset = v),
-              ),
-            ],
-          ),
-        ),
-        if (_copySelectSubset) ...[
-          const SizedBox(height: 12),
-          sourceCatsAsync.when(
-            data: (cats) {
-              final byId = {for (final c in cats) c.id: c};
-              final visible = _copyIncludeHidden
-                  ? cats
-                  : cats.where((c) => !c.isHide).toList();
-              return _tonalCard(
-                context,
-                child: Column(
-                  children: [
-                    for (final c in visible)
-                      CheckboxListTile(
-                        key: Key('cat-copy-check-${c.id}'),
-                        title: Text(_formatCategoryOption(c, byId)),
-                        subtitle: Text(c.type == 0 ? '支出' : '收入'),
-                        value: _selectedSourceCategoryIds.contains(c.id),
-                        onChanged: _busy
-                            ? null
-                            : (checked) => setState(() {
-                                if (checked == true) {
-                                  _selectedSourceCategoryIds.add(c.id);
-                                } else {
-                                  _selectedSourceCategoryIds.remove(c.id);
-                                }
-                              }),
-                      ),
-                  ],
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text('跨账本分类复制', style: Theme.of(context).textTheme.titleMedium),
+                const SizedBox(height: 12),
+                _BookDropdownField(
+                  fieldKey: const Key('cat-copy-source-book'),
+                  label: '源账本（复制来源）',
+                  books: books,
+                  selectedBookId: sourceBookId,
+                  enabled: !_busy,
+                  onChanged: (id) => setState(() {
+                    _copySourceBookId = id;
+                    _selectedSourceCategoryIds.clear();
+                    if (_copyTargetBookId == id) {
+                      _copyTargetBookId = books
+                          .where((b) => b.id != id)
+                          .firstOrNull
+                          ?.id;
+                    }
+                  }),
                 ),
-              );
-            },
-            loading: () => const LinearProgressIndicator(),
-            error: (e, _) => Text(safeMessage(e)),
-          ),
-        ],
-        const SizedBox(height: 16),
-        FilledButton.icon(
-          key: const Key('cat-copy-submit-btn'),
-          onPressed: _busy || targetBookId == null
-              ? null
-              : () => _submitCrossBookCopy(
-                  sourceBookId: sourceBookId,
-                  targetBookId: targetBookId,
+                const SizedBox(height: 12),
+                _BookDropdownField(
+                  fieldKey: const Key('cat-copy-target-book'),
+                  label: '目标账本（合并去向）',
+                  books: targetOptions,
+                  selectedBookId: targetBookId ?? targetOptions.first.id,
+                  enabled: !_busy,
+                  onChanged: (id) => setState(() => _copyTargetBookId = id),
                 ),
-          icon: const Icon(Icons.copy_all_outlined),
-          label: const Text('开始复制到目标账本'),
+                const SizedBox(height: 8),
+                SwitchListTile(
+                  key: const Key('cat-copy-include-hidden'),
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('包含已隐藏分类'),
+                  value: _copyIncludeHidden,
+                  onChanged: _busy
+                      ? null
+                      : (v) => setState(() => _copyIncludeHidden = v),
+                ),
+                SwitchListTile(
+                  key: const Key('cat-copy-subset-toggle'),
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('仅复制勾选的指定分类'),
+                  subtitle: const Text('关闭时复制源账本全部可用分类'),
+                  value: _copySelectSubset,
+                  onChanged: _busy
+                      ? null
+                      : (v) => setState(() => _copySelectSubset = v),
+                ),
+                if (_copySelectSubset) ...[
+                  const SizedBox(height: 8),
+                  sourceCatsAsync.when(
+                    data: (cats) {
+                      final byId = {for (final c in cats) c.id: c};
+                      final visible = _copyIncludeHidden
+                          ? cats
+                          : cats.where((c) => !c.isHide).toList();
+                      return Container(
+                        decoration: BoxDecoration(
+                          color: tallyNestedSurfaceColor(
+                            Theme.of(context).colorScheme,
+                          ),
+                          borderRadius: BorderRadius.circular(
+                            kTallyNestedRadius,
+                          ),
+                        ),
+                        clipBehavior: Clip.antiAlias,
+                        child: Column(
+                          children: [
+                            for (final c in visible)
+                              CheckboxListTile(
+                                key: Key('cat-copy-check-${c.id}'),
+                                title: Text(_formatCategoryOption(c, byId)),
+                                subtitle: Text(c.type == 0 ? '支出' : '收入'),
+                                value: _selectedSourceCategoryIds.contains(
+                                  c.id,
+                                ),
+                                onChanged: _busy
+                                    ? null
+                                    : (checked) => setState(() {
+                                        if (checked == true) {
+                                          _selectedSourceCategoryIds.add(c.id);
+                                        } else {
+                                          _selectedSourceCategoryIds.remove(
+                                            c.id,
+                                          );
+                                        }
+                                      }),
+                              ),
+                          ],
+                        ),
+                      );
+                    },
+                    loading: () => const LinearProgressIndicator(),
+                    error: (e, _) => Text(safeMessage(e)),
+                  ),
+                ],
+                const SizedBox(height: 12),
+                TallySoftButton.icon(
+                  key: const Key('cat-copy-submit-btn'),
+                  onPressed: _busy || targetBookId == null
+                      ? null
+                      : () => _submitCrossBookCopy(
+                          sourceBookId: sourceBookId,
+                          targetBookId: targetBookId,
+                        ),
+                  icon: const Icon(Icons.copy_all_outlined, size: 18),
+                  label: const Text('开始复制到目标账本'),
+                ),
+              ],
+            ),
+          ),
         ),
       ],
     );
@@ -773,137 +806,151 @@ class _CategoryTransferPageState extends ConsumerState<CategoryTransferPage>
         return ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            _BookDropdownField(
-              fieldKey: const Key('cat-migrate-book'),
-              label: '所属账本',
-              books: books,
-              selectedBookId: bookId,
-              enabled: !_busy,
-              onChanged: (id) => setState(() {
-                _migrateBookId = id;
-                _migrateSourceCatId = null;
-                _migrateTargetCatId = null;
-              }),
-            ),
-            const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              child: SegmentedButton<int>(
-                showSelectedIcon: false,
-                style: DesktopAdaptive.isDesktop(context)
-                    ? null
-                    : const ButtonStyle(
-                        visualDensity: VisualDensity.compact,
-                        padding: WidgetStatePropertyAll(
-                          EdgeInsets.symmetric(horizontal: 10),
-                        ),
-                      ),
-                segments: const [
-                  ButtonSegment(
-                    value: 0,
-                    label: FittedBox(
-                      fit: BoxFit.scaleDown,
-                      child: Text('支出分类', maxLines: 1, softWrap: false),
+            _tonalCard(
+              context,
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      '同账本分类迁移',
+                      style: Theme.of(context).textTheme.titleMedium,
                     ),
-                  ),
-                  ButtonSegment(
-                    value: 1,
-                    label: FittedBox(
-                      fit: BoxFit.scaleDown,
-                      child: Text('收入分类', maxLines: 1, softWrap: false),
-                    ),
-                  ),
-                ],
-                selected: {_migrateType},
-                onSelectionChanged: _busy
-                    ? null
-                    : (sel) => setState(() {
-                        _migrateType = sel.first;
+                    const SizedBox(height: 12),
+                    _BookDropdownField(
+                      fieldKey: const Key('cat-migrate-book'),
+                      label: '所属账本',
+                      books: books,
+                      selectedBookId: bookId,
+                      enabled: !_busy,
+                      onChanged: (id) => setState(() {
+                        _migrateBookId = id;
                         _migrateSourceCatId = null;
                         _migrateTargetCatId = null;
                       }),
-              ),
-            ),
-            const SizedBox(height: 16),
-            if (typedCats.length < 2)
-              _tonalCard(
-                context,
-                child: const Padding(
-                  padding: EdgeInsets.all(16),
-                  child: Text('当前类型下不足两个分类，无法执行分类间迁移。'),
-                ),
-              )
-            else ...[
-              TallySelectField<int>(
-                key: const Key('cat-migrate-source'),
-                label: '迁出源分类',
-                enabled: !_busy,
-                value: effectiveSource?.id,
-                options: [
-                  for (final c in typedCats)
-                    TallySelectOption<int>(
-                      value: c.id,
-                      label: _formatCategoryOption(c, byId),
                     ),
-                ],
-                onChanged: (id) => setState(() => _migrateSourceCatId = id),
-              ),
-              const SizedBox(height: 12),
-              TallySelectField<int>(
-                key: const Key('cat-migrate-target'),
-                label: '迁入目标分类',
-                enabled: !_busy,
-                value: effectiveTarget?.id,
-                options: [
-                  for (final c in targetCandidates)
-                    TallySelectOption<int>(
-                      value: c.id,
-                      label: _formatCategoryOption(c, byId),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: SegmentedButton<int>(
+                        showSelectedIcon: false,
+                        segments: const [
+                          ButtonSegment(
+                            value: 0,
+                            label: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Text('支出分类', maxLines: 1, softWrap: false),
+                            ),
+                          ),
+                          ButtonSegment(
+                            value: 1,
+                            label: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Text('收入分类', maxLines: 1, softWrap: false),
+                            ),
+                          ),
+                        ],
+                        selected: {_migrateType},
+                        onSelectionChanged: _busy
+                            ? null
+                            : (sel) => setState(() {
+                                _migrateType = sel.first;
+                                _migrateSourceCatId = null;
+                                _migrateTargetCatId = null;
+                              }),
+                      ),
                     ),
-                ],
-                onChanged: (id) => setState(() => _migrateTargetCatId = id),
-              ),
-              const SizedBox(height: 12),
-              _tonalCard(
-                context,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (effectiveSource != null &&
-                        effectiveSource.parentCatId == -1)
+                    const SizedBox(height: 12),
+                    if (typedCats.length < 2)
+                      Container(
+                        decoration: BoxDecoration(
+                          color: tallyNestedSurfaceColor(
+                            Theme.of(context).colorScheme,
+                          ),
+                          borderRadius: BorderRadius.circular(
+                            kTallyNestedRadius,
+                          ),
+                        ),
+                        padding: const EdgeInsets.all(12),
+                        child: const Text('当前类型下不足两个分类，无法执行分类间迁移。'),
+                      )
+                    else ...[
+                      TallySelectField<int>(
+                        key: const Key('cat-migrate-source'),
+                        label: '迁出源分类',
+                        enabled: !_busy,
+                        value: effectiveSource?.id,
+                        options: [
+                          for (final c in typedCats)
+                            TallySelectOption<int>(
+                              value: c.id,
+                              label: _formatCategoryOption(c, byId),
+                            ),
+                        ],
+                        onChanged: (id) =>
+                            setState(() => _migrateSourceCatId = id),
+                      ),
+                      const SizedBox(height: 12),
+                      TallySelectField<int>(
+                        key: const Key('cat-migrate-target'),
+                        label: '迁入目标分类',
+                        enabled: !_busy,
+                        value: effectiveTarget?.id,
+                        options: [
+                          for (final c in targetCandidates)
+                            TallySelectOption<int>(
+                              value: c.id,
+                              label: _formatCategoryOption(c, byId),
+                            ),
+                        ],
+                        onChanged: (id) =>
+                            setState(() => _migrateTargetCatId = id),
+                      ),
+                      const SizedBox(height: 8),
+                      if (effectiveSource != null &&
+                          effectiveSource.parentCatId == -1)
+                        SwitchListTile(
+                          key: const Key('cat-migrate-include-subs'),
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('包含源分类下的全部二级子分类'),
+                          value: _migrateIncludeSubs,
+                          onChanged: _busy
+                              ? null
+                              : (v) => setState(() => _migrateIncludeSubs = v),
+                        ),
                       SwitchListTile(
-                        key: const Key('cat-migrate-include-subs'),
-                        title: const Text('包含源分类下的全部二级子分类'),
-                        value: _migrateIncludeSubs,
+                        key: const Key('cat-migrate-delete-source'),
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('迁移完成后删除源分类'),
+                        value: _migrateDeleteSource,
                         onChanged: _busy
                             ? null
-                            : (v) => setState(() => _migrateIncludeSubs = v),
+                            : (v) => setState(() => _migrateDeleteSource = v),
                       ),
-                    SwitchListTile(
-                      key: const Key('cat-migrate-delete-source'),
-                      title: const Text('迁移完成后删除源分类'),
-                      value: _migrateDeleteSource,
-                      onChanged: _busy
-                          ? null
-                          : (v) => setState(() => _migrateDeleteSource = v),
-                    ),
+                      const SizedBox(height: 12),
+                      TallySoftButton.icon(
+                        key: const Key('cat-migrate-submit-btn'),
+                        onPressed:
+                            _busy ||
+                                effectiveSource == null ||
+                                effectiveTarget == null
+                            ? null
+                            : () => _submitIntraBookMigration(
+                                source: effectiveSource,
+                                target: effectiveTarget,
+                              ),
+                        icon: const Icon(
+                          Icons.drive_file_move_outlined,
+                          size: 18,
+                        ),
+                        label: const Text('执行关联数据迁移'),
+                      ),
+                    ],
                   ],
                 ),
               ),
-              const SizedBox(height: 16),
-              FilledButton.icon(
-                key: const Key('cat-migrate-submit-btn'),
-                onPressed:
-                    _busy || effectiveSource == null || effectiveTarget == null
-                    ? null
-                    : () => _submitIntraBookMigration(
-                        source: effectiveSource,
-                        target: effectiveTarget,
-                      ),
-                icon: const Icon(Icons.drive_file_move_outlined),
-                label: const Text('执行关联数据迁移'),
-              ),
-            ],
+            ),
           ],
         );
       },

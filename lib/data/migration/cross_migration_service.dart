@@ -9,6 +9,7 @@ import 'package:sqlite3/sqlite3.dart' as raw_sqlite;
 import '../../core/failure.dart';
 import '../../core/money.dart';
 import '../../domain/model/codes.dart';
+import '../../domain/rules/cloud_sync_rules.dart';
 import '../../domain/rules/haohao_db_migration_rules.dart';
 import '../../domain/rules/ios_migration_rules.dart';
 import '../../domain/rules/receipt_diy_rules.dart';
@@ -2115,6 +2116,31 @@ final class CrossMigrationService {
                     value: resetDiy.encode(),
                   ),
                 );
+          }
+
+          // Mark cloud sync cursor as non-incremental full DB replacement.
+          final cursorRow =
+              await (db.select(db.preferences)
+                    ..where((t) => t.key.equals(prefKeyCloudSyncCursor)))
+                  .getSingleOrNull();
+          if (cursorRow != null && cursorRow.value.trim().isNotEmpty) {
+            try {
+              final decoded = jsonDecode(cursorRow.value);
+              if (decoded is Map<String, Object?>) {
+                final nextCursor = LocalSyncCursor.fromJson(decoded).copyWith(
+                  localFullReplaceSinceLastSync: true,
+                  clearConflictRecord: true,
+                );
+                await db
+                    .into(db.preferences)
+                    .insertOnConflictUpdate(
+                      PreferencesCompanion.insert(
+                        key: prefKeyCloudSyncCursor,
+                        value: jsonEncode(nextCursor.toJson()),
+                      ),
+                    );
+              }
+            } catch (_) {}
           }
 
           // 4. Clear stale command receipts and persist this migration command receipt

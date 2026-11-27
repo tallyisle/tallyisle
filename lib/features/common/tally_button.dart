@@ -52,6 +52,7 @@ FilledButtonThemeData tallyPrimaryButtonTheme(
     surfaceTintColor: Colors.transparent,
     minimumSize: Size(0, isDesktop ? 40 : 42),
     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+    visualDensity: VisualDensity.standard,
     textStyle: const TextStyle(fontWeight: FontWeight.w600),
     shape: RoundedRectangleBorder(
       borderRadius: BorderRadius.circular(kTallyNestedRadius),
@@ -80,6 +81,7 @@ OutlinedButtonThemeData tallySoftOutlinedButtonTheme(
     disabledIconColor: s.onSurface.withValues(alpha: 0.38),
     minimumSize: Size(0, isDesktop ? 40 : 42),
     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+    visualDensity: VisualDensity.standard,
     textStyle: const TextStyle(fontWeight: FontWeight.w600),
     shape: RoundedRectangleBorder(
       borderRadius: BorderRadius.circular(kTallyNestedRadius),
@@ -87,9 +89,17 @@ OutlinedButtonThemeData tallySoftOutlinedButtonTheme(
   ),
 );
 
-/// Global [TextButtonThemeData] aligned to the 12dp rounded-rectangle radius.
-TextButtonThemeData tallyTextButtonTheme(ColorScheme s) => TextButtonThemeData(
+/// Global [TextButtonThemeData] aligned to the 12dp rounded-rectangle radius
+/// and matching `40dp` (desktop) / `42dp` (mobile) height with [TallySoftButton].
+TextButtonThemeData tallyTextButtonTheme(
+  ColorScheme s, {
+  bool isDesktop = false,
+}) => TextButtonThemeData(
   style: TextButton.styleFrom(
+    minimumSize: Size(0, isDesktop ? 40 : 42),
+    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+    visualDensity: VisualDensity.standard,
+    textStyle: const TextStyle(fontWeight: FontWeight.w600),
     shape: RoundedRectangleBorder(
       borderRadius: BorderRadius.circular(kTallyNestedRadius),
     ),

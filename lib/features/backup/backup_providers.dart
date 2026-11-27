@@ -88,6 +88,37 @@ final cloudSyncInProgressProvider = StreamProvider<bool>((ref) async* {
   yield* service.watchSyncInProgress();
 });
 
+final class InitialStartupSyncPendingNotifier extends Notifier<bool> {
+  @override
+  bool build() => false;
+
+  void setPending(bool value) {
+    state = value;
+  }
+}
+
+/// `true` during initial cold-start cloud sync (`_runLifecycleSync(isInitial: true)`)
+/// so day-1 budget auto-carryover defers until remote pull/merge finishes.
+final initialStartupSyncPendingProvider =
+    NotifierProvider<InitialStartupSyncPendingNotifier, bool>(
+      InitialStartupSyncPendingNotifier.new,
+    );
+
+final class SyncBackoffStateNotifier extends Notifier<SyncBackoffState> {
+  @override
+  SyncBackoffState build() => SyncBackoffState.healthy;
+
+  void updateState(SyncBackoffState next) {
+    state = next;
+  }
+}
+
+/// Live scheduler backoff / auth circuit-breaker status surfaced on BackupPage.
+final syncBackoffStateProvider =
+    NotifierProvider<SyncBackoffStateNotifier, SyncBackoffState>(
+      SyncBackoffStateNotifier.new,
+    );
+
 final localBackupsProvider = FutureProvider<List<BackupFileMetadata>>((
   ref,
 ) async {

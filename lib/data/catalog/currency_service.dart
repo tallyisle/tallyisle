@@ -440,6 +440,28 @@ final class CurrencyService {
             continue;
           }
 
+          // Skip rewriting `currency` row (and dirtying `dataSha256` / `tableUpdates`)
+          // when the quoted rate is numerically identical to the stored rate.
+          var numericallyUnchanged = false;
+          try {
+            final existingDecimal = DecimalValue.parse(
+              currency.rateToAnchor.trim(),
+            );
+            final cmpScale = existingDecimal.scale > verifiedDecimal.scale
+                ? existingDecimal.scale
+                : verifiedDecimal.scale;
+            if (cmpScale <= 30 &&
+                existingDecimal.unitsAt(cmpScale) ==
+                    verifiedDecimal.unitsAt(cmpScale)) {
+              numericallyUnchanged = true;
+            }
+          } on Failure {
+            numericallyUnchanged = false;
+          }
+          if (numericallyUnchanged) {
+            continue;
+          }
+
           await (db.update(
             db.currencies,
           )..where((t) => t.code.equals(currency.code))).write(
@@ -496,8 +518,22 @@ final class CurrencyService {
     required ExchangeRateProvider provider,
     String? commandId,
   }) async {
-    final settings = await getOnlineRateSettings();
+    var settings = await getOnlineRateSettings();
     final now = db.nowMs();
+    if (settings.lastSyncedAtMs > 0) {
+      final rows = await guardDatabase(() => db.select(db.currencies).get());
+      var maxForeignRefresh = settings.lastSyncedAtMs;
+      for (final c in rows) {
+        final norm = normalizeCurrency(c.code);
+        if (norm == null || norm == baseCurrency) continue;
+        if (c.rateRefreshTime > maxForeignRefresh) {
+          maxForeignRefresh = c.rateRefreshTime;
+        }
+      }
+      if (maxForeignRefresh > settings.lastSyncedAtMs) {
+        settings = settings.copyWith(lastSyncedAtMs: maxForeignRefresh);
+      }
+    }
     if (!settings.shouldAutoSync(nowMs: now)) {
       return null;
     }

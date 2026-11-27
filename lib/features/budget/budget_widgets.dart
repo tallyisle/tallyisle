@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/providers.dart';
 import '../../domain/rules/billing_period.dart';
 import '../../domain/rules/budget_rules.dart';
+import '../backup/backup_providers.dart';
 import '../common/common.dart';
 import 'budget_providers.dart';
 
@@ -62,6 +63,10 @@ class _BudgetSummaryCardState extends ConsumerState<BudgetSummaryCard> {
 
   void _checkAutoCarryover(WidgetRef ref, int effectiveOffset) {
     if (effectiveOffset != 0) return;
+    if (ref.read(initialStartupSyncPendingProvider) ||
+        (ref.read(cloudSyncInProgressProvider).value ?? false)) {
+      return;
+    }
     final bookAsync = ref.read(currentBookProvider);
     final modeAsync = ref.read(budgetModeProvider);
     final serviceAsync = ref.read(budgetServiceProvider);
@@ -80,14 +85,25 @@ class _BudgetSummaryCardState extends ConsumerState<BudgetSummaryCard> {
       final section = mode.sectionFor(period);
       final key = '${book.id}-${mode.value}-$section';
       if (!_checkedCarryoverKeys.add(key)) return;
+      final backupSvc = ref.read(tallyBackupServiceProvider).value;
       unawaited(
-        service.ensureAutoCarryoverIfNeeded(
-          commandId: 'auto-carryover-$key',
-          bookId: book.id,
-          mode: mode,
-          currentPeriod: period,
-          startDay: book.startDay,
-        ),
+        backupSvc != null
+            ? backupSvc.runInSilentMaintenanceScope(
+                () => service.ensureAutoCarryoverIfNeeded(
+                  commandId: 'auto-carryover-$key',
+                  bookId: book.id,
+                  mode: mode,
+                  currentPeriod: period,
+                  startDay: book.startDay,
+                ),
+              )
+            : service.ensureAutoCarryoverIfNeeded(
+                commandId: 'auto-carryover-$key',
+                bookId: book.id,
+                mode: mode,
+                currentPeriod: period,
+                startDay: book.startDay,
+              ),
       );
     }
   }
@@ -206,6 +222,16 @@ class _BudgetSummaryCardState extends ConsumerState<BudgetSummaryCard> {
     final targetProvider = budgetOverviewForOffsetProvider(effectiveOffset);
     ref.listen(targetProvider, (_, next) {
       if (next.hasValue && !next.isLoading) {
+        _checkAutoCarryover(ref, effectiveOffset);
+      }
+    });
+    ref.listen<bool>(initialStartupSyncPendingProvider, (prev, next) {
+      if (prev == true && !next && mounted) {
+        _checkAutoCarryover(ref, effectiveOffset);
+      }
+    });
+    ref.listen<AsyncValue<bool>>(cloudSyncInProgressProvider, (_, next) {
+      if (next.value == false && mounted) {
         _checkAutoCarryover(ref, effectiveOffset);
       }
     });

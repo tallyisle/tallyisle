@@ -6,10 +6,22 @@ import 'tally_backup.dart';
 
 const int currentCloudSyncHeadFormat = 2;
 const int cloudSyncFormatVersion = currentCloudSyncHeadFormat;
+const int maxSafeCloudSyncRevision = 9007199254740991; // 2^53 - 1
+const int defaultMaxPriorSyncRevisions = 4; // Top-5 total (current + 4 prior)
+const int maxRecentSyncRevisions = 32;
+const int defaultWindowFocusCooldownMs = 30 * 1000;
+const int defaultStaleFutureRevisionMinAgeMs = 2 * 60 * 60 * 1000;
+const int defaultOrphanTmpMinAgeMs = 24 * 60 * 60 * 1000;
+const int defaultAttachmentMinUploadAgeMs = 24 * 60 * 60 * 1000;
+const int defaultAttachmentGcGraceMs = 30 * 24 * 60 * 60 * 1000;
+const String legacyDefaultSyncDeviceName = '帐屿本机';
+
 const String cloudSyncHeadPath = 'sync/head.json';
 const String cloudSyncRevisionsDir = 'sync/revisions';
 const String legacyCloudSyncLatestDbPath = 'sync/latest_db.tally';
 const String cloudSyncAttachmentsDir = 'sync/attachments';
+const String cloudSyncGcPendingPath = 'sync/gc_pending.json';
+const String cloudSyncConflictRefsDir = 'sync/conflict_refs';
 const int maxSanitizedAttachmentBasenameUtf8Bytes = 120;
 
 const String prefKeyCloudSyncSettings = 'cloud_sync_settings';
@@ -20,6 +32,8 @@ const String prefKeyLocalAutoBackupLastAtMs = 'local_auto_backup_last_at_ms';
 const String prefKeyLocalAutoBackupLastSha256 = 'local_auto_backup_last_sha256';
 const String prefKeyCloudSyncLastScheduleCheckAtMs =
     'cloud_sync_last_schedule_check_at_ms';
+const String prefKeyCloudSyncLastGcAtMs = 'cloud_sync_last_gc_at_ms';
+const int defaultWriteCommandRetentionMs = 30 * 24 * 60 * 60 * 1000;
 
 const List<int> autoIdleMinutesChoices = <int>[1, 3, 5, 10, 15, 30];
 const List<int> localScheduleIntervalMinutesChoices = <int>[
@@ -460,14 +474,37 @@ bool shouldRunCloudAutoSyncForTrigger({
   return true;
 }
 
+/// Returns `true` when [rawName] is unset or still uses the legacy generic
+/// `'帐屿本机'` placeholder that cannot distinguish devices in conflict dialogs.
+bool isLegacyDefaultSyncDeviceName(String? rawName) {
+  if (rawName == null) return true;
+  final trimmed = rawName.trim();
+  return trimmed.isEmpty || trimmed == legacyDefaultSyncDeviceName;
+}
+
+/// Builds a privacy-safe, platform-distinguishable default device name such as
+/// `'Linux (98b9)'` or `'Android (a1b2)'` without reading OS hostnames.
+String defaultSyncDeviceNameForPlatform({
+  required String platformLabel,
+  required String deviceId,
+}) {
+  final cleanPlatform = platformLabel.trim().isEmpty
+      ? 'Device'
+      : platformLabel.trim();
+  final short8 = shortDeviceId(deviceId);
+  final short4 = short8.length <= 4 ? short8 : short8.substring(0, 4);
+  return '$cleanPlatform ($short4)';
+}
+
 /// Resolves effective [CloudSyncSettings], seamlessly recognizing legacy
 /// [isWebDavConfigured] setups when `cloud_sync_settings` has not been
-/// explicitly set yet.
+/// explicitly set yet, and upgrading legacy `'帐屿本机'` device names when a
+/// platform-specific [fallbackDeviceName] is provided.
 CloudSyncSettings resolveEffectiveCloudSyncSettings({
   required String? rawJson,
   required bool isWebDavConfigured,
   required String fallbackDeviceId,
-  String fallbackDeviceName = '帐屿本机',
+  String fallbackDeviceName = legacyDefaultSyncDeviceName,
 }) {
   if (rawJson == null || rawJson.trim().isEmpty) {
     return CloudSyncSettings(
@@ -482,11 +519,23 @@ CloudSyncSettings resolveEffectiveCloudSyncSettings({
   try {
     final decoded = jsonDecode(rawJson);
     if (decoded is Map<String, Object?>) {
-      final parsed = CloudSyncSettings.fromJson(
+      var parsed = CloudSyncSettings.fromJson(
         decoded,
         fallbackDeviceId: fallbackDeviceId,
         fallbackDeviceName: fallbackDeviceName,
       );
+      if (isLegacyDefaultSyncDeviceName(parsed.deviceName) &&
+          !isLegacyDefaultSyncDeviceName(fallbackDeviceName)) {
+        final effectiveShort = shortDeviceId(parsed.deviceId);
+        final short4 = effectiveShort.length <= 4
+            ? effectiveShort
+            : effectiveShort.substring(0, 4);
+        final parenIdx = fallbackDeviceName.lastIndexOf(' (');
+        final upgradedName = parenIdx > 0
+            ? '${fallbackDeviceName.substring(0, parenIdx)} ($short4)'
+            : fallbackDeviceName;
+        parsed = parsed.copyWith(deviceName: upgradedName);
+      }
       if (!parsed.explicitBackend &&
           parsed.backend == CloudBackendType.none &&
           isWebDavConfigured) {
@@ -569,7 +618,7 @@ String buildCloudSyncRevisionPath({
   required int revision,
   required String dataSha256,
 }) {
-  if (revision < 1) {
+  if (revision < 1 || revision > maxSafeCloudSyncRevision) {
     throw Failure(FailureCode.validation, '非法的云同步版本号：$revision');
   }
   final cleanSha = dataSha256.trim().toLowerCase();
@@ -632,52 +681,113 @@ final RegExp _syncRevisionFilePattern = RegExp(
   final m = _syncRevisionFilePattern.firstMatch(fileName.trim());
   if (m == null) return null;
   final rev = int.tryParse(m.group(1)!);
-  if (rev == null || rev < 1) return null;
+  if (rev == null || rev < 1 || rev > maxSafeCloudSyncRevision) return null;
   return (revision: rev, sha16: m.group(2)!.toLowerCase());
 }
 
 /// Selects superseded `sync/revisions/*` filenames safe to prune after
-/// [currentRevision] (`[currentDatabasePath]`) has been committed to `head.json`,
-/// always preserving the current revision AND the immediate previous revision
-/// (`r(N-1)` / [previousDatabasePath]) so an in-flight reader on the prior
-/// revision is never broken (`S-01`).
+/// [currentRevision] (`[currentDatabasePath]`) has been committed to `head.json`:
+/// - Retains [currentDatabasePath], [previousDatabasePath], and up to
+///   [maxPriorRevisions] (default `4` -> Top-5 total) highest numeric revisions
+///   strictly `< currentRevision` so recent ancestors remain available for
+///   three-way merge and in-flight readers.
+/// - **NEVER** selects any revision `>= currentRevision`, protecting concurrent
+///   uploads (`db_r(N+1)_*.tally`) from another device that have not committed
+///   `head.json` yet!
 List<String> selectSupersededSyncRevisionFileNames(
   Iterable<String> existingFileNames, {
   required int currentRevision,
   required String currentDatabasePath,
   String? previousDatabasePath,
+  int maxPriorRevisions = defaultMaxPriorSyncRevisions,
 }) {
+  final effectiveMaxPrior = maxPriorRevisions < 1 ? 1 : maxPriorRevisions;
   final keepNames = <String>{
     currentDatabasePath.split('/').last,
     if (previousDatabasePath != null && previousDatabasePath.contains('/'))
       previousDatabasePath.split('/').last,
   };
 
-  int? highestPriorRev;
+  final priorRevisionsDesc = <int>{};
   for (final name in existingFileNames) {
     final parsed = parseSyncRevisionFileName(name);
     if (parsed == null) continue;
     if (parsed.revision < currentRevision) {
-      if (highestPriorRev == null || parsed.revision > highestPriorRev) {
-        highestPriorRev = parsed.revision;
-      }
+      priorRevisionsDesc.add(parsed.revision);
     }
   }
+  final sortedPriorRevs = priorRevisionsDesc.toList()
+    ..sort((a, b) => b.compareTo(a));
+  final protectedPriorRevs = sortedPriorRevs.take(effectiveMaxPrior).toSet();
 
-  final minProtectedRev = currentRevision - 1;
-  final toDelete = <String>[];
+  final candidates = <({int rev, String name})>[];
   for (final name in existingFileNames) {
     if (keepNames.contains(name)) continue;
     final parsed = parseSyncRevisionFileName(name);
     if (parsed == null) continue;
-    if (parsed.revision >= minProtectedRev) continue;
-    if (highestPriorRev != null && parsed.revision == highestPriorRev) {
-      continue;
-    }
-    toDelete.add(name);
+    // Strictly never touch current or future revisions (>= currentRevision).
+    if (parsed.revision >= currentRevision) continue;
+    if (protectedPriorRevs.contains(parsed.revision)) continue;
+    candidates.add((rev: parsed.revision, name: name));
   }
-  toDelete.sort();
-  return toDelete;
+  candidates.sort((a, b) {
+    final byRev = a.rev.compareTo(b.rev);
+    return byRev != 0 ? byRev : a.name.compareTo(b.name);
+  });
+  return <String>[for (final c in candidates) c.name];
+}
+
+/// Computes the minimum retained revision number across [existingFileNames]
+/// after pruning at [currentRevision] (used as the revision watermark for GC).
+int computeMinRetainedSyncRevision(
+  Iterable<String> existingFileNames, {
+  required int currentRevision,
+  int maxPriorRevisions = defaultMaxPriorSyncRevisions,
+}) {
+  final effectiveMaxPrior = maxPriorRevisions < 1 ? 1 : maxPriorRevisions;
+  final revs = <int>{currentRevision};
+  final priorRevs = <int>{};
+  for (final name in existingFileNames) {
+    final parsed = parseSyncRevisionFileName(name);
+    if (parsed == null) continue;
+    if (parsed.revision < currentRevision) {
+      priorRevs.add(parsed.revision);
+    }
+  }
+  final sortedPrior = priorRevs.toList()..sort((a, b) => b.compareTo(a));
+  revs.addAll(sortedPrior.take(effectiveMaxPrior));
+  var minRev = currentRevision;
+  for (final r in revs) {
+    if (r < minRev) minRev = r;
+  }
+  return minRev;
+}
+
+/// Low-frequency 24h maintenance selector for abandoned future revision files
+/// (`revision > headRevision`) whose `LastModified` is at least [minAgeMs] old
+/// after re-verifying `head.json`.
+List<String> selectStaleFutureOrphanRevisionFileNames(
+  Iterable<({String fileName, int? modifiedAtMs})> entries, {
+  required int headRevision,
+  required int nowMs,
+  int minAgeMs = defaultStaleFutureRevisionMinAgeMs,
+}) {
+  final stale = <({int rev, String name})>[];
+  for (final entry in entries) {
+    final parsed = parseSyncRevisionFileName(entry.fileName);
+    if (parsed == null) continue;
+    if (parsed.revision <= headRevision) continue;
+    final modMs = entry.modifiedAtMs;
+    if (modMs == null || modMs <= 0) continue;
+    if ((nowMs - modMs) >= minAgeMs) {
+      stale.add((rev: parsed.revision, name: entry.fileName));
+    }
+  }
+  stale.sort((a, b) {
+    final byRev = a.rev.compareTo(b.rev);
+    return byRev != 0 ? byRev : a.name.compareTo(b.name);
+  });
+  return <String>[for (final s in stale) s.name];
 }
 
 /// Returns `true` when decoded `head.json` is an incompatible legacy format
@@ -947,6 +1057,94 @@ bool isFreshSeedSnapshot(
   return true;
 }
 
+/// Ring-buffer entry inside `CloudSyncHead.recentRevisions` recording recent
+/// commits and crash-idempotent `mergedParentSha` lineage (`<= 32` entries).
+final class SyncRevisionHistoryEntry {
+  SyncRevisionHistoryEntry({
+    required this.revision,
+    required String dataSha256,
+    required this.deviceId,
+    String? mergedParentSha,
+  }) : dataSha256 = dataSha256.trim().toLowerCase(),
+       mergedParentSha = mergedParentSha?.trim().toLowerCase() {
+    if (revision < 1 || revision > maxSafeCloudSyncRevision) {
+      throw Failure(FailureCode.validation, '非法的同步历史版本号：$revision');
+    }
+    if (!_hex64LowerOrUpper.hasMatch(this.dataSha256)) {
+      throw Failure(FailureCode.validation, '非法的同步历史摘要：$dataSha256');
+    }
+    if (this.mergedParentSha != null &&
+        this.mergedParentSha!.isNotEmpty &&
+        !_hex64LowerOrUpper.hasMatch(this.mergedParentSha!)) {
+      throw Failure(FailureCode.validation, '非法的合并父摘要：$mergedParentSha');
+    }
+  }
+
+  final int revision;
+  final String dataSha256;
+  final String deviceId;
+  final String? mergedParentSha;
+
+  Map<String, Object> toJson() => <String, Object>{
+    'rev': revision,
+    'sha': dataSha256,
+    'deviceId': deviceId,
+    if (mergedParentSha != null && mergedParentSha!.isNotEmpty)
+      'mergedParentSha': mergedParentSha!,
+  };
+
+  factory SyncRevisionHistoryEntry.fromJson(Map<String, Object?> json) {
+    final rev = json['rev'];
+    final sha = json['sha'];
+    final deviceId = (json['deviceId'] as String?)?.trim() ?? '';
+    final mergedParentSha = (json['mergedParentSha'] as String?)?.trim();
+    if (rev is! int ||
+        rev < 1 ||
+        rev > maxSafeCloudSyncRevision ||
+        sha is! String ||
+        !_hex64LowerOrUpper.hasMatch(sha) ||
+        deviceId.isEmpty) {
+      throw const Failure(
+        FailureCode.corruptData,
+        '远端 head.json recentRevisions 条目损坏',
+      );
+    }
+    if (mergedParentSha != null &&
+        mergedParentSha.isNotEmpty &&
+        !_hex64LowerOrUpper.hasMatch(mergedParentSha)) {
+      throw const Failure(
+        FailureCode.corruptData,
+        '远端 head.json mergedParentSha 损坏',
+      );
+    }
+    return SyncRevisionHistoryEntry(
+      revision: rev,
+      dataSha256: sha,
+      deviceId: deviceId,
+      mergedParentSha: (mergedParentSha == null || mergedParentSha.isEmpty)
+          ? null
+          : mergedParentSha,
+    );
+  }
+}
+
+/// Appends [next] to [existing], deduplicating by `revision` and keeping at
+/// most the newest [maxEntries] (default `32`) sorted ascending by `revision`.
+List<SyncRevisionHistoryEntry> appendSyncRevisionHistory(
+  Iterable<SyncRevisionHistoryEntry> existing,
+  SyncRevisionHistoryEntry next, {
+  int maxEntries = maxRecentSyncRevisions,
+}) {
+  final byRev = <int, SyncRevisionHistoryEntry>{
+    for (final e in existing) e.revision: e,
+    next.revision: next,
+  };
+  final sorted = byRev.values.toList()
+    ..sort((a, b) => a.revision.compareTo(b.revision));
+  if (sorted.length <= maxEntries) return sorted;
+  return sorted.sublist(sorted.length - maxEntries);
+}
+
 /// Parsed remote `sync/head.json` pointer (`format: 2`, `S-01`).
 final class CloudSyncHead {
   CloudSyncHead({
@@ -960,6 +1158,9 @@ final class CloudSyncHead {
     required this.recordCount,
     required List<String> attachmentFiles,
     Map<String, String>? attachmentManifest,
+    List<SyncRevisionHistoryEntry> recentRevisions =
+        const <SyncRevisionHistoryEntry>[],
+    this.lastNonIncrementalRevision,
   }) : dataSha256 = dataSha256.toLowerCase(),
        databasePath = validateCloudSyncDatabasePath(
          databasePath ??
@@ -976,7 +1177,26 @@ final class CloudSyncHead {
            : Map<String, String>.unmodifiable({
                for (final e in attachmentManifest.entries)
                  normalizeAttachmentArchivePath(e.key): e.value.toLowerCase(),
-             });
+             }),
+       recentRevisions = List<SyncRevisionHistoryEntry>.unmodifiable(
+         recentRevisions.length <= maxRecentSyncRevisions
+             ? recentRevisions
+             : recentRevisions.sublist(
+                 recentRevisions.length - maxRecentSyncRevisions,
+               ),
+       ) {
+    if (revision < 1 || revision > maxSafeCloudSyncRevision) {
+      throw Failure(FailureCode.validation, '非法的云同步版本号：$revision');
+    }
+    if (lastNonIncrementalRevision != null &&
+        (lastNonIncrementalRevision! < 1 ||
+            lastNonIncrementalRevision! > maxSafeCloudSyncRevision)) {
+      throw Failure(
+        FailureCode.validation,
+        '非法的非增量基线版本号：$lastNonIncrementalRevision',
+      );
+    }
+  }
 
   final int format;
   final int revision;
@@ -988,6 +1208,27 @@ final class CloudSyncHead {
   final int recordCount;
   final List<String> attachmentFiles;
   final Map<String, String>? attachmentManifest;
+  final List<SyncRevisionHistoryEntry> recentRevisions;
+  final int? lastNonIncrementalRevision;
+
+  /// Returns `true` when [recentRevisions] proves this [deviceId] already
+  /// committed a merge incorporating [localDataSha256] (`mergedParentSha`)
+  /// before an interrupted local cursor write / power loss.
+  bool hasCommittedMergeForLocalSha({
+    required String deviceId,
+    required String localDataSha256,
+    int? afterRevision,
+  }) {
+    final cleanSha = localDataSha256.trim().toLowerCase();
+    for (final entry in recentRevisions) {
+      if (afterRevision != null && entry.revision <= afterRevision) continue;
+      if (entry.deviceId == deviceId &&
+          (entry.mergedParentSha == cleanSha || entry.dataSha256 == cleanSha)) {
+        return true;
+      }
+    }
+    return false;
+  }
 
   /// Resolves every attachment required to reconstruct this snapshot locally.
   List<SyncAttachmentDescriptor> resolvedAttachments() {
@@ -1029,6 +1270,12 @@ final class CloudSyncHead {
     'recordCount': recordCount,
     'attachmentFiles': attachmentFiles,
     if (attachmentManifest != null) 'attachmentManifest': attachmentManifest!,
+    if (recentRevisions.isNotEmpty)
+      'recentRevisions': <Map<String, Object>>[
+        for (final r in recentRevisions) r.toJson(),
+      ],
+    if (lastNonIncrementalRevision != null)
+      'lastNonIncrementalRevision': lastNonIncrementalRevision!,
   };
 
   factory CloudSyncHead.fromJson(Map<String, Object?> json) {
@@ -1054,7 +1301,9 @@ final class CloudSyncHead {
     }
     final databasePath = validateCloudSyncDatabasePath(rawDatabasePath);
     final revision = json['revision'];
-    if (revision is! int || revision < 1) {
+    if (revision is! int ||
+        revision < 1 ||
+        revision > maxSafeCloudSyncRevision) {
       throw const Failure(FailureCode.corruptData, '远端 head.json revision 无效');
     }
     final dataSha256 = json['dataSha256'];
@@ -1125,6 +1374,40 @@ final class CloudSyncHead {
       }
     }
 
+    final recentRevs = <SyncRevisionHistoryEntry>[];
+    final rawRecent = json['recentRevisions'];
+    if (rawRecent != null) {
+      if (rawRecent is! List) {
+        throw const Failure(
+          FailureCode.corruptData,
+          '远端 head.json recentRevisions 结构损坏',
+        );
+      }
+      for (final item in rawRecent) {
+        if (item is! Map<String, Object?>) {
+          throw const Failure(
+            FailureCode.corruptData,
+            '远端 head.json recentRevisions 条目格式错误',
+          );
+        }
+        recentRevs.add(SyncRevisionHistoryEntry.fromJson(item));
+      }
+    }
+
+    int? lastNonInc;
+    final rawLastNonInc = json['lastNonIncrementalRevision'];
+    if (rawLastNonInc != null) {
+      if (rawLastNonInc is! int ||
+          rawLastNonInc < 1 ||
+          rawLastNonInc > maxSafeCloudSyncRevision) {
+        throw const Failure(
+          FailureCode.corruptData,
+          '远端 head.json lastNonIncrementalRevision 无效',
+        );
+      }
+      lastNonInc = rawLastNonInc;
+    }
+
     return CloudSyncHead(
       format: format,
       revision: revision,
@@ -1136,6 +1419,8 @@ final class CloudSyncHead {
       recordCount: recordCount,
       attachmentFiles: attFiles,
       attachmentManifest: attManifest,
+      recentRevisions: recentRevs,
+      lastNonIncrementalRevision: lastNonInc,
     );
   }
 }
@@ -1149,6 +1434,9 @@ final class LocalSyncCursor {
     this.targetFingerprint,
     this.lastConflictSha256,
     this.lastConflictFileName,
+    this.localFullReplaceSinceLastSync = false,
+    this.lastRemoteHeadEtag,
+    this.lastConflictSummaryJson,
   });
 
   const LocalSyncCursor.initial() : this();
@@ -1159,6 +1447,9 @@ final class LocalSyncCursor {
   final String? targetFingerprint;
   final String? lastConflictSha256;
   final String? lastConflictFileName;
+  final bool localFullReplaceSinceLastSync;
+  final String? lastRemoteHeadEtag;
+  final String? lastConflictSummaryJson;
 
   bool get isNeverSynced =>
       lastSyncedRevision <= 0 ||
@@ -1184,6 +1475,10 @@ final class LocalSyncCursor {
     String? targetFingerprint,
     String? lastConflictSha256,
     String? lastConflictFileName,
+    bool? localFullReplaceSinceLastSync,
+    String? lastRemoteHeadEtag,
+    bool clearRemoteHeadEtag = false,
+    String? lastConflictSummaryJson,
     bool clearConflictRecord = false,
   }) => LocalSyncCursor(
     lastSyncedRevision: lastSyncedRevision ?? this.lastSyncedRevision,
@@ -1196,6 +1491,14 @@ final class LocalSyncCursor {
     lastConflictFileName: clearConflictRecord
         ? null
         : (lastConflictFileName ?? this.lastConflictFileName),
+    localFullReplaceSinceLastSync:
+        localFullReplaceSinceLastSync ?? this.localFullReplaceSinceLastSync,
+    lastRemoteHeadEtag: clearRemoteHeadEtag
+        ? null
+        : (lastRemoteHeadEtag ?? this.lastRemoteHeadEtag),
+    lastConflictSummaryJson: clearConflictRecord
+        ? null
+        : (lastConflictSummaryJson ?? this.lastConflictSummaryJson),
   );
 
   Map<String, Object?> toJson() => <String, Object?>{
@@ -1205,6 +1508,12 @@ final class LocalSyncCursor {
     'target_fingerprint': targetFingerprint,
     'last_conflict_sha256': lastConflictSha256,
     'last_conflict_file': lastConflictFileName,
+    if (localFullReplaceSinceLastSync)
+      'local_full_replace_since_last_sync': true,
+    if (lastRemoteHeadEtag != null && lastRemoteHeadEtag!.isNotEmpty)
+      'last_remote_head_etag': lastRemoteHeadEtag,
+    if (lastConflictSummaryJson != null && lastConflictSummaryJson!.isNotEmpty)
+      'last_conflict_summary_json': lastConflictSummaryJson,
   };
 
   factory LocalSyncCursor.fromJson(Map<String, Object?> json) =>
@@ -1215,7 +1524,21 @@ final class LocalSyncCursor {
         targetFingerprint: json['target_fingerprint'] as String?,
         lastConflictSha256: json['last_conflict_sha256'] as String?,
         lastConflictFileName: json['last_conflict_file'] as String?,
+        localFullReplaceSinceLastSync:
+            (json['local_full_replace_since_last_sync'] as bool?) ?? false,
+        lastRemoteHeadEtag: json['last_remote_head_etag'] as String?,
+        lastConflictSummaryJson: json['last_conflict_summary_json'] as String?,
       );
+}
+
+int _checkedNextSyncRevision(int baseRevision) {
+  if (baseRevision < 0 || baseRevision >= maxSafeCloudSyncRevision) {
+    throw Failure(
+      FailureCode.validation,
+      '云同步版本号已达安全上限（$baseRevision），请导出备份后归档重置远端同步目录',
+    );
+  }
+  return baseRevision + 1;
 }
 
 /// User-chosen resolution strategy when both local and remote diverged.
@@ -1256,7 +1579,7 @@ SyncDecision decideSyncAction({
     final baseRev = remoteHead?.revision ?? legacyRemoteRevision ?? 0;
     return SyncDecision(
       action: SyncActionType.pushLocal,
-      nextRevision: baseRev + 1,
+      nextRevision: _checkedNextSyncRevision(baseRev),
     );
   }
 
@@ -1279,7 +1602,8 @@ SyncDecision decideSyncAction({
   // Identical content already on both sides -> align cursor if needed, zero transfer.
   if (remoteHead.dataSha256 == cleanLocalSha) {
     if (cursor.lastSyncedRevision == remoteHead.revision &&
-        cursor.lastSyncedDataSha256?.toLowerCase() == cleanLocalSha) {
+        cursor.lastSyncedDataSha256?.toLowerCase() == cleanLocalSha &&
+        !cursor.localFullReplaceSinceLastSync) {
       return const SyncDecision(action: SyncActionType.noOp);
     }
     return const SyncDecision(action: SyncActionType.fastForwardCursor);
@@ -1305,7 +1629,7 @@ SyncDecision decideSyncAction({
   if (localChanged && !remoteChanged) {
     return SyncDecision(
       action: SyncActionType.pushLocal,
-      nextRevision: remoteHead.revision + 1,
+      nextRevision: _checkedNextSyncRevision(remoteHead.revision),
     );
   }
   if (localChanged && remoteChanged) {
@@ -1328,6 +1652,7 @@ final class CloudSyncOutcome {
     this.downloadedAttachments = 0,
     this.conflictBackupFileName,
     this.archivedBackupFileName,
+    this.didMerge = false,
   });
 
   const CloudSyncOutcome.conflict({
@@ -1338,7 +1663,8 @@ final class CloudSyncOutcome {
   }) : status = CloudSyncStatus.conflict,
        uploadedAttachments = 0,
        downloadedAttachments = 0,
-       archivedBackupFileName = null;
+       archivedBackupFileName = null,
+       didMerge = false;
 
   final CloudSyncStatus status;
   final int revision;
@@ -1348,6 +1674,386 @@ final class CloudSyncOutcome {
   final int downloadedAttachments;
   final String? conflictBackupFileName;
   final String? archivedBackupFileName;
+  final bool didMerge;
 
   bool get isConflict => status == CloudSyncStatus.conflict;
+
+  /// True whenever local SQLite business tables were replaced (`pulled` OR a
+  /// three-way merged `pushed` that incorporated remote rows).
+  bool get didReplaceLocalDatabase =>
+      status == CloudSyncStatus.pulled ||
+      (status == CloudSyncStatus.pushed && didMerge);
+}
+
+/// Returns `true` when repeated desktop/mobile `windowFocus` checks should be
+/// throttled within [cooldownMs] (default `30s`).
+bool shouldCooldownWindowFocus({
+  required int? lastFocusSyncAtMs,
+  required int nowMs,
+  int cooldownMs = defaultWindowFocusCooldownMs,
+}) {
+  if (lastFocusSyncAtMs == null || cooldownMs <= 0) return false;
+  final elapsed = nowMs - lastFocusSyncAtMs;
+  return elapsed >= 0 && elapsed < cooldownMs;
+}
+
+const Map<String, int> _httpMonthByShortName = <String, int>{
+  'jan': 1,
+  'feb': 2,
+  'mar': 3,
+  'apr': 4,
+  'may': 5,
+  'jun': 6,
+  'jul': 7,
+  'aug': 8,
+  'sep': 9,
+  'oct': 10,
+  'nov': 11,
+  'dec': 12,
+};
+
+final RegExp _rfc1123DatePattern = RegExp(
+  r'^[A-Za-z]{3},\s*(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})\s+(\d{2}):(\d{2}):(\d{2})\s+GMT$',
+);
+
+/// Parses an HTTP `Retry-After` header (delta seconds or RFC-1123 / ISO-8601
+/// date) into a positive delay in milliseconds bounded to `[1000, 86400000]`.
+int? parseHttpRetryAfterMs(String? rawHeader, {required int nowMs}) {
+  if (rawHeader == null) return null;
+  final trimmed = rawHeader.trim();
+  if (trimmed.isEmpty) return null;
+
+  final seconds = int.tryParse(trimmed);
+  if (seconds != null) {
+    if (seconds <= 0) return 1000;
+    final ms = seconds * 1000;
+    return ms > 86400000 ? 86400000 : ms;
+  }
+
+  DateTime? targetUtc = DateTime.tryParse(trimmed)?.toUtc();
+  if (targetUtc == null) {
+    final m = _rfc1123DatePattern.firstMatch(trimmed);
+    if (m != null) {
+      final day = int.tryParse(m.group(1)!);
+      final month = _httpMonthByShortName[m.group(2)!.toLowerCase()];
+      final year = int.tryParse(m.group(3)!);
+      final hh = int.tryParse(m.group(4)!);
+      final mm = int.tryParse(m.group(5)!);
+      final ss = int.tryParse(m.group(6)!);
+      if (day != null &&
+          month != null &&
+          year != null &&
+          hh != null &&
+          mm != null &&
+          ss != null) {
+        targetUtc = DateTime.utc(year, month, day, hh, mm, ss);
+      }
+    }
+  }
+  if (targetUtc == null) return null;
+  final deltaMs = targetUtc.millisecondsSinceEpoch - nowMs;
+  if (deltaMs <= 0) return 1000;
+  return deltaMs > 86400000 ? 86400000 : deltaMs;
+}
+
+/// Classification of an automatic sync/backup failure for backoff & circuit-breaking.
+enum SyncFailureDisposition { none, transientBackoff, hardAuthCircuitBreak }
+
+/// In-memory / UI-observable backoff & auth circuit-breaker state shared by
+/// automatic cloud sync and 24h silent cloud auto-backup.
+final class SyncBackoffState {
+  const SyncBackoffState({
+    this.consecutiveTransientFailures = 0,
+    this.consecutiveNonClock403Failures = 0,
+    this.nextRetryAtMs,
+    this.isAuthCircuitOpen = false,
+    this.lastFailureMessage,
+  });
+
+  static const SyncBackoffState healthy = SyncBackoffState();
+
+  final int consecutiveTransientFailures;
+  final int consecutiveNonClock403Failures;
+  final int? nextRetryAtMs;
+  final bool isAuthCircuitOpen;
+  final String? lastFailureMessage;
+
+  bool isBlockedAt(int nowMs) {
+    if (isAuthCircuitOpen) return true;
+    if (nextRetryAtMs != null && nowMs < nextRetryAtMs!) return true;
+    return false;
+  }
+
+  int remainingBackoffMs(int nowMs) {
+    if (nextRetryAtMs == null || nowMs >= nextRetryAtMs!) return 0;
+    return nextRetryAtMs! - nowMs;
+  }
+}
+
+/// Evaluates how [failure] should update [previous] backoff / circuit-breaker
+/// state (`30s -> 60min` exponential backoff with jitter & `Retry-After`, vs
+/// `401` / invalid key / 2 consecutive non-clock `403` hard auth circuit break).
+SyncBackoffState evaluateSyncFailureBackoff({
+  required SyncBackoffState previous,
+  required Failure failure,
+  required int nowMs,
+  int? retryAfterMs,
+  int jitterPermille = 0,
+  int baseDelayMs = 30 * 1000,
+  int maxDelayMs = 60 * 60 * 1000,
+}) {
+  final msg = failure.message;
+  final lowerMsg = msg.toLowerCase();
+
+  final isClockSkew =
+      lowerMsg.contains('requesttimetooskewed') ||
+      msg.contains('时钟偏差') ||
+      lowerMsg.contains('clock skew');
+
+  if (isClockSkew) {
+    final nextCount = previous.consecutiveTransientFailures + 1;
+    final expShift = nextCount - 1 > 10 ? 10 : nextCount - 1;
+    var delay = baseDelayMs * (1 << expShift);
+    if (delay > maxDelayMs) delay = maxDelayMs;
+    final clampedPermille = jitterPermille < 0
+        ? 0
+        : (jitterPermille > 200 ? 200 : jitterPermille);
+    delay += (delay * clampedPermille) ~/ 1000;
+    if (retryAfterMs != null && retryAfterMs > delay) {
+      delay = retryAfterMs;
+    }
+    return SyncBackoffState(
+      consecutiveTransientFailures: nextCount,
+      consecutiveNonClock403Failures: 0,
+      nextRetryAtMs: nowMs + delay,
+      isAuthCircuitOpen: false,
+      lastFailureMessage: msg,
+    );
+  }
+
+  if (failure.code == FailureCode.authRequired) {
+    final isExplicitInvalidCreds =
+        msg.contains('401') ||
+        lowerMsg.contains('invalidaccesskeyid') ||
+        lowerMsg.contains('signaturedoesnotmatch') ||
+        !msg.contains('403');
+    if (isExplicitInvalidCreds) {
+      return SyncBackoffState(
+        consecutiveTransientFailures: previous.consecutiveTransientFailures,
+        consecutiveNonClock403Failures:
+            previous.consecutiveNonClock403Failures + 1,
+        nextRetryAtMs: null,
+        isAuthCircuitOpen: true,
+        lastFailureMessage: msg,
+      );
+    }
+    // Non-clock 403 (e.g. CDN/WAF transient block vs genuine AccessDenied):
+    // open hard circuit breaker on the 2nd consecutive 403.
+    final next403Count = previous.consecutiveNonClock403Failures + 1;
+    if (next403Count >= 2) {
+      return SyncBackoffState(
+        consecutiveTransientFailures: previous.consecutiveTransientFailures,
+        consecutiveNonClock403Failures: next403Count,
+        nextRetryAtMs: null,
+        isAuthCircuitOpen: true,
+        lastFailureMessage: msg,
+      );
+    }
+    final nextCount = previous.consecutiveTransientFailures + 1;
+    final delay = retryAfterMs != null && retryAfterMs > baseDelayMs
+        ? retryAfterMs
+        : baseDelayMs;
+    return SyncBackoffState(
+      consecutiveTransientFailures: nextCount,
+      consecutiveNonClock403Failures: next403Count,
+      nextRetryAtMs: nowMs + delay,
+      isAuthCircuitOpen: false,
+      lastFailureMessage: msg,
+    );
+  }
+
+  if (failure.code == FailureCode.remoteUnavailable ||
+      failure.code == FailureCode.storageUnavailable) {
+    final nextCount = previous.consecutiveTransientFailures + 1;
+    final expShift = nextCount - 1 > 10 ? 10 : nextCount - 1;
+    var delay = baseDelayMs * (1 << expShift);
+    if (delay > maxDelayMs) delay = maxDelayMs;
+    final clampedPermille = jitterPermille < 0
+        ? 0
+        : (jitterPermille > 200 ? 200 : jitterPermille);
+    delay += (delay * clampedPermille) ~/ 1000;
+    if (retryAfterMs != null && retryAfterMs > delay) {
+      delay = retryAfterMs;
+    }
+    return SyncBackoffState(
+      consecutiveTransientFailures: nextCount,
+      consecutiveNonClock403Failures: 0,
+      nextRetryAtMs: nowMs + delay,
+      isAuthCircuitOpen: false,
+      lastFailureMessage: msg,
+    );
+  }
+
+  return previous;
+}
+
+/// Tombstone watermark entry stored inside `sync/gc_pending.json` for
+/// zero-false-deletion 30-day attachment garbage collection.
+final class GcPendingEntry {
+  const GcPendingEntry({
+    required this.unreferencedSinceMs,
+    required this.unreferencedAtRevision,
+  });
+
+  final int unreferencedSinceMs;
+  final int unreferencedAtRevision;
+
+  Map<String, Object> toJson() => <String, Object>{
+    'unreferencedSinceMs': unreferencedSinceMs,
+    'unreferencedAtRevision': unreferencedAtRevision,
+  };
+
+  factory GcPendingEntry.fromJson(Map<String, Object?> json) {
+    final sinceMs = json['unreferencedSinceMs'];
+    final atRev = json['unreferencedAtRevision'];
+    if (sinceMs is! int ||
+        sinceMs < 0 ||
+        atRev is! int ||
+        atRev < 1 ||
+        atRev > maxSafeCloudSyncRevision) {
+      throw const Failure(FailureCode.corruptData, 'gc_pending 条目损坏');
+    }
+    return GcPendingEntry(
+      unreferencedSinceMs: sinceMs,
+      unreferencedAtRevision: atRev,
+    );
+  }
+}
+
+/// Evaluates the 30-day dual-watermark attachment GC state machine:
+/// - Any object in [referencedObjectNames] (`head.attachmentFiles` ∪
+///   `sync/conflict_refs/*.json`) is protected and removed from `gc_pending`.
+/// - Unreferenced objects enter `gc_pending` on first observation and are ONLY
+///   eligible for deletion when ALL of the following hold:
+///   1. `(nowMs - entry.unreferencedSinceMs) >= gracePeriodMs` (default 30d)
+///   2. `entry.unreferencedAtRevision < minRetainedRevision` (strictly below
+///      every retained Top-5 revision snapshot)
+///   3. Object `modifiedAtMs` is absent or `(nowMs - modifiedAtMs) >= minUploadAgeMs`
+///      (default 24h, protecting concurrent in-flight uploads).
+({List<String> toDelete, Map<String, GcPendingEntry> nextPending})
+evaluateAttachmentGarbageCollection({
+  required Map<String, int?> existingRemoteAttachments,
+  required Set<String> referencedObjectNames,
+  required Map<String, GcPendingEntry> previousPending,
+  required int currentRevision,
+  required int minRetainedRevision,
+  required int nowMs,
+  int gracePeriodMs = defaultAttachmentGcGraceMs,
+  int minUploadAgeMs = defaultAttachmentMinUploadAgeMs,
+}) {
+  final toDelete = <String>[];
+  final nextPending = <String, GcPendingEntry>{};
+
+  final sortedNames = existingRemoteAttachments.keys.toList()..sort();
+  for (final objName in sortedNames) {
+    if (objName.toLowerCase().endsWith('.tmp')) continue;
+    // Only evaluate valid `<sha256>__<basename>` objects.
+    try {
+      parseAttachmentObjectName(objName);
+    } catch (_) {
+      continue;
+    }
+
+    if (referencedObjectNames.contains(objName)) {
+      continue;
+    }
+
+    final existingTombstone = previousPending[objName];
+    if (existingTombstone == null) {
+      nextPending[objName] = GcPendingEntry(
+        unreferencedSinceMs: nowMs,
+        unreferencedAtRevision: currentRevision,
+      );
+      continue;
+    }
+
+    final uploadModMs = existingRemoteAttachments[objName];
+    final uploadOldEnough =
+        uploadModMs == null ||
+        uploadModMs <= 0 ||
+        (nowMs - uploadModMs) >= minUploadAgeMs;
+    final unrefOldEnough =
+        (nowMs - existingTombstone.unreferencedSinceMs) >= gracePeriodMs;
+    final belowRetainedWatermark =
+        existingTombstone.unreferencedAtRevision < minRetainedRevision;
+
+    if (uploadOldEnough && unrefOldEnough && belowRetainedWatermark) {
+      toDelete.add(objName);
+    } else {
+      nextPending[objName] = existingTombstone;
+    }
+  }
+
+  return (toDelete: toDelete, nextPending: nextPending);
+}
+
+/// Reference lock document stored at `sync/conflict_refs/<conflictFileName>.json`
+/// when an oversize conflict archive falls back to a lightweight DB-only `.tally`
+/// after pushing local-only attachments to `sync/attachments/`.
+final class ConflictAttachmentRefLock {
+  ConflictAttachmentRefLock({
+    required this.conflictFileName,
+    required this.createdAtMs,
+    required List<String> attachmentFiles,
+    required Map<String, String> attachmentManifest,
+  }) : attachmentFiles = List<String>.unmodifiable(
+         List<String>.from(attachmentFiles)..sort(),
+       ),
+       attachmentManifest = Map<String, String>.unmodifiable({
+         for (final e in attachmentManifest.entries)
+           normalizeAttachmentArchivePath(e.key): e.value.toLowerCase(),
+       });
+
+  final String conflictFileName;
+  final int createdAtMs;
+  final List<String> attachmentFiles;
+  final Map<String, String> attachmentManifest;
+
+  Map<String, Object> toJson() => <String, Object>{
+    'conflictFileName': conflictFileName,
+    'createdAtMs': createdAtMs,
+    'attachmentFiles': attachmentFiles,
+    'attachmentManifest': attachmentManifest,
+  };
+
+  factory ConflictAttachmentRefLock.fromJson(Map<String, Object?> json) {
+    final fileName = (json['conflictFileName'] as String?)?.trim() ?? '';
+    final createdAtMs = (json['createdAtMs'] as int?) ?? 0;
+    final rawFiles = json['attachmentFiles'];
+    final rawManifest = json['attachmentManifest'];
+    if (fileName.isEmpty || rawFiles is! List || rawManifest is! Map) {
+      throw const Failure(FailureCode.corruptData, 'conflict_refs 引用锁损坏');
+    }
+    final files = <String>[
+      for (final item in rawFiles)
+        if (item is String && item.trim().isNotEmpty) item.trim(),
+    ];
+    for (final f in files) {
+      parseAttachmentObjectName(f);
+    }
+    final manifest = <String, String>{};
+    for (final e in rawManifest.entries) {
+      final k = e.key;
+      final v = e.value;
+      if (k is String && v is String && _hex64LowerOrUpper.hasMatch(v)) {
+        manifest[normalizeAttachmentArchivePath(k)] = v.toLowerCase();
+      }
+    }
+    return ConflictAttachmentRefLock(
+      conflictFileName: fileName,
+      createdAtMs: createdAtMs,
+      attachmentFiles: files,
+      attachmentManifest: manifest,
+    );
+  }
 }

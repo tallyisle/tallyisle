@@ -5,6 +5,7 @@ import 'package:drift/drift.dart';
 
 import '../../core/failure.dart';
 import '../../domain/model/codes.dart';
+import '../../domain/rules/cloud_sync_rules.dart';
 import '../../domain/rules/penny_backup.dart';
 import '../../domain/rules/receipt_diy_rules.dart';
 import '../db/database.dart';
@@ -541,6 +542,32 @@ final class PennyImportService {
                   value: resetDiy.encode(),
                 ),
               );
+        }
+
+        // Mark cloud sync cursor as non-incremental full DB replacement so a
+        // subsequent sync never treats wiped local rows as incremental deletes.
+        final cursorRow =
+            await (db.select(db.preferences)
+                  ..where((t) => t.key.equals(prefKeyCloudSyncCursor)))
+                .getSingleOrNull();
+        if (cursorRow != null && cursorRow.value.trim().isNotEmpty) {
+          try {
+            final decoded = jsonDecode(cursorRow.value);
+            if (decoded is Map<String, Object?>) {
+              final nextCursor = LocalSyncCursor.fromJson(decoded).copyWith(
+                localFullReplaceSinceLastSync: true,
+                clearConflictRecord: true,
+              );
+              await db
+                  .into(db.preferences)
+                  .insertOnConflictUpdate(
+                    PreferencesCompanion.insert(
+                      key: prefKeyCloudSyncCursor,
+                      value: jsonEncode(nextCursor.toJson()),
+                    ),
+                  );
+            }
+          } catch (_) {}
         }
 
         await db

@@ -571,6 +571,63 @@ bool shouldTriggerAutoBackup({
   return (nowMs - lastBackupAtMs) >= cooldownMs;
 }
 
+/// Extracts and validates ONLY `manifest.json` from [archiveBytes] via the ZIP
+/// Central Directory without inflating `database.json` or `attachments/*`.
+TallyManifest extractTallyManifestOnly(Uint8List archiveBytes) {
+  final manifestEntry = ZipArchive.readSingleEntryFromBytes(
+    archiveBytes,
+    tallyManifestFileName,
+  );
+  if (manifestEntry == null) {
+    throw const Failure(FailureCode.corruptData, '备份包缺少 manifest.json');
+  }
+  final Object? decodedManifest;
+  try {
+    decodedManifest = jsonDecode(utf8.decode(manifestEntry.bytes));
+  } catch (_) {
+    throw const Failure(FailureCode.corruptData, '备份包 manifest.json 解析失败');
+  }
+  if (decodedManifest is! Map<String, Object?>) {
+    throw const Failure(FailureCode.corruptData, '备份包 manifest.json 结构损坏');
+  }
+  return TallyManifest.fromJson(decodedManifest);
+}
+
+final RegExp _backupCollisionSuffixPattern = RegExp(
+  r'^(.*?_\d{8}_\d{6})(?:_([1-9][0-9]*))?\.(tally|tallyzip)$',
+  caseSensitive: false,
+);
+
+({String stem, int seq, String ext})? _parseBackupStemAndCollisionSeq(
+  String fileName,
+) {
+  final trimmed = fileName.trim();
+  final match = _backupCollisionSuffixPattern.firstMatch(trimmed);
+  if (match == null) return null;
+  final stem = match.group(1)!.toLowerCase();
+  final rawSeq = match.group(2);
+  final seq = rawSeq == null ? 1 : (int.tryParse(rawSeq) ?? 1);
+  final ext = match.group(3)!.toLowerCase();
+  return (stem: stem, seq: seq, ext: ext);
+}
+
+/// Natural newest-first filename comparator for `.tally` / `.tallyzip` archives
+/// so same-second collision suffixes sort numerically (`_10` > `_9` > `_2` > base)
+/// instead of lexicographically (`_9` > `_10`).
+int compareBackupFileNamesNewestFirst(String a, String b) {
+  final pa = _parseBackupStemAndCollisionSeq(a);
+  final pb = _parseBackupStemAndCollisionSeq(b);
+  if (pa != null && pb != null) {
+    final byStem = pb.stem.compareTo(pa.stem);
+    if (byStem != 0) return byStem;
+    final bySeq = pb.seq.compareTo(pa.seq);
+    if (bySeq != 0) return bySeq;
+    final byExt = pb.ext.compareTo(pa.ext);
+    if (byExt != 0) return byExt;
+  }
+  return b.compareTo(a);
+}
+
 /// Minimal metadata item used for backup retention pruning (§6.2).
 final class BackupRetentionItem {
   const BackupRetentionItem({
@@ -583,7 +640,7 @@ final class BackupRetentionItem {
 }
 
 /// Selects older backup files exceeding [keepCount] (sorted newest-first by
-/// `(modifiedAtMs, fileName)`) for automatic retention cleanup (§6.2).
+/// `(modifiedAtMs, naturalFileName)`) for automatic retention cleanup (§6.2).
 List<String> selectBackupsToPrune(
   Iterable<BackupRetentionItem> items, {
   int keepCount = defaultWebDavKeepCount,
@@ -593,7 +650,7 @@ List<String> selectBackupsToPrune(
     ..sort((a, b) {
       final byTime = b.modifiedAtMs.compareTo(a.modifiedAtMs);
       if (byTime != 0) return byTime;
-      return b.fileName.compareTo(a.fileName);
+      return compareBackupFileNamesNewestFirst(a.fileName, b.fileName);
     });
   if (sorted.length <= keepCount) return const <String>[];
   return <String>[

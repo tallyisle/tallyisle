@@ -151,49 +151,6 @@ void _openFullBackupPage(BuildContext context) {
   }
 }
 
-Future<SyncConflictResolution?> _promptQuickConflictResolution(
-  BuildContext context,
-  CloudSyncOutcome conflict,
-) {
-  final head = conflict.remoteHead;
-  final remoteDesc = head == null
-      ? '云端新版本'
-      : '设备「${head.deviceName}」于 ${formatDateTime(DateTime.fromMillisecondsSinceEpoch(head.updatedAtMs))} 推送的版本 r${head.revision}（账单 ${head.recordCount} 条）';
-  final backupName = conflict.conflictBackupFileName ?? 'conflict_*.tally';
-  return showDialog<SyncConflictResolution?>(
-    context: context,
-    builder: (ctx) => AlertDialog(
-      key: const Key('cloud_sync_conflict_dialog'),
-      title: const Text('检测到多端同步冲突'),
-      content: Text(
-        '本机与云端自上次同步后均产生了新的账务改动。\n\n'
-        '• 云端状态：$remoteDesc\n'
-        '• 冲突自动留档：已自动将本机当前完整数据归档保存为「$backupName」。\n\n'
-        '请选择如何处理当前同步冲突：',
-      ),
-      actions: [
-        TextButton(
-          key: const Key('conflict_resolve_later_button'),
-          onPressed: () => Navigator.of(ctx).pop(null),
-          child: const Text('稍后处理'),
-        ),
-        TallySoftButton(
-          key: const Key('conflict_use_remote_button'),
-          onPressed: () =>
-              Navigator.of(ctx).pop(SyncConflictResolution.useRemote),
-          child: const Text('采用云端版本'),
-        ),
-        FilledButton(
-          key: const Key('conflict_use_local_button'),
-          onPressed: () =>
-              Navigator.of(ctx).pop(SyncConflictResolution.useLocal),
-          child: const Text('以本机覆盖云端'),
-        ),
-      ],
-    ),
-  );
-}
-
 /// Opens a compact mobile bottom sheet for 1-tap Cloud Sync, Local `.tally`
 /// Backup, external export, and quick navigation to `/backup`.
 Future<void> showMobileSyncBackupQuickSheet(BuildContext context) {
@@ -249,11 +206,24 @@ class _MobileSyncBackupQuickSheetState
           Navigator.of(context).pop();
           _showToast(messenger, '多端数据已是最新（版本 r${outcome.revision}）');
         case CloudSyncStatus.pushed:
-          await _invalidateBackupState(ref, didPullOrRestore: false);
+          ref
+            ..read(
+              syncBackoffStateProvider.notifier,
+            ).updateState(SyncBackoffState.healthy);
+          await _invalidateBackupState(ref, didPullOrRestore: outcome.didMerge);
           if (!mounted) return;
           Navigator.of(context).pop();
-          _showToast(messenger, '已推送最新快照至云端（版本 r${outcome.revision}）');
+          _showToast(
+            messenger,
+            outcome.didMerge
+                ? '已智能合并双端账单并同步（版本 r${outcome.revision}）'
+                : '已推送最新快照至云端（版本 r${outcome.revision}）',
+          );
         case CloudSyncStatus.pulled:
+          ref
+            ..read(
+              syncBackoffStateProvider.notifier,
+            ).updateState(SyncBackoffState.healthy);
           await _invalidateBackupState(ref, didPullOrRestore: true);
           if (!mounted) return;
           Navigator.of(context).pop();
@@ -276,9 +246,10 @@ class _MobileSyncBackupQuickSheetState
     }
 
     if (pendingConflict != null && mounted) {
-      final choice = await _promptQuickConflictResolution(
+      final choice = await showCloudSyncConflictResolutionDialog(
         context,
-        pendingConflict,
+        ref,
+        conflict: pendingConflict,
       );
       if (choice != null && mounted) {
         await _runSync(resolution: choice);
@@ -678,9 +649,24 @@ class _MobileMeSyncQuickCardState extends ConsumerState<MobileMeSyncQuickCard> {
             await _invalidateBackupState(ref, didPullOrRestore: false);
             _toast('多端数据已是最新（版本 r${outcome.revision}）');
           case CloudSyncStatus.pushed:
-            await _invalidateBackupState(ref, didPullOrRestore: false);
-            _toast('已推送最新快照至云端（版本 r${outcome.revision}）');
+            ref
+              ..read(
+                syncBackoffStateProvider.notifier,
+              ).updateState(SyncBackoffState.healthy);
+            await _invalidateBackupState(
+              ref,
+              didPullOrRestore: outcome.didMerge,
+            );
+            _toast(
+              outcome.didMerge
+                  ? '已智能合并双端账单并同步（版本 r${outcome.revision}）'
+                  : '已推送最新快照至云端（版本 r${outcome.revision}）',
+            );
           case CloudSyncStatus.pulled:
+            ref
+              ..read(
+                syncBackoffStateProvider.notifier,
+              ).updateState(SyncBackoffState.healthy);
             await _invalidateBackupState(ref, didPullOrRestore: true);
             _toast('已从云端同步最新数据（版本 r${outcome.revision}）');
           case CloudSyncStatus.conflict:
@@ -716,9 +702,10 @@ class _MobileMeSyncQuickCardState extends ConsumerState<MobileMeSyncQuickCard> {
     }
 
     if (pendingConflict != null && mounted) {
-      final choice = await _promptQuickConflictResolution(
+      final choice = await showCloudSyncConflictResolutionDialog(
         context,
-        pendingConflict,
+        ref,
+        conflict: pendingConflict,
       );
       if (choice != null && mounted) {
         setState(() => _busy = true);
@@ -728,7 +715,7 @@ class _MobileMeSyncQuickCardState extends ConsumerState<MobileMeSyncQuickCard> {
           if (!mounted) return;
           await _invalidateBackupState(
             ref,
-            didPullOrRestore: resolved.status == CloudSyncStatus.pulled,
+            didPullOrRestore: resolved.didReplaceLocalDatabase,
           );
           _toast('冲突已处理（版本 r${resolved.revision}）');
         } catch (e) {

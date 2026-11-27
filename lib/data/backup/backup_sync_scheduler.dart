@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:math';
 
 import 'package:drift/drift.dart' show TableUpdate;
 
+import '../../core/failure.dart';
 import '../../domain/rules/cloud_sync_rules.dart';
 import '../../domain/rules/tally_backup.dart';
 import 'tally_backup_service.dart';
@@ -10,12 +12,16 @@ import 'webdav_client.dart';
 /// Orchestrates opt-in automatic triggers for local `.tally` backups and
 /// multi-device cloud synchronization (`WebDAV` / `S3`):
 /// - `db.tableUpdates()` idle debounce (`N` quiet minutes after bookkeeping writes),
-///   strictly scoped to the 22 business tables and suppressed during pull/restore;
-/// - Startup & desktop window-focus checks (`onAppResumedOrFocused`);
+///   strictly scoped to the 22 business tables and suppressed during pull/restore
+///   and silent background FX/budget maintenance;
+/// - Startup & desktop window-focus checks (`onAppResumedOrFocused`, with 30s
+///   `windowFocus` cooldown);
 /// - Mobile background pause (`onAppPaused`) & desktop window-close exit guard
 ///   with bounded timeout (`onDesktopExitRequested`);
 /// - Periodic background schedule timers (`Timer.periodic`) reconfigured live
-///   from reactive preference streams.
+///   from reactive preference streams;
+/// - Exponential backoff (`30s -> 60m` with jitter & `Retry-After`) and auth
+///   circuit breaker (`401` / invalid key / 2nd consecutive non-clock `403`).
 final class BackupSyncScheduler {
   BackupSyncScheduler({
     required this.service,
@@ -26,14 +32,20 @@ final class BackupSyncScheduler {
     this.onError,
     Duration Function(int minutes)? idleTimerDurationBuilder,
     Duration Function(int minutes)? scheduleTimerDurationBuilder,
+    int Function()? jitterPermilleBuilder,
   }) : _nowMs = nowMs ?? service.db.nowMs,
        _idleDurationForMinutes =
            idleTimerDurationBuilder ?? _defaultMinutesDuration,
        _scheduleDurationForMinutes =
-           scheduleTimerDurationBuilder ?? _defaultMinutesDuration;
+           scheduleTimerDurationBuilder ?? _defaultMinutesDuration,
+       _nextJitterPermille =
+           jitterPermilleBuilder ?? _defaultRandomJitterPermille;
 
   static Duration _defaultMinutesDuration(int minutes) =>
       Duration(minutes: minutes);
+
+  static final Random _jitterRandom = Random();
+  static int _defaultRandomJitterPermille() => _jitterRandom.nextInt(201);
 
   /// Exact SQL names of all 22 business tables (`ti_preference` and
   /// `ti_write_command` are intentionally excluded).
@@ -49,15 +61,23 @@ final class BackupSyncScheduler {
   final void Function(Object error, StackTrace stackTrace)? onError;
   final Duration Function(int minutes) _idleDurationForMinutes;
   final Duration Function(int minutes) _scheduleDurationForMinutes;
+  final int Function() _nextJitterPermille;
 
   LocalAutoBackupPolicy _localPolicy = LocalAutoBackupPolicy.defaults;
   CloudSyncSettings _cloudSettings = const CloudSyncSettings(
     deviceId: 'pending',
   );
+  LocalSyncCursor _latestCursor = const LocalSyncCursor.initial();
+  SyncBackoffState _backoffState = SyncBackoffState.healthy;
+  final StreamController<SyncBackoffState> _backoffController =
+      StreamController<SyncBackoffState>.broadcast();
 
   StreamSubscription<Set<TableUpdate>>? _tableUpdatesSub;
   StreamSubscription<LocalAutoBackupPolicy>? _localPolicySub;
   StreamSubscription<CloudSyncSettings>? _cloudSettingsSub;
+  StreamSubscription<LocalSyncCursor>? _cursorSub;
+  StreamSubscription<void>? _manualResetSub;
+  StreamSubscription<bool>? _syncInProgressSub;
 
   Timer? _localIdleTimer;
   Timer? _cloudIdleTimer;
@@ -70,6 +90,8 @@ final class BackupSyncScheduler {
 
   int? _pendingLocalChangeAtMs;
   int? _pendingCloudChangeAtMs;
+  int? _lastFocusSyncAtMs;
+  AutoTriggerSource? _coalescedCloudSyncSource;
 
   Future<void>? _startFuture;
   bool _initialized = false;
@@ -81,6 +103,29 @@ final class BackupSyncScheduler {
   bool get isDisposed => _disposed;
   int? get pendingLocalChangeAtMs => _pendingLocalChangeAtMs;
   int? get pendingCloudChangeAtMs => _pendingCloudChangeAtMs;
+  SyncBackoffState get currentBackoffState => _backoffState;
+
+  /// Reactive stream of [SyncBackoffState] (emitting the current state first).
+  Stream<SyncBackoffState> watchBackoffState() async* {
+    yield _backoffState;
+    yield* _backoffController.stream;
+  }
+
+  void _updateBackoffState(SyncBackoffState next) {
+    if (_backoffState.consecutiveTransientFailures ==
+            next.consecutiveTransientFailures &&
+        _backoffState.consecutiveNonClock403Failures ==
+            next.consecutiveNonClock403Failures &&
+        _backoffState.nextRetryAtMs == next.nextRetryAtMs &&
+        _backoffState.isAuthCircuitOpen == next.isAuthCircuitOpen &&
+        _backoffState.lastFailureMessage == next.lastFailureMessage) {
+      return;
+    }
+    _backoffState = next;
+    if (!_backoffController.isClosed) {
+      _backoffController.add(next);
+    }
+  }
 
   /// Attaches reactive listeners to `db.tableUpdates()` and policy streams.
   /// Safe to call multiple times (idempotent).
@@ -104,10 +149,27 @@ final class BackupSyncScheduler {
     _cloudSettingsSub = service.watchCloudSyncSettings().listen(
       _onCloudSettingsChanged,
     );
+    _cursorSub = service.watchSyncCursor().listen((c) {
+      if (!_disposed) _latestCursor = c;
+    });
+    _manualResetSub = service.watchManualResetSignals().listen((_) {
+      if (_disposed) return;
+      _updateBackoffState(SyncBackoffState.healthy);
+      _cancelCloudIdle();
+    });
+    _syncInProgressSub = service.watchSyncInProgress().listen((inProgress) {
+      if (_disposed || inProgress) return;
+      final coalesced = _coalescedCloudSyncSource;
+      if (coalesced != null && !_backoffState.isBlockedAt(_nowMs())) {
+        _coalescedCloudSyncSource = null;
+        unawaited(_triggerCloudSync(coalesced));
+      }
+    });
 
     try {
       final loadedLocal = await service.getLocalAutoBackupPolicy();
       final loadedCloud = await service.getCloudSyncSettings();
+      final loadedCursor = await service.getSyncCursor();
       if (_disposed) return;
       if (!_receivedLocalPolicyFromStream) {
         _localPolicy = loadedLocal;
@@ -115,6 +177,7 @@ final class BackupSyncScheduler {
       if (!_receivedCloudSettingsFromStream) {
         _cloudSettings = loadedCloud;
       }
+      _latestCursor = loadedCursor;
       _initialized = true;
       _reconfigureLocalScheduleTimer();
       _reconfigureCloudScheduleTimer();
@@ -127,18 +190,26 @@ final class BackupSyncScheduler {
   void _onTableUpdates(Set<TableUpdate> updates) {
     if (_disposed) return;
 
-    final hasBusinessChange = updates.any(
-      (u) => businessTableNames.contains(u.table),
-    );
-    if (!hasBusinessChange) {
+    final touchedBusinessTables = <String>{
+      for (final u in updates)
+        if (businessTableNames.contains(u.table)) u.table,
+    };
+    if (touchedBusinessTables.isEmpty) {
       return;
     }
 
     if (service.isSuppressingTableChangeTriggers) {
-      // Pull or restore just replaced the 22 business tables: never trigger
+      // Pull, merge, or restore just replaced business tables: never trigger
       // push/backup loops and clear any superseded pre-restore idle timers.
       _cancelLocalIdle();
       _cancelCloudIdle();
+      return;
+    }
+
+    if (service.isInSilentMaintenanceScope &&
+        touchedBusinessTables.every((t) => t == 'currency' || t == 'budget')) {
+      // Silent online FX auto-sync or day-1 auto budget carryover must not
+      // trigger automatic `syncOnIdle` / `backupOnIdle` ping-pong!
       return;
     }
 
@@ -240,8 +311,13 @@ final class BackupSyncScheduler {
   void _onCloudSettingsChanged(CloudSyncSettings nextSettings) {
     if (_disposed) return;
     _receivedCloudSettingsFromStream = true;
+    final prevBackend = _cloudSettings.backend;
     final prevIdleMinutes = _cloudSettings.idleMinutes;
     _cloudSettings = nextSettings;
+
+    if (prevBackend != nextSettings.backend) {
+      _updateBackoffState(SyncBackoffState.healthy);
+    }
 
     if (!nextSettings.syncOnIdle ||
         nextSettings.backend == CloudBackendType.none) {
@@ -384,12 +460,21 @@ final class BackupSyncScheduler {
     if (!ranCloud &&
         _cloudSettings.syncOnStartup &&
         _cloudSettings.backend != CloudBackendType.none) {
-      final stampBefore = _pendingCloudChangeAtMs;
-      final outcome = await _triggerCloudSync(source);
-      if (outcome != null &&
-          !outcome.isConflict &&
-          _pendingCloudChangeAtMs == stampBefore) {
-        _cancelCloudIdle();
+      final throttledFocus =
+          !isInitialStartup &&
+          shouldCooldownWindowFocus(
+            lastFocusSyncAtMs: _lastFocusSyncAtMs,
+            nowMs: _nowMs(),
+          );
+      if (!throttledFocus) {
+        final stampBefore = _pendingCloudChangeAtMs;
+        _lastFocusSyncAtMs = _nowMs();
+        final outcome = await _triggerCloudSync(source);
+        if (outcome != null &&
+            !outcome.isConflict &&
+            _pendingCloudChangeAtMs == stampBefore) {
+          _cancelCloudIdle();
+        }
       }
     }
 
@@ -437,13 +522,28 @@ final class BackupSyncScheduler {
   }
 
   Future<BackupFileMetadata?> _triggerSilentCloudAutoBackup() async {
+    if (_backoffState.isBlockedAt(_nowMs())) {
+      return null;
+    }
     try {
       final uploaded = await service.runSilentAutoBackupIfNeeded();
       if (uploaded != null && !_disposed) {
+        _updateBackoffState(SyncBackoffState.healthy);
         onCloudBackupUploaded?.call(uploaded);
       }
       return uploaded;
     } catch (e, st) {
+      if (e is Failure) {
+        _updateBackoffState(
+          evaluateSyncFailureBackoff(
+            previous: _backoffState,
+            failure: e,
+            nowMs: _nowMs(),
+            retryAfterMs: e.retryAfterMs,
+            jitterPermille: _nextJitterPermille(),
+          ),
+        );
+      }
       onError?.call(e, st);
       return null;
     }
@@ -465,13 +565,48 @@ final class BackupSyncScheduler {
   }
 
   Future<CloudSyncOutcome?> _triggerCloudSync(AutoTriggerSource source) async {
+    final now = _nowMs();
+    if (_backoffState.isBlockedAt(now)) {
+      return null;
+    }
+    // Suppress automatic background re-triggers while an unresolved conflict
+    // exists on the unchanged local state (`lastConflictSha256 != null`).
+    if (source == AutoTriggerSource.idleAfterChange &&
+        _latestCursor.lastConflictFileName != null &&
+        _latestCursor.lastConflictSha256 != null) {
+      final currentSha = await service.computeLocalDataSha256();
+      if (currentSha.toLowerCase() ==
+          _latestCursor.lastConflictSha256!.toLowerCase()) {
+        return null;
+      }
+    }
+    if (service.isSyncInProgress && source != AutoTriggerSource.exit) {
+      _coalescedCloudSyncSource = source;
+      return null;
+    }
+
     try {
       final outcome = await service.runCloudAutoSyncForTrigger(source);
       if (outcome != null && !_disposed) {
+        _updateBackoffState(SyncBackoffState.healthy);
+        if (outcome.isConflict) {
+          _cancelCloudIdle();
+        }
         onCloudSyncOutcome?.call(outcome);
       }
       return outcome;
     } catch (e, st) {
+      if (e is Failure) {
+        _updateBackoffState(
+          evaluateSyncFailureBackoff(
+            previous: _backoffState,
+            failure: e,
+            nowMs: _nowMs(),
+            retryAfterMs: e.retryAfterMs,
+            jitterPermille: _nextJitterPermille(),
+          ),
+        );
+      }
       onError?.call(e, st);
       return null;
     }
@@ -487,6 +622,7 @@ final class BackupSyncScheduler {
     }
     _cancelLocalIdle();
     _cancelCloudIdle();
+    _coalescedCloudSyncSource = null;
     _localScheduleTimer?.cancel();
     _localScheduleTimer = null;
     _cloudScheduleTimer?.cancel();
@@ -495,14 +631,24 @@ final class BackupSyncScheduler {
     final f1 = _tableUpdatesSub?.cancel();
     final f2 = _localPolicySub?.cancel();
     final f3 = _cloudSettingsSub?.cancel();
+    final f4 = _cursorSub?.cancel();
+    final f5 = _manualResetSub?.cancel();
+    final f6 = _syncInProgressSub?.cancel();
     _tableUpdatesSub = null;
     _localPolicySub = null;
     _cloudSettingsSub = null;
+    _cursorSub = null;
+    _manualResetSub = null;
+    _syncInProgressSub = null;
 
     await Future.wait(<Future<void>>[
       if (f1 != null) f1,
       if (f2 != null) f2,
       if (f3 != null) f3,
+      if (f4 != null) f4,
+      if (f5 != null) f5,
+      if (f6 != null) f6,
     ]);
+    await _backoffController.close();
   }
 }

@@ -549,12 +549,26 @@ DataHealthReport evaluateDataHealth({
   }
 
   // 3. Check each asset by category (Credit Card / Debt / Ordinary).
+  // Pre-index debt principal records by asset ID in a single O(R) pass so
+  // 100k-record snapshots with many debt accounts never degrade to O(D * R).
   const debtPrincipalTypes = <int>{
     RecordType.borrowIn,
     RecordType.lendOut,
     RecordType.repay,
     RecordType.collect,
   };
+  final debtRecordsByAssetId = <int, List<HealthRecordRow>>{};
+  for (final r in records) {
+    if (!debtPrincipalTypes.contains(r.type)) continue;
+    final fromId = r.fromAssetId;
+    final toId = r.toAssetId;
+    if (fromId != noRef) {
+      (debtRecordsByAssetId[fromId] ??= <HealthRecordRow>[]).add(r);
+    }
+    if (toId != noRef && toId != fromId) {
+      (debtRecordsByAssetId[toId] ??= <HealthRecordRow>[]).add(r);
+    }
+  }
 
   for (final asset in sortedAssets) {
     final curr = normalizeCurrency(asset.currency) ?? effectiveRates.base;
@@ -683,19 +697,14 @@ DataHealthReport evaluateDataHealth({
         continue;
       }
 
-      final principalRecords =
-          [
-            for (final r in records)
-              if (debtPrincipalTypes.contains(r.type) &&
-                  (r.fromAssetId == asset.id || r.toAssetId == asset.id))
-                r,
-          ]..sort((a, b) {
-            final t = a.recordTime.compareTo(b.recordTime);
-            if (t != 0) return t;
-            final c = (a.createDate ?? 0).compareTo(b.createDate ?? 0);
-            if (c != 0) return c;
-            return a.recordId.compareTo(b.recordId);
-          });
+      final principalRecords = [...?debtRecordsByAssetId[asset.id]]
+        ..sort((a, b) {
+          final t = a.recordTime.compareTo(b.recordTime);
+          if (t != 0) return t;
+          final c = (a.createDate ?? 0).compareTo(b.createDate ?? 0);
+          if (c != 0) return c;
+          return a.recordId.compareTo(b.recordId);
+        });
 
       final entries = [
         for (final r in principalRecords)

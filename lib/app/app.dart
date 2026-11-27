@@ -65,7 +65,7 @@ ThemeData _buildDesktopTheme(ThemeData base) => base.copyWith(
     base.colorScheme,
     isDesktop: true,
   ),
-  textButtonTheme: tallyTextButtonTheme(base.colorScheme),
+  textButtonTheme: tallyTextButtonTheme(base.colorScheme, isDesktop: true),
   floatingActionButtonTheme: tallyFabTheme(base.colorScheme),
   segmentedButtonTheme: tallySegmentedButtonTheme(
     base.colorScheme,
@@ -121,6 +121,7 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
   StreamSubscription<CapturedPaymentEvent>? _capturedEventSub;
   StreamSubscription<AutoBillSharedPayload>? _sharedPayloadSub;
   StreamSubscription<AutoBillPromptActionEvent>? _promptActionSub;
+  StreamSubscription<SyncBackoffState>? _backoffStateSub;
   int _deepLinkSeq = 0;
   int _capturedEventSeq = 0;
   bool _disposed = false;
@@ -135,6 +136,7 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
     );
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_disposed || !mounted) return;
+      ref.read(initialStartupSyncPendingProvider.notifier).setPending(true);
       _attachLaunchRouteListener();
       unawaited(_runLifecycleSync(isInitial: true));
     });
@@ -167,6 +169,8 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
     if (scheduler == null ||
         scheduler.isDisposed ||
         !identical(_schedulerService, service)) {
+      await _backoffStateSub?.cancel();
+      _backoffStateSub = null;
       await scheduler?.dispose();
       if (_disposed || !mounted) return null;
       _schedulerService = service;
@@ -194,6 +198,11 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
         },
       );
       _backupSyncScheduler = scheduler;
+      _backoffStateSub = scheduler.watchBackoffState().listen((state) {
+        if (!_disposed && mounted) {
+          ref.read(syncBackoffStateProvider.notifier).updateState(state);
+        }
+      });
     }
     await scheduler.start();
     if (_disposed || !mounted) return null;
@@ -221,13 +230,21 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
   Future<void> _applyCloudSyncOutcome(CloudSyncOutcome outcome) async {
     if (_disposed || !mounted) return;
     ref
-      ..invalidate(localBackupsProvider)
-      ..invalidate(webDavBackupsProvider)
-      ..invalidate(s3BackupsProvider)
-      ..invalidate(activeCloudBackupsProvider)
       ..invalidate(cloudSyncCursorProvider)
       ..invalidate(lastBackupAtMsProvider);
-    if (outcome.status == CloudSyncStatus.pulled) {
+    if (outcome.conflictBackupFileName != null ||
+        outcome.didReplaceLocalDatabase) {
+      ref.invalidate(localBackupsProvider);
+    }
+    if (outcome.archivedBackupFileName != null ||
+        outcome.conflictBackupFileName != null ||
+        outcome.didReplaceLocalDatabase) {
+      ref
+        ..invalidate(webDavBackupsProvider)
+        ..invalidate(s3BackupsProvider)
+        ..invalidate(activeCloudBackupsProvider);
+    }
+    if (outcome.didReplaceLocalDatabase) {
       await invalidateAllAfterDatabaseReplace(ref);
       return;
     }
@@ -466,11 +483,19 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
       // Run cloud sync / 24h silent cloud backup BEFORE local auto-plan
       // catch-ups so a fresh remote snapshot is pulled first instead of
       // generating local due bills that trigger spurious conflicts (`S-05`).
-      await safeStep(() async {
-        final scheduler = await _ensureBackupSyncScheduler();
-        if (_disposed || !mounted || scheduler == null) return;
-        await scheduler.onAppResumedOrFocused(isInitialStartup: isInitial);
-      });
+      try {
+        await safeStep(() async {
+          final scheduler = await _ensureBackupSyncScheduler();
+          if (_disposed || !mounted || scheduler == null) return;
+          await scheduler.onAppResumedOrFocused(isInitialStartup: isInitial);
+        });
+      } finally {
+        if (isInitial && !_disposed && mounted) {
+          ref
+              .read(initialStartupSyncPendingProvider.notifier)
+              .setPending(false);
+        }
+      }
       await safeStep(() async {
         final service = await ref.read(periodicServiceProvider.future);
         if (_disposed || !mounted) return;
@@ -508,8 +533,11 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
         final provider = await ref.read(
           exchangeRateProviderInstanceProvider.future,
         );
+        final backupSvc = await ref.read(tallyBackupServiceProvider.future);
         if (_disposed || !mounted) return;
-        final synced = await service.runAutoSyncIfNeeded(provider: provider);
+        final synced = await backupSvc.runInSilentMaintenanceScope(
+          () => service.runAutoSyncIfNeeded(provider: provider),
+        );
         if (_disposed || !mounted || synced == null) return;
         ref.invalidate(onlineRateSettingsProvider);
         if (synced.updatedCount > 0) {
@@ -543,6 +571,8 @@ class _TallyIsleAppState extends ConsumerState<TallyIsleApp>
     final mcpService = _mcpServerService;
     _mcpServerService = null;
     unawaited(mcpService?.stop());
+    unawaited(_backoffStateSub?.cancel());
+    _backoffStateSub = null;
     final scheduler = _backupSyncScheduler;
     _backupSyncScheduler = null;
     _schedulerService = null;

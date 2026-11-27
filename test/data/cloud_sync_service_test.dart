@@ -40,6 +40,7 @@ final class _LoopbackSigV4S3Server {
   String expectedAccessKey = 'AKIA_TALLY_TEST';
   String expectedSecretKey = 'secret_s3_signing_key_999';
   int maxKeysPerPage = 2;
+  (int statusCode, String? retryAfter)? Function(HttpRequest req)? forceStatus;
   int _tick = 0;
 
   String get endpoint => 'http://127.0.0.1:${_server.port}';
@@ -60,6 +61,17 @@ final class _LoopbackSigV4S3Server {
     }
     final bodyBytes = bodyBuilder.takeBytes();
     requestLog.add('${req.method} ${req.uri.path}');
+
+    final forced = forceStatus?.call(req);
+    if (forced != null) {
+      req.response.statusCode = forced.$1;
+      if (forced.$2 != null) {
+        req.response.headers.set(HttpHeaders.retryAfterHeader, forced.$2!);
+      }
+      req.response.write('<Error><Code>SlowDown</Code></Error>');
+      await req.response.close();
+      return;
+    }
 
     // Verify AWS Signature Version 4 strictly!
     if (!_verifySigV4(req, bodyBytes)) {
@@ -147,7 +159,24 @@ final class _LoopbackSigV4S3Server {
         objects[objectKey] = bodyBytes;
         modifiedAt[objectKey] = DateTime.utc(2026, 11, 11, 10, 0, ++_tick);
         putCountsByKey[objectKey] = (putCountsByKey[objectKey] ?? 0) + 1;
+        req.response.headers.set(
+          HttpHeaders.etagHeader,
+          '"${sha256Hex(bodyBytes).substring(0, 16)}"',
+        );
         req.response.statusCode = HttpStatus.ok;
+        await req.response.close();
+      case 'HEAD':
+        final data = objects[objectKey];
+        if (data == null) {
+          req.response.statusCode = HttpStatus.notFound;
+        } else {
+          req.response.headers.set(
+            HttpHeaders.etagHeader,
+            '"${sha256Hex(data).substring(0, 16)}"',
+          );
+          req.response.contentLength = data.length;
+          req.response.statusCode = HttpStatus.ok;
+        }
         await req.response.close();
       case 'GET':
         final data = objects[objectKey];
@@ -155,10 +184,18 @@ final class _LoopbackSigV4S3Server {
           req.response.statusCode = HttpStatus.notFound;
           req.response.write('<Error><Code>NoSuchKey</Code></Error>');
         } else {
-          getCountsByKey[objectKey] = (getCountsByKey[objectKey] ?? 0) + 1;
-          req.response.statusCode = HttpStatus.ok;
-          req.response.contentLength = data.length;
-          req.response.add(data);
+          final etag = '"${sha256Hex(data).substring(0, 16)}"';
+          final ifNoneMatch = req.headers.value(HttpHeaders.ifNoneMatchHeader);
+          if (ifNoneMatch != null && ifNoneMatch.trim() == etag) {
+            req.response.headers.set(HttpHeaders.etagHeader, etag);
+            req.response.statusCode = HttpStatus.notModified;
+          } else {
+            getCountsByKey[objectKey] = (getCountsByKey[objectKey] ?? 0) + 1;
+            req.response.headers.set(HttpHeaders.etagHeader, etag);
+            req.response.statusCode = HttpStatus.ok;
+            req.response.contentLength = data.length;
+            req.response.add(data);
+          }
         }
         await req.response.close();
       case 'DELETE':
@@ -249,6 +286,7 @@ final class _LoopbackSyncWebDavServer {
   String? lastGetCacheControl;
   int? Function(String path, HttpRequest req)? overrideHeadLength;
   Uint8List? Function(String path, HttpRequest req)? overrideGetBytes;
+  (int statusCode, String? retryAfter)? Function(HttpRequest req)? forceStatus;
   Future<void> Function(String path)? onBeforeGet;
   int _tick = 0;
 
@@ -270,6 +308,16 @@ final class _LoopbackSyncWebDavServer {
 
   Future<void> _handle(HttpRequest req) async {
     final path = _norm(req.uri.path);
+    final forced = forceStatus?.call(req);
+    if (forced != null) {
+      await req.drain<void>();
+      req.response.statusCode = forced.$1;
+      if (forced.$2 != null) {
+        req.response.headers.set(HttpHeaders.retryAfterHeader, forced.$2!);
+      }
+      await req.response.close();
+      return;
+    }
     switch (req.method) {
       case 'MKCOL':
         await req.drain<void>();
@@ -785,8 +833,11 @@ void main() {
         expect((await serviceA.syncNow()).revision, 1);
         expect((await serviceB.syncNow()).status, CloudSyncStatus.pulled);
 
-        // 2. Both devices edit offline -> conflict!
+        // 2. Both devices make conflicting edits offline (A & B rename cashId differently + add bills) -> conflict!
         now += 10000;
+        await (dbA.update(dbA.assets)..where((t) => t.id.equals(cashId))).write(
+          const AssetsCompanion(name: Value('A端现金钱包')),
+        );
         await ledgerA.saveRecord(
           commandId: 'dav-a-edit',
           draft: RecordDraft(
@@ -802,6 +853,9 @@ void main() {
         expect((await serviceA.syncNow()).revision, 2);
 
         now += 10000;
+        await (dbB.update(dbB.assets)..where((t) => t.id.equals(cashId))).write(
+          const AssetsCompanion(name: Value('B端现金钱包')),
+        );
         await ledgerB.saveRecord(
           commandId: 'dav-b-edit',
           draft: RecordDraft(
@@ -868,8 +922,11 @@ void main() {
         expect(silentPullA?.revision, 3);
         expect((await dbA.select(dbA.records).get()).single.remark, 'B端离线晚餐');
 
-        // 4. Race guard right before commit: A starts pushing r4, but B commits r4 mid-flight!
+        // 4. Race guard right before commit: A starts pushing r4, but B commits conflicting r4 mid-flight!
         now += 20000;
+        await (dbA.update(dbA.assets)..where((t) => t.id.equals(cashId))).write(
+          const AssetsCompanion(remark: Value('A并发备注')),
+        );
         await ledgerA.saveRecord(
           commandId: 'dav-a-race',
           draft: RecordDraft(
@@ -884,6 +941,8 @@ void main() {
         );
         final racedOutcome = await serviceA.syncNow(
           beforePushCommitForTest: () async {
+            await (dbB.update(dbB.assets)..where((t) => t.id.equals(cashId)))
+                .write(const AssetsCompanion(remark: Value('B并发备注')));
             await ledgerB.saveRecord(
               commandId: 'dav-b-race-winner',
               draft: RecordDraft(
@@ -1889,6 +1948,837 @@ void main() {
           2,
         );
         expect(await serviceA.listActiveCloudBackups(), isEmpty);
+      },
+    );
+
+    test(
+      'Three-Way Merge end-to-end (with Isolate offload & ti_write_command reset), 304 Conditional Probe, Zero-LIST Push, >1000 S3 Pagination, 30d GC & Oversize Conflict Hydration',
+      () async {
+        final s3 = await _LoopbackSigV4S3Server.start();
+        s3.maxKeysPerPage = 1000;
+        addTearDown(s3.close);
+
+        final tempRoot = await Directory.systemTemp.createTemp(
+          'tally_sync_3way_scale_',
+        );
+        addTearDown(() => tempRoot.delete(recursive: true));
+
+        var now = 1762870000000;
+        final dbA = AppDatabase(NativeDatabase.memory(), nowMs: () => now);
+        final dbB = AppDatabase(NativeDatabase.memory(), nowMs: () => now);
+        addTearDown(dbA.close);
+        addTearDown(dbB.close);
+        await dbA.select(dbA.accountBooks).get();
+        await dbB.select(dbB.accountBooks).get();
+
+        final attA = Directory(p.join(tempRoot.path, 'att_a'));
+        final attB = Directory(p.join(tempRoot.path, 'att_b'));
+
+        // Seed stale `attachments.bak_100` power-loss rescue test on A before first service call!
+        final bakA = Directory('${attA.path}.bak_100');
+        await bakA.create(recursive: true);
+        final rescuedBytes = Uint8List.fromList(
+          utf8.encode('rescued-power-loss'),
+        );
+        await File(p.join(bakA.path, 'rescued.jpg')).writeAsBytes(rescuedBytes);
+
+        final serviceA = TallyBackupService(
+          dbA,
+          reminderService: ReminderService(
+            dbA,
+            scheduler: InMemoryReminderScheduler(),
+          ),
+          localBackupsDirectoryProvider: () async =>
+              Directory(p.join(tempRoot.path, 'bk_a')),
+          attachmentsDirectoryProvider: () async => attA,
+          isolateOffloadRowThreshold: 1, // Force real background Isolate.run!
+        );
+        final serviceB = TallyBackupService(
+          dbB,
+          reminderService: ReminderService(
+            dbB,
+            scheduler: InMemoryReminderScheduler(),
+          ),
+          localBackupsDirectoryProvider: () async =>
+              Directory(p.join(tempRoot.path, 'bk_b')),
+          attachmentsDirectoryProvider: () async => attB,
+          isolateOffloadRowThreshold: 1,
+        );
+
+        final s3Cfg = S3Config(
+          endpoint: s3.endpoint,
+          region: s3.expectedRegion,
+          bucket: s3.expectedBucket,
+          accessKeyId: s3.expectedAccessKey,
+          secretAccessKey: s3.expectedSecretKey,
+          remotePrefix: 'TallyIsle',
+          forcePathStyle: true,
+        );
+        await serviceA.saveS3Config(s3Cfg);
+        await serviceB.saveS3Config(s3Cfg);
+        await serviceA.setAutoArchiveBackupEnabled(false);
+        await serviceB.setAutoArchiveBackupEnabled(false);
+        await serviceA.updateCloudSyncTriggers(syncOnStartup: true);
+        await serviceB.updateCloudSyncTriggers(syncOnStartup: true);
+
+        final ledgerA = LedgerService(dbA);
+        final ledgerB = LedgerService(dbB);
+        final cardId = await ledgerA.createAsset(
+          commandId: '3way-card',
+          name: '主储蓄卡',
+          type: AssetType.normal,
+          initial: Money.parse('1000.00'),
+        );
+
+        // 1. Push r1 (verifies `.bak_100` power-loss self-healing restored `rescued.jpg`!)
+        final push1 = await serviceA.syncNow();
+        expect(push1.status, CloudSyncStatus.pushed);
+        expect(push1.revision, 1);
+        expect(await File(p.join(attA.path, 'rescued.jpg')).exists(), isTrue);
+
+        // B pulls r1
+        final pull1 = await serviceB.syncNow();
+        expect(pull1.status, CloudSyncStatus.pulled);
+        expect(pull1.revision, 1);
+
+        // 2. Clean background auto-sync on B -> 1 HTTP GET (`304 Not Modified`), 0 HEAD, 0 LIST!
+        s3.requestLog.clear();
+        final bgNoOp = await serviceB.runCloudAutoSyncForTrigger(
+          AutoTriggerSource.windowFocus,
+        );
+        expect(bgNoOp?.status, CloudSyncStatus.alreadyUpToDate);
+        expect(s3.requestLog, <String>[
+          'GET /tally-bucket/TallyIsle/sync/head.json',
+        ]);
+
+        // 3. Zero-LIST incremental push on A -> A adds a bill (-120.00) and pushes r2 without LISTing sync/attachments!
+        now += 5000;
+        await ledgerA.saveRecord(
+          commandId: '3way-a-lunch',
+          draft: RecordDraft(
+            bookId: 1,
+            type: RecordType.expense,
+            money: Money.parse('120.00'),
+            recordTime: now,
+            categoryId: 1,
+            assetId: cardId,
+            remark: 'A端午餐',
+          ),
+        );
+        s3.requestLog.clear();
+        final push2 = await serviceA.syncNow();
+        expect(push2.revision, 2);
+        // Zero LIST calls for sync/attachments (only 1 LIST for sync/revisions Top-5 prune)!
+        final listCalls = s3.requestLog
+            .where((l) => l == 'GET /tally-bucket')
+            .length;
+        expect(listCalls, 1);
+
+        // 4. Offline B adds an independent bill (-80.00) -> `serviceB.syncNow()` executes Three-Way Merge inside Isolate!
+        now += 5000;
+        await ledgerB.saveRecord(
+          commandId: '3way-b-coffee',
+          draft: RecordDraft(
+            bookId: 1,
+            type: RecordType.expense,
+            money: Money.parse('80.00'),
+            recordTime: now,
+            categoryId: 1,
+            assetId: cardId,
+            remark: 'B端咖啡',
+          ),
+        );
+        expect(await dbB.select(dbB.writeCommands).get(), isNotEmpty);
+
+        final mergedOut = await serviceB.syncNow();
+        expect(mergedOut.status, CloudSyncStatus.pushed);
+        expect(mergedOut.didMerge, isTrue);
+        expect(mergedOut.didReplaceLocalDatabase, isTrue);
+        expect(mergedOut.revision, 3);
+        expect(
+          await serviceB.listLocalBackups(),
+          isEmpty,
+        ); // Zero false conflict_*.tally!
+        expect(
+          await dbB.select(dbB.writeCommands).get(),
+          isEmpty,
+        ); // ti_write_command cleared!
+
+        final bRecords = await dbB.select(dbB.records).get();
+        expect(bRecords, hasLength(2));
+        final bCard = await (dbB.select(
+          dbB.assets,
+        )..where((t) => t.id.equals(cardId))).getSingle();
+        // 1000.00 - 120.00 - 80.00 = 800.00 (80000 minor)!
+        expect(bCard.balanceMinor, BigInt.from(80000));
+
+        // A pulls r3 -> converges to exact 800.00!
+        final pullA3 = await serviceA.syncNow();
+        expect(pullA3.status, CloudSyncStatus.pulled);
+        expect(pullA3.revision, 3);
+        final aCard = await (dbA.select(
+          dbA.assets,
+        )..where((t) => t.id.equals(cardId))).getSingle();
+        expect(aCard.balanceMinor, BigInt.from(80000));
+
+        // 5. > 1,000 objects S3 pagination verification (`1,205` objects across 2 pages):
+        for (var i = 1; i <= 1205; i++) {
+          final pad = i.toString().padLeft(4, '0');
+          s3.objects['TallyIsle/sync/revisions/dummy_$pad.txt'] =
+              Uint8List.fromList(<int>[1]);
+        }
+        final s3Target = await serviceA.getS3Target();
+        final listedMany = await s3Target.listRelativeFileNames(
+          cloudSyncRevisionsDir,
+        );
+        expect(listedMany.length, greaterThanOrEqualTo(1208));
+
+        // 6. Oversize conflict archive (`maxInlineConflictAttachmentBytes = 5`) -> writes
+        // lightweight `includeAttachments: false` `conflict_*.tally` + `sync/conflict_refs/*.json`,
+        // and `restoreLocalBackup` automatically hydrates attachments from `sync/attachments/`!
+        serviceB.maxInlineConflictAttachmentBytes = 5;
+        now += 10000;
+        await (dbA.update(dbA.assets)..where((t) => t.id.equals(cardId))).write(
+          const AssetsCompanion(name: Value('A改名储蓄卡')),
+        );
+        expect((await serviceA.syncNow()).revision, 4);
+
+        final bigPhoto = Uint8List.fromList(List<int>.filled(64, 0x42));
+        await File(
+          p.join(attB.path, 'oversize_bill.jpg'),
+        ).writeAsBytes(bigPhoto);
+        await (dbB.update(dbB.assets)..where((t) => t.id.equals(cardId))).write(
+          const AssetsCompanion(name: Value('B改名储蓄卡')),
+        );
+        final oversizeConflict = await serviceB.syncNow();
+        expect(oversizeConflict.isConflict, isTrue);
+        final conflictName = oversizeConflict.conflictBackupFileName!;
+        expect(
+          s3.objects.containsKey(
+            'TallyIsle/$cloudSyncConflictRefsDir/$conflictName.json',
+          ),
+          isTrue,
+        );
+        final conflictBks = await serviceB.listLocalBackups();
+        final lightMeta = conflictBks.singleWhere(
+          (m) => m.fileName == conflictName,
+        );
+        expect(lightMeta.manifest?.includeAttachments, isFalse);
+
+        // Adopt remote (wipes `oversize_bill.jpg` locally), then restore `conflictName` -> hydrates `oversize_bill.jpg`!
+        await serviceB.syncNow(resolution: SyncConflictResolution.useRemote);
+        expect(
+          await File(p.join(attB.path, 'oversize_bill.jpg')).exists(),
+          isFalse,
+        );
+        await serviceB.restoreLocalBackup(conflictName);
+        expect(
+          await File(p.join(attB.path, 'oversize_bill.jpg')).readAsBytes(),
+          equals(bigPhoto),
+        );
+      },
+    );
+
+    test(
+      '24h *.tmp Orphan Cleanup, Exit Merge Deferral, Zero-Copy Incremental Attachments, >30d WriteCommand Pruning & Retry-After Propagation',
+      () async {
+        driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
+        final dav = await _LoopbackSyncWebDavServer.start();
+        final s3 = await _LoopbackSigV4S3Server.start();
+        final tempRoot = await Directory.systemTemp.createTemp(
+          'tally_sync_reg_fixes_',
+        );
+
+        var now = DateTime(2026, 11, 20, 10, 0).millisecondsSinceEpoch;
+        final dbA = AppDatabase(NativeDatabase.memory(), nowMs: () => now);
+        final dbB = AppDatabase(NativeDatabase.memory(), nowMs: () => now);
+        addTearDown(() async {
+          await dbA.close();
+          await dbB.close();
+          await dav.close();
+          await s3.close();
+          if (await tempRoot.exists()) {
+            await tempRoot.delete(recursive: true);
+          }
+        });
+
+        final attA = Directory(p.join(tempRoot.path, 'att_a'))
+          ..createSync(recursive: true);
+        final attB = Directory(p.join(tempRoot.path, 'att_b'))
+          ..createSync(recursive: true);
+
+        // Seed interrupted incremental `.bak_*` with `.in_progress` marker on A
+        // AND expired (>30d) vs recent (<30d) `ti_write_command` rows!
+        final incBakA = Directory('${attA.path}.bak_999')
+          ..createSync(recursive: true);
+        await File(p.join(incBakA.path, '.in_progress')).writeAsString('1');
+        final rescuedIncBytes = Uint8List.fromList(
+          utf8.encode('incremental-rescued-photo'),
+        );
+        await File(
+          p.join(incBakA.path, 'inc_rescued.jpg'),
+        ).writeAsBytes(rescuedIncBytes);
+
+        await dbA.select(dbA.accountBooks).get();
+        await dbB.select(dbB.accountBooks).get();
+        await dbA
+            .into(dbA.writeCommands)
+            .insert(
+              WriteCommandsCompanion.insert(
+                commandId: 'old-cmd-35d',
+                payloadHash: 'h1',
+                resultId: '1',
+                committedAt: now - 35 * 24 * 60 * 60 * 1000,
+              ),
+            );
+        await dbA
+            .into(dbA.writeCommands)
+            .insert(
+              WriteCommandsCompanion.insert(
+                commandId: 'recent-cmd-2d',
+                payloadHash: 'h2',
+                resultId: '2',
+                committedAt: now - 2 * 24 * 60 * 60 * 1000,
+              ),
+            );
+
+        final serviceA = TallyBackupService(
+          dbA,
+          reminderService: ReminderService(
+            dbA,
+            scheduler: InMemoryReminderScheduler(),
+          ),
+          localBackupsDirectoryProvider: () async =>
+              Directory(p.join(tempRoot.path, 'bk_a')),
+          attachmentsDirectoryProvider: () async => attA,
+        );
+        final serviceB = TallyBackupService(
+          dbB,
+          reminderService: ReminderService(
+            dbB,
+            scheduler: InMemoryReminderScheduler(),
+          ),
+          localBackupsDirectoryProvider: () async =>
+              Directory(p.join(tempRoot.path, 'bk_b')),
+          attachmentsDirectoryProvider: () async => attB,
+        );
+
+        final davCfg = WebDavConfig(
+          serverUrl: dav.baseUrl,
+          username: 'alice',
+          password: 'secret',
+          remoteDirectory: '/TallySync',
+        );
+        await serviceA.saveWebDavConfig(davCfg);
+        await serviceB.saveWebDavConfig(davCfg);
+        await serviceA.setAutoArchiveBackupEnabled(false);
+        await serviceB.setAutoArchiveBackupEnabled(false);
+        await serviceB.updateCloudSyncTriggers(
+          syncOnStartup: true,
+          syncOnExit: true,
+        );
+
+        final ledgerA = LedgerService(dbA);
+        final ledgerB = LedgerService(dbB);
+        final walletId = await ledgerA.createAsset(
+          commandId: 'fix-wallet',
+          name: '测试钱包',
+          type: AssetType.normal,
+          initial: Money.parse('1000.00'),
+        );
+        final recR1Id = await ledgerA.saveRecord(
+          commandId: 'fix-r1-att',
+          draft: RecordDraft(
+            bookId: 1,
+            type: RecordType.expense,
+            money: Money.parse('10.00'),
+            recordTime: now,
+            categoryId: 1,
+            assetId: walletId,
+          ),
+        );
+        await (dbA.update(dbA.records)
+              ..where((t) => t.recordId.equals(recR1Id)))
+            .write(const RecordsCompanion(images: Value('inc_rescued.jpg')));
+
+        // 1. Push r1 -> triggers startup self-healing (rescuing `.in_progress`
+        // incremental `.bak_999` AND pruning `old-cmd-35d` while keeping `recent-cmd-2d`)!
+        final r1 = await serviceA.syncNow();
+        expect(r1.revision, 1);
+        expect(
+          await File(p.join(attA.path, 'inc_rescued.jpg')).readAsBytes(),
+          equals(rescuedIncBytes),
+        );
+        final remainingCmdIds = (await dbA.select(dbA.writeCommands).get())
+            .map((r) => r.commandId)
+            .toSet();
+        expect(remainingCmdIds, contains('recent-cmd-2d'));
+        expect(remainingCmdIds, isNot(contains('old-cmd-35d')));
+
+        // B pulls r1 -> backdate `inc_rescued.jpg` mtime on B to 2025-06-01 to prove 0-byte copy!
+        expect((await serviceB.syncNow()).revision, 1);
+        final existingAttOnB = File(p.join(attB.path, 'inc_rescued.jpg'));
+        final pinnedMtime = DateTime.utc(2025, 6, 1, 12, 0, 0);
+        await existingAttOnB.setLastModified(pinnedMtime);
+        final mtimeBeforePull = (await existingAttOnB.stat()).modified;
+
+        // 2. A adds a new bill + new photo (`new_bill.jpg`) and pushes r2.
+        now += 5000;
+        final newPhotoBytes = Uint8List.fromList(
+          utf8.encode('brand-new-photo'),
+        );
+        await File(
+          p.join(attA.path, 'new_bill.jpg'),
+        ).writeAsBytes(newPhotoBytes);
+        final recR2Id = await ledgerA.saveRecord(
+          commandId: 'fix-a-r2',
+          draft: RecordDraft(
+            bookId: 1,
+            type: RecordType.expense,
+            money: Money.parse('25.00'),
+            recordTime: now,
+            categoryId: 1,
+            assetId: walletId,
+            remark: 'A端新单',
+          ),
+        );
+        await (dbA.update(dbA.records)
+              ..where((t) => t.recordId.equals(recR2Id)))
+            .write(const RecordsCompanion(images: Value('new_bill.jpg')));
+        expect((await serviceA.syncNow()).revision, 2);
+
+        // 3. B also adds a compatible local bill -> `AutoTriggerSource.exit` MUST
+        // defer cleanly WITHOUT creating false `conflict_*.tally` or poisoning cursor!
+        now += 5000;
+        await ledgerB.saveRecord(
+          commandId: 'fix-b-local',
+          draft: RecordDraft(
+            bookId: 1,
+            type: RecordType.expense,
+            money: Money.parse('15.00'),
+            recordTime: now,
+            categoryId: 1,
+            assetId: walletId,
+            remark: 'B端本地单',
+          ),
+        );
+        final exitSync = await serviceB.runCloudAutoSyncForTrigger(
+          AutoTriggerSource.exit,
+        );
+        expect(exitSync?.status, CloudSyncStatus.alreadyUpToDate);
+        expect(exitSync?.isConflict, isFalse);
+        expect(await serviceB.listLocalBackups(), isEmpty);
+        expect((await serviceB.getSyncCursor()).lastConflictFileName, isNull);
+
+        // Next startup/focus sync on B cleanly 3-way merges r2 + local -> r3,
+        // AND `inc_rescued.jpg` on B keeps its exact 2025-06-01 mtime (0-byte copy)!
+        final startupMerge = await serviceB.runCloudAutoSyncForTrigger(
+          AutoTriggerSource.startup,
+        );
+        expect(startupMerge?.status, CloudSyncStatus.pushed);
+        expect(startupMerge?.didMerge, isTrue);
+        expect(startupMerge?.revision, 3);
+        expect((await existingAttOnB.stat()).modified, equals(mtimeBeforePull));
+        expect(
+          await File(p.join(attB.path, 'new_bill.jpg')).readAsBytes(),
+          equals(newPhotoBytes),
+        );
+
+        // 4. 24h remote `*.tmp` orphan cleanup (`includeTmp: true`) across WebDAV dirs:
+        // Advance clock > 25h first so 24h low-frequency remote maintenance runs on push!
+        now += 25 * 60 * 60 * 1000;
+        final staleMod = DateTime.fromMillisecondsSinceEpoch(
+          now - 26 * 60 * 60 * 1000,
+          isUtc: true,
+        );
+        final freshMod = DateTime.fromMillisecondsSinceEpoch(
+          now - 1 * 60 * 60 * 1000,
+          isUtc: true,
+        );
+        for (final stalePath in const <String>[
+          '/dav/TallySync/orphan_root.tally.tmp',
+          '/dav/TallySync/sync/head.json.tmp',
+          '/dav/TallySync/sync/revisions/db_r99.tally.tmp',
+          '/dav/TallySync/sync/attachments/att_abandoned.jpg.tmp',
+        ]) {
+          dav.files[stalePath] = Uint8List.fromList(<int>[1, 2, 3]);
+          dav.modifiedAt[stalePath] = staleMod;
+        }
+        const freshTmpPath =
+            '/dav/TallySync/sync/attachments/in_flight_upload.jpg.tmp';
+        dav.files[freshTmpPath] = Uint8List.fromList(<int>[9, 9]);
+        dav.modifiedAt[freshTmpPath] = freshMod;
+
+        await ledgerB.saveRecord(
+          commandId: 'fix-b-gc-trigger',
+          draft: RecordDraft(
+            bookId: 1,
+            type: RecordType.expense,
+            money: Money.parse('5.00'),
+            recordTime: now,
+            categoryId: 1,
+            assetId: walletId,
+            remark: '触发24h维护',
+          ),
+        );
+        expect((await serviceB.syncNow()).revision, 4);
+        expect(
+          dav.files.containsKey('/dav/TallySync/orphan_root.tally.tmp'),
+          isFalse,
+        );
+        expect(
+          dav.files.containsKey('/dav/TallySync/sync/head.json.tmp'),
+          isFalse,
+        );
+        expect(
+          dav.files.containsKey(
+            '/dav/TallySync/sync/revisions/db_r99.tally.tmp',
+          ),
+          isFalse,
+        );
+        expect(
+          dav.files.containsKey(
+            '/dav/TallySync/sync/attachments/att_abandoned.jpg.tmp',
+          ),
+          isFalse,
+        );
+        expect(dav.files.containsKey(freshTmpPath), isTrue);
+
+        // 5. `429` + `Retry-After: 95` propagation across WebDavClient & S3Client!
+        final davClient = WebDavClient(davCfg);
+        dav.forceStatus = (_) => (429, '95');
+        await expectLater(
+          davClient.putRelativeFile(
+            'throttle_test.bin',
+            Uint8List.fromList(<int>[1]),
+          ),
+          throwsA(
+            isA<Failure>().having((f) => f.retryAfterMs, 'retryAfterMs', 95000),
+          ),
+        );
+        await expectLater(
+          davClient.headRelativeFileOrNull('sync/head.json'),
+          throwsA(
+            isA<Failure>().having((f) => f.retryAfterMs, 'retryAfterMs', 95000),
+          ),
+        );
+        dav.forceStatus = null;
+
+        final s3Client = S3Client(
+          S3Config(
+            endpoint: s3.endpoint,
+            region: s3.expectedRegion,
+            bucket: s3.expectedBucket,
+            accessKeyId: s3.expectedAccessKey,
+            secretAccessKey: s3.expectedSecretKey,
+            remotePrefix: 'TallyIsle',
+            forcePathStyle: true,
+          ),
+        );
+        s3.forceStatus = (_) => (429, '95');
+        await expectLater(
+          s3Client.getObjectOrNull('sync/head.json'),
+          throwsA(
+            isA<Failure>().having((f) => f.retryAfterMs, 'retryAfterMs', 95000),
+          ),
+        );
+        await expectLater(
+          s3Client.deleteObject('sync/head.json'),
+          throwsA(
+            isA<Failure>().having((f) => f.retryAfterMs, 'retryAfterMs', 95000),
+          ),
+        );
+        s3.forceStatus = null;
+      },
+    );
+
+    test(
+      '3-Device Asymmetric Ring (A -> B -> C across 2+ revisions), >400 SQL Variable Chunking & lastNonIncrementalRevision Gate',
+      () async {
+        driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
+        final s3 = await _LoopbackSigV4S3Server.start();
+        s3.maxKeysPerPage = 1000;
+        final tempRoot = await Directory.systemTemp.createTemp(
+          'tally_sync_3ring_',
+        );
+
+        var now = DateTime(2026, 11, 22, 9, 0).millisecondsSinceEpoch;
+        final dbA = AppDatabase(NativeDatabase.memory(), nowMs: () => now);
+        final dbB = AppDatabase(NativeDatabase.memory(), nowMs: () => now);
+        final dbC = AppDatabase(NativeDatabase.memory(), nowMs: () => now);
+        addTearDown(() async {
+          await dbA.close();
+          await dbB.close();
+          await dbC.close();
+          await s3.close();
+          if (await tempRoot.exists()) {
+            await tempRoot.delete(recursive: true);
+          }
+        });
+
+        final bkC = Directory(p.join(tempRoot.path, 'bk_c'));
+        final serviceA = TallyBackupService(
+          dbA,
+          reminderService: ReminderService(
+            dbA,
+            scheduler: InMemoryReminderScheduler(),
+          ),
+          localBackupsDirectoryProvider: () async =>
+              Directory(p.join(tempRoot.path, 'bk_a')),
+          attachmentsDirectoryProvider: () async =>
+              Directory(p.join(tempRoot.path, 'att_a')),
+        );
+        final serviceB = TallyBackupService(
+          dbB,
+          reminderService: ReminderService(
+            dbB,
+            scheduler: InMemoryReminderScheduler(),
+          ),
+          localBackupsDirectoryProvider: () async =>
+              Directory(p.join(tempRoot.path, 'bk_b')),
+          attachmentsDirectoryProvider: () async =>
+              Directory(p.join(tempRoot.path, 'att_b')),
+        );
+        final serviceC = TallyBackupService(
+          dbC,
+          reminderService: ReminderService(
+            dbC,
+            scheduler: InMemoryReminderScheduler(),
+          ),
+          localBackupsDirectoryProvider: () async => bkC,
+          attachmentsDirectoryProvider: () async =>
+              Directory(p.join(tempRoot.path, 'att_c')),
+        );
+
+        final s3Cfg = S3Config(
+          endpoint: s3.endpoint,
+          region: s3.expectedRegion,
+          bucket: s3.expectedBucket,
+          accessKeyId: s3.expectedAccessKey,
+          secretAccessKey: s3.expectedSecretKey,
+          remotePrefix: 'RingSync',
+          forcePathStyle: true,
+        );
+        for (final svc in <TallyBackupService>[serviceA, serviceB, serviceC]) {
+          await svc.saveS3Config(s3Cfg);
+          await svc.setAutoArchiveBackupEnabled(false);
+        }
+
+        final ledgerA = LedgerService(dbA);
+        final ledgerB = LedgerService(dbB);
+        final ledgerC = LedgerService(dbC);
+        await dbA.select(dbA.accountBooks).get();
+        await dbB.select(dbB.accountBooks).get();
+        await dbC.select(dbC.accountBooks).get();
+
+        final cardId = await ledgerA.createAsset(
+          commandId: 'ring-card',
+          name: '多端环测卡',
+          type: AssetType.normal,
+          initial: Money.parse('10000.00'), // 1,000,000 minor
+        );
+        await dbA
+            .into(dbA.tags)
+            .insert(TagsCompanion.insert(tagId: 'tag-bulk', name: '批量标签'));
+
+        // Batch-insert 520 initial bills (`1.00` each = 520.00) + composite `tag_record`s
+        // on A so we exercise > 400 SQL variable chunking on BOTH delete and upsert!
+        await dbA.batch((b) {
+          for (var i = 0; i < 520; i++) {
+            b.insert(
+              dbA.records,
+              RecordsCompanion.insert(
+                recordId: 'base-rec-$i',
+                type: RecordType.expense,
+                subType: const Value(RecordDirection.none),
+                moneyMinor: BigInt.from(100),
+                discountMinor: i.isEven
+                    ? Value(BigInt.from(10))
+                    : const Value(null),
+                remark: Value('基线单-$i'),
+                recordTime: now + i,
+                recordCatId: const Value(1),
+                assetId: Value(cardId),
+                accountBookId: 1,
+                createDate: Value(now + i),
+              ),
+            );
+            b.insert(
+              dbA.tagRecords,
+              TagRecordsCompanion.insert(
+                tagId: 'tag-bulk',
+                recordId: 'base-rec-$i',
+              ),
+            );
+          }
+        });
+        await (dbA.update(dbA.assets)..where((t) => t.id.equals(cardId))).write(
+          AssetsCompanion(balanceMinor: Value(BigInt.from(1000000 - 52000))),
+        );
+
+        // Push r1 from A, and pull r1 onto both B and C!
+        expect((await serviceA.syncNow()).revision, 1);
+        expect((await serviceB.syncNow()).revision, 1);
+        expect((await serviceC.syncNow()).revision, 1);
+
+        // Delete C's local `.sync_base` directory to force historical ancestor fetch
+        // from remote Top-5 `sync/revisions/db_r1_*.tally`!
+        final cSyncBase = Directory(p.join(bkC.parent.path, '.sync_base'));
+        if (await cSyncBase.exists()) {
+          await cSyncBase.delete(recursive: true);
+        }
+
+        // A deletes 510 base records (+510.00) and inserts 525 new records (-1050.00) -> pushes r2!
+        now += 10000;
+        await dbA.transaction(() async {
+          for (var i = 0; i < 510; i++) {
+            await (dbA.delete(
+              dbA.tagRecords,
+            )..where((t) => t.recordId.equals('base-rec-$i'))).go();
+            await (dbA.delete(
+              dbA.records,
+            )..where((t) => t.recordId.equals('base-rec-$i'))).go();
+          }
+          await dbA.batch((b) {
+            for (var j = 0; j < 525; j++) {
+              b.insert(
+                dbA.records,
+                RecordsCompanion.insert(
+                  recordId: 'a-new-$j',
+                  type: RecordType.expense,
+                  subType: const Value(RecordDirection.none),
+                  moneyMinor: BigInt.from(200),
+                  discountMinor: j.isOdd
+                      ? Value(BigInt.from(5))
+                      : const Value(null),
+                  remark: Value('A新增批量-$j'),
+                  recordTime: now + j,
+                  recordCatId: const Value(1),
+                  assetId: Value(cardId),
+                  accountBookId: 1,
+                  createDate: Value(now + j),
+                ),
+              );
+              b.insert(
+                dbA.tagRecords,
+                TagRecordsCompanion.insert(
+                  tagId: 'tag-bulk',
+                  recordId: 'a-new-$j',
+                ),
+              );
+            }
+          });
+          // 948,000 + 51,000 - 105,000 = 894,000 minor
+          await (dbA.update(dbA.assets)..where((t) => t.id.equals(cardId)))
+              .write(AssetsCompanion(balanceMinor: Value(BigInt.from(894000))));
+        });
+        expect((await serviceA.syncNow()).revision, 2);
+
+        // B (at r1) adds a manual bill (-30.00 = -3000 minor) -> 3-way merges r1->r2 into r3!
+        now += 10000;
+        await ledgerB.saveRecord(
+          commandId: 'ring-b-1',
+          draft: RecordDraft(
+            bookId: 1,
+            type: RecordType.expense,
+            money: Money.parse('30.00'),
+            recordTime: now,
+            categoryId: 1,
+            assetId: cardId,
+            remark: 'B端独立消费',
+          ),
+        );
+        final mergeB = await serviceB.syncNow();
+        expect(mergeB.didMerge, isTrue);
+        expect(mergeB.revision, 3);
+
+        // C (still at r1, 2 revisions behind r3, AND with `.sync_base` deleted!)
+        // adds its own manual bill (-70.00 = -7000 minor) -> fetches `db_r1_*.tally`
+        // from remote `sync/revisions/`, merges >500 deletes + >500 upserts into r4!
+        now += 10000;
+        await ledgerC.saveRecord(
+          commandId: 'ring-c-1',
+          draft: RecordDraft(
+            bookId: 1,
+            type: RecordType.expense,
+            money: Money.parse('70.00'),
+            recordTime: now,
+            categoryId: 1,
+            assetId: cardId,
+            remark: 'C端滞后两版独立消费',
+          ),
+        );
+        final mergeC = await serviceC.syncNow();
+        expect(mergeC.status, CloudSyncStatus.pushed);
+        expect(mergeC.didMerge, isTrue);
+        expect(mergeC.revision, 4);
+
+        // Total records: (520 - 510) + 525 + 1 (B) + 1 (C) = 537!
+        expect(await dbC.select(dbC.records).get(), hasLength(537));
+        expect(await dbC.select(dbC.tagRecords).get(), hasLength(535));
+        final cCard = await (dbC.select(
+          dbC.assets,
+        )..where((t) => t.id.equals(cardId))).getSingle();
+        // 894,000 - 3,000 - 7,000 = 884,000 minor!
+        expect(cCard.balanceMinor, BigInt.from(884000));
+
+        // A and B pull r4 -> all 3 devices converge identically to 884,000 minor!
+        expect((await serviceA.syncNow()).revision, 4);
+        expect((await serviceB.syncNow()).revision, 4);
+        final aCard = await (dbA.select(
+          dbA.assets,
+        )..where((t) => t.id.equals(cardId))).getSingle();
+        expect(aCard.balanceMinor, BigInt.from(884000));
+
+        // Now verify `lastNonIncrementalRevision` barrier:
+        // B creates a backup, deletes a record, restores backup (`localFullReplaceSinceLastSync`),
+        // and force-pushes `useLocal` as r5 -> `lastNonIncrementalRevision == 5`!
+        final snapBytes = (await serviceB.createBackupBytes()).bytes;
+        await ledgerB.saveRecord(
+          commandId: 'ring-b-temp',
+          draft: RecordDraft(
+            bookId: 1,
+            type: RecordType.expense,
+            money: Money.parse('1.00'),
+            recordTime: now + 1000,
+            categoryId: 1,
+            assetId: cardId,
+          ),
+        );
+        await serviceB.restoreFromBytes(snapBytes);
+        await ledgerB.saveRecord(
+          commandId: 'ring-b-post-restore',
+          draft: RecordDraft(
+            bookId: 1,
+            type: RecordType.expense,
+            money: Money.parse('9.00'),
+            recordTime: now + 2000,
+            categoryId: 1,
+            assetId: cardId,
+          ),
+        );
+        final forceR5 = await serviceB.syncNow(
+          resolution: SyncConflictResolution.useLocal,
+        );
+        expect(forceR5.revision, 5);
+        expect(forceR5.remoteHead?.lastNonIncrementalRevision, 5);
+
+        // C (at r4 < lastNonIncrementalRevision 5) adds a bill -> MUST block
+        // unsafe 3-way merge across full-replace barrier and report conflict!
+        await ledgerC.saveRecord(
+          commandId: 'ring-c-after-r4',
+          draft: RecordDraft(
+            bookId: 1,
+            type: RecordType.expense,
+            money: Money.parse('12.00'),
+            recordTime: now + 3000,
+            categoryId: 1,
+            assetId: cardId,
+          ),
+        );
+        final blockedOnC = await serviceC.syncNow();
+        expect(blockedOnC.isConflict, isTrue);
+        expect(blockedOnC.didMerge, isFalse);
       },
     );
   });

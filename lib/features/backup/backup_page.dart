@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert' show jsonDecode;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -8,6 +9,7 @@ import '../../core/failure.dart';
 import '../../data/backup/s3_client.dart';
 import '../../data/backup/tally_backup_service.dart';
 import '../../data/backup/webdav_client.dart';
+import '../../domain/rules/cloud_sync_merge_rules.dart';
 import '../../domain/rules/cloud_sync_rules.dart';
 import '../../domain/rules/tally_backup.dart';
 import '../../platform/files.dart';
@@ -18,6 +20,239 @@ import 'backup_providers.dart';
 import 'post_restore_refresh.dart';
 import 's3_config_page.dart';
 import 'webdav_config_page.dart';
+
+/// Shows the shared multi-device conflict comparison & resolution dialog
+/// across `BackupPage` and `MobileSyncBackupQuickSheet`.
+Future<SyncConflictResolution?> showCloudSyncConflictResolutionDialog(
+  BuildContext context,
+  WidgetRef ref, {
+  CloudSyncOutcome? conflict,
+  String? fallbackBackupFileName,
+}) {
+  SyncConflictComparison? cachedInitial;
+  final cursor = ref.read(cloudSyncCursorProvider).value;
+  final rawCached = cursor?.lastConflictSummaryJson;
+  if (rawCached != null && rawCached.trim().isNotEmpty) {
+    try {
+      final decoded = jsonDecode(rawCached);
+      if (decoded is Map<String, Object?>) {
+        cachedInitial = SyncConflictComparison.fromJson(decoded);
+      }
+    } catch (_) {}
+  }
+
+  final backupName =
+      conflict?.conflictBackupFileName ??
+      fallbackBackupFileName ??
+      cursor?.lastConflictFileName ??
+      'conflict_*.tally';
+
+  return showDialog<SyncConflictResolution?>(
+    context: context,
+    builder: (ctx) => _CloudSyncConflictComparisonDialog(
+      conflict: conflict,
+      backupName: backupName,
+      initialComparison: cachedInitial,
+    ),
+  );
+}
+
+class _CloudSyncConflictComparisonDialog extends ConsumerStatefulWidget {
+  const _CloudSyncConflictComparisonDialog({
+    required this.conflict,
+    required this.backupName,
+    required this.initialComparison,
+  });
+
+  final CloudSyncOutcome? conflict;
+  final String backupName;
+  final SyncConflictComparison? initialComparison;
+
+  @override
+  ConsumerState<_CloudSyncConflictComparisonDialog> createState() =>
+      _CloudSyncConflictComparisonDialogState();
+}
+
+class _CloudSyncConflictComparisonDialogState
+    extends ConsumerState<_CloudSyncConflictComparisonDialog> {
+  SyncConflictComparison? _comparison;
+
+  @override
+  void initState() {
+    super.initState();
+    _comparison = widget.initialComparison;
+    if (_comparison == null ||
+        (_comparison!.remoteAssetCount == 0 &&
+            _comparison!.remoteRecordCount > 0)) {
+      unawaited(_loadLiveComparison());
+    }
+  }
+
+  Future<void> _loadLiveComparison() async {
+    try {
+      final service = await ref.read(tallyBackupServiceProvider.future);
+      final loaded = await service.inspectCurrentConflictComparison(
+        conflictOutcome: widget.conflict,
+      );
+      if (mounted) {
+        setState(() => _comparison = loaded);
+      }
+    } catch (_) {}
+  }
+
+  static String _formatSampleBill(SyncConflictSampleBill bill) {
+    final dt = formatDateTime(
+      DateTime.fromMillisecondsSinceEpoch(bill.recordTime),
+    );
+    final amt = '${bill.currencyCode} ${formatMinor(bill.moneyMinor)}';
+    final rem = bill.remark.trim().isEmpty ? '无备注' : bill.remark.trim();
+    return '$dt · $amt · $rem';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final head = widget.conflict?.remoteHead;
+    final cmp = _comparison;
+
+    final remoteDesc = head != null
+        ? '设备「${head.deviceName}」于 ${formatDateTime(DateTime.fromMillisecondsSinceEpoch(head.updatedAtMs))} 推送的版本 r${head.revision}（账单 ${head.recordCount} 条）'
+        : (cmp != null && cmp.remoteRevision > 0
+              ? '设备「${cmp.remoteDeviceName}」${cmp.remoteUpdatedAtMs != null ? '于 ${formatDateTime(DateTime.fromMillisecondsSinceEpoch(cmp.remoteUpdatedAtMs!))} ' : ''}推送的版本 r${cmp.remoteRevision}（账单 ${cmp.remoteRecordCount} 条）'
+              : '云端新版本');
+
+    return AlertDialog(
+      key: const Key('cloud_sync_conflict_dialog'),
+      title: const Text('检测到多端同步冲突'),
+      content: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 520),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '本机与云端存在无法自动合并的同行或平账冲突，已停止静默覆盖并保留完整快照供您对比选择。',
+                style: theme.textTheme.bodyMedium,
+              ),
+              const SizedBox(height: 12),
+              if (cmp != null) ...[
+                Container(
+                  key: const Key('conflict_comparison_summary_card'),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: tallyNestedSurfaceColor(scheme),
+                    borderRadius: BorderRadius.circular(kTallyNestedRadius),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '本机（${cmp.localDeviceName}）',
+                        style: theme.textTheme.labelLarge?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '账单 ${cmp.localRecordCount} 笔 · 账户 ${cmp.localAssetCount} 个 · 便签 ${cmp.localNoteCount} 条'
+                        '${cmp.localOnlyRecordCount > 0 ? ' · 本机独有 +${cmp.localOnlyRecordCount} 笔' : ''}',
+                        style: theme.textTheme.bodySmall,
+                      ),
+                      if (cmp.localSampleBills.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        for (final b in cmp.localSampleBills.take(3))
+                          Text(
+                            '  · ${_formatSampleBill(b)}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: scheme.onSurfaceVariant,
+                            ),
+                          ),
+                      ],
+                      const SizedBox(height: 12),
+                      Text(
+                        '云端（${cmp.remoteDeviceName}${cmp.remoteRevision > 0 ? ' · r${cmp.remoteRevision}' : ''}）',
+                        style: theme.textTheme.labelLarge?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '账单 ${cmp.remoteRecordCount} 笔'
+                        '${cmp.remoteAssetCount > 0 ? ' · 账户 ${cmp.remoteAssetCount} 个 · 便签 ${cmp.remoteNoteCount} 条' : ''}'
+                        '${cmp.remoteOnlyRecordCount > 0 ? ' · 云端独有 +${cmp.remoteOnlyRecordCount} 笔' : ''}'
+                        '${cmp.modifiedRecordCount > 0 ? ' · 同笔改动 ${cmp.modifiedRecordCount} 笔' : ''}',
+                        style: theme.textTheme.bodySmall,
+                      ),
+                      if (cmp.remoteUpdatedAtMs != null) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          '推送时间：${formatDateTime(DateTime.fromMillisecondsSinceEpoch(cmp.remoteUpdatedAtMs!))}',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                      if (cmp.remoteSampleBills.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        for (final b in cmp.remoteSampleBills.take(3))
+                          Text(
+                            '  · ${_formatSampleBill(b)}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: scheme.onSurfaceVariant,
+                            ),
+                          ),
+                      ],
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 10),
+              ] else ...[
+                Text('• 云端状态：$remoteDesc'),
+                const SizedBox(height: 6),
+              ],
+              Text(
+                '• 冲突自动留档：已自动将本机当前数据归档保存为「${widget.backupName}」，同时留存于本机与云端备份列表。',
+                style: theme.textTheme.bodySmall,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '请选择如何处理当前同步冲突：',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          key: const Key('conflict_resolve_later_button'),
+          onPressed: () => Navigator.of(context).pop(null),
+          child: const Text('稍后处理'),
+        ),
+        TallySoftButton(
+          key: const Key('conflict_use_remote_button'),
+          onPressed: () =>
+              Navigator.of(context).pop(SyncConflictResolution.useRemote),
+          child: const Text('采用云端版本'),
+        ),
+        FilledButton(
+          key: const Key('conflict_use_local_button'),
+          onPressed: () =>
+              Navigator.of(context).pop(SyncConflictResolution.useLocal),
+          child: const Text('以本机覆盖云端'),
+        ),
+      ],
+    );
+  }
+}
 
 class BackupPage extends ConsumerStatefulWidget {
   const BackupPage({super.key});
@@ -301,10 +536,23 @@ class _BackupPageState extends ConsumerState<BackupPage>
           _showMessage('多端数据已是最新（版本 r${outcome.revision}）');
         case CloudSyncStatus.pushed:
           setState(_clearPendingConflict);
-          _refreshAfterBackupChange();
-          _showMessage('已推送最新快照至云端（版本 r${outcome.revision}）');
+          ref
+            ..read(
+              syncBackoffStateProvider.notifier,
+            ).updateState(SyncBackoffState.healthy);
+          if (outcome.didMerge) {
+            await _refreshAfterRestore();
+            _showMessage('已智能合并双端账单并同步（版本 r${outcome.revision}）');
+          } else {
+            _refreshAfterBackupChange();
+            _showMessage('已推送最新快照至云端（版本 r${outcome.revision}）');
+          }
         case CloudSyncStatus.pulled:
           setState(_clearPendingConflict);
+          ref
+            ..read(
+              syncBackoffStateProvider.notifier,
+            ).updateState(SyncBackoffState.healthy);
           await _refreshAfterRestore();
           _showMessage('已从云端同步最新数据（版本 r${outcome.revision}）');
         case CloudSyncStatus.conflict:
@@ -333,50 +581,32 @@ class _BackupPageState extends ConsumerState<BackupPage>
     }
   }
 
+  Future<void> _handleRenameSyncDevice(CloudSyncSettings current) async {
+    final nextName = await showDialog<String?>(
+      context: context,
+      builder: (_) => _RenameSyncDeviceDialog(initialName: current.deviceName),
+    );
+    if (nextName == null || !mounted) return;
+    try {
+      final service = await ref.read(tallyBackupServiceProvider.future);
+      await service.updateSyncDeviceName(nextName);
+      if (!mounted) return;
+      ref.invalidate(cloudSyncSettingsProvider);
+      _showMessage('已更新本机标识：${nextName.trim()}');
+    } catch (e) {
+      _showMessage(safeMessage(e));
+    }
+  }
+
   Future<void> _showConflictResolutionDialog(
     CloudSyncOutcome? conflict, {
     String? fallbackBackupFileName,
   }) async {
-    final head = conflict?.remoteHead;
-    final remoteDesc = head == null
-        ? '云端新版本'
-        : '设备「${head.deviceName}」于 ${formatDateTime(DateTime.fromMillisecondsSinceEpoch(head.updatedAtMs))} 推送的版本 r${head.revision}（账单 ${head.recordCount} 条）';
-    final backupName =
-        conflict?.conflictBackupFileName ??
-        fallbackBackupFileName ??
-        'conflict_*.tally';
-
-    final choice = await showDialog<SyncConflictResolution?>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        key: const Key('cloud_sync_conflict_dialog'),
-        title: const Text('检测到多端同步冲突'),
-        content: Text(
-          '本机与云端自上次同步后均产生了新的账务改动。\n\n'
-          '• 云端状态：$remoteDesc\n'
-          '• 冲突自动留档：已自动将本机当前完整数据（含附件）归档保存为「$backupName」，同时留存于本机与云端备份列表。\n\n'
-          '请选择如何处理当前同步冲突：',
-        ),
-        actions: [
-          TextButton(
-            key: const Key('conflict_resolve_later_button'),
-            onPressed: () => Navigator.of(ctx).pop(null),
-            child: const Text('稍后处理'),
-          ),
-          TallySoftButton(
-            key: const Key('conflict_use_remote_button'),
-            onPressed: () =>
-                Navigator.of(ctx).pop(SyncConflictResolution.useRemote),
-            child: const Text('采用云端版本'),
-          ),
-          FilledButton(
-            key: const Key('conflict_use_local_button'),
-            onPressed: () =>
-                Navigator.of(ctx).pop(SyncConflictResolution.useLocal),
-            child: const Text('以本机覆盖云端'),
-          ),
-        ],
-      ),
+    final choice = await showCloudSyncConflictResolutionDialog(
+      context,
+      ref,
+      conflict: conflict,
+      fallbackBackupFileName: fallbackBackupFileName,
     );
 
     if (choice != null && mounted) {
@@ -993,6 +1223,7 @@ class _BackupPageState extends ConsumerState<BackupPage>
     final externalBinding = ref.watch(externalBackupDirBindingProvider).value;
     final externalNeedsRebind =
         ref.watch(externalBackupNeedsRebindProvider).value ?? false;
+    final backoffState = ref.watch(syncBackoffStateProvider);
     final lastBackupAsync = ref.watch(lastBackupAtMsProvider);
     final fileAccess = ref.watch(backupFileAccessProvider);
 
@@ -1344,6 +1575,76 @@ class _BackupPageState extends ConsumerState<BackupPage>
                                 key: const Key('cloud_sync_status_summary'),
                                 style: Theme.of(context).textTheme.bodySmall,
                               ),
+                              const SizedBox(height: 6),
+                              Row(
+                                key: const Key('cloud_sync_device_name_row'),
+                                children: [
+                                  Icon(
+                                    Icons.devices_outlined,
+                                    size: 16,
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.onSurfaceVariant,
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Expanded(
+                                    child: Text(
+                                      '本机标识：${syncSettings.deviceName}',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: Theme.of(
+                                        context,
+                                      ).textTheme.bodySmall,
+                                    ),
+                                  ),
+                                  TallySoftButton(
+                                    key: const Key(
+                                      'edit_sync_device_name_button',
+                                    ),
+                                    compact: true,
+                                    onPressed: effectiveBusy
+                                        ? null
+                                        : () => _handleRenameSyncDevice(
+                                            syncSettings,
+                                          ),
+                                    child: _singleLineText('修改名称'),
+                                  ),
+                                ],
+                              ),
+                              if (isActiveCloudReady &&
+                                  (backoffState.isAuthCircuitOpen ||
+                                      backoffState.nextRetryAtMs != null)) ...[
+                                const SizedBox(height: 8),
+                                Container(
+                                  key: const Key('cloud_sync_backoff_banner'),
+                                  padding: const EdgeInsets.all(10),
+                                  decoration: BoxDecoration(
+                                    color: backoffState.isAuthCircuitOpen
+                                        ? Theme.of(
+                                            context,
+                                          ).colorScheme.errorContainer
+                                        : tallyNestedSurfaceColor(
+                                            Theme.of(context).colorScheme,
+                                          ),
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: Text(
+                                    backoffState.isAuthCircuitOpen
+                                        ? '云端鉴权异常已暂停后台自动重试：${backoffState.lastFailureMessage ?? '请检查密钥或账号密码'}。修复配置或点击「立即多端同步」后恢复。'
+                                        : '云端繁忙或网络波动，后台自动同步退避等待中${backoffState.nextRetryAtMs != null ? '（下次重试 ${formatDateTime(DateTime.fromMillisecondsSinceEpoch(backoffState.nextRetryAtMs!))}）' : ''}。可随时点击「立即多端同步」手动重试。',
+                                    style: Theme.of(context).textTheme.bodySmall
+                                        ?.copyWith(
+                                          color: backoffState.isAuthCircuitOpen
+                                              ? Theme.of(
+                                                  context,
+                                                ).colorScheme.onErrorContainer
+                                              : Theme.of(
+                                                  context,
+                                                ).colorScheme.onSurface,
+                                        ),
+                                  ),
+                                ),
+                              ],
                               const SizedBox(height: 10),
                               Row(
                                 children: [
@@ -2287,4 +2588,55 @@ Color _backupCardColor(ThemeData theme) {
   return theme.brightness == Brightness.dark
       ? scheme.surfaceContainerLow
       : Color.lerp(scheme.surfaceContainerLow, scheme.surfaceContainer, 0.55)!;
+}
+
+final class _RenameSyncDeviceDialog extends StatefulWidget {
+  const _RenameSyncDeviceDialog({required this.initialName});
+
+  final String initialName;
+
+  @override
+  State<_RenameSyncDeviceDialog> createState() =>
+      _RenameSyncDeviceDialogState();
+}
+
+final class _RenameSyncDeviceDialogState
+    extends State<_RenameSyncDeviceDialog> {
+  late final TextEditingController _controller = TextEditingController(
+    text: widget.initialName,
+  );
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    key: const Key('rename_sync_device_dialog'),
+    title: const Text('修改本机设备标识'),
+    content: TextField(
+      key: const Key('sync_device_name_input'),
+      controller: _controller,
+      autofocus: true,
+      maxLength: 40,
+      decoration: const InputDecoration(
+        labelText: '设备名称',
+        hintText: '例如：家用台式机 / 随身手机',
+      ),
+      onSubmitted: (v) => Navigator.of(context).pop(v),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.of(context).pop(null),
+        child: const Text('取消'),
+      ),
+      FilledButton(
+        key: const Key('save_sync_device_name_button'),
+        onPressed: () => Navigator.of(context).pop(_controller.text),
+        child: const Text('保存'),
+      ),
+    ],
+  );
 }
