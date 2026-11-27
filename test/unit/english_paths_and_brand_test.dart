@@ -47,10 +47,8 @@ void main() {
         reason: 'tool/build_android.sh must not contain CJK filenames or paths',
       );
       for (final expectedApk in const <String>[
-        'TallyIsle-Android-arm64-release.apk',
-        'TallyIsle-Android-arm64-debug.apk',
-        'TallyIsle-Android-x64-release.apk',
-        'TallyIsle-Android-x64-debug.apk',
+        'TallyIsle-Android-arm64.apk',
+        'TallyIsle-Android-x64.apk',
       ]) {
         expect(
           content,
@@ -58,6 +56,12 @@ void main() {
           reason: 'Missing expected Android APK filename: $expectedApk',
         );
       }
+      expect(content, isNot(contains('-debug.apk')));
+      expect(
+        content.replaceAll('app-release.apk', ''),
+        isNot(contains('-release.apk')),
+      );
+      expect(content, isNot(contains('--debug')));
     });
 
     test('.github/workflows/build.yml uses pure-ASCII artifact filenames', () {
@@ -72,11 +76,15 @@ void main() {
         isTrue,
         reason: '.github/workflows/build.yml must be 100% pure ASCII',
       );
+      expect(content, isNot(contains('-debug.apk')));
+      expect(
+        content.replaceAll('app-release.apk', ''),
+        isNot(contains('-release.apk')),
+      );
+      expect(content, isNot(contains('--debug')));
       for (final expectedArtifact in const <String>[
-        'TallyIsle-Android-arm64-release.apk',
-        'TallyIsle-Android-arm64-debug.apk',
-        'TallyIsle-Android-x64-release.apk',
-        'TallyIsle-Android-x64-debug.apk',
+        'TallyIsle-Android-arm64.apk',
+        'TallyIsle-Android-x64.apk',
         'TallyIsle-Windows-x64-setup.exe',
         'TallyIsle-Windows-x64.msi',
         'TallyIsle-Windows-x64-portable.zip',
@@ -108,7 +116,7 @@ void main() {
     });
 
     test(
-      '.github/workflows/build-ohos.yml and tool/ohos installers use pure-ASCII .hap filenames',
+      '.github/workflows/build-ohos.yml and tool/ohos installers use pure-ASCII dual-arch .hap filenames',
       () {
         final ohosFiles = <String>[
           '.github/workflows/build-ohos.yml',
@@ -118,26 +126,64 @@ void main() {
         final hapTokenPattern = RegExp(r'([^\s"\x27`「」()<>]+\.hap)');
 
         for (final path in ohosFiles) {
-          final file = File(path);
-          if (!file.existsSync()) {
-            continue;
-          }
-          final content = file.readAsStringSync();
+          final content = _readRepoFile(path);
           expect(
             content,
-            contains('TallyIsle-HarmonyOS-signed-debug.hap'),
-            reason: '$path must reference TallyIsle-HarmonyOS-signed-debug.hap',
+            contains('TallyIsle-HarmonyOS-arm64-signed-debug.hap'),
+            reason:
+                '$path must reference TallyIsle-HarmonyOS-arm64-signed-debug.hap',
+          );
+          expect(
+            content,
+            contains('TallyIsle-HarmonyOS-x64-signed-debug.hap'),
+            reason:
+                '$path must reference TallyIsle-HarmonyOS-x64-signed-debug.hap',
+          );
+          expect(
+            content,
+            contains('arm64-v8a'),
+            reason: '$path must reference arm64-v8a ABI',
+          );
+          expect(
+            content,
+            contains('x86_64'),
+            reason: '$path must reference x86_64 ABI',
+          );
+          expect(
+            content,
+            isNot(contains('TallyIsle-HarmonyOS-unsigned.hap')),
+            reason: '$path must not contain legacy single-arch unsigned HAP',
+          );
+          expect(
+            content,
+            isNot(contains('TallyIsle-HarmonyOS-signed-debug.hap')),
+            reason:
+                '$path must not contain legacy single-arch signed-debug HAP',
           );
           if (path == '.github/workflows/build-ohos.yml') {
             expect(
               content,
-              contains('TallyIsle-HarmonyOS-unsigned.hap'),
-              reason: '$path must reference TallyIsle-HarmonyOS-unsigned.hap',
+              contains('TallyIsle-HarmonyOS-arm64-unsigned.hap'),
+              reason:
+                  '$path must reference TallyIsle-HarmonyOS-arm64-unsigned.hap',
+            );
+            expect(
+              content,
+              contains('TallyIsle-HarmonyOS-x64-unsigned.hap'),
+              reason:
+                  '$path must reference TallyIsle-HarmonyOS-x64-unsigned.hap',
             );
             expect(
               content,
               contains('TallyIsle-HarmonyOS-*.hap'),
               reason: '$path must stage TallyIsle-HarmonyOS-*.hap',
+            );
+          } else {
+            expect(
+              content,
+              contains('const.product.cpu.abilist'),
+              reason:
+                  '$path must auto-detect ABI via const.product.cpu.abilist',
             );
           }
           for (final match in hapTokenPattern.allMatches(content)) {

@@ -15,9 +15,9 @@
 
 | 平台 | 构建产物 | 原生适配说明 |
 |---|---|---|
-| **Android** | `TallyIsle-Android-{arm64,x64}-release.apk` / `-debug.apk` | 文件保存与系统分享、桌面小组件、每日提醒通知、指纹/面容与应用锁、通知栏/无障碍自动记账与离线中文识图 |
+| **Android** | `TallyIsle-Android-{arm64,x64}.apk` | 文件保存与系统分享、桌面小组件、每日提醒通知、指纹/面容与应用锁、通知栏/无障碍自动记账与离线中文识图 |
 | **iOS / iPadOS** | `TallyIsle-iOS-unsigned.ipa`（支持自签安装） | 原生“文件”应用共享、快捷指令（AppIntents）联动、桌面图标长按菜单与离线识图 |
-| **HarmonyOS** | `TallyIsle-HarmonyOS-unsigned.hap` / `TallyIsle-HarmonyOS-installer-kit.zip` | HarmonyOS NEXT 原生适配、桌面服务卡片、系统分享与离线识图、生物识别解锁 |
+| **HarmonyOS** | `TallyIsle-HarmonyOS-{arm64,x64}-unsigned.hap` / `TallyIsle-HarmonyOS-installer-kit.zip` | HarmonyOS NEXT 原生适配、桌面服务卡片、系统分享与离线识图、生物识别解锁 |
 | **Windows** | `TallyIsle-Windows-{x64,arm64}-setup.exe` / `.msi` / `-portable.zip` | Win32 原生窗口与状态记忆、桌面双栏布局与键盘快捷记账、`tallyisle://` 与 `.tally` 文件关联 |
 | **Linux (KDE / GNOME)** | `TallyIsle-Linux-{x64,arm64}.deb` / `.rpm` / `.AppImage` / `.flatpak` / `-portable.tar.gz` | GTK3 窗口状态记忆、Wayland / X11 原生 KWin 标题栏识别、`xdg-desktop-portal` 原生文件选择器 |
 | **macOS** | `TallyIsle-macOS.dmg` / `.pkg` / `-portable.zip` | AppKit 窗口状态记忆、App Sandbox 网络与选定文件读写权限、Ad-hoc 签名开箱即用 |
@@ -47,7 +47,7 @@ bash tool/cloud_bootstrap.sh
 # 2. 日常格式检查、静态分析与全量测试
 bash tool/check.sh
 
-# 3. 本地构建 Android APK（arm64 + x64 正式版与开发版，支持 --arch arm64|x64|all）
+# 3. 本地构建 Android APK（arm64 + x64 正式包，支持 --arch arm64|x64|all）
 bash tool/cloud_bootstrap.sh --with-android
 TALLYISLE_GRADLE_ONLINE=1 bash tool/build_android.sh
 

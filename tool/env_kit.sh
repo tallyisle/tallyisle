@@ -105,6 +105,11 @@ restore_kit() {
     fi
   fi
 
+  if git -C "$PROJECT_DIR" rev-parse --git-dir >/dev/null 2>&1; then
+    git -C "$PROJECT_DIR" config --local user.name "TallyIsle"
+    git -C "$PROJECT_DIR" config --local user.email "git@tallyisle.com"
+  fi
+
   # Seed debug.keystore, android-licenses, gradle-init, and sqlite native hooks.
   source "$SCRIPT_DIR/env.sh"
   if [[ -d "$PROJECT_DIR/tool/seeds/gradle-init" ]]; then

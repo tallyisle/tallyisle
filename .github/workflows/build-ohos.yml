@@ -145,53 +145,63 @@ jobs:
           echo "FLUTTER_ROOT=$OHOS_FLUTTER" >> "$GITHUB_ENV"
           echo "$OHOS_FLUTTER/bin" >> "$GITHUB_PATH"
 
-      - name: Compile SQLite 3.54.0 (arm64-v8a) with OpenHarmony NDK
+      - name: Compile SQLite 3.54.0 (arm64-v8a & x86_64) with OpenHarmony NDK
         run: |
+          set -euo pipefail
           SQLITE_WORK="$RUNNER_TEMP/sqlite-build"
-          mkdir -p "$SQLITE_WORK" ohos/entry/libs/arm64-v8a
+          SQLITE_OUT="$RUNNER_TEMP/sqlite-out"
+          mkdir -p "$SQLITE_WORK" "$SQLITE_OUT/arm64-v8a" "$SQLITE_OUT/x86_64"
           curl -fSL --retry 3 "$SQLITE_AMALGAMATION_URL" -o "$SQLITE_WORK/sqlite.zip"
           unzip -q "$SQLITE_WORK/sqlite.zip" -d "$SQLITE_WORK"
 
           OHOS_NATIVE="$DEVECO_SDK_HOME/default/openharmony/native"
-          "$OHOS_NATIVE/llvm/bin/clang" \
-            --target=aarch64-linux-ohos \
-            --sysroot="$OHOS_NATIVE/sysroot" \
-            -shared -fPIC -O2 -pthread \
-            -Wl,-soname,libsqlite3.so \
-            -Wl,-Bsymbolic \
-            -DSQLITE_ENABLE_DBSTAT_VTAB \
-            -DSQLITE_ENABLE_FTS5 \
-            -DSQLITE_ENABLE_RTREE \
-            -DSQLITE_ENABLE_MATH_FUNCTIONS \
-            -DSQLITE_DQS=0 \
-            -DSQLITE_DEFAULT_MEMSTATUS=0 \
-            -DSQLITE_TEMP_STORE=2 \
-            -DSQLITE_MAX_EXPR_DEPTH=0 \
-            -DSQLITE_STRICT_SUBTYPE=1 \
-            -DSQLITE_OMIT_AUTHORIZATION \
-            -DSQLITE_OMIT_DECLTYPE \
-            -DSQLITE_OMIT_DEPRECATED \
-            -DSQLITE_OMIT_PROGRESS_CALLBACK \
-            -DSQLITE_OMIT_SHARED_CACHE \
-            -DSQLITE_OMIT_TCL_VARIABLE \
-            -DSQLITE_OMIT_TRACE \
-            -DSQLITE_USE_ALLOCA \
-            -DSQLITE_ENABLE_SESSION \
-            -DSQLITE_ENABLE_PREUPDATE_HOOK \
-            -DSQLITE_UNTESTABLE \
-            -DSQLITE_HAVE_ISNAN \
-            -DSQLITE_HAVE_LOCALTIME_R \
-            -DSQLITE_HAVE_LOCALTIME_S \
-            -DSQLITE_HAVE_MALLOC_USABLE_SIZE \
-            -DSQLITE_HAVE_STRCHRNUL \
-            -DSQLITE_ENABLE_BATCH_ATOMIC_WRITE \
-            "$SQLITE_WORK/$SQLITE_AMALGAMATION_DIR/sqlite3.c" \
-            -lm \
-            -o ohos/entry/libs/arm64-v8a/libsqlite3.so
+          compile_sqlite() {
+            local target_flag="$1"
+            local abi="$2"
+            local out_so="$SQLITE_OUT/$abi/libsqlite3.so"
+            "$OHOS_NATIVE/llvm/bin/clang" \
+              "$target_flag" \
+              --sysroot="$OHOS_NATIVE/sysroot" \
+              -shared -fPIC -O2 -pthread \
+              -Wl,-soname,libsqlite3.so \
+              -Wl,-Bsymbolic \
+              -DSQLITE_ENABLE_DBSTAT_VTAB \
+              -DSQLITE_ENABLE_FTS5 \
+              -DSQLITE_ENABLE_RTREE \
+              -DSQLITE_ENABLE_MATH_FUNCTIONS \
+              -DSQLITE_DQS=0 \
+              -DSQLITE_DEFAULT_MEMSTATUS=0 \
+              -DSQLITE_TEMP_STORE=2 \
+              -DSQLITE_MAX_EXPR_DEPTH=0 \
+              -DSQLITE_STRICT_SUBTYPE=1 \
+              -DSQLITE_OMIT_AUTHORIZATION \
+              -DSQLITE_OMIT_DECLTYPE \
+              -DSQLITE_OMIT_DEPRECATED \
+              -DSQLITE_OMIT_PROGRESS_CALLBACK \
+              -DSQLITE_OMIT_SHARED_CACHE \
+              -DSQLITE_OMIT_TCL_VARIABLE \
+              -DSQLITE_OMIT_TRACE \
+              -DSQLITE_USE_ALLOCA \
+              -DSQLITE_ENABLE_SESSION \
+              -DSQLITE_ENABLE_PREUPDATE_HOOK \
+              -DSQLITE_UNTESTABLE \
+              -DSQLITE_HAVE_ISNAN \
+              -DSQLITE_HAVE_LOCALTIME_R \
+              -DSQLITE_HAVE_LOCALTIME_S \
+              -DSQLITE_HAVE_MALLOC_USABLE_SIZE \
+              -DSQLITE_HAVE_STRCHRNUL \
+              -DSQLITE_ENABLE_BATCH_ATOMIC_WRITE \
+              "$SQLITE_WORK/$SQLITE_AMALGAMATION_DIR/sqlite3.c" \
+              -lm \
+              -o "$out_so"
 
-          "$OHOS_NATIVE/llvm/bin/llvm-strip" --strip-unneeded ohos/entry/libs/arm64-v8a/libsqlite3.so
-          "$OHOS_NATIVE/llvm/bin/llvm-nm" -D ohos/entry/libs/arm64-v8a/libsqlite3.so | grep -q "sqlite3_open_v2"
-          ls -lh ohos/entry/libs/arm64-v8a/libsqlite3.so
+            "$OHOS_NATIVE/llvm/bin/llvm-strip" --strip-unneeded "$out_so"
+            "$OHOS_NATIVE/llvm/bin/llvm-nm" -D "$out_so" | grep -q "sqlite3_open_v2"
+            ls -lh "$out_so"
+          }
+
+          compile_sqlite --target=aarch64-linux-ohos arm64-v8a
+          compile_sqlite --target=x86_64-linux-ohos x86_64
 
       - name: Apply HarmonyOS pubspec overrides
         run: python3 tool/ohos/apply_ohos_pubspec.py --apply
@@ -206,14 +216,77 @@ jobs:
 
       - name: Build HarmonyOS Release HAP (arm64-v8a)
         run: |
-          mkdir -p build/ohos/hap
+          set -euo pipefail
+          rm -rf ohos/entry/libs ohos/entry/build ohos/build build/ohos
+          mkdir -p ohos/entry/libs/arm64-v8a build/ohos/hap
+          cp "$RUNNER_TEMP/sqlite-out/arm64-v8a/libsqlite3.so" ohos/entry/libs/arm64-v8a/libsqlite3.so
           flutter build hap --release --no-codesign --target-platform ohos-arm64
           UNSIGNED_HAP="ohos/entry/build/default/outputs/default/entry-default-unsigned.hap"
           if [ ! -f "$UNSIGNED_HAP" ]; then
             UNSIGNED_HAP="build/ohos/hap/entry-default-unsigned.hap"
           fi
           test -f "$UNSIGNED_HAP"
-          cp "$UNSIGNED_HAP" "TallyIsle-HarmonyOS-unsigned.hap"
+          cp "$UNSIGNED_HAP" "TallyIsle-HarmonyOS-arm64-unsigned.hap"
+
+      - name: Build HarmonyOS Release HAP (x86_64)
+        run: |
+          set -euo pipefail
+          rm -rf ohos/entry/libs ohos/entry/build ohos/build build/ohos ohos/oh_modules ohos/entry/oh_modules ohos/oh-package-lock.json5 ohos/entry/oh-package-lock.json5 && git checkout -- ohos/oh-package.json5 ohos/entry/oh-package.json5
+          mkdir -p ohos/entry/libs/x86_64 build/ohos/hap
+          cp "$RUNNER_TEMP/sqlite-out/x86_64/libsqlite3.so" ohos/entry/libs/x86_64/libsqlite3.so
+          flutter build hap --release --no-codesign --target-platform ohos-x64
+          UNSIGNED_HAP="ohos/entry/build/default/outputs/default/entry-default-unsigned.hap"
+          if [ ! -f "$UNSIGNED_HAP" ]; then
+            UNSIGNED_HAP="build/ohos/hap/entry-default-unsigned.hap"
+          fi
+          test -f "$UNSIGNED_HAP"
+          cp "$UNSIGNED_HAP" "TallyIsle-HarmonyOS-x64-unsigned.hap"
+
+      - name: Verify HarmonyOS HAP ABI isolation
+        run: |
+          python3 - <<'PY'
+          import sys
+          import zipfile
+
+          checks = [
+              ("TallyIsle-HarmonyOS-arm64-unsigned.hap", "libs/arm64-v8a/", "libs/x86_64/"),
+              ("TallyIsle-HarmonyOS-x64-unsigned.hap", "libs/x86_64/", "libs/arm64-v8a/"),
+          ]
+          required_libs = ("libsqlite3.so", "libapp.so", "libflutter.so")
+
+          for hap, expected_prefix, forbidden_prefix in checks:
+              with zipfile.ZipFile(hap, "r") as zf:
+                  names = zf.namelist()
+              name_set = set(names)
+              for lib in required_libs:
+                  expected_entry = f"{expected_prefix}{lib}"
+                  if expected_entry not in name_set:
+                      print(
+                          f"::error::{hap} is missing required native library {expected_entry}",
+                          file=sys.stderr,
+                      )
+                      sys.exit(1)
+              if any(name.startswith(forbidden_prefix) for name in names):
+                  print(
+                      f"::error::{hap} unexpectedly contains forbidden ABI entries under {forbidden_prefix}",
+                      file=sys.stderr,
+                  )
+                  sys.exit(1)
+              stray = [
+                  name
+                  for name in names
+                  if name.startswith("libs/")
+                  and not name.endswith("/")
+                  and not name.startswith(expected_prefix)
+              ]
+              if stray:
+                  print(
+                      f"::error::{hap} contains unexpected libs/ entries outside {expected_prefix}: {stray}",
+                      file=sys.stderr,
+                  )
+                  sys.exit(1)
+              print(f"OK {hap}: verified {expected_prefix}{required_libs}, no {forbidden_prefix}")
+          PY
 
       - name: Sign HAP with DevEco Debug Credentials (Method A, optional)
         env:
@@ -237,28 +310,31 @@ jobs:
             printf '%s' "$OHOS_CER_BASE64" | tr -d '[:space:]' | base64 --decode > "$SIGN_DIR/debug.cer"
             printf '%s' "$OHOS_P7B_BASE64" | tr -d '[:space:]' | base64 --decode > "$SIGN_DIR/debug.p7b"
 
-            java -jar "$DEVECO_SDK_HOME/default/openharmony/toolchains/lib/hap-sign-tool.jar" sign-app \
-              -mode localSign \
-              -keyAlias "$OHOS_KEY_ALIAS" \
-              -keyPwd "$OHOS_KEY_PWD" \
-              -appCertFile "$SIGN_DIR/debug.cer" \
-              -profileFile "$SIGN_DIR/debug.p7b" \
-              -inForm zip \
-              -inFile "TallyIsle-HarmonyOS-unsigned.hap" \
-              -signAlg SHA256withECDSA \
-              -keystoreFile "$SIGN_DIR/debug.p12" \
-              -keystorePwd "$OHOS_KEYSTORE_PWD" \
-              -outFile "TallyIsle-HarmonyOS-signed-debug.hap" \
-              -compatibleVersion 12 \
-              -signCode 1
+            for arch in arm64 x64; do
+              java -jar "$DEVECO_SDK_HOME/default/openharmony/toolchains/lib/hap-sign-tool.jar" sign-app \
+                -mode localSign \
+                -keyAlias "$OHOS_KEY_ALIAS" \
+                -keyPwd "$OHOS_KEY_PWD" \
+                -appCertFile "$SIGN_DIR/debug.cer" \
+                -profileFile "$SIGN_DIR/debug.p7b" \
+                -inForm zip \
+                -inFile "TallyIsle-HarmonyOS-${arch}-unsigned.hap" \
+                -signAlg SHA256withECDSA \
+                -keystoreFile "$SIGN_DIR/debug.p12" \
+                -keystorePwd "$OHOS_KEYSTORE_PWD" \
+                -outFile "TallyIsle-HarmonyOS-${arch}-signed-debug.hap" \
+                -compatibleVersion 12 \
+                -signCode 1
 
-            test -f "TallyIsle-HarmonyOS-signed-debug.hap"
+              test -f "TallyIsle-HarmonyOS-${arch}-signed-debug.hap"
+            done
+
             echo "### HarmonyOS NEXT 构建与自动签名完成" >> "$GITHUB_STEP_SUMMARY"
-            echo "- 已生成可直接真机安装的签名包：\`TallyIsle-HarmonyOS-signed-debug.hap\`" >> "$GITHUB_STEP_SUMMARY"
-            echo "- 下载产物压缩包解压后，连接鸿蒙手机双击 \`install-hap-windows.bat\`（或运行 \`bash install-hap-unix.sh\`）即可一键安装。" >> "$GITHUB_STEP_SUMMARY"
+            echo "- 已生成可直接安装的签名包：\`TallyIsle-HarmonyOS-arm64-signed-debug.hap\`（ARM64 真机 / 模拟器）、\`TallyIsle-HarmonyOS-x64-signed-debug.hap\`（x86_64 模拟器 / 设备）" >> "$GITHUB_STEP_SUMMARY"
+            echo "- 下载产物压缩包解压后，连接鸿蒙设备双击 \`install-hap-windows.bat\`（或运行 \`bash install-hap-unix.sh\`）即可自动识别设备架构并一键安装。" >> "$GITHUB_STEP_SUMMARY"
           else
             echo "### HarmonyOS NEXT 构建完成（未配置调试签名 Secrets）" >> "$GITHUB_STEP_SUMMARY"
-            echo "- 已生成未签名安装包：\`TallyIsle-HarmonyOS-unsigned.hap\`" >> "$GITHUB_STEP_SUMMARY"
+            echo "- 已生成未签名安装包：\`TallyIsle-HarmonyOS-arm64-unsigned.hap\`（ARM64）、\`TallyIsle-HarmonyOS-x64-unsigned.hap\`（x86_64）" >> "$GITHUB_STEP_SUMMARY"
             echo "- 如需云端自动生成可直装真机的签名包，请在仓库 Settings -> Secrets and variables -> Actions 中配置 \`OHOS_P12_BASE64\`、\`OHOS_CER_BASE64\`、\`OHOS_P7B_BASE64\`、\`OHOS_KEY_ALIAS\`、\`OHOS_KEY_PWD\`、\`OHOS_KEYSTORE_PWD\`。" >> "$GITHUB_STEP_SUMMARY"
           fi
 

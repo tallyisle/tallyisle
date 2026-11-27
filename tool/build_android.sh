@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Builds symmetric Android arm64 and x64 Debug/Release APKs in release/, signed
-# with the same debug.keystore so devices can overwrite-install between profiles.
+# Builds symmetric Android arm64 and x64 Release APKs in release/, signed
+# with the fixed debug.keystore so local and CI builds share the same signing key.
 #
 # Usage:
 #   bash tool/build_android.sh [--arch arm64|x64|all] [extra flutter build flags...]
@@ -100,46 +100,34 @@ verify_apk_abi() {
 BUILT_APKS=()
 
 if [[ "$ARCH" == "arm64" || "$ARCH" == "all" ]]; then
-  ARM64_DEBUG="$TALLYISLE_PROJECT/release/TallyIsle-Android-arm64-debug.apk"
-  ARM64_RELEASE="$TALLYISLE_PROJECT/release/TallyIsle-Android-arm64-release.apk"
+  ARM64_APK="$TALLYISLE_PROJECT/release/TallyIsle-Android-arm64.apk"
 
-  echo "==> Building Android arm64 Debug APK (release/TallyIsle-Android-arm64-debug.apk) ..."
-  flutter build apk --debug --no-pub --target-platform android-arm64 ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}
-  cp "$TALLYISLE_PROJECT/build/app/outputs/flutter-apk/app-debug.apk" "$ARM64_DEBUG"
-
-  echo "==> Building Android arm64 Release APK (release/TallyIsle-Android-arm64-release.apk) ..."
+  echo "==> Building Android arm64 Release APK (release/TallyIsle-Android-arm64.apk) ..."
   flutter build apk --release --no-pub --target-platform android-arm64 --tree-shake-icons ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}
-  cp "$TALLYISLE_PROJECT/build/app/outputs/flutter-apk/app-release.apk" "$ARM64_RELEASE"
+  cp "$TALLYISLE_PROJECT/build/app/outputs/flutter-apk/app-release.apk" "$ARM64_APK"
 
-  BUILT_APKS+=("$ARM64_DEBUG" "$ARM64_RELEASE")
+  BUILT_APKS+=("$ARM64_APK")
 fi
 
 if [[ "$ARCH" == "x64" || "$ARCH" == "all" ]]; then
-  X64_DEBUG="$TALLYISLE_PROJECT/release/TallyIsle-Android-x64-debug.apk"
-  X64_RELEASE="$TALLYISLE_PROJECT/release/TallyIsle-Android-x64-release.apk"
+  X64_APK="$TALLYISLE_PROJECT/release/TallyIsle-Android-x64.apk"
 
-  echo "==> Building Android x64 Debug APK (release/TallyIsle-Android-x64-debug.apk) ..."
-  flutter build apk --debug --no-pub --target-platform android-x64 ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}
-  cp "$TALLYISLE_PROJECT/build/app/outputs/flutter-apk/app-debug.apk" "$X64_DEBUG"
-
-  echo "==> Building Android x64 Release APK (release/TallyIsle-Android-x64-release.apk) ..."
+  echo "==> Building Android x64 Release APK (release/TallyIsle-Android-x64.apk) ..."
   flutter build apk --release --no-pub --target-platform android-x64 --tree-shake-icons ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}
-  cp "$TALLYISLE_PROJECT/build/app/outputs/flutter-apk/app-release.apk" "$X64_RELEASE"
+  cp "$TALLYISLE_PROJECT/build/app/outputs/flutter-apk/app-release.apk" "$X64_APK"
 
-  BUILT_APKS+=("$X64_DEBUG" "$X64_RELEASE")
+  BUILT_APKS+=("$X64_APK")
 fi
 
-# Refresh plugin registrant for local test/debug runs without touching pubspec.lock.
+# Refresh plugin registrant for local test runs without touching pubspec.lock.
 flutter pub get --enforce-lockfile --offline >/dev/null
 
 echo "==> Verifying APK ABI isolation ..."
 if [[ "$ARCH" == "arm64" || "$ARCH" == "all" ]]; then
-  verify_apk_abi "$TALLYISLE_PROJECT/release/TallyIsle-Android-arm64-debug.apk" "arm64-v8a" "x86_64"
-  verify_apk_abi "$TALLYISLE_PROJECT/release/TallyIsle-Android-arm64-release.apk" "arm64-v8a" "x86_64"
+  verify_apk_abi "$TALLYISLE_PROJECT/release/TallyIsle-Android-arm64.apk" "arm64-v8a" "x86_64"
 fi
 if [[ "$ARCH" == "x64" || "$ARCH" == "all" ]]; then
-  verify_apk_abi "$TALLYISLE_PROJECT/release/TallyIsle-Android-x64-debug.apk" "x86_64" "arm64-v8a"
-  verify_apk_abi "$TALLYISLE_PROJECT/release/TallyIsle-Android-x64-release.apk" "x86_64" "arm64-v8a"
+  verify_apk_abi "$TALLYISLE_PROJECT/release/TallyIsle-Android-x64.apk" "x86_64" "arm64-v8a"
 fi
 
 ls -lh "${BUILT_APKS[@]}"

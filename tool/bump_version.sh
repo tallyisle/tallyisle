@@ -5,12 +5,13 @@
 #   - ohos/AppScope/app.json5      `versionName` / `versionCode` (if present)
 #
 # Usage:
-#   bash tool/bump_version.sh 0.2.1          # build number = current + 1
-#   bash tool/bump_version.sh 0.3.0 7        # explicit build number (must increase)
+#   bash tool/bump_version.sh 1.0.1          # build = MAJOR * 10000 + MINOR * 100 + PATCH (10001)
+#   bash tool/bump_version.sh 1.0.1 10002    # explicit build number (must increase)
 #   bash tool/bump_version.sh --show         # print current version
 #
-# Rules (plan A, 0.x.y track until real-device acceptance, then 1.0.0):
+# Rules (1.0.0 formal release track):
 #   - PATCH (Z) for bug fixes / small polish, MINOR (Y) for feature batches.
+#   - Default BUILD = MAJOR * 10000 + MINOR * 100 + PATCH (requires MINOR < 100 and PATCH < 100).
 #   - BUILD is a strictly increasing integer (Android versionCode); never reuse.
 set -euo pipefail
 
@@ -40,18 +41,28 @@ if [[ "${1:-}" == "--show" ]]; then
 fi
 
 if [[ $# -lt 1 || $# -gt 2 ]]; then
-  sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'
   exit 2
 fi
 
 new_name="$1"
-new_build="${2:-$((current_build + 1))}"
-
 if ! [[ "$new_name" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   echo "error: version must be plain MAJOR.MINOR.PATCH (got '$new_name')" >&2
   exit 1
 fi
-if ! [[ "$new_build" =~ ^[0-9]+$ ]] || (( new_build <= current_build )); then
+
+IFS='.' read -r major minor patch <<< "$new_name"
+if [[ $# -eq 1 ]]; then
+  if (( 10#$minor >= 100 || 10#$patch >= 100 )); then
+    echo "error: default build formula requires MINOR < 100 and PATCH < 100 (got '$new_name'); pass an explicit build number as the 2nd argument" >&2
+    exit 1
+  fi
+  new_build=$((10#$major * 10000 + 10#$minor * 100 + 10#$patch))
+else
+  new_build="$2"
+fi
+
+if ! [[ "$new_build" =~ ^[0-9]+$ ]] || (( 10#$new_build <= 10#$current_build )); then
   echo "error: build number must be an integer > $current_build (got '$new_build')" >&2
   exit 1
 fi

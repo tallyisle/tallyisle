@@ -20,10 +20,8 @@ const List<String> _packagingFiles = <String>[
 ];
 
 const List<String> _expectedBuildYmlAssets = <String>[
-  'TallyIsle-Android-arm64-release.apk',
-  'TallyIsle-Android-arm64-debug.apk',
-  'TallyIsle-Android-x64-release.apk',
-  'TallyIsle-Android-x64-debug.apk',
+  'TallyIsle-Android-arm64.apk',
+  'TallyIsle-Android-x64.apk',
   'TallyIsle-Windows-x64-setup.exe',
   'TallyIsle-Windows-x64.msi',
   'TallyIsle-Windows-x64-portable.zip',
@@ -48,7 +46,8 @@ const List<String> _expectedBuildYmlAssets = <String>[
 ];
 
 const List<String> _expectedOhosYmlAssets = <String>[
-  'TallyIsle-HarmonyOS-*.hap',
+  'TallyIsle-HarmonyOS-arm64-unsigned.hap',
+  'TallyIsle-HarmonyOS-x64-unsigned.hap',
   'TallyIsle-HarmonyOS-installer-kit.zip',
 ];
 
@@ -73,8 +72,11 @@ void main() {
             reason: 'Legacy scheme leaked into $path',
           );
           if (path.startsWith('tool/packaging/')) {
+            final sanitized = content
+                .replaceAll('PolyForm-Noncommercial-1.0.0', '')
+                .replaceAll('licenses/noncommercial/1.0.0', '');
             expect(
-              content,
+              sanitized,
               isNot(contains(appVersionName)),
               reason: 'Hardcoded appVersionName ($appVersionName) in $path',
             );
@@ -84,10 +86,13 @@ void main() {
     );
 
     test(
-      'bash -n syntax validation passes on Android, Linux & macOS packaging scripts',
+      'bash -n syntax validation passes on Android, OHOS, Linux, macOS & release scripts',
       () {
         for (final script in const <String>[
           'tool/build_android.sh',
+          'tool/ohos/install-hap-unix.sh',
+          'tool/bump_version.sh',
+          'tool/env_kit.sh',
           'tool/packaging/linux/package_linux.sh',
           'tool/packaging/macos/package_macos.sh',
         ]) {
@@ -125,10 +130,14 @@ void main() {
         expect(buildAndroid, contains('arm64|x64|all'));
         expect(buildAndroid, contains('--target-platform android-arm64'));
         expect(buildAndroid, contains('--target-platform android-x64'));
-        expect(buildAndroid, contains('TallyIsle-Android-arm64-debug.apk'));
-        expect(buildAndroid, contains('TallyIsle-Android-arm64-release.apk'));
-        expect(buildAndroid, contains('TallyIsle-Android-x64-debug.apk'));
-        expect(buildAndroid, contains('TallyIsle-Android-x64-release.apk'));
+        expect(buildAndroid, contains('TallyIsle-Android-arm64.apk'));
+        expect(buildAndroid, contains('TallyIsle-Android-x64.apk'));
+        expect(buildAndroid, isNot(contains('-debug.apk')));
+        expect(
+          buildAndroid.replaceAll('app-release.apk', ''),
+          isNot(contains('-release.apk')),
+        );
+        expect(buildAndroid, isNot(contains('--debug')));
         expect(buildAndroid, contains('python3 -m zipfile'));
         expect(buildAndroid, contains('arm64-v8a'));
         expect(buildAndroid, contains('x86_64'));
@@ -341,6 +350,9 @@ void main() {
           reason: '.github/workflows/build.yml must be 100% pure ASCII',
         );
 
+        expect(_expectedBuildYmlAssets.length, 23);
+        expect(_expectedOhosYmlAssets.length, 3);
+
         for (final asset in _expectedBuildYmlAssets) {
           expect(
             buildYml,
@@ -353,6 +365,16 @@ void main() {
             reason: 'Non-ASCII release asset filename: $asset',
           );
         }
+        expect(buildYml, isNot(contains('-debug.apk')));
+        expect(
+          buildYml.replaceAll('app-release.apk', ''),
+          isNot(contains('-release.apk')),
+        );
+        expect(buildYml, isNot(contains('--debug')));
+        expect(
+          buildYml,
+          contains('List and verify all 22 platform release assets'),
+        );
         expect(buildYml, contains('runner: windows-latest'));
         expect(buildYml, contains('runner: windows-11-arm'));
         expect(buildYml, contains('runner: ubuntu-latest'));
@@ -414,7 +436,15 @@ void main() {
             reason: 'Non-ASCII release asset filename: $asset',
           );
         }
-        expect(ohosYml, contains('TallyIsle-HarmonyOS-unsigned.hap'));
+        expect(ohosYml, contains('TallyIsle-HarmonyOS-*.hap'));
+        expect(ohosYml, contains('x86_64-linux-ohos'));
+        expect(ohosYml, contains('ohos-x64'));
+        expect(ohosYml, contains('Verify HarmonyOS HAP ABI isolation'));
+        expect(ohosYml, isNot(contains('TallyIsle-HarmonyOS-unsigned.hap')));
+        expect(
+          ohosYml,
+          isNot(contains('TallyIsle-HarmonyOS-signed-debug.hap')),
+        );
         expect(
           ohosYml,
           contains(

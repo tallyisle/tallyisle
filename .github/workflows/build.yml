@@ -99,22 +99,12 @@ jobs:
       - name: Build Android arm64 Release APK
         run: |
           flutter build apk --release --target-platform android-arm64 --tree-shake-icons
-          cp build/app/outputs/flutter-apk/app-release.apk TallyIsle-Android-arm64-release.apk
-
-      - name: Build Android arm64 Debug APK
-        run: |
-          flutter build apk --debug --target-platform android-arm64
-          cp build/app/outputs/flutter-apk/app-debug.apk TallyIsle-Android-arm64-debug.apk
+          cp build/app/outputs/flutter-apk/app-release.apk TallyIsle-Android-arm64.apk
 
       - name: Build Android x64 Release APK
         run: |
           flutter build apk --release --target-platform android-x64 --tree-shake-icons
-          cp build/app/outputs/flutter-apk/app-release.apk TallyIsle-Android-x64-release.apk
-
-      - name: Build Android x64 Debug APK
-        run: |
-          flutter build apk --debug --target-platform android-x64
-          cp build/app/outputs/flutter-apk/app-debug.apk TallyIsle-Android-x64-debug.apk
+          cp build/app/outputs/flutter-apk/app-release.apk TallyIsle-Android-x64.apk
 
       - name: Verify Android APK ABI isolation
         run: |
@@ -123,10 +113,8 @@ jobs:
           import zipfile
 
           checks = [
-              ("TallyIsle-Android-arm64-release.apk", "lib/arm64-v8a/", "lib/x86_64/"),
-              ("TallyIsle-Android-arm64-debug.apk", "lib/arm64-v8a/", "lib/x86_64/"),
-              ("TallyIsle-Android-x64-release.apk", "lib/x86_64/", "lib/arm64-v8a/"),
-              ("TallyIsle-Android-x64-debug.apk", "lib/x86_64/", "lib/arm64-v8a/"),
+              ("TallyIsle-Android-arm64.apk", "lib/arm64-v8a/", "lib/x86_64/"),
+              ("TallyIsle-Android-x64.apk", "lib/x86_64/", "lib/arm64-v8a/"),
           ]
           for apk, expected_prefix, forbidden_prefix in checks:
               with zipfile.ZipFile(apk, "r") as zf:
@@ -161,10 +149,8 @@ jobs:
           fi
           echo "Using apksigner: $APKSIGNER"
           for apk in \
-            TallyIsle-Android-arm64-release.apk \
-            TallyIsle-Android-arm64-debug.apk \
-            TallyIsle-Android-x64-release.apk \
-            TallyIsle-Android-x64-debug.apk; do
+            TallyIsle-Android-arm64.apk \
+            TallyIsle-Android-x64.apk; do
             VERIFY_OUT="$("$APKSIGNER" verify --print-certs "$apk")"
             printf '%s\n' "$VERIFY_OUT"
             SIGNER_DIGESTS="$(printf '%s\n' "$VERIFY_OUT" | grep -v '^Source Stamp' | sed -n 's/^.*certificate SHA-256 digest:[[:space:]]*//p' | tr -d ':\r ' | tr '[:upper:]' '[:lower:]' | sort -u)"
@@ -186,10 +172,8 @@ jobs:
         with:
           name: TallyIsle-Android-APK
           path: |
-            TallyIsle-Android-arm64-release.apk
-            TallyIsle-Android-arm64-debug.apk
-            TallyIsle-Android-x64-release.apk
-            TallyIsle-Android-x64-debug.apk
+            TallyIsle-Android-arm64.apk
+            TallyIsle-Android-x64.apk
           if-no-files-found: error
 
   build-windows:
@@ -384,15 +368,13 @@ jobs:
           merge-multiple: true
           path: dist
 
-      - name: List and verify all 24 platform release assets
+      - name: List and verify all 22 platform release assets
         run: |
           set -euo pipefail
           ls -lh dist/
           for asset in \
-            TallyIsle-Android-arm64-release.apk \
-            TallyIsle-Android-arm64-debug.apk \
-            TallyIsle-Android-x64-release.apk \
-            TallyIsle-Android-x64-debug.apk \
+            TallyIsle-Android-arm64.apk \
+            TallyIsle-Android-x64.apk \
             TallyIsle-Windows-x64-setup.exe \
             TallyIsle-Windows-x64.msi \
             TallyIsle-Windows-x64-portable.zip \

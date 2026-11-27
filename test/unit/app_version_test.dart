@@ -67,4 +67,116 @@ void main() {
       );
     },
   );
+
+  test(
+    'tool/bump_version.sh computes default build formula, accepts explicit build, and rejects non-monotonic builds',
+    () {
+      final tempDir = Directory.systemTemp.createTempSync('tallyisle_bump_');
+      addTearDown(() {
+        if (tempDir.existsSync()) {
+          tempDir.deleteSync(recursive: true);
+        }
+      });
+
+      final toolDir = Directory('${tempDir.path}/tool')..createSync();
+      final coreDir = Directory('${tempDir.path}/lib/core')
+        ..createSync(recursive: true);
+      final ohosDir = Directory('${tempDir.path}/ohos/AppScope')
+        ..createSync(recursive: true);
+
+      final scriptCopy = File('${toolDir.path}/bump_version.sh');
+      File('tool/bump_version.sh').copySync(scriptCopy.path);
+
+      final pubspecFile = File('${tempDir.path}/pubspec.yaml')
+        ..writeAsStringSync('name: tallyisle\nversion: 1.0.0+10000\n');
+      final dartFile = File('${coreDir.path}/app_version.dart')
+        ..writeAsStringSync(
+          "const String appVersionName = '1.0.0';\n"
+          'const int appBuildNumber = 10000;\n',
+        );
+      final ohosFile = File('${ohosDir.path}/app.json5')
+        ..writeAsStringSync(
+          '{\n'
+          '  "app": {\n'
+          '    "versionCode": 10000,\n'
+          '    "versionName": "1.0.0"\n'
+          '  }\n'
+          '}\n',
+        );
+
+      ProcessResult runBump(List<String> args) => Process.runSync(
+        'bash',
+        <String>[scriptCopy.path, ...args],
+        workingDirectory: tempDir.path,
+      );
+
+      // (a) Default formula: 1.2.3 -> 1 * 10000 + 2 * 100 + 3 = 10203
+      final defaultRes = runBump(<String>['1.2.3']);
+      expect(defaultRes.exitCode, 0, reason: 'stderr: ${defaultRes.stderr}');
+      expect(pubspecFile.readAsStringSync(), contains('version: 1.2.3+10203'));
+      expect(
+        dartFile.readAsStringSync(),
+        allOf(
+          contains("const String appVersionName = '1.2.3';"),
+          contains('const int appBuildNumber = 10203;'),
+        ),
+      );
+      expect(
+        ohosFile.readAsStringSync(),
+        allOf(
+          contains('"versionCode": 10203'),
+          contains('"versionName": "1.2.3"'),
+        ),
+      );
+
+      // (b) Explicit 2nd arg: 1.2.4 10300 -> 10300
+      final explicitRes = runBump(<String>['1.2.4', '10300']);
+      expect(explicitRes.exitCode, 0, reason: 'stderr: ${explicitRes.stderr}');
+      expect(pubspecFile.readAsStringSync(), contains('version: 1.2.4+10300'));
+      expect(
+        dartFile.readAsStringSync(),
+        allOf(
+          contains("const String appVersionName = '1.2.4';"),
+          contains('const int appBuildNumber = 10300;'),
+        ),
+      );
+      expect(
+        ohosFile.readAsStringSync(),
+        allOf(
+          contains('"versionCode": 10300'),
+          contains('"versionName": "1.2.4"'),
+        ),
+      );
+
+      // (c) Monotonic rejection when new_build <= current_build
+      final equalBuildRes = runBump(<String>['1.2.5', '10300']);
+      expect(equalBuildRes.exitCode, isNonZero);
+      final lowerBuildRes = runBump(<String>['1.2.5', '10299']);
+      expect(lowerBuildRes.exitCode, isNonZero);
+      final formulaLowerRes = runBump(<String>['1.2.5']);
+      expect(formulaLowerRes.exitCode, isNonZero);
+      final overflowMinorRes = runBump(<String>['1.100.0']);
+      expect(overflowMinorRes.exitCode, isNonZero);
+      expect(pubspecFile.readAsStringSync(), contains('version: 1.2.4+10300'));
+    },
+  );
+
+  test('lib/features contains zero references to appVersionLabel', () {
+    final featuresDir = Directory('lib/features');
+    expect(featuresDir.existsSync(), isTrue);
+    final offenders = <String>[];
+    for (final entity in featuresDir.listSync(recursive: true)) {
+      if (entity is File && entity.path.endsWith('.dart')) {
+        if (entity.readAsStringSync().contains('appVersionLabel')) {
+          offenders.add(entity.path);
+        }
+      }
+    }
+    expect(
+      offenders,
+      isEmpty,
+      reason:
+          'User-facing UI must use appVersionName / appDisplayVersion instead of appVersionLabel',
+    );
+  });
 }

@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tallyisle/app/providers.dart';
+import 'package:tallyisle/core/app_version.dart' show appVersionName;
 import 'package:tallyisle/core/failure.dart';
 import 'package:tallyisle/data/db/database.dart';
 import 'package:tallyisle/data/db/seed.dart';
@@ -458,7 +459,14 @@ void main() {
         findsOneWidget,
       );
 
-      // 4. Verify zero RenderFlex overflow across 360x640, 390x844, 960x800 in Light & Dark @ 1.2x text scale
+      // 4. Tap licenses tile -> opens LicensePage displaying pure semantic version without Build number
+      await tester.tap(find.byKey(const Key('about_licenses_tile')));
+      await settle(tester);
+      expect(find.byType(LicensePage), findsOneWidget);
+      expect(find.text(appVersionName), findsOneWidget);
+      expect(find.textContaining('Build '), findsNothing);
+
+      // 5. Verify zero RenderFlex overflow across 360x640, 390x844, 960x800 in Light & Dark @ 1.2x text scale
       for (final viewport in const <Size>[
         Size(360, 640),
         Size(390, 844),
